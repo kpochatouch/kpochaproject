@@ -1,0 +1,14 @@
+{
+  "name": "kpocha-touch-monorepo",
+  "private": true,
+  "workspaces": ["apps/*"],
+  "scripts": {
+    "dev:web": "npm --workspace apps/web run dev",
+    "dev:api": "npm --workspace apps/api run dev",
+    "build:web": "npm --workspace apps/web run build",
+    "start:api": "npm --workspace apps/api start"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

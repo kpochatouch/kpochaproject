@@ -1,0 +1,15 @@
+# 🔐 Secrets
+serviceAccountKey.json
+.env
+
+# 📦 Dependencies
+node_modules/
+
+# 🏗️ Build output & logs
+dist/
+build/
+*.log
+
+# 🧹 System files
+.DS_Store
+.env.local
