@@ -1,0 +1,22 @@
+# 🔐 Secrets
+serviceAccountKey.json
+.env
+
+# 📦 Dependencies
+node_modules/
+apps/*/node_modules/
+
+# 🏗️ Build output & logs
+dist/
+build/
+apps/web/dist/
+apps/api/dist/
+*.log
+
+# 🧹 System files
+.DS_Store
+.vscode/
+
+# 🌐 Hosting caches
+.vercel/
+.render/

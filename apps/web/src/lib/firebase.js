@@ -1,3 +1,4 @@
+// apps/web/src/lib/firebase.js
 import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
 
@@ -10,6 +11,9 @@ const firebaseConfig = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID,
 };
 
-const app = initializeApp(firebaseConfig);
+// export app so PhoneOTP.jsx can import it
+export const app = initializeApp(firebaseConfig);
+
+// auth + provider (unchanged)
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();

@@ -1,6 +1,7 @@
+// apps/web/src/context/AuthContext.jsx
 import { createContext, useContext, useEffect, useState } from "react";
 import { auth } from "../lib/firebase";
-import { onAuthStateChanged, signOut, getIdToken } from "firebase/auth";
+import { onIdTokenChanged, signOut } from "firebase/auth";
 
 const AuthCtx = createContext(null);
 
@@ -9,11 +10,16 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    return onAuthStateChanged(auth, async (u) => {
+    return onIdTokenChanged(auth, async (u) => {
       setUser(u || null);
       setLoading(false);
-      // Cache Firebase ID token globally so API calls can use it
-      window.__ID_TOKEN__ = u ? await getIdToken(u, true) : null;
+
+      if (u) {
+        const token = await u.getIdToken(true);
+        localStorage.setItem("token", token);
+      } else {
+        localStorage.removeItem("token");
+      }
     });
   }, []);
 
