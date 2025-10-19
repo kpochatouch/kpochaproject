@@ -274,25 +274,43 @@ async function restartSchedulers() {
 /* ------------------- Express App ------------------- */
 const app = express();
 
-// CORS
-function computeAllowedOrigins() {
-  const envOrigins = (process.env.CORS_ORIGIN || "http://localhost:5173")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  const settingsOrigins = (getCachedSettings()?.security?.allowedOrigins || []).map((s) => s.trim());
-  return Array.from(new Set([...envOrigins, ...settingsOrigins]));
+// ---- CORS (hardened) ----
+import cors from "cors";
+
+const ALLOW_LIST = (process.env.CORS_ORIGIN || "http://localhost:5173")
+  .split(/[,\s]+/)       // split by comma or whitespace
+  .map(s => s.trim())
+  .filter(Boolean);
+
+function originAllowed(origin) {
+  if (!origin) return true; // non-browser or same-origin
+  for (const o of ALLOW_LIST) {
+    if (o === origin) return true;
+    try {
+      // host-only match to avoid trailing-slash mismatch
+      if (new URL(o).host === new URL(origin).host) return true;
+    } catch (_) {}
+  }
+  return false;
 }
-app.use(morgan("dev"));
-app.use(
-  cors({
-    origin: (origin, cb) => {
-      const allowlist = computeAllowedOrigins();
-      if (!origin || allowlist.includes(origin)) return cb(null, true);
-      return cb(new Error("CORS blocked"));
-    },
-  })
-);
+
+const corsOptions = {
+  origin(origin, cb) {
+    const ok = originAllowed(origin);
+    if (ok) return cb(null, true);
+    console.warn("[CORS] Blocked:", origin, "Allowed:", ALLOW_LIST);
+    return cb(new Error("CORS blocked"));
+  },
+  credentials: true,
+  methods: ["GET","HEAD","POST","PUT","PATCH","DELETE","OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+  exposedHeaders: ["Content-Length", "X-Request-Id"],
+  maxAge: 86400,
+};
+
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions)); // important for preflights
+
 
 // Webhook must parse raw body
 app.post(
