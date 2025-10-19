@@ -64,7 +64,10 @@ function requireAdmin(req, res, next) {
 /* ------------------- Firebase Admin ------------------- */
 let adminReady = false;
 try {
-  const keyPath = new URL("./serviceAccountKey.json", import.meta.url);
+  // Try Render secret path first, then fallback to local
+  const keyPath =
+    process.env.SERVICE_KEY_PATH || new URL("./serviceAccountKey.json", import.meta.url).pathname;
+
   const svc = JSON.parse(fs.readFileSync(keyPath, "utf8"));
   admin.initializeApp({ credential: admin.credential.cert(svc) });
   adminReady = true;
