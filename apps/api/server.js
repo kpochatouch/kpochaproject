@@ -1027,19 +1027,19 @@ app.post("/api/pros/apply", requireAuth, async (req, res) => {
   }
 });
 
-if (process.env.NODE_ENV !== "production") {
-  app.get("/api/pros/pending", async (_req, res) => {
-    try {
-      if (mongoose.connection.readyState === 1) {
-        const docs = await Application.find({}).sort({ createdAt: -1 }).lean();
-        return res.json(docs);
-      }
-      return res.status(503).json({ error: "Database not connected" });
-    } catch (err) {
-      console.error("[pros/pending] error:", err);
-      res.status(500).json({ error: "Failed to load pending applications" });
+app.get("/api/pros/pending", requireAuth, requireAdmin, async (_req, res) => {
+  try {
+    if (mongoose.connection.readyState === 1) {
+      const docs = await Application.find({}).sort({ createdAt: -1 }).lean();
+      return res.json(docs);
     }
-  });
+    return res.status(503).json({ error: "Database not connected" });
+  } catch (err) {
+    console.error("[pros/pending] error:", err);
+    res.status(500).json({ error: "Failed to load pending applications" });
+  }
+});
+
 
   app.post("/api/pros/approve/:id", async (req, res) => {
     try {
