@@ -1085,8 +1085,8 @@ app.get("/api/pros/pending", requireAuth, requireAdmin, async (_req, res) => {
       res.status(500).json({ error: "Failed to approve" });
     }
   });
-}
 
+  
 /* ------------------- Decline ------------------- */
 app.post("/api/pros/decline/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
