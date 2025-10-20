@@ -22,6 +22,7 @@ import Legal from "./pages/Legal.jsx";
 import ClientRegister from "./pages/ClientRegister.jsx";
 import DeactivateAccount from "./pages/DeactivateAccount.jsx";
 import ApplyThanks from "./pages/ApplyThanks.jsx";
+import PaymentConfirm from "./pages/PaymentConfirm.jsx"; // ✅ Added import
 
 // Layout
 import Navbar from "./components/Navbar.jsx";
@@ -114,8 +115,7 @@ export default function App() {
           <Route path="/legal" element={<Legal />} />
           <Route path="/legal/*" element={<Legal />} />
           <Route path="/apply/thanks" element={<ApplyThanks />} />
-          <Route path="/payment/confirm" element={<PaymentConfirm />} />
-
+          <Route path="/payment/confirm" element={<PaymentConfirm />} /> {/* ✅ Route stays */}
 
           {/* Helpful legal shortcuts */}
           <Route path="/terms" element={<Navigate to="/legal#terms" replace />} />
@@ -133,9 +133,7 @@ export default function App() {
             }
           />
 
-          {/* Settings:
-              - /settings smartly chooses component
-              - direct routes for each page also available */}
+          {/* Settings */}
           <Route
             path="/settings"
             element={
