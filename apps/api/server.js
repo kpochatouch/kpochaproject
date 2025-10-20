@@ -275,11 +275,9 @@ async function restartSchedulers() {
 const app = express();
 
 // ---- CORS (hardened) ----
-import cors from "cors";
-
 const ALLOW_LIST = (process.env.CORS_ORIGIN || "http://localhost:5173")
-  .split(/[,\s]+/)       // split by comma or whitespace
-  .map(s => s.trim())
+  .split(/[,\s]+/)
+  .map((s) => s.trim())
   .filter(Boolean);
 
 function originAllowed(origin) {
@@ -302,7 +300,7 @@ const corsOptions = {
     return cb(new Error("CORS blocked"));
   },
   credentials: true,
-  methods: ["GET","HEAD","POST","PUT","PATCH","DELETE","OPTIONS"],
+  methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
   exposedHeaders: ["Content-Length", "X-Request-Id"],
   maxAge: 86400,
@@ -310,7 +308,6 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 app.options("*", cors(corsOptions)); // important for preflights
-
 
 // Webhook must parse raw body
 app.post(
@@ -449,18 +446,14 @@ app.use("/api/bookings", requireAuth, async (req, _res, next) => {
     if (mongoose.connection.readyState !== 1) return next();
 
     const { fullName, phone } = await getVerifiedClientIdentity(req.user.uid);
-    // Attach to body in common shapes used by booking creation flows:
     req.body = req.body || {};
-    // legacy flat fields
     req.body.clientName = fullName || req.body.clientName || "";
     req.body.clientPhone = phone || req.body.clientPhone || "";
-    // nested shape
     req.body.client = {
       ...(req.body.client || {}),
       name: fullName || req.body?.client?.name || "",
       phone: phone || req.body?.client?.phone || "",
     };
-    // also stamp uid for safety
     req.body.clientUid = req.user.uid;
 
     next();
@@ -809,11 +802,9 @@ app.post("/api/payments/init", requireAuth, async (req, res) => {
     if (!bookingId || !amountKobo) return res.status(400).json({ error: "bookingId and amountKobo required" });
     if (!process.env.PAYSTACK_SECRET_KEY) return res.status(500).json({ error: "paystack_secret_missing" });
 
-    // Make sure booking exists & stamp pending state
     const booking = await Booking.findById(bookingId);
     if (!booking) return res.status(404).json({ error: "booking_not_found" });
 
-    // Initialize with Paystack
     const initResp = await fetch("https://api.paystack.co/transaction/initialize", {
       method: "POST",
       headers: {
@@ -835,7 +826,6 @@ app.post("/api/payments/init", requireAuth, async (req, res) => {
       return res.status(400).json({ error: "init_failed", details: initJson?.message || "unknown_error" });
     }
 
-    // Persist reference and mark pending payment
     booking.paystackReference = initJson.data.reference || `BOOKING-${booking._id}`;
     if (booking.paymentStatus !== "paid") {
       booking.paymentStatus = "pending";
@@ -899,7 +889,7 @@ app.post("/api/payments/verify", async (req, res) => {
   }
 });
 
-/* ------------------- Pros (new forms) ------------------- */
+/* ------------------- Pros (forms + admin tools) ------------------- */
 /** 🔧 GET /api/pros/me returns application or a read-only stub for approved pros */
 app.get("/api/pros/me", requireAuth, async (req, res) => {
   try {
@@ -998,7 +988,7 @@ app.put("/api/pros/me", requireAuth, async (req, res) => {
   }
 });
 
-/* ------------------- Legacy dev helpers (kept) ------------------- */
+/** Clients apply to become a pro */
 app.post("/api/pros/apply", requireAuth, async (req, res) => {
   const { displayName, phone, lga, services = "" } = req.body || {};
   if (!displayName || !phone || !lga) {
@@ -1027,6 +1017,7 @@ app.post("/api/pros/apply", requireAuth, async (req, res) => {
   }
 });
 
+/** 🔒 Admin-only: list applications (works in production) */
 app.get("/api/pros/pending", requireAuth, requireAdmin, async (_req, res) => {
   try {
     if (mongoose.connection.readyState === 1) {
@@ -1040,54 +1031,58 @@ app.get("/api/pros/pending", requireAuth, requireAdmin, async (_req, res) => {
   }
 });
 
+/** 🔒 Admin-only: approve an application and promote to Pro */
+app.post("/api/pros/approve/:id", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const rawId = req.params.id;
+    if (mongoose.connection.readyState !== 1) return res.status(503).json({ error: "Database not connected" });
 
-  app.post("/api/pros/approve/:id", async (req, res) => {
-    try {
-      const rawId = req.params.id;
-      if (mongoose.connection.readyState !== 1) return res.status(503).json({ error: "Database not connected" });
+    // Accept either clientId or Mongo ObjectId
+    let doc =
+      (await Application.findOneAndUpdate(
+        { clientId: rawId },
+        { status: "approved" },
+        { new: true }
+      )) ||
+      (/^[0-9a-fA-F]{24}$/.test(rawId)
+        ? await Application.findOneAndUpdate(
+            { _id: rawId },
+            { status: "approved" },
+            { new: true }
+          )
+        : null);
 
-      let doc =
-        (await Application.findOneAndUpdate(
-          { clientId: rawId },
-          { status: "approved" },
-          { new: true }
-        )) ||
-        (/^[0-9a-fA-F]{24}$/.test(rawId)
-          ? await Application.findOneAndUpdate({ _id: rawId }, { status: "approved" }, { new: true })
-          : null);
+    if (!doc) return res.status(404).json({ error: "Not found" });
 
-      if (!doc) return res.status(404).json({ error: "Not found" });
+    const name =
+      doc.displayName ||
+      [doc?.identity?.firstName, doc?.identity?.lastName].filter(Boolean).join(" ") ||
+      doc.email;
 
-      const name =
-        doc.displayName ||
-        [doc?.identity?.firstName, doc?.identity?.lastName].filter(Boolean).join(" ") ||
-        doc.email;
+    const lga =
+      (doc.lga || doc?.identity?.city || doc?.identity?.state || "UNSPECIFIED").toString().toUpperCase();
 
-      const lga =
-        (doc.lga || doc?.identity?.city || doc?.identity?.state || "UNSPECIFIED").toString().toUpperCase();
+    const services =
+      (Array.isArray(doc?.professional?.services) && doc.professional.services) || [];
 
-      const services =
-        (Array.isArray(doc?.professional?.services) && doc.professional.services) || [];
+    const pro = await Pro.create({
+      ownerUid: doc.uid,
+      name,
+      lga,
+      availability: "Available",
+      rating: 4.8,
+      services,
+    });
 
-      const pro = await Pro.create({
-        ownerUid: doc.uid,
-        name,
-        lga,
-        availability: "Available",
-        rating: 4.8,
-        services,
-      });
+    await Application.deleteOne({ _id: doc._id });
+    return res.json({ ok: true, proId: pro._id.toString() });
+  } catch (err) {
+    console.error("[pros/approve] error:", err);
+    res.status(500).json({ error: "Failed to approve" });
+  }
+});
 
-      await Application.deleteOne({ _id: doc._id });
-      return res.json({ ok: true, proId: pro._id.toString() });
-    } catch (err) {
-      console.error("[pros/approve] error:", err);
-      res.status(500).json({ error: "Failed to approve" });
-    }
-  });
-
-  
-/* ------------------- Decline ------------------- */
+/** 🔒 Admin-only: decline an application */
 app.post("/api/pros/decline/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
     if (mongoose.connection.readyState !== 1) return res.status(503).json({ error: "Database not connected" });
