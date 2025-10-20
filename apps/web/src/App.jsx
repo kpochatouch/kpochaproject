@@ -1,3 +1,4 @@
+// apps/web/src/App.jsx
 import { Routes, Route, Navigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { api } from "./lib/api";
@@ -22,12 +23,60 @@ import Legal from "./pages/Legal.jsx";
 import ClientRegister from "./pages/ClientRegister.jsx";
 import DeactivateAccount from "./pages/DeactivateAccount.jsx";
 import ApplyThanks from "./pages/ApplyThanks.jsx";
-import PaymentConfirm from "./pages/PaymentConfirm.jsx"; // ✅ Added import
+import PaymentConfirm from "./pages/PaymentConfirm.jsx"; // payment confirmation page
 
 // Layout
 import Navbar from "./components/Navbar.jsx";
 import Footer from "./components/Footer.jsx";
 import RequireAuth from "./components/RequireAuth.jsx";
+
+/* ---------- Chatbase loader (gated, safe) ---------- */
+function useChatbase() {
+  useEffect(() => {
+    const ENABLE = import.meta.env.VITE_ENABLE_CHATBASE === "true";
+    const CHATBOT_ID = import.meta.env.VITE_CHATBASE_ID; // e.g. 5gZgvHpeJvGhp8cWAlEvZ
+
+    // Do nothing if not explicitly enabled or missing ID
+    if (!ENABLE || !CHATBOT_ID) return;
+
+    let cancelled = false;
+
+    async function init() {
+      const baseCfg = { chatbotId: CHATBOT_ID, domain: window.location.host };
+
+      // Try to fetch verified hash but don't block longer than ~2s
+      try {
+        const r = await api.get("/api/chatbase/userhash", { timeout: 2000 });
+        if (!cancelled && r?.data?.userId && r?.data?.userHash) {
+          baseCfg.userId = r.data.userId;
+          baseCfg.userHash = r.data.userHash;
+        }
+      } catch {
+        // Silent fallback to anonymous
+      }
+
+      if (cancelled) return;
+
+      // Must set config before loading script
+      window.chatbaseConfig = baseCfg;
+
+      // Load script once; Chatbase expects id === chatbotId and domain === "www.chatbase.co"
+      if (!document.getElementById(CHATBOT_ID)) {
+        const s = document.createElement("script");
+        s.src = "https://www.chatbase.co/embed.min.js";
+        s.id = CHATBOT_ID;            // important
+        s.domain = "www.chatbase.co"; // important
+        s.defer = true;
+        document.body.appendChild(s);
+      }
+    }
+
+    init();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+}
 
 /* ---------- Role guard ---------- */
 function RequireRole({ role, children }) {
@@ -99,6 +148,9 @@ function SettingsSmart() {
 }
 
 export default function App() {
+  // Chatbot loads only when VITE_ENABLE_CHATBASE="true" and ID is present
+  useChatbase();
+
   return (
     <div className="min-h-screen flex flex-col bg-black text-white">
       <Navbar />
@@ -115,7 +167,7 @@ export default function App() {
           <Route path="/legal" element={<Legal />} />
           <Route path="/legal/*" element={<Legal />} />
           <Route path="/apply/thanks" element={<ApplyThanks />} />
-          <Route path="/payment/confirm" element={<PaymentConfirm />} /> {/* ✅ Route stays */}
+          <Route path="/payment/confirm" element={<PaymentConfirm />} />
 
           {/* Helpful legal shortcuts */}
           <Route path="/terms" element={<Navigate to="/legal#terms" replace />} />
