@@ -222,18 +222,33 @@ export default function BookService() {
       handler.openIframe();
     });
   }
-
-  async function startPaystackRedirect(booking) {
-    // Optional server endpoint (see snippet below).
-    // If present, it returns { authorization_url, reference } and we redirect.
-    const { data } = await api.post("/api/payments/init", {
+async function startPaystackRedirect(booking) {
+  const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/payments/init`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${localStorage.getItem("token") || ""}`,
+    },
+    body: JSON.stringify({
       bookingId: booking._id,
       amountKobo: booking.amountKobo,
       email: me?.email || "customer@example.com",
-    });
-    if (!data?.authorization_url) throw new Error("init_failed");
-    window.location.href = data.authorization_url;
-  }
+    }),
+  });
+
+  const data = await res.json();
+  if (!res.ok || !data?.authorization_url) throw new Error("Payment initialization failed.");
+
+  // Save for confirmation page
+  sessionStorage.setItem("pay_ref", JSON.stringify({
+    bookingId: booking._id,
+    reference: data.reference
+  }));
+
+  // Redirect to Paystack
+  window.location.href = data.authorization_url;
+}
+
 
   async function instantCheckout() {
     setErrorMsg(""); setSoftMsg("");

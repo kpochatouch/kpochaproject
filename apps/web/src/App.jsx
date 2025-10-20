@@ -114,6 +114,8 @@ export default function App() {
           <Route path="/legal" element={<Legal />} />
           <Route path="/legal/*" element={<Legal />} />
           <Route path="/apply/thanks" element={<ApplyThanks />} />
+          <Route path="/payment/confirm" element={<PaymentConfirm />} />
+
 
           {/* Helpful legal shortcuts */}
           <Route path="/terms" element={<Navigate to="/legal#terms" replace />} />
