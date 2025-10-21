@@ -150,6 +150,7 @@ export default function App() {
           <Route path="/" element={<Home />} />
           <Route path="/browse" element={<Browse />} />
           <Route path="/book/:barberId" element={<BookService />} />
+
           {/* Booking details requires auth on the API → gate it here */}
           <Route
             path="/bookings/:id"
@@ -159,6 +160,7 @@ export default function App() {
               </RequireAuth>
             }
           />
+
           {/* Profile is user-specific → gate it */}
           <Route
             path="/profile"
@@ -168,6 +170,7 @@ export default function App() {
               </RequireAuth>
             }
           />
+
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
           <Route path="/legal" element={<Legal />} />
