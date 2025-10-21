@@ -1,31 +1,62 @@
 // apps/web/src/lib/api.js
 import axios from "axios";
+import { getAuth, onAuthStateChanged } from "firebase/auth";
 
 /* =========================================
-   AXIOS INSTANCE
+   BASE URL (no hardcoding)
    ========================================= */
+const ROOT =
+  (import.meta.env.VITE_API_BASE_URL || "http://localhost:8080").replace(/\/+$/, "");
 
+// Points to server root. Your functions already include "/api/..."
 export const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || "http://localhost:8080",
+  baseURL: ROOT,
+  headers: { "Content-Type": "application/json", Accept: "application/json" },
 });
 
-// Attach Firebase ID token if stored
-api.interceptors.request.use((config) => {
+/* =========================================
+   AUTH TOKEN (Firebase preferred, localStorage fallback)
+   ========================================= */
+let authReady = new Promise((resolve) => {
+  try {
+    const auth = getAuth();
+    const stop = onAuthStateChanged(auth, () => {
+      stop();
+      resolve();
+    });
+  } catch {
+    resolve();
+  }
+});
+
+api.interceptors.request.use(async (config) => {
+  await authReady;
+
+  try {
+    const auth = getAuth();
+    const user = auth?.currentUser || null;
+    if (user) {
+      const idToken = await user.getIdToken();
+      if (idToken) config.headers.Authorization = `Bearer ${idToken}`;
+      return config;
+    }
+  } catch {
+    // ignore and try fallback
+  }
+
   try {
     const token = localStorage.getItem("token");
     if (token) config.headers.Authorization = `Bearer ${token}`;
   } catch {
     // ignore
   }
+
   return config;
 });
 
 export function setAuthToken(token) {
-  if (!token) {
-    localStorage.removeItem("token");
-  } else {
-    localStorage.setItem("token", token);
-  }
+  if (!token) localStorage.removeItem("token");
+  else localStorage.setItem("token", token);
 }
 
 /* =========================================
@@ -53,7 +84,7 @@ export async function getNgLgas(stateName) {
 }
 
 /* =========================================
-   BROWSE: PROS (legacy "barbers" naming)
+   BROWSE: PROS
    ========================================= */
 export async function listBarbers(params = {}) {
   const { data } = await api.get("/api/barbers", { params });
@@ -69,14 +100,13 @@ export async function listNearbyBarbers({ lat, lon, radiusKm = 25 }) {
 }
 
 /* =========================================
-   FEED (public + pro posts)
+   FEED
    ========================================= */
 export async function listPublicFeed(params = {}) {
   const { data } = await api.get("/api/feed/public", { params });
   return data;
 }
 export async function createPost(payload) {
-  // { text, media:[{url,type}], lga, isPublic, tags:[] }
   const { data } = await api.post("/api/posts", payload);
   return data;
 }
@@ -86,43 +116,36 @@ export async function createPost(payload) {
    ========================================= */
 export async function verifyPayment({ bookingId, reference }) {
   const { data } = await api.post("/api/payments/verify", { bookingId, reference });
-  return data; // { ok, status }
+  return data;
 }
 export async function initPayment({ bookingId, amountKobo, email }) {
   const { data } = await api.post("/api/payments/init", { bookingId, amountKobo, email });
-  return data; // { authorization_url, reference }
+  return data;
 }
 
 /* =========================================
    BOOKINGS — CLIENT
    ========================================= */
 export async function createBooking(payload) {
-  // legacy scheduled booking
   const { data } = await api.post("/api/bookings", payload);
   return data.booking;
 }
-
 export async function createInstantBooking(payload) {
-  // new instant booking
   const { data } = await api.post("/api/bookings/instant", payload);
   return data;
 }
-
 export async function setBookingReference(bookingId, paystackReference) {
   const { data } = await api.put(`/api/bookings/${bookingId}/reference`, { paystackReference });
   return data.ok === true;
 }
-
 export async function getMyBookings() {
   const { data } = await api.get("/api/bookings/me");
   return data;
 }
-
 export async function getBooking(id) {
   const { data } = await api.get(`/api/bookings/${id}`);
   return data;
 }
-
 export async function cancelBooking(id) {
   const { data } = await api.put(`/api/bookings/${id}/cancel`);
   return data.booking;
@@ -149,41 +172,36 @@ export async function completeBooking(id) {
 }
 
 /* =========================================
-   WALLET (client top-up + history)
+   WALLET
    ========================================= */
-
-// New canonical endpoints we exposed in apps/api/routes/wallets.js:
 export async function getWalletMe() {
   const { data } = await api.get("/api/wallet/me");
-  return data; // { wallet:{...}, transactions:[...] }
+  return data;
 }
 export async function initWalletTopup(amountKobo) {
   const { data } = await api.post("/api/wallet/topup/init", { amountKobo });
-  return data; // { authorization_url, reference }
+  return data;
 }
 export async function verifyWalletTopup(reference) {
   const { data } = await api.post("/api/wallet/topup/verify", { reference });
-  return data; // { ok, creditedKobo, wallet }
+  return data;
 }
 export async function withdrawPendingToAvailable({ amountKobo, pin }) {
   const { data } = await api.post("/api/wallet/withdraw-pending", { amountKobo, pin });
-  return data; // { ok, feeKobo, creditedKobo }
+  return data;
 }
 export async function withdrawToBank({ amountKobo, pin }) {
   const { data } = await api.post("/api/wallet/withdraw", { amountKobo, pin });
-  return data; // { ok, transfer }
+  return data;
 }
-
-// Backward-compatible aliases (if any old code still calls these):
-export const getMyWallet = getWalletMe; // old name -> new endpoint
-// getMyTransactions was previously separate; merged into getWalletMe(). Keep a light wrapper:
+export const getMyWallet = getWalletMe;
 export async function getMyTransactions() {
   const data = await getWalletMe();
   return data?.transactions || [];
 }
 
 /* =========================================
-   PIN (Wallet PIN on Application)
+   PIN
    ========================================= */
 export async function setWithdrawPin(pin) {
   const { data } = await api.post("/api/pin/me/set", { pin });
