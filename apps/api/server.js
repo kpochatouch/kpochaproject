@@ -68,20 +68,16 @@ function requireAdmin(req, res, next) {
 }
 
 /* ------------------- Firebase Admin ------------------- */
-let adminReady = false;
 try {
-  // Try Render secret path first, then fallback to local
   const keyPath =
     process.env.SERVICE_KEY_PATH || new URL("./serviceAccountKey.json", import.meta.url).pathname;
 
   const svc = JSON.parse(fs.readFileSync(keyPath, "utf8"));
   admin.initializeApp({ credential: admin.credential.cert(svc) });
-  adminReady = true;
   console.log("[auth] ✅ Firebase Admin initialized (service account).");
 } catch (e) {
   try {
     admin.initializeApp(); // ADC fallback
-    adminReady = true;
     console.log("[auth] ✅ Firebase Admin initialized (ADC).");
   } catch (e2) {
     console.error("[auth] ❌ Firebase Admin failed to initialize:", e2?.message || e2);
@@ -244,7 +240,6 @@ async function initSchedulers() {
         const releaseDays = s.payouts.releaseDays ?? 7;
         const cutoff = new Date(Date.now() - releaseDays * 24 * 60 * 60 * 1000);
 
-        // Only release bookings that are paid + completed, not yet released
         const toRelease = await Booking.find({
           status: "completed",
           paymentStatus: "paid",
@@ -255,13 +250,11 @@ async function initSchedulers() {
           .limit(500)
           .lean();
 
-        let ok = 0,
-          fail = 0;
+        let ok = 0, fail = 0;
         for (const b of toRelease) {
           try {
             const res = await releasePendingToAvailableForBooking(b, { reason: "auto_release_cron" });
-            if (res?.ok) ok++;
-            else fail++;
+            if (res?.ok) ok++; else fail++;
           } catch (e) {
             fail++;
             console.error("[scheduler] release error for booking", b._id?.toString?.(), e?.message || e);
@@ -269,9 +262,7 @@ async function initSchedulers() {
         }
 
         console.log(
-          `[scheduler] Auto-release ran in ${Math.round(
-            (Date.now() - started) / 1000
-          )}s. Processed=${toRelease.length}, ok=${ok}, fail=${fail}`
+          `[scheduler] Auto-release ran in ${Math.round((Date.now() - started) / 1000)}s. Processed=${toRelease.length}, ok=${ok}, fail=${fail}`
         );
       } catch (err) {
         console.error("[scheduler] Auto-release error:", err.message);
@@ -303,21 +294,28 @@ async function restartSchedulers() {
 /* ------------------- Express App ------------------- */
 const app = express();
 
-// ---- CORS (hardened) ----
+/* ------------------- CORS (hardened, with Vercel previews) ------------------- */
 const ALLOW_LIST = (process.env.CORS_ORIGIN || "http://localhost:5173")
   .split(/[,\s]+/)
   .map((s) => s.trim())
   .filter(Boolean);
 
 function originAllowed(origin) {
-  if (!origin) return true; // non-browser or same-origin
-  for (const o of ALLOW_LIST) {
-    if (o === origin) return true;
-    try {
-      // host-only match to avoid trailing-slash mismatch
-      if (new URL(o).host === new URL(origin).host) return true;
-    } catch (_) {}
-  }
+  if (!origin) return true; // non-browser / same-origin
+  try {
+    const oh = new URL(origin).host;
+    // Allow explicit allow-list
+    for (const o of ALLOW_LIST) {
+      try {
+        if (new URL(o).host === oh) return true;
+        if (o === origin) return true;
+      } catch {}
+    }
+    // Allow any *.vercel.app preview unless disabled
+    if ((process.env.ALLOW_VERCEL_PREVIEWS || "true") !== "false") {
+      if (oh.endsWith(".vercel.app")) return true;
+    }
+  } catch {}
   return false;
 }
 
@@ -325,7 +323,7 @@ const corsOptions = {
   origin(origin, cb) {
     const ok = originAllowed(origin);
     if (ok) return cb(null, true);
-    console.warn("[CORS] Blocked:", origin, "Allowed:", ALLOW_LIST);
+    console.warn("[CORS] Blocked:", origin, "Allowed:", ALLOW_LIST, "VercelPreviews=on");
     return cb(new Error("CORS blocked"));
   },
   credentials: true,
@@ -336,12 +334,10 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.options("*", cors(corsOptions)); // important for preflights
-
-// Minimal request logging (since morgan was imported)
+app.options("*", cors(corsOptions));
 app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 
-// Webhook must parse raw body
+/* ------------------- Webhooks need raw body ------------------- */
 app.post(
   "/api/paystack/webhook",
   express.raw({ type: "application/json" }),
@@ -362,7 +358,7 @@ app.post(
   }
 );
 
-// JSON afterwards
+// JSON after webhooks
 app.use(express.json());
 
 /* ------------------- Auth Middleware ------------------- */
@@ -399,7 +395,7 @@ async function requirePro(req, res, next) {
 function maintenanceBypass(req) {
   if (req.path === "/api/health") return true;
   if (req.path.startsWith("/api/paystack/webhook")) return true;
-  if (req.path.startsWith("/api/settings/admin")) return true;
+  if (req.path.startsWith("/api/settings")) return true; // allow admins to toggle
   return false;
 }
 app.use(async (req, res, next) => {
@@ -427,10 +423,6 @@ app.use(async (req, res, next) => {
 });
 
 /* ------------------- Verified client identity helpers ------------------- */
-/**
- * We fetch a client's verified identity from the "profiles" collection (generic),
- * falling back to any likely fields. This avoids tight coupling to Profile.js internals.
- */
 async function getVerifiedClientIdentity(uid) {
   try {
     const col = mongoose.connection.db.collection("profiles");
@@ -466,12 +458,7 @@ app.get("/api/profile/client/me", requireAuth, async (req, res) => {
   }
 });
 
-/**
- * 🔒 Server-side enforcement:
- * For any POST under /api/bookings, we overwrite any client-sent name/phone
- * with the verified values fetched above. This protects professionals even if
- * the UI is tampered with.
- */
+/** 🔒 Enforce verified name/phone on bookings POST */
 app.use("/api/bookings", requireAuth, async (req, _res, next) => {
   try {
     if (req.method !== "POST") return next();
@@ -495,6 +482,7 @@ app.use("/api/bookings", requireAuth, async (req, _res, next) => {
 });
 
 /* ------------------- Routers ------------------- */
+app.use("/api", bookingsRouter);
 
 /** 🔒 Pro payout write-ops guard */
 app.use("/api/wallet", requireAuth, (req, res, next) => {
@@ -503,20 +491,18 @@ app.use("/api/wallet", requireAuth, (req, res, next) => {
   if (!write) return next();
   return requirePro(req, res, next);
 });
-
-/** ✅ Optional client wallet credits endpoint (read-only). */
+/** ✅ Client wallet read stub */
 app.get("/api/wallet/client/me", requireAuth, async (_req, res) => {
   res.json({ creditsKobo: 0, transactions: [] });
 });
 
-app.use("/api", bookingsRouter);
 app.use("/api", walletWithAuth(requireAuth, requireAdmin));
 app.use("/api", pinRoutes({ requireAuth, Application })); // /pin/me/*
 app.use("/api", profileRouter);
 app.use("/api", postsRouter);
 app.use("/api", paymentsRouter({ requireAuth })); // mounts /payments/*
 
-/* ----- Optional availability router (mounted if file exists) ----- */
+/* ----- Optional availability router ----- */
 try {
   const { default: availabilityRouter } = await import("./routes/availability.js").catch(() => ({
     default: null,
@@ -528,6 +514,173 @@ try {
     console.log("[api] ℹ️ Availability routes not present (skipped)");
   }
 } catch {}
+
+/* ------------------- Admin & Pros endpoints required by your frontend ------------------- */
+
+/** Settings: GET for admin panel */
+app.get("/api/settings/admin", requireAuth, requireAdmin, async (_req, res) => {
+  try {
+    const s = await loadSettings();
+    res.json(s);
+  } catch (e) {
+    console.error("[settings:admin:get]", e?.message || e);
+    res.status(500).json({ error: "failed" });
+  }
+});
+
+/** Settings: PUT (admin). UI calls PUT /api/settings, so we provide both */
+async function saveSettingsAndRestart(req, res) {
+  try {
+    const doc = await updateSettings(req.body || {}, req.user?.email || req.user?.uid || "admin");
+    await restartSchedulers().catch((e) => console.warn("[settings] restart warn:", e?.message || e));
+    res.json(doc);
+  } catch (err) {
+    console.error("[settings:put]", err?.message || err);
+    res.status(500).json({ error: "failed" });
+  }
+}
+app.put("/api/settings", requireAuth, requireAdmin, saveSettingsAndRestart);
+app.put("/api/settings/admin", requireAuth, requireAdmin, saveSettingsAndRestart);
+
+/** Applications: list pending for Admin.jsx */
+app.get("/api/pros/pending", requireAuth, requireAdmin, async (_req, res) => {
+  try {
+    const docs = await Application.find({ status: { $in: ["submitted", "pending"] } })
+      .sort({ createdAt: -1 })
+      .limit(500)
+      .lean();
+    res.json(docs || []);
+  } catch (e) {
+    console.error("[pros:pending]", e?.message || e);
+    res.status(500).json({ error: "failed" });
+  }
+});
+
+/** Approve application → upsert Pro (Admin.jsx calls POST /api/pros/approve/:id) */
+app.post("/api/pros/approve/:id", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const appDoc =
+      (await Application.findById(id)) ||
+      (await Application.findOne({ clientId: id })) ||
+      null;
+
+    if (!appDoc) return res.status(404).json({ error: "application_not_found" });
+
+    const ownerUid = appDoc.uid;
+    if (!ownerUid) return res.status(400).json({ error: "missing_applicant_uid" });
+
+    const base = {
+      ownerUid,
+      name:
+        appDoc.displayName ||
+        [appDoc?.identity?.firstName, appDoc?.identity?.lastName].filter(Boolean).join(" ") ||
+        appDoc.email ||
+        "Unnamed Pro",
+      email: appDoc.email || "",
+      phone: appDoc.phone || appDoc?.identity?.phone || "",
+      lga:
+        (appDoc.lga ||
+          appDoc?.identity?.city ||
+          appDoc?.identity?.state ||
+          "").toString().toUpperCase(),
+      identity: appDoc.identity || {},
+      professional: appDoc.professional || {},
+      availability: appDoc.availability || {},
+      bank: appDoc.bank || {},
+      status: "approved",
+    };
+
+    const pro = await Pro.findOneAndUpdate(
+      { ownerUid },
+      { $set: base },
+      { new: true, upsert: true }
+    );
+
+    appDoc.status = "approved";
+    appDoc.approvedAt = new Date();
+    await appDoc.save();
+
+    res.json({ ok: true, proId: pro._id.toString(), applicationId: appDoc._id.toString() });
+  } catch (err) {
+    console.error("[pros/approve]", err?.message || err);
+    res.status(500).json({ error: "approve_failed" });
+  }
+});
+
+/** Manual Release (Admin tool) */
+app.post("/api/admin/release-booking/:id", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!/^[0-9a-fA-F]{24}$/.test(id)) return res.status(400).json({ error: "invalid_booking_id" });
+
+    const booking = await Booking.findById(id);
+    if (!booking) return res.status(404).json({ error: "booking_not_found" });
+
+    if (booking.payoutReleased === true) {
+      return res.json({ ok: true, alreadyReleased: true });
+    }
+
+    const outcome = await releasePendingToAvailableForBooking(booking, { reason: "admin_manual_release" });
+    if (!outcome?.ok) return res.status(400).json({ error: "release_failed", details: outcome });
+
+    res.json({
+      ok: true,
+      releasedKobo: outcome.releasedKobo || 0,
+      walletId: outcome.walletId || null,
+      bookingId: booking._id.toString(),
+    });
+  } catch (err) {
+    console.error("[admin:release-booking]", err?.message || err);
+    res.status(500).json({ error: "release_error" });
+  }
+});
+
+/* ------------------- Minimal /api/pros/me (for Settings page) ------------------- */
+// GET: read current user's Pro doc (if any)
+app.get("/api/pros/me", requireAuth, async (req, res) => {
+  try {
+    if (mongoose.connection.readyState !== 1) return res.status(503).json({ error: "Database not connected" });
+    const pro = await Pro.findOne({ ownerUid: req.user.uid }).lean();
+    if (!pro) return res.json(null);
+    res.json(pro);
+  } catch (e) {
+    console.error("[pros:me:get]", e?.message || e);
+    res.status(500).json({ error: "failed" });
+  }
+});
+
+// PUT: update current user's Pro doc (only if exists; this does not create)
+app.put("/api/pros/me", requireAuth, async (req, res) => {
+  try {
+    if (mongoose.connection.readyState !== 1) return res.status(503).json({ error: "Database not connected" });
+    const existing = await Pro.findOne({ ownerUid: req.user.uid });
+    if (!existing) return res.status(400).json({ error: "no_pro_profile" });
+
+    const payload = req.body || {};
+    // Only allow safe fields to be updated
+    const allowed = {
+      name: payload.name ?? existing.name,
+      email: payload.email ?? existing.email,
+      phone: payload.phone ?? existing.phone,
+      lga: (payload.lga ?? existing.lga ?? "").toString().toUpperCase(),
+      identity: payload.identity ?? existing.identity,
+      professional: payload.professional ?? existing.professional,
+      availability: payload.availability ?? existing.availability,
+      bank: payload.bank ?? existing.bank,
+      status: payload.status ?? existing.status,
+    };
+
+    Object.assign(existing, allowed);
+    await existing.save();
+
+    res.json({ ok: true, item: existing.toObject() });
+  } catch (e) {
+    console.error("[pros:me:put]", e?.message || e);
+    res.status(500).json({ error: "failed" });
+  }
+});
 
 /* ------------------- Deactivation Requests ------------------- */
 const DeactivationRequestSchema = new mongoose.Schema(
@@ -726,14 +879,12 @@ app.get("/api/barbers/nearby", async (req, res) => {
     if (mongoose.connection.readyState !== 1) return res.status(503).json({ error: "Database not connected" });
 
     const lat = Number(req.query.lat);
-    thelon: {
-      /* label to keep diff minimal */ }
+    thelon: { /* label to keep diff minimal */ }
     const lon = Number(req.query.lon);
     const radiusKm = Math.max(1, Math.min(200, Number(req.query.radiusKm || 25)));
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) return res.status(400).json({ error: "lat & lon required" });
 
-    let used = "geo",
-      items = [];
+    let used = "geo", items = [];
     try {
       const agg = await Pro.aggregate([
         {
@@ -802,7 +953,7 @@ app.get("/api/geo/ng/lgas/:state", (req, res) => {
   }
 });
 
-/* ------------------- WebRTC: serve ICE servers from env (optional) ------------------- */
+/* ------------------- WebRTC: ICE servers ------------------- */
 app.get("/api/webrtc/ice", (_req, res) => {
   try {
     const stun = (process.env.ICE_STUN_URLS || process.env.VITE_STUN_URLS || "")

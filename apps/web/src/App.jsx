@@ -1,7 +1,11 @@
 // apps/web/src/App.jsx
 import { Routes, Route, Navigate } from "react-router-dom";
 import { useEffect, useState } from "react";
-import { api } from "./lib/api";
+import { api, setAuthToken } from "./lib/api";
+
+// 🔐 keep Firebase token -> API header in sync
+import { onIdTokenChanged } from "firebase/auth";
+import { auth } from "./lib/firebase";
 
 // Pages
 import Home from "./pages/Home.jsx";
@@ -33,14 +37,12 @@ import RequireAuth from "./components/RequireAuth.jsx";
 /* ---------- Chatbase loader (verified users when logged in) ---------- */
 function useChatbase() {
   useEffect(() => {
-    const CHATBOT_ID = import.meta.env.VITE_CHATBASE_ID; // e.g. 5gZgvHpeJvGhp8cWAlEvZ
+    const CHATBOT_ID = import.meta.env.VITE_CHATBASE_ID;
     if (!CHATBOT_ID) return;
 
     async function init() {
-      // Base config (anonymous)
       const cfg = { chatbotId: CHATBOT_ID };
 
-      // Try verified mode if user is logged in
       try {
         const r = await api.get("/api/chatbase/userhash");
         if (r?.data?.userId && r?.data?.userHash) {
@@ -48,18 +50,16 @@ function useChatbase() {
           cfg.userHash = r.data.userHash;
         }
       } catch {
-        // Not logged in or endpoint unavailable → anonymous
+        // anonymous fallback
       }
 
-      // Make config available before loading script
       window.chatbaseConfig = cfg;
 
-      // Load once; Chatbase expects script id = bot id and domain = "www.chatbase.co"
       if (!document.getElementById(CHATBOT_ID)) {
         const s = document.createElement("script");
         s.src = "https://www.chatbase.co/embed.min.js";
-        s.id = CHATBOT_ID;            // important
-        s.domain = "www.chatbase.co"; // important
+        s.id = CHATBOT_ID;
+        s.domain = "www.chatbase.co";
         s.defer = true;
         document.body.appendChild(s);
       }
@@ -139,7 +139,20 @@ function SettingsSmart() {
 }
 
 export default function App() {
-  useChatbase(); // initialize Chatbase
+  useChatbase();
+
+  // 🔐 Write/refresh token → axios header + localStorage
+  useEffect(() => {
+    const unsub = onIdTokenChanged(auth, async (user) => {
+      try {
+        const token = user ? await user.getIdToken() : null; // fresh token
+        setAuthToken(token); // your api.js helper updates axios + localStorage
+      } catch {
+        setAuthToken(null);
+      }
+    });
+    return () => unsub();
+  }, []);
 
   return (
     <div className="min-h-screen flex flex-col bg-black text-white">
