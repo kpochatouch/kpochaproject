@@ -30,37 +30,31 @@ import Navbar from "./components/Navbar.jsx";
 import Footer from "./components/Footer.jsx";
 import RequireAuth from "./components/RequireAuth.jsx";
 
-/* ---------- Chatbase loader (gated, safe) ---------- */
+/* ---------- Chatbase loader (verified users when logged in) ---------- */
 function useChatbase() {
   useEffect(() => {
-    const ENABLE = import.meta.env.VITE_ENABLE_CHATBASE === "true";
     const CHATBOT_ID = import.meta.env.VITE_CHATBASE_ID; // e.g. 5gZgvHpeJvGhp8cWAlEvZ
-
-    // Do nothing if not explicitly enabled or missing ID
-    if (!ENABLE || !CHATBOT_ID) return;
-
-    let cancelled = false;
+    if (!CHATBOT_ID) return;
 
     async function init() {
-      const baseCfg = { chatbotId: CHATBOT_ID, domain: window.location.host };
+      // Base config (anonymous)
+      const cfg = { chatbotId: CHATBOT_ID };
 
-      // Try to fetch verified hash but don't block longer than ~2s
+      // Try verified mode if user is logged in
       try {
-        const r = await api.get("/api/chatbase/userhash", { timeout: 2000 });
-        if (!cancelled && r?.data?.userId && r?.data?.userHash) {
-          baseCfg.userId = r.data.userId;
-          baseCfg.userHash = r.data.userHash;
+        const r = await api.get("/api/chatbase/userhash");
+        if (r?.data?.userId && r?.data?.userHash) {
+          cfg.userId = r.data.userId;
+          cfg.userHash = r.data.userHash;
         }
       } catch {
-        // Silent fallback to anonymous
+        // Not logged in or endpoint unavailable → anonymous
       }
 
-      if (cancelled) return;
+      // Make config available before loading script
+      window.chatbaseConfig = cfg;
 
-      // Must set config before loading script
-      window.chatbaseConfig = baseCfg;
-
-      // Load script once; Chatbase expects id === chatbotId and domain === "www.chatbase.co"
+      // Load once; Chatbase expects script id = bot id and domain = "www.chatbase.co"
       if (!document.getElementById(CHATBOT_ID)) {
         const s = document.createElement("script");
         s.src = "https://www.chatbase.co/embed.min.js";
@@ -72,9 +66,6 @@ function useChatbase() {
     }
 
     init();
-    return () => {
-      cancelled = true;
-    };
   }, []);
 }
 
@@ -148,8 +139,7 @@ function SettingsSmart() {
 }
 
 export default function App() {
-  // Chatbot loads only when VITE_ENABLE_CHATBASE="true" and ID is present
-  useChatbase();
+  useChatbase(); // initialize Chatbase
 
   return (
     <div className="min-h-screen flex flex-col bg-black text-white">
