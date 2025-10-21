@@ -49,13 +49,11 @@ function Avatar({ url, seed }) {
 }
 
 /**
- * PosterMyWall-inspired card with:
- * - round logo top-right
- * - larger avatar
- * - bottom action bar: View (left) & Book now (right), both #000 with white bold text
- * - NO phone number shown
+ * Card with bottom actions:
+ * - View (left) — opens drawer
+ * - Book now (right) — calls onBook(service?) so Browse can carry state/LGA/service forward
  */
-export default function BarberCard({ barber, onOpen }) {
+export default function BarberCard({ barber, onOpen, onBook }) {
   const id = barber?.id || barber?._id;
   const name = barber?.name || "Professional";
   const role =
@@ -89,7 +87,7 @@ export default function BarberCard({ barber, onOpen }) {
       className="
         relative overflow-hidden rounded-2xl
         border border-zinc-800
-        bg-[#0f1116]  /* deep slate like the sample */
+        bg-[#0f1116]
         text-white
       "
       style={{
@@ -97,7 +95,7 @@ export default function BarberCard({ barber, onOpen }) {
           "0 1px 0 rgba(255,255,255,0.03) inset, 0 10px 30px rgba(0,0,0,0.45)",
       }}
     >
-      {/* Subtle dot-decoration like the sample (top-center) */}
+      {/* Subtle dot-decoration */}
       <svg
         className="absolute left-1/2 -translate-x-1/2 -top-1 h-16 w-24 opacity-30"
         viewBox="0 0 80 60"
@@ -126,7 +124,6 @@ export default function BarberCard({ barber, onOpen }) {
         </div>
 
         <div className="min-w-0 flex-1">
-          {/* Name stack like sample (first name normal, last bold) */}
           <div className="leading-tight">
             <div className="text-zinc-200 text-[15px]">
               {name.split(" ").slice(0, -1).join(" ") || name}
@@ -137,7 +134,6 @@ export default function BarberCard({ barber, onOpen }) {
             <div className="text-sm text-zinc-400">{role}</div>
           </div>
 
-          {/* Info row */}
           <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-zinc-300">
             <span className="inline-flex items-center gap-1">
               <span className="text-amber-300">★</span>
@@ -167,37 +163,53 @@ export default function BarberCard({ barber, onOpen }) {
             )}
           </div>
 
-          {/* Services chips */}
+          {/* Top services — clickable to preselect on Book page if onBook exists */}
           {!!topThree.length && (
             <div className="mt-3 flex flex-wrap gap-2">
-              {topThree.map((s, i) => (
-                <span
-                  key={i}
-                  className="rounded-full border border-zinc-700 bg-zinc-900/60 px-3 py-1 text-xs text-zinc-200"
-                >
-                  {priceTag(s)}
-                </span>
-              ))}
+              {topThree.map((s, i) => {
+                const label = priceTag(s);
+                const svcName = typeof s === "string" ? s : s?.name || "";
+                if (onBook && svcName) {
+                  return (
+                    <button
+                      key={`${svcName}-${i}`}
+                      type="button"
+                      onClick={() => onBook(svcName)}
+                      className="rounded-full border border-zinc-700 bg-zinc-900/60 px-3 py-1 text-xs text-zinc-200 hover:bg-zinc-900"
+                      title={`Book "${svcName}"`}
+                    >
+                      {label}
+                    </button>
+                  );
+                }
+                return (
+                  <span
+                    key={`${label}-${i}`}
+                    className="rounded-full border border-zinc-700 bg-zinc-900/60 px-3 py-1 text-xs text-zinc-200"
+                  >
+                    {label}
+                  </span>
+                );
+              })}
             </div>
           )}
 
-          {/* Bio */}
           <p className="mt-3 line-clamp-2 text-sm text-zinc-300">{bio}</p>
         </div>
       </div>
 
-      {/* Orange→Pink sweeping footer (curved like the sample) */}
+      {/* Gradient footer */}
       <div
         className="pointer-events-none absolute bottom-0 left-0 right-0 h-16"
         style={{
           background:
-            "linear-gradient(90deg, #ff7a00 0%, #ff3b3b 45%, #ff2d55 100%)", // EDIT gradient here if needed
+            "linear-gradient(90deg, #ff7a00 0%, #ff3b3b 45%, #ff2d55 100%)",
           clipPath:
             "path('M0,0 C120,30 260,-5 360,12 C420,22 480,40 520,0 L520,64 L0,64 Z')",
         }}
       />
 
-      {/* Bottom action bar (above the sweep) */}
+      {/* Bottom action bar */}
       <div className="absolute inset-x-5 bottom-3 z-10 flex items-center justify-between">
         <button
           type="button"
@@ -207,12 +219,26 @@ export default function BarberCard({ barber, onOpen }) {
         >
           View now
         </button>
-        <Link
-          to={`/book/${id}`}
-          className="px-4 py-2 rounded-lg bg-black text-white font-bold text-sm shadow-md hover:opacity-90"
-        >
-          Book now
-        </Link>
+        {onBook ? (
+          <button
+            type="button"
+            onClick={() => onBook(null)}
+            className="px-4 py-2 rounded-lg bg-black text-white font-bold text-sm shadow-md hover:opacity-90"
+          >
+            Book now
+          </button>
+        ) : (
+          <Link
+            to={id ? `/book/${id}` : "#"}
+            className="px-4 py-2 rounded-lg bg-black text-white font-bold text-sm shadow-md hover:opacity-90"
+            aria-disabled={!id}
+            onClick={(e) => {
+              if (!id) e.preventDefault();
+            }}
+          >
+            Book now
+          </Link>
+        )}
       </div>
     </div>
   );

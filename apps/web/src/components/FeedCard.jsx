@@ -1,4 +1,3 @@
-// apps/web/src/components/FeedCard.jsx
 import { Link } from "react-router-dom";
 
 function timeAgo(iso) {
@@ -18,18 +17,15 @@ function timeAgo(iso) {
 
 export default function FeedCard({ post }) {
   const pro = post.pro || {};
-  const proId = pro._id || pro.id;
+  const proId = pro._id || pro.id || post.proId;
   const proName = pro.name || post.authorName || "Professional";
   const lga = pro.lga || post.lga || "—";
   const avatar = pro.photoUrl || post.authorAvatar || "";
   const created = post.createdAt || post.ts;
 
-  // media: first image
-  const media =
-    Array.isArray(post.media) && post.media.length
-      ? post.media[0]
-      : null;
-  const img = media?.url || post.imageUrl || "";
+  const media = Array.isArray(post.media) && post.media.length ? post.media[0] : null;
+  const mediaUrl = media?.url || post.imageUrl || "";
+  const mediaType = media?.type || (mediaUrl ? "image" : null);
 
   const tags = Array.isArray(post.tags) ? post.tags.slice(0, 4) : [];
 
@@ -60,17 +56,24 @@ export default function FeedCard({ post }) {
         </div>
       </div>
 
-      {/* media */}
-      {img && (
+      {/* media (image or video) */}
+      {mediaUrl && (
         <div className="bg-zinc-950">
-          {/* 4:3 container */}
           <div className="relative w-full" style={{ paddingTop: "75%" }}>
-            <img
-              src={img}
-              alt=""
-              className="absolute inset-0 w-full h-full object-cover"
-              loading="lazy"
-            />
+            {mediaType === "video" ? (
+              <video
+                src={mediaUrl}
+                className="absolute inset-0 w-full h-full object-cover"
+                controls
+              />
+            ) : (
+              <img
+                src={mediaUrl}
+                alt=""
+                className="absolute inset-0 w-full h-full object-cover"
+                loading="lazy"
+              />
+            )}
           </div>
         </div>
       )}

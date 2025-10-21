@@ -42,7 +42,8 @@ function sanitizeBookingFor(req, b) {
   const isProOwner = req?.user?.uid && b?.proOwnerUid && req.user.uid === b.proOwnerUid;
 
   const obj = typeof b.toObject === "function" ? b.toObject() : { ...b };
-  const showPrivate = isAdmin || (isProOwner && (b.status === "accepted" || b.status === "completed"));
+  const showPrivate =
+    isAdmin || (isProOwner && (b.status === "accepted" || b.status === "completed"));
 
   if (!showPrivate) {
     if (obj.clientContactPrivate) {
@@ -77,6 +78,9 @@ function buildServiceSnapshotFromPayload(body = {}) {
   return null;
 }
 
+const trimStr = (v) => (typeof v === "string" ? v.trim() : v);
+const toUpper = (v) => (typeof v === "string" ? v.trim().toUpperCase() : v);
+
 /* ============================== ROUTES ============================== */
 
 /**
@@ -101,10 +105,12 @@ router.post("/bookings", requireAuth, async (req, res) => {
     const svcSnap = buildServiceSnapshotFromPayload(req.body);
     if (!proId || !svcSnap || !scheduledFor || !lga) {
       return res.status(400).json({
-        error: "Missing fields: proId, service (or serviceName+amountKobo), scheduledFor, lga",
+        error:
+          "Missing fields: proId, service (or serviceName+amountKobo), scheduledFor, lga",
       });
     }
 
+    // Fetch pro to attach owner uid
     let proOwnerUid = null;
     try {
       const pro = await Pro.findById(proId).lean();
@@ -121,10 +127,10 @@ router.post("/bookings", requireAuth, async (req, res) => {
       amountKobo: svcSnap.priceKobo,
       currency: "NGN",
 
-      scheduledFor,
-      lga: (lga || "").toUpperCase(),
-      addressText,
-      notes,
+      scheduledFor: new Date(scheduledFor),
+      lga: toUpper(lga || ""),
+      addressText: trimStr(addressText),
+      notes: trimStr(notes),
 
       location: location || undefined,
       clientContactPrivate: clientContactPrivate || undefined,
@@ -148,13 +154,13 @@ router.post("/bookings", requireAuth, async (req, res) => {
  *    country, state, lga, addressText,
  *    clientName, clientPhone,
  *    coords: { lat, lng }?, paymentMethod: 'wallet' | 'card',
+ *    clientRequestId?: string (idempotency key),
  *    instant: true
  *  }
  *
  * Response:
  *  - For card: { booking, amountKobo } (FE opens Paystack, then POST /api/payments/verify)
- *  - For wallet (when implemented): { ok:true, booking } after wallet debit + set paid/scheduled
- *    (Right now we return { booking } and leave paymentStatus='pending' unless you have a wallet debit service wired.)
+ *  - For wallet: (when implemented) debit wallet, set paid/scheduled and return { ok:true, booking }
  */
 router.post("/bookings/instant", requireAuth, async (req, res) => {
   try {
@@ -171,18 +177,53 @@ router.post("/bookings/instant", requireAuth, async (req, res) => {
       clientPhone = "",
       coords = null,
       paymentMethod = "card",
+      clientRequestId = "", // optional idempotency key from FE
     } = body;
 
-    if (!proId || !serviceName || !Number.isFinite(Number(amountKobo)) || !lga) {
-      return res.status(400).json({ error: "Missing fields: proId, serviceName, amountKobo, lga" });
+    // Validate basic inputs
+    if (!proId || !serviceName || !Number.isFinite(Number(amountKobo))) {
+      return res.status(400).json({
+        error: "Missing fields: proId, serviceName, amountKobo",
+      });
     }
 
-    // Find pro to attach owner uid
-    let proOwnerUid = null;
+    // Load pro (to attach owner uid and default LGA if missing)
+    let proDoc = null;
     try {
-      const pro = await Pro.findById(proId).lean();
-      proOwnerUid = pro?.ownerUid || null;
-    } catch {}
+      proDoc = await Pro.findById(proId).lean();
+      if (!proDoc) {
+        return res.status(404).json({ error: "pro_not_found" });
+      }
+    } catch {
+      return res.status(400).json({ error: "invalid_proId" });
+    }
+    const proOwnerUid = proDoc?.ownerUid || null;
+
+    // Normalize and default region
+    const normalizedLga = toUpper(lga || proDoc?.lga || "");
+    if (!normalizedLga) {
+      return res
+        .status(400)
+        .json({ error: "Missing lga (and pro has no default LGA)" });
+    }
+
+    // Optional idempotency: reuse existing recent booking with same key + user
+    if (clientRequestId) {
+      const existing = await Booking.findOne({
+        clientUid: req.user.uid,
+        "meta.clientRequestId": String(clientRequestId),
+      })
+        .sort({ createdAt: -1 })
+        .lean();
+      if (existing) {
+        return res.json({
+          ok: true,
+          reused: true,
+          booking: sanitizeBookingFor(req, existing),
+          amountKobo: existing.amountKobo,
+        });
+      }
+    }
 
     const svcSnap = {
       serviceId: "",
@@ -203,36 +244,49 @@ router.post("/bookings/instant", requireAuth, async (req, res) => {
       // No scheduledFor in instant flow
       scheduledFor: null,
 
-      // Location bits (LGA is upper-cased to match your browse filters)
-      country: String(country),
-      state: String(state),
-      lga: (lga || "").toUpperCase(),
-      addressText: String(addressText || ""),
+      // Region context
+      country: trimStr(country) || "Nigeria",
+      state: trimStr(state),
+      lga: normalizedLga,
+      addressText: trimStr(addressText || ""),
 
-      // Store private contact so it becomes visible to pro AFTER accept
+      // Private contact snapshot (server-side guards elsewhere will override from verified profile when present)
       clientContactPrivate: {
         phone: String(clientPhone || ""),
         address: String(addressText || ""),
       },
 
-      location: coords ? { lat: Number(coords.lat), lng: Number(coords.lng) } : undefined,
+      location: coords
+        ? {
+            lat: Number(coords.lat),
+            lng: Number(coords.lng),
+          }
+        : undefined,
 
       paymentStatus: "pending",
       status: "pending_payment", // becomes scheduled/accepted after payment + pro action
       paystackReference: null,
-      meta: { paymentMethodRequested: paymentMethod },
+      meta: {
+        paymentMethodRequested: paymentMethod,
+        clientRequestId: clientRequestId ? String(clientRequestId) : undefined,
+      },
     });
 
     // For card, FE will open Paystack and then call /api/payments/verify
     if (paymentMethod === "card") {
-      return res.json({ booking: sanitizeBookingFor(req, b), amountKobo: b.amountKobo });
+      return res.json({
+        ok: true,
+        booking: sanitizeBookingFor(req, b),
+        amountKobo: b.amountKobo,
+      });
     }
 
-    // Wallet path:
-    // If your wallet debit is implemented, do it here, e.g.:
-    //   const ok = await debitClientWallet(req.user.uid, b.amountKobo)
-    //   if (ok) { b.paymentStatus='paid'; b.status='scheduled'; await b.save(); return res.json({ ok:true, booking: sanitizeBookingFor(req, b) }); }
-    // For now, fail-soft and let FE show a message (keeps flow consistent).
+    // Wallet path (to be wired when wallet debit is ready)
+    // Example:
+    //   const ok = await debitClientWallet(req.user.uid, b.amountKobo, { bookingId: b._id });
+    //   if (!ok) return res.status(400).json({ ok:false, message:"wallet_debit_failed" });
+    //   b.paymentStatus = "paid"; b.status = "scheduled"; await b.save();
+    //   return res.json({ ok:true, booking: sanitizeBookingFor(req, b) });
     return res.status(400).json({ ok: false, message: "wallet_not_configured" });
   } catch (err) {
     console.error("[bookings:instant] error:", err);
@@ -252,7 +306,7 @@ router.put("/bookings/:id/reference", requireAuth, async (req, res) => {
     if (b.clientUid !== req.user.uid)
       return res.status(403).json({ error: "Forbidden" });
 
-    b.paystackReference = paystackReference;
+    b.paystackReference = String(paystackReference);
     await b.save();
     res.json({ ok: true });
   } catch (err) {
@@ -293,6 +347,31 @@ router.get("/bookings/pro/me", requireAuth, async (req, res) => {
   }
 });
 
+/** Get a single booking (client or assigned pro or admin) */
+router.get("/bookings/:id", requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!/^[0-9a-fA-F]{24}$/.test(id)) {
+      return res.status(400).json({ error: "invalid_id" });
+    }
+    const b = await Booking.findById(id);
+    if (!b) return res.status(404).json({ error: "not_found" });
+
+    const isAdmin = isAdminReq(req);
+    const isClient = b.clientUid === req.user.uid;
+    const isProOwner = b.proOwnerUid && b.proOwnerUid === req.user.uid;
+
+    if (!isAdmin && !isClient && !isProOwner) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    return res.json(sanitizeBookingFor(req, b));
+  } catch (err) {
+    console.error("[bookings:getOne] error:", err);
+    res.status(500).json({ error: "Failed to load booking" });
+  }
+});
+
 /** Client: cancel booking (safe states) */
 router.put("/bookings/:id/cancel", requireAuth, async (req, res) => {
   try {
@@ -302,7 +381,9 @@ router.put("/bookings/:id/cancel", requireAuth, async (req, res) => {
       return res.status(403).json({ error: "Forbidden" });
 
     if (!["pending_payment", "scheduled", "accepted"].includes(b.status)) {
-      return res.status(400).json({ error: `Cannot cancel when status is ${b.status}` });
+      return res
+        .status(400)
+        .json({ error: `Cannot cancel when status is ${b.status}` });
     }
 
     b.status = "cancelled";
@@ -323,7 +404,9 @@ router.put("/bookings/:id/accept", requireAuth, async (req, res) => {
       return res.status(403).json({ error: "Forbidden" });
 
     if (!["scheduled", "pending_payment"].includes(b.status)) {
-      return res.status(400).json({ error: `Cannot accept when status is ${b.status}` });
+      return res
+        .status(400)
+        .json({ error: `Cannot accept when status is ${b.status}` });
     }
     if (b.paymentStatus !== "paid") {
       return res.status(400).json({ error: "Cannot accept before payment" });
@@ -348,7 +431,9 @@ router.put("/bookings/:id/decline", requireAuth, async (req, res) => {
       return res.status(403).json({ error: "Forbidden" });
 
     if (["completed", "cancelled"].includes(b.status)) {
-      return res.status(400).json({ error: `Cannot decline when status is ${b.status}` });
+      return res
+        .status(400)
+        .json({ error: `Cannot decline when status is ${b.status}` });
     }
 
     b.status = "declined";
@@ -371,7 +456,9 @@ router.put("/bookings/:id/complete", requireAuth, async (req, res) => {
       return res.status(403).json({ error: "Forbidden" });
 
     if (!["accepted", "scheduled"].includes(b.status)) {
-      return res.status(400).json({ error: `Cannot complete when status is ${b.status}` });
+      return res
+        .status(400)
+        .json({ error: `Cannot complete when status is ${b.status}` });
     }
 
     b.status = "completed";

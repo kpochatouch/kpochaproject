@@ -1,10 +1,9 @@
-// apps/api/models/Booking.js
 import mongoose from "mongoose";
 
 /**
- * Booking states (kept for back-compat with your server logic):
+ * Booking states:
  * - "pending_payment" -> "scheduled" on Paystack success.
- * - Added "accepted"/"declined" earlier, keep all.
+ * - "accepted"/"declined" for pro decisions.
  */
 const STATUS = [
   "pending_payment",
@@ -64,27 +63,23 @@ const BookingSchema = new mongoose.Schema(
 
     // Which professional
     proId: { type: mongoose.Schema.Types.ObjectId, ref: "Pro", required: true, index: true },
-    // ⚠️ Was required before; make optional so routes can infer and save later
+    // optional; routes infer & set it
     proOwnerUid: { type: String, index: true },
 
-    // What & how much (snapshot; keep amountKobo for back-compat)
+    // What & how much
     service: { type: ServiceSnapshotSchema, required: true },
     amountKobo: { type: Number, required: true, min: 1 },
     currency: { type: String, default: "NGN" },
 
     // Scheduling
-    // ⚠️ For instant bookings we may not have a chosen timeslot. Make optional.
     scheduledFor: { type: Date, index: true },
 
-    // Instant flag for date/time-less flow
+    // Instant flow
     instant: { type: Boolean, default: false, index: true },
 
-    // Region support (let routes fill it; don’t block save)
-    lga: { type: String, default: "" }, // e.g., "OREDO" (UPPERCASE)
-
-    // Human-readable address (can match location.text)
+    // Region (upper-cased)
+    lga: { type: String, default: "" }, // e.g., "OREDO"
     addressText: { type: String, default: "" },
-
     location: { type: LocationSchema, default: () => ({}) },
 
     notes: { type: String, default: "" },
@@ -98,7 +93,7 @@ const BookingSchema = new mongoose.Schema(
     },
     paystackReference: { type: String, default: "", index: true },
 
-    // Payout release flag (scheduler/admin endpoint uses this)
+    // Payout release flag
     payoutReleased: { type: Boolean, default: false },
 
     // Booking lifecycle
@@ -113,7 +108,7 @@ const BookingSchema = new mongoose.Schema(
     decline: {
       type: new mongoose.Schema(
         {
-          reasonCode: { type: String, default: "" }, // "too_busy" | "out_of_area" | ...
+          reasonCode: { type: String, default: "" },
           reasonText: { type: String, default: "" },
           at: { type: Date, default: null },
         },
@@ -122,25 +117,20 @@ const BookingSchema = new mongoose.Schema(
       default: () => ({}),
     },
 
-    // Private client contact (only after accept to assigned pro, and to admins)
+    // Private client contact (visible to assigned pro after accept, and to admins)
     clientContactPrivate: { type: ClientContactPrivateSchema, default: () => ({}) },
 
-    // Timestamps you already use
+    // Timestamps
     completedAt: { type: Date },
   },
   { timestamps: true }
 );
 
 /* ------------------------------ Hooks/Virtuals ------------------------------ */
-/**
- * Keep `amountKobo` in sync with `service.priceKobo` at creation time.
- * If caller passes both, trust explicit `amountKobo`.
- */
 BookingSchema.pre("validate", function (next) {
   if (!this.amountKobo && this.service?.priceKobo) {
     this.amountKobo = this.service.priceKobo;
   }
-  // For instant bookings, auto-stamp scheduledFor so downstream code that expects a Date doesn’t crash
   if (this.instant && !this.scheduledFor) {
     this.scheduledFor = new Date();
   }

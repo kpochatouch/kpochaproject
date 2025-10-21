@@ -20,12 +20,18 @@ import { Booking } from "./models/Booking.js";
 
 // Wallet & Ledger
 import { withAuth as walletWithAuth } from "./routes/wallets.js";
-import { creditProPendingForBooking } from "./services/walletService.js";
+import {
+  creditProPendingForBooking,
+  releasePendingToAvailableForBooking,
+} from "./services/walletService.js";
 
 // ✅ PIN routes (set / reset / forgot)
 import pinRoutes from "./routes/pin.js";
 // ✅ Case-sensitive import (your file is Profile.js)
 import profileRouter from "./routes/Profile.js";
+// ✅ New routes
+import postsRouter from "./routes/posts.js";
+import paymentsRouter from "./routes/payments.js";
 
 dotenv.config();
 
@@ -182,7 +188,9 @@ const SettingsSchema = new mongoose.Schema(
     bookingRules: { type: BookingRulesSchema, default: () => ({}) },
     maintenance: { type: MaintenanceSchema, default: () => ({}) },
     notifications: { type: NotificationsSchema, default: () => ({}) },
-    withdrawals: { type: new mongoose.Schema({ requireApproval: { type: Boolean, default: true } }, { _id: false }) },
+    withdrawals: {
+      type: new mongoose.Schema({ requireApproval: { type: Boolean, default: true } }, { _id: false }),
+    },
     security: { allowedOrigins: { type: [String], default: [] } },
     webhooks: { paystack: { secret: { type: String, default: "" } } },
     updatedBy: { type: String, default: "system" },
@@ -228,23 +236,43 @@ async function initSchedulers() {
 
   const s = await loadSettings();
 
+  // 🔁 Auto-release completed bookings older than releaseDays
   if (s?.payouts?.enableAutoRelease && s?.payouts?.autoReleaseCron) {
     const t = cron.schedule(s.payouts.autoReleaseCron, async () => {
+      const started = Date.now();
       try {
         const releaseDays = s.payouts.releaseDays ?? 7;
         const cutoff = new Date(Date.now() - releaseDays * 24 * 60 * 60 * 1000);
+
+        // Only release bookings that are paid + completed, not yet released
         const toRelease = await Booking.find({
           status: "completed",
+          paymentStatus: "paid",
           payoutReleased: { $ne: true },
           completedAt: { $lte: cutoff },
         })
           .select("_id proId amountKobo completedAt payoutReleased")
-          .limit(500);
+          .limit(500)
+          .lean();
 
+        let ok = 0,
+          fail = 0;
         for (const b of toRelease) {
-          await Booking.updateOne({ _id: b._id }, { $set: { payoutReleased: true } });
+          try {
+            const res = await releasePendingToAvailableForBooking(b, { reason: "auto_release_cron" });
+            if (res?.ok) ok++;
+            else fail++;
+          } catch (e) {
+            fail++;
+            console.error("[scheduler] release error for booking", b._id?.toString?.(), e?.message || e);
+          }
         }
-        console.log(`[scheduler] Auto-release ran. Marked: ${toRelease.length}`);
+
+        console.log(
+          `[scheduler] Auto-release ran in ${Math.round(
+            (Date.now() - started) / 1000
+          )}s. Processed=${toRelease.length}, ok=${ok}, fail=${fail}`
+        );
       } catch (err) {
         console.error("[scheduler] Auto-release error:", err.message);
       }
@@ -252,6 +280,7 @@ async function initSchedulers() {
     CRON_TASKS.push(t);
   }
 
+  // (Placeholder) No-show sweeper
   if (s?.bookingRules?.enableNoShowSweep && s?.bookingRules?.noShowSweepCron) {
     const t = cron.schedule(s.bookingRules.noShowSweepCron, async () => {
       try {
@@ -308,6 +337,9 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 app.options("*", cors(corsOptions)); // important for preflights
+
+// Minimal request logging (since morgan was imported)
+app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 
 // Webhook must parse raw body
 app.post(
@@ -481,10 +513,14 @@ app.use("/api", bookingsRouter);
 app.use("/api", walletWithAuth(requireAuth, requireAdmin));
 app.use("/api", pinRoutes({ requireAuth, Application })); // /pin/me/*
 app.use("/api", profileRouter);
+app.use("/api", postsRouter);
+app.use("/api", paymentsRouter({ requireAuth })); // mounts /payments/*
 
 /* ----- Optional availability router (mounted if file exists) ----- */
 try {
-  const { default: availabilityRouter } = await import("./routes/availability.js").catch(() => ({ default: null }));
+  const { default: availabilityRouter } = await import("./routes/availability.js").catch(() => ({
+    default: null,
+  }));
   if (availabilityRouter) {
     app.use("/api", availabilityRouter);
     console.log("[api] ✅ Availability routes mounted");
@@ -564,7 +600,11 @@ app.post("/api/admin/deactivation-requests/:id/decision", requireAuth, requireAd
     if (doc.status !== "pending") return res.status(400).json({ error: "already_decided" });
 
     if (action === "approve") {
-      try { await admin.auth().updateUser(doc.uid, { disabled: true }); } catch (e) { console.warn("[admin] disable warn:", e?.message || e); }
+      try {
+        await admin.auth().updateUser(doc.uid, { disabled: true });
+      } catch (e) {
+        console.warn("[admin] disable warn:", e?.message || e);
+      }
       doc.status = "approved";
     } else {
       doc.status = "rejected";
@@ -669,7 +709,9 @@ const GEOAPIFY_KEY = process.env.GEOAPIFY_KEY || "9258e71a50234a35b0bec3b44515b0
 async function reverseGeocode(lat, lon) {
   if (!GEOAPIFY_KEY) return null;
   const r = await fetch(
-    `https://api.geoapify.com/v1/geocode/reverse?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}&apiKey=${encodeURIComponent(GEOAPIFY_KEY)}`
+    `https://api.geoapify.com/v1/geocode/reverse?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(
+      lon
+    )}&apiKey=${encodeURIComponent(GEOAPIFY_KEY)}`
   );
   if (!r.ok) return null;
   const j = await r.json();
@@ -684,11 +726,14 @@ app.get("/api/barbers/nearby", async (req, res) => {
     if (mongoose.connection.readyState !== 1) return res.status(503).json({ error: "Database not connected" });
 
     const lat = Number(req.query.lat);
+    thelon: {
+      /* label to keep diff minimal */ }
     const lon = Number(req.query.lon);
     const radiusKm = Math.max(1, Math.min(200, Number(req.query.radiusKm || 25)));
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) return res.status(400).json({ error: "lat & lon required" });
 
-    let used = "geo", items = [];
+    let used = "geo",
+      items = [];
     try {
       const agg = await Pro.aggregate([
         {
@@ -697,10 +742,10 @@ app.get("/api/barbers/nearby", async (req, res) => {
             distanceField: "dist",
             spherical: true,
             maxDistance: radiusKm * 1000,
-            key: "loc"
-          }
+            key: "loc",
+          },
         },
-        { $limit: 100 }
+        { $limit: 100 },
       ]);
       items = agg.map((d) => {
         const shaped = proToBarber(d);
@@ -757,452 +802,6 @@ app.get("/api/geo/ng/lgas/:state", (req, res) => {
   }
 });
 
-/* ------------------- Geoapify Proxy ------------------- */
-app.get("/api/geo/rev", async (req, res) => {
-  try {
-    const { lat, lon } = req.query;
-    if (!lat || !lon) return res.status(400).json({ error: "lat & lon required" });
-
-    const nLat = Number(lat), nLon = Number(lon);
-    if (!Number.isFinite(nLat) || !Number.isFinite(nLon)) return res.status(400).json({ error: "lat & lon must be numbers" });
-    if (!GEOAPIFY_KEY) return res.status(500).json({ error: "geo_key_missing" });
-
-    const r = await fetch(
-      `https://api.geoapify.com/v1/geocode/reverse?lat=${encodeURIComponent(nLat)}&lon=${encodeURIComponent(nLon)}&apiKey=${encodeURIComponent(GEOAPIFY_KEY)}`
-    );
-    const data = await r.json();
-    res.json(data);
-  } catch (e) {
-    console.error("[geo/rev] error:", e?.message || e);
-    res.status(500).json({ error: "reverse_failed" });
-  }
-});
-app.get("/api/geo/search", async (req, res) => {
-  try {
-    const q = String(req.query.q || "").trim();
-    if (!q) return res.status(400).json({ error: "q required" });
-    if (!GEOAPIFY_KEY) return res.status(500).json({ error: "geo_key_missing" });
-
-    const r = await fetch(
-      `https://api.geoapify.com/v1/geocode/search?text=${encodeURIComponent(q)}&limit=5&apiKey=${encodeURIComponent(GEOAPIFY_KEY)}`
-    );
-    const data = await r.json();
-    res.json(data);
-  } catch (e) {
-    console.error("[geo/search] error:", e?.message || e);
-    res.status(500).json({ error: "search_failed" });
-  }
-});
-
-/* ------------------- Payments (Paystack) ------------------- */
-/** ✅ Init (for redirect fallback) */
-app.post("/api/payments/init", requireAuth, async (req, res) => {
-  try {
-    const { bookingId, amountKobo, email } = req.body || {};
-    if (!bookingId || !amountKobo) return res.status(400).json({ error: "bookingId and amountKobo required" });
-    if (!process.env.PAYSTACK_SECRET_KEY) return res.status(500).json({ error: "paystack_secret_missing" });
-
-    const booking = await Booking.findById(bookingId);
-    if (!booking) return res.status(404).json({ error: "booking_not_found" });
-
-    const initResp = await fetch("https://api.paystack.co/transaction/initialize", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        email: email || req.user.email || "customer@example.com",
-        amount: Number(amountKobo), // kobo
-        reference: `BOOKING-${booking._id}`,
-        metadata: {
-          custom_fields: [{ display_name: "Booking", variable_name: "bookingId", value: String(booking._id) }],
-        },
-      }),
-    });
-
-    const initJson = await initResp.json();
-    if (!initResp.ok || !initJson?.status || !initJson?.data?.authorization_url) {
-      return res.status(400).json({ error: "init_failed", details: initJson?.message || "unknown_error" });
-    }
-
-    booking.paystackReference = initJson.data.reference || `BOOKING-${booking._id}`;
-    if (booking.paymentStatus !== "paid") {
-      booking.paymentStatus = "pending";
-      booking.status = booking.status === "scheduled" ? booking.status : "pending_payment";
-    }
-    await booking.save();
-
-    return res.json({
-      authorization_url: initJson.data.authorization_url,
-      reference: initJson.data.reference,
-    });
-  } catch (e) {
-    console.error("[payments/init] error:", e);
-    res.status(500).json({ error: "init_error" });
-  }
-});
-
-/** ✅ Verify (used by inline & post-redirect confirmation) */
-app.post("/api/payments/verify", async (req, res) => {
-  try {
-    const { bookingId, reference } = req.body || {};
-    if (!bookingId || !reference) return res.status(400).json({ error: "bookingId and reference required" });
-
-    const r = await fetch(
-      `https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`,
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-          "Content-Type": "application/json",
-        },
-      }
-    );
-    const verify = await r.json();
-
-    const status = verify?.data?.status;
-    const amount = verify?.data?.amount;
-    if (status !== "success") return res.json({ ok: false, status: status || "unknown" });
-
-    const booking = await Booking.findById(bookingId);
-    if (!booking) return res.status(404).json({ error: "Booking not found" });
-
-    if (booking.amountKobo && Number(amount) !== Number(booking.amountKobo)) {
-      console.warn("[paystack] amount mismatch", amount, "vs", booking.amountKobo);
-    }
-
-    booking.paymentStatus = "paid";
-    if (booking.status === "pending_payment") booking.status = "scheduled";
-    booking.paystackReference = reference;
-    await booking.save();
-
-    try {
-      await creditProPendingForBooking(booking, { paystackRef: reference });
-    } catch (err) {
-      console.error("[wallet] credit pending error:", err);
-    }
-
-    return res.json({ ok: true, status: "success" });
-  } catch (e) {
-    console.error("[payments/verify] error:", e);
-    res.status(500).json({ error: "verify_failed" });
-  }
-});
-
-/* ------------------- Pros (forms + admin tools) ------------------- */
-/** 🔧 GET /api/pros/me returns application or a read-only stub for approved pros */
-app.get("/api/pros/me", requireAuth, async (req, res) => {
-  try {
-    if (mongoose.connection.readyState !== 1) {
-      return res.status(503).json({ error: "Database not connected" });
-    }
-
-    const appDoc = await Application.findOne({ uid: req.user.uid }).lean();
-    if (appDoc) return res.json(appDoc);
-
-    const pro = await Pro.findOne({ ownerUid: req.user.uid }).lean();
-    if (pro) {
-      return res.json({
-        _id: pro._id,
-        uid: req.user.uid,
-        email: req.user.email,
-        displayName: pro.name || req.user.email,
-        lga: (pro.lga || "").toUpperCase(),
-        professional: { services: pro.services || [] },
-        availability: { statesCovered: [] },
-        status: "approved",
-        readOnly: true,
-      });
-    }
-
-    return res.json(null);
-  } catch (err) {
-    console.error("[pros/me GET] error:", err);
-    res.status(500).json({ error: "failed" });
-  }
-});
-
-app.put("/api/pros/me", requireAuth, async (req, res) => {
-  try {
-    if (mongoose.connection.readyState !== 1) return res.status(503).json({ error: "Database not connected" });
-
-    // 🔒 explicit guard: do not allow creation here
-    const existing = await Application.findOne({ uid: req.user.uid }).lean();
-    if (!existing) {
-      return res.status(403).json({ error: "No professional profile exists. Please apply first." });
-    }
-
-    const body = req.body || {};
-    const identity = body.identity || {};
-    const professional = body.professional || {};
-
-    const displayName =
-      body.displayName ||
-      [identity.firstName, identity.middleName, identity.lastName].filter(Boolean).join(" ").trim() ||
-      req.user.email;
-
-    const phone = identity.phone || body.phone || null;
-    const lgaRaw = body.lga || identity.city || identity.state || "";
-    const lga = (lgaRaw || "").toString().toUpperCase();
-
-    const servicesSummary = Array.isArray(professional.services)
-      ? professional.services.join(", ")
-      : body.services || "";
-
-    const toSet = {
-      ...body,
-      uid: req.user.uid,
-      email: req.user.email,
-      displayName,
-      phone,
-      lga,
-      services: servicesSummary,
-      status: body.status || "submitted",
-    };
-
-    if (body.phoneVerifiedAt) toSet.phoneVerifiedAt = new Date(body.phoneVerifiedAt);
-    if (body.verification?.phoneVerifiedAt) {
-      toSet.verification = { ...(toSet.verification || {}), phoneVerifiedAt: new Date(body.verification.phoneVerifiedAt) };
-    }
-
-    if (body.bank && !body.payoutBank) {
-      const b = body.bank || {};
-      toSet.payoutBank = {
-        name: b.bankName || b.name || "",
-        code: b.bankCode || b.code || "",
-        accountNumber: b.accountNumber || b.account_no || "",
-        accountName: b.accountName || b.account_name || "",
-      };
-    }
-
-    const saved = await Application.findOneAndUpdate(
-      { uid: req.user.uid },
-      { $set: toSet },
-      { new: true, upsert: false } // ⛔️ no upsert; settings must not create
-    ).lean();
-
-    return res.json({ ok: true, item: saved });
-  } catch (err) {
-    console.error("[pros/me PUT] error:", err);
-    res.status(500).json({ error: "failed_to_save" });
-  }
-});
-
-/** Clients apply to become a pro */
-app.post("/api/pros/apply", requireAuth, async (req, res) => {
-  const { displayName, phone, lga, services = "" } = req.body || {};
-  if (!displayName || !phone || !lga) {
-    return res.status(400).json({ error: "Missing required fields" });
-  }
-
-  try {
-    if (mongoose.connection.readyState === 1) {
-      const clientId = Date.now().toString();
-      const appDoc = await Application.create({
-        uid: req.user.uid,
-        email: req.user.email,
-        displayName,
-        phone,
-        lga,
-        services,
-        clientId,
-      });
-      return res.json({ ok: true, item: appDoc });
-    } else {
-      return res.status(503).json({ error: "Database not connected" });
-    }
-  } catch (err) {
-    console.error("[pros/apply] error:", err);
-    return res.status(500).json({ error: "Failed to save application" });
-  }
-});
-
-/** 🔒 Admin-only: list applications (works in production) */
-app.get("/api/pros/pending", requireAuth, requireAdmin, async (_req, res) => {
-  try {
-    if (mongoose.connection.readyState === 1) {
-      const docs = await Application.find({}).sort({ createdAt: -1 }).lean();
-      return res.json(docs);
-    }
-    return res.status(503).json({ error: "Database not connected" });
-  } catch (err) {
-    console.error("[pros/pending] error:", err);
-    res.status(500).json({ error: "Failed to load pending applications" });
-  }
-});
-
-/** 🔒 Admin-only: approve an application and promote to Pro */
-app.post("/api/pros/approve/:id", requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const rawId = req.params.id;
-    if (mongoose.connection.readyState !== 1) return res.status(503).json({ error: "Database not connected" });
-
-    // Accept either clientId or Mongo ObjectId
-    let doc =
-      (await Application.findOneAndUpdate(
-        { clientId: rawId },
-        { status: "approved" },
-        { new: true }
-      )) ||
-      (/^[0-9a-fA-F]{24}$/.test(rawId)
-        ? await Application.findOneAndUpdate(
-            { _id: rawId },
-            { status: "approved" },
-            { new: true }
-          )
-        : null);
-
-    if (!doc) return res.status(404).json({ error: "Not found" });
-
-    const name =
-      doc.displayName ||
-      [doc?.identity?.firstName, doc?.identity?.lastName].filter(Boolean).join(" ") ||
-      doc.email;
-
-    const lga =
-      (doc.lga || doc?.identity?.city || doc?.identity?.state || "UNSPECIFIED").toString().toUpperCase();
-
-    const services =
-      (Array.isArray(doc?.professional?.services) && doc.professional.services) || [];
-
-    const pro = await Pro.create({
-      ownerUid: doc.uid,
-      name,
-      lga,
-      availability: "Available",
-      rating: 4.8,
-      services,
-    });
-
-    await Application.deleteOne({ _id: doc._id });
-    return res.json({ ok: true, proId: pro._id.toString() });
-  } catch (err) {
-    console.error("[pros/approve] error:", err);
-    res.status(500).json({ error: "Failed to approve" });
-  }
-});
-
-/** 🔒 Admin-only: decline an application */
-app.post("/api/pros/decline/:id", requireAuth, requireAdmin, async (req, res) => {
-  try {
-    if (mongoose.connection.readyState !== 1) return res.status(503).json({ error: "Database not connected" });
-    const { reason = "" } = req.body || {};
-    const rawId = req.params.id;
-
-    let doc =
-      (await Application.findOneAndUpdate(
-        { clientId: rawId },
-        { status: "declined", declineReason: reason, declinedAt: new Date() },
-        { new: true }
-      )) ||
-      (/^[0-9a-fA-F]{24}$/.test(rawId)
-        ? await Application.findOneAndUpdate(
-            { _id: rawId },
-            { status: "declined", declineReason: reason, declinedAt: new Date() },
-            { new: true }
-          )
-        : null);
-
-    if (!doc) return res.status(404).json({ error: "Not found" });
-    return res.json({ ok: true });
-  } catch (err) {
-    console.error("[pros/decline] error:", err);
-    res.status(500).json({ error: "Failed to decline" });
-  }
-});
-
-/* ------------------- Settings routes ------------------- */
-app.get("/api/settings", async (_req, res) => {
-  try {
-    const s = await loadSettings();
-    res.json({
-      appName: s.appName,
-      tagline: s.tagline,
-      commissionSplit: s.commissionSplit,
-      payouts: s.payouts,
-      withdrawals: s.withdrawals,
-      bookingRules: s.bookingRules,
-      maintenance: s.maintenance,
-      notifications: s.notifications,
-      security: s.security,
-      updatedAt: s.updatedAt,
-      updatedBy: s.updatedBy,
-    });
-  } catch (e) {
-    res.status(500).json({ error: "Failed to load settings", details: e.message });
-  }
-});
-
-app.get("/api/settings/admin", requireAuth, requireAdmin, async (_req, res) => {
-  try {
-    const s = await loadSettings();
-    res.json(s);
-  } catch (e) {
-    res.status(500).json({ error: "Failed to load settings", details: e.message });
-  }
-});
-
-app.put("/api/settings", requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const updated = await updateSettings(req.body, req.user?.email || "admin");
-    await restartSchedulers();
-    const clean = updated.toObject();
-    if (clean?.webhooks?.paystack) delete clean.webhooks.paystack.secret;
-    res.json(clean);
-  } catch (e) {
-    res.status(500).json({ error: "Failed to update settings", details: e.message });
-  }
-});
-
-app.post("/api/admin/release-booking/:id", requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const id = req.params.id;
-    if (!id || !/^[0-9a-fA-F]{24}$/.test(id)) return res.status(400).json({ error: "invalid_id" });
-
-    const s = await loadSettings();
-    const proPct = Number(s?.commissionSplit?.pro ?? 75);
-
-    const b = await Booking.findById(id);
-    if (!b) return res.status(404).json({ error: "booking_not_found" });
-    if (b.payoutReleased) return res.json({ ok: true, alreadyReleased: true });
-
-    const releasedKobo = Math.round(Number(b.amountKobo || 0) * (proPct / 100));
-    b.payoutReleased = true;
-    await b.save();
-
-    return res.json({ ok: true, releasedKobo, proPct });
-  } catch (e) {
-    console.error("[admin:release-booking] error:", e);
-    res.status(500).json({ error: "release_failed" });
-  }
-});
-
-/* ------------------- Feed / Posts (NEW) ------------------- */
-const PostSchema = new mongoose.Schema(
-  {
-    ownerUid: { type: String, index: true },
-    proId: { type: mongoose.Schema.Types.ObjectId, ref: "Pro", index: true },
-    text: { type: String, default: "" },
-    media: [{ url: String, type: { type: String, default: "image" } }],
-    tags: { type: [String], default: [] },
-    isPublic: { type: Boolean, default: true },
-    lga: { type: String, default: "" },
-  },
-  { timestamps: true }
-);
-const Post = mongoose.models.Post || mongoose.model("Post", PostSchema);
-
-app.get("/api/feed/public", async (_req, res) => {
-  try {
-    if (mongoose.connection.readyState !== 1) return res.json([]);
-    const posts = await Post.find({ isPublic: true }).sort({ createdAt: -1 }).limit(20).lean();
-    res.json(posts);
-  } catch (e) {
-    console.error("[feed/public] error:", e?.message || e);
-    res.json([]);
-  }
-});
-
 /* ------------------- WebRTC: serve ICE servers from env (optional) ------------------- */
 app.get("/api/webrtc/ice", (_req, res) => {
   try {
@@ -1243,7 +842,6 @@ app.get("/api/chatbase/userhash", requireAuth, async (req, res) => {
     return res.status(500).json({ error: "hash_failed" });
   }
 });
-
 
 /* ------------------- Paystack event handler ------------------- */
 async function handlePaystackEvent(event) {

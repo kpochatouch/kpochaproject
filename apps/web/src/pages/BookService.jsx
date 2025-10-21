@@ -1,7 +1,7 @@
-// Instant Booking (no date/time) with verified, read-only client identity
-// Simplified: no Country/State/LGA fields. Uses inline Paystack (auto-loads script) or optional redirect init.
+// Book page that respects Browse context (service/state/LGA)
+// Only asks for Address + Payment; passes country/state/lga/coords to API.
 
-import { useParams, useNavigate, useSearchParams, Link } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams, Link, useLocation } from "react-router-dom";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../lib/api";
 
@@ -10,7 +10,7 @@ function usePaystackScript() {
   useEffect(() => {
     if (window.PaystackPop) { setReady(true); return; }
     const id = "paystack-inline-sdk";
-    if (document.getElementById(id)) return; // already loading
+    if (document.getElementById(id)) return;
     const s = document.createElement("script");
     s.id = id;
     s.src = "https://js.paystack.co/v1/inline.js";
@@ -25,25 +25,39 @@ function usePaystackScript() {
 export default function BookService() {
   const { barberId } = useParams();
   const [search] = useSearchParams();
+  const location = useLocation();
   const navigate = useNavigate();
 
   const [barber, setBarber] = useState(null);
   const [me, setMe] = useState(null);
   const [clientProfile, setClientProfile] = useState(null);
 
+  // carry-forward region & service
+  const carry = location.state || {};
+  const [region, setRegion] = useState({
+    country: carry.country || "Nigeria",
+    state: (carry.state || "").toUpperCase(),
+    lga: (carry.lga || "").toUpperCase(),
+  });
+  const lockRegion = !!(carry.state || carry.lga);
+
   // service/price
-  const [serviceName, setServiceName] = useState("");
-  const [amountNaira, setAmountNaira] = useState("");
+  const [serviceName, setServiceName] = useState(carry.serviceName || "");
+  const [amountNaira, setAmountNaira] = useState(
+    typeof carry.amountNaira !== "undefined" ? carry.amountNaira : ""
+  );
+  const lockService = !!(carry.serviceName || search.get("service"));
 
   // address (auto from GPS; editable)
   const [addressText, setAddressText] = useState("");
 
   // payment
-  const [paymentMethod, setPaymentMethod] = useState("wallet"); // 'wallet' | 'card'
+  const [paymentMethod, setPaymentMethod] = useState("wallet"); // wallet | card
 
   // GPS
-  const [coords, setCoords] = useState(null); // { lat, lng }
+  const [coords, setCoords] = useState(null);
   const [detecting, setDetecting] = useState(false);
+  const [gpsSuggestion, setGpsSuggestion] = useState(null); // {state, lga}
 
   // ui
   const [loading, setLoading] = useState(false);
@@ -51,14 +65,13 @@ export default function BookService() {
   const [softMsg, setSoftMsg] = useState("");
   const okTimer = useRef();
 
-  const lockService = !!search.get("service");
   const digitsOnly = (s = "") => String(s).replace(/\D/g, "");
   function clearMsg(){ setErrorMsg(""); setSoftMsg(""); clearTimeout(okTimer.current); }
 
   // load paystack script (for inline)
   const paystackReady = usePaystackScript();
 
-  // read-only name/phone (shown, not editable)
+  // read-only name/phone
   const clientName  = clientProfile?.fullName || me?.displayName || me?.email || "";
   const clientPhone = clientProfile?.phone || me?.identity?.phone || "";
 
@@ -76,23 +89,26 @@ export default function BookService() {
         setBarber(barbRes?.data || null);
         setMe(meRes?.data || null);
 
-        // profile for verified identity
         try {
           const prof = await api.get("/api/profile/client/me");
           if (alive) setClientProfile(prof?.data || null);
         } catch {}
 
-        // prefill service/amount
-        const qsService = search.get("service");
-        if (qsService) {
-          setServiceName(qsService);
-        } else {
-          const list = Array.isArray(barbRes?.data?.services) ? barbRes.data.services : [];
-          const first = list.length
-            ? (typeof list[0] === "string" ? { name: list[0] } : list[0])
-            : { name: "Haircut", price: 5000 };
-          setServiceName(first.name);
-          if (typeof first.price !== "undefined") setAmountNaira(first.price);
+        // prefill service/amount if not set by carry/context
+        if (!serviceName) {
+          const qsService = search.get("service");
+          if (qsService) {
+            setServiceName(qsService);
+          } else {
+            const list = Array.isArray(barbRes?.data?.services) ? barbRes.data.services : [];
+            const first = list.length
+              ? (typeof list[0] === "string" ? { name: list[0] } : list[0])
+              : { name: "Haircut", price: 5000 };
+            setServiceName(first.name);
+            if (typeof first.price !== "undefined" && amountNaira === "") {
+              setAmountNaira(first.price);
+            }
+          }
         }
 
         // best-effort address from GPS
@@ -114,10 +130,11 @@ export default function BookService() {
 
   // keep amount synced with selected service (read-only)
   useEffect(() => {
+    if (amountNaira !== "" && carry.amountNaira !== undefined) return; // honored from carry
     const list = serviceOptions.map(s => (typeof s === "string" ? { name: s } : s));
     const found = list.find((s) => s.name === serviceName);
     if (found && typeof found.price !== "undefined") setAmountNaira(found.price);
-  }, [serviceOptions, serviceName]);
+  }, [serviceOptions, serviceName, carry.amountNaira, amountNaira]);
 
   function formattedAddressFromGeo(p = {}) {
     const parts = [
@@ -148,6 +165,16 @@ export default function BookService() {
             const p = data?.features?.[0]?.properties || {};
             const pretty = formattedAddressFromGeo(p);
             if (pretty && !addressText.trim()) setAddressText(pretty);
+
+            // GPS → region suggestion if different
+            const s = (p.state || p.region || "").toString().toUpperCase();
+            const l = (p.county || p.city || p.district || p.suburb || "").toString().toUpperCase();
+            if ((!lockRegion) && (s || l)) {
+              const suggest = { state: s || region.state, lga: l || region.lga };
+              if (suggest.state !== region.state || suggest.lga !== region.lga) {
+                setGpsSuggestion(suggest);
+              }
+            }
           } catch {}
           setDetecting(false);
           resolve();
@@ -183,9 +210,6 @@ export default function BookService() {
       throw new Error("paystack_inline_missing");
     }
     let email = me?.email || "customer@example.com";
-    if (!import.meta.env.VITE_PAYSTACK_PUBLIC_KEY) {
-      console.warn("[BookService] Missing VITE_PAYSTACK_PUBLIC_KEY");
-    }
     return new Promise((resolve, reject) => {
       const handler = window.PaystackPop.setup({
         key: String(import.meta.env.VITE_PAYSTACK_PUBLIC_KEY || ""),
@@ -222,33 +246,31 @@ export default function BookService() {
       handler.openIframe();
     });
   }
-async function startPaystackRedirect(booking) {
-  const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/payments/init`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${localStorage.getItem("token") || ""}`,
-    },
-    body: JSON.stringify({
+
+  async function startPaystackRedirect(booking) {
+    const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/payments/init`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${localStorage.getItem("token") || ""}`,
+      },
+      body: JSON.stringify({
+        bookingId: booking._id,
+        amountKobo: booking.amountKobo,
+        email: me?.email || "customer@example.com",
+      }),
+    });
+
+    const data = await res.json();
+    if (!res.ok || !data?.authorization_url) throw new Error("Payment initialization failed.");
+
+    sessionStorage.setItem("pay_ref", JSON.stringify({
       bookingId: booking._id,
-      amountKobo: booking.amountKobo,
-      email: me?.email || "customer@example.com",
-    }),
-  });
+      reference: data.reference
+    }));
 
-  const data = await res.json();
-  if (!res.ok || !data?.authorization_url) throw new Error("Payment initialization failed.");
-
-  // Save for confirmation page
-  sessionStorage.setItem("pay_ref", JSON.stringify({
-    bookingId: booking._id,
-    reference: data.reference
-  }));
-
-  // Redirect to Paystack
-  window.location.href = data.authorization_url;
-}
-
+    window.location.href = data.authorization_url;
+  }
 
   async function instantCheckout() {
     setErrorMsg(""); setSoftMsg("");
@@ -276,6 +298,9 @@ async function startPaystackRedirect(booking) {
       addressText: addressText.trim(),
       client: { name: clientName, phone: digitsOnly(clientPhone) },
       coords,
+      country: region.country,
+      state: region.state,
+      lga: region.lga,
       paymentMethod,
       instant: true,
     };
@@ -297,12 +322,10 @@ async function startPaystackRedirect(booking) {
         return;
       }
 
-      // CARD: Prefer inline; fall back to redirect init if inline SDK unavailable
       try {
         if (!paystackReady) throw new Error("inline_not_ready");
         await startPaystackInline(booking);
       } catch (e) {
-        // Try redirect init if backend supports it
         try {
           await startPaystackRedirect(booking);
         } catch {
@@ -344,7 +367,7 @@ async function startPaystackRedirect(booking) {
       {softMsg && <p className="text-amber-400 mb-4">{softMsg}</p>}
       {errorMsg && <p className="text-red-400 mb-4 font-semibold">{errorMsg}</p>}
 
-      {/* Service + price (locked) */}
+      {/* Service + price (locked if carried) */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
         <label className="block">
           <span className="text-sm text-zinc-400">Service</span>
@@ -379,28 +402,18 @@ async function startPaystackRedirect(booking) {
         </label>
       </div>
 
-      {/* Client (read-only) */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
-        <label className="block">
-          <span className="text-sm text-zinc-400">Your full name</span>
-          <input
-            className="mt-1 w-full bg-black border border-zinc-800 rounded-lg px-3 py-2 opacity-70"
-            value={clientName}
-            readOnly
-            disabled
-            title="Verified in Settings"
-          />
-        </label>
-        <label className="block">
-          <span className="text-sm text-zinc-400">Phone</span>
-          <input
-            className="mt-1 w-full bg-black border border-zinc-800 rounded-lg px-3 py-2 opacity-70"
-            value={clientPhone}
-            readOnly
-            disabled
-            title="Verified in Settings"
-          />
-        </label>
+      {/* Region summary (locked if carried) + GPS suggestion */}
+      <div className="mb-4 p-4 rounded-xl border border-zinc-800">
+        <p className="text-sm text-zinc-400 mb-1">Area</p>
+        <p>{region.country} • {region.state || "—"} • {region.lga || "—"}</p>
+        {!!gpsSuggestion && !lockRegion && (
+          <button
+            className="mt-2 text-xs px-2 py-1 border border-zinc-700 rounded"
+            onClick={() => { setRegion(r => ({ ...r, ...gpsSuggestion })); setGpsSuggestion(null); }}
+          >
+            Use detected area: {gpsSuggestion.state} / {gpsSuggestion.lga}
+          </button>
+        )}
       </div>
 
       {/* Address + GPS detect */}

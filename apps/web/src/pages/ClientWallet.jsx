@@ -1,5 +1,23 @@
+// apps/web/src/pages/ClientWallet.jsx
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
+
+function usePaystackScript() {
+  const [ready, setReady] = useState(!!window.PaystackPop);
+  useEffect(() => {
+    if (window.PaystackPop) { setReady(true); return; }
+    const id = "paystack-inline-sdk";
+    if (document.getElementById(id)) return;
+    const s = document.createElement("script");
+    s.id = id;
+    s.src = "https://js.paystack.co/v1/inline.js";
+    s.async = true;
+    s.onload = () => setReady(!!window.PaystackPop);
+    s.onerror = () => setReady(false);
+    document.body.appendChild(s);
+  }, []);
+  return ready;
+}
 
 export default function ClientWallet() {
   const [loading, setLoading] = useState(true);
@@ -8,6 +26,20 @@ export default function ClientWallet() {
   const [creditsKobo, setCreditsKobo] = useState(0);
   const [txns, setTxns] = useState([]);
 
+  // top-up UI
+  const [topupNaira, setTopupNaira] = useState("");
+  const [busyTopup, setBusyTopup] = useState(false);
+  const paystackReady = usePaystackScript();
+
+  // ---------- helpers ----------
+  const fmtNaira = (k) => `₦${Math.floor((Number(k) || 0) / 100).toLocaleString()}`;
+  const refreshWallet = async () => {
+    const { data } = await api.get("/api/wallet/client/me");
+    setCreditsKobo(Number(data?.creditsKobo || 0));
+    setTxns(Array.isArray(data?.transactions) ? data.transactions : []);
+  };
+
+  // ---------- initial load ----------
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -18,16 +50,9 @@ export default function ClientWallet() {
         if (!alive) return;
         setMe(meData);
 
-        // Read-only client wallet/credits (safe even if not implemented server-side).
         try {
-          const { data } = await api.get("/api/wallet/client/me");
-          if (alive) {
-            setCreditsKobo(Number(data?.creditsKobo || 0));
-            setTxns(Array.isArray(data?.transactions) ? data.transactions : []);
-          }
-        } catch {
-          /* leave defaults; page stays read-only */
-        }
+          await refreshWallet();
+        } catch {}
       } catch {
         if (alive) setErr("Failed to load wallet.");
       } finally {
@@ -37,7 +62,102 @@ export default function ClientWallet() {
     return () => { alive = false; };
   }, []);
 
-  const fmtNaira = (k) => `₦${Math.floor((Number(k) || 0) / 100).toLocaleString()}`;
+  // ---------- handle Paystack redirect back (?reference=...) ----------
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const reference = params.get("reference");
+    if (!reference) return;
+
+    let on = true;
+    (async () => {
+      try {
+        setErr("");
+        await api.post("/api/wallet/topup/verify", { reference });
+        if (!on) return;
+        await refreshWallet();
+        // Clean the URL (remove the reference param) for a tidy state
+        const url = new URL(window.location.href);
+        url.searchParams.delete("reference");
+        window.history.replaceState({}, "", url.toString());
+      } catch (e) {
+        if (!on) return;
+        setErr(e?.response?.data?.error || "Could not verify top-up.");
+      }
+    })();
+    return () => { on = false; };
+  }, []);
+
+  // ---------- inline flow ----------
+  async function startTopupInline(amountKobo) {
+    // Force redirect if no public key configured
+    const pubKey = String(import.meta.env.VITE_PAYSTACK_PUBLIC_KEY || "");
+    if (!pubKey || !window.PaystackPop || typeof window.PaystackPop.setup !== "function") {
+      throw new Error("inline_not_ready");
+    }
+
+    return new Promise((resolve, reject) => {
+      const handler = window.PaystackPop.setup({
+        key: pubKey,
+        email: me?.email || "customer@example.com",
+        amount: Number(amountKobo), // kobo
+        ref: `TOPUP-${me?.uid || "anon"}-${Date.now()}`,
+        metadata: {
+          custom_fields: [
+            { display_name: "Topup", variable_name: "topup", value: String(amountKobo) }
+          ]
+        },
+        callback: async (response) => {
+          try {
+            const verify = await api.post("/api/wallet/topup/verify", { reference: response.reference });
+            if (verify?.data?.ok) {
+              await refreshWallet();
+              resolve();
+            } else {
+              reject(new Error("verify_failed"));
+            }
+          } catch (e) {
+            reject(e);
+          }
+        },
+        onClose: () => reject(new Error("payment_cancelled")),
+      });
+      handler.openIframe();
+    });
+  }
+
+  // ---------- redirect/init flow ----------
+  async function startTopupRedirect(amountKobo) {
+    const { data } = await api.post("/api/wallet/topup/init", { amountKobo });
+    if (!data?.authorization_url) throw new Error("init_failed");
+    // Optional: stash context if you want to show a message on return
+    sessionStorage.setItem("topup_pending", String(amountKobo));
+    window.location.href = data.authorization_url;
+  }
+
+  // ---------- top-up button handler ----------
+  async function startTopup() {
+    setErr("");
+    const naira = Number(topupNaira);
+    if (!naira || naira <= 0) { setErr("Enter a valid amount."); return; }
+    const kobo = Math.round(naira * 100);
+
+    try {
+      setBusyTopup(true);
+      // Try inline first; if not ready or pubkey missing, fall back to redirect
+      try {
+        if (!paystackReady) throw new Error("inline_not_ready");
+        await startTopupInline(kobo);
+        setTopupNaira("");
+      } catch {
+        await startTopupRedirect(kobo);
+      }
+    } catch (e) {
+      setErr("Could not start top-up.");
+      setBusyTopup(false); // only unset if we didn't redirect away
+      return;
+    }
+    setBusyTopup(false);
+  }
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-10">
@@ -45,7 +165,7 @@ export default function ClientWallet() {
         <h1 className="text-2xl font-semibold">Wallet</h1>
         {!me?.isPro && (
           <span className="text-xs text-zinc-400">
-            This is your <b>client</b> wallet (credits & refunds). No withdrawals.
+            This is your <b>client</b> wallet (credits &amp; refunds). No withdrawals.
           </span>
         )}
       </div>
@@ -64,14 +184,32 @@ export default function ClientWallet() {
             <Card title="Credits (usable for bookings)">
               <div className="text-2xl font-semibold">{fmtNaira(creditsKobo)}</div>
             </Card>
+
+            <Card title="Top up">
+              <div className="flex items-center gap-2">
+                <span className="text-zinc-400">₦</span>
+                <input
+                  type="number"
+                  min="0"
+                  className="w-28 bg-black border border-zinc-800 rounded px-2 py-1"
+                  value={topupNaira}
+                  onChange={(e) => setTopupNaira(e.target.value)}
+                  placeholder="Amount"
+                />
+                <button
+                  onClick={startTopup}
+                  disabled={busyTopup}
+                  className="rounded bg-gold text-black px-3 py-1.5 text-sm font-semibold disabled:opacity-50"
+                >
+                  {busyTopup ? "Starting…" : "Add funds"}
+                </button>
+              </div>
+              <div className="text-xs text-zinc-500 mt-1">Powered by Paystack</div>
+            </Card>
+
             <Card title="Saved cards">
               <div className="text-sm text-zinc-400">
                 Cards are saved by Paystack during checkout.
-              </div>
-            </Card>
-            <Card title="Refunds / Promos">
-              <div className="text-sm text-zinc-400">
-                If we issue a refund or promo, the amount will appear as Credits.
               </div>
             </Card>
           </section>
@@ -83,11 +221,16 @@ export default function ClientWallet() {
                 <div className="px-4 py-6 text-zinc-400">No activity yet.</div>
               ) : (
                 <ul className="divide-y divide-zinc-800">
-                  {txns.map((t) => (
-                    <li key={t.id || `${t.ts}-${t.amountKobo}`} className="px-4 py-3 flex items-center justify-between">
+                  {txns.map((t, i) => (
+                    <li
+                      key={t.id || `${t.ts || ""}-${t.amountKobo || 0}-${i}`}
+                      className="px-4 py-3 flex items-center justify-between"
+                    >
                       <div>
-                        <div className="text-sm">{t.type || "entry"}</div>
-                        <div className="text-xs text-zinc-500">{new Date(t.ts).toLocaleString()}</div>
+                        <div className="text-sm capitalize">{t.type || "entry"}</div>
+                        <div className="text-xs text-zinc-500">
+                          {t.ts ? new Date(t.ts).toLocaleString() : ""}
+                        </div>
                       </div>
                       <div className="font-mono">{fmtNaira(t.amountKobo)}</div>
                     </li>

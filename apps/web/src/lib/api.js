@@ -63,6 +63,23 @@ export async function getBarber(id) {
   const { data } = await api.get(`/api/barbers/${id}`);
   return data;
 }
+export async function listNearbyBarbers({ lat, lon, radiusKm = 25 }) {
+  const { data } = await api.get(`/api/barbers/nearby`, { params: { lat, lon, radiusKm } });
+  return data;
+}
+
+/* =========================================
+   FEED (public + pro posts)
+   ========================================= */
+export async function listPublicFeed(params = {}) {
+  const { data } = await api.get("/api/feed/public", { params });
+  return data;
+}
+export async function createPost(payload) {
+  // { text, media:[{url,type}], lga, isPublic, tags:[] }
+  const { data } = await api.post("/api/posts", payload);
+  return data;
+}
 
 /* =========================================
    PAYMENTS (Paystack)
@@ -70,6 +87,10 @@ export async function getBarber(id) {
 export async function verifyPayment({ bookingId, reference }) {
   const { data } = await api.post("/api/payments/verify", { bookingId, reference });
   return data; // { ok, status }
+}
+export async function initPayment({ bookingId, amountKobo, email }) {
+  const { data } = await api.post("/api/payments/init", { bookingId, amountKobo, email });
+  return data; // { authorization_url, reference }
 }
 
 /* =========================================
@@ -97,6 +118,11 @@ export async function getMyBookings() {
   return data;
 }
 
+export async function getBooking(id) {
+  const { data } = await api.get(`/api/bookings/${id}`);
+  return data;
+}
+
 export async function cancelBooking(id) {
   const { data } = await api.put(`/api/bookings/${id}/cancel`);
   return data.booking;
@@ -113,21 +139,47 @@ export async function acceptBooking(id) {
   const { data } = await api.put(`/api/bookings/${id}/accept`);
   return data.booking;
 }
+export async function declineBooking(id, payload = {}) {
+  const { data } = await api.put(`/api/bookings/${id}/decline`, payload);
+  return data.booking;
+}
 export async function completeBooking(id) {
   const { data } = await api.put(`/api/bookings/${id}/complete`);
   return data.booking;
 }
 
 /* =========================================
-   WALLET (optional — align with your server)
+   WALLET (client top-up + history)
    ========================================= */
-export async function getMyWallet() {
-  const { data } = await api.get("/api/wallets/me");
-  return data;
+
+// New canonical endpoints we exposed in apps/api/routes/wallets.js:
+export async function getWalletMe() {
+  const { data } = await api.get("/api/wallet/me");
+  return data; // { wallet:{...}, transactions:[...] }
 }
+export async function initWalletTopup(amountKobo) {
+  const { data } = await api.post("/api/wallet/topup/init", { amountKobo });
+  return data; // { authorization_url, reference }
+}
+export async function verifyWalletTopup(reference) {
+  const { data } = await api.post("/api/wallet/topup/verify", { reference });
+  return data; // { ok, creditedKobo, wallet }
+}
+export async function withdrawPendingToAvailable({ amountKobo, pin }) {
+  const { data } = await api.post("/api/wallet/withdraw-pending", { amountKobo, pin });
+  return data; // { ok, feeKobo, creditedKobo }
+}
+export async function withdrawToBank({ amountKobo, pin }) {
+  const { data } = await api.post("/api/wallet/withdraw", { amountKobo, pin });
+  return data; // { ok, transfer }
+}
+
+// Backward-compatible aliases (if any old code still calls these):
+export const getMyWallet = getWalletMe; // old name -> new endpoint
+// getMyTransactions was previously separate; merged into getWalletMe(). Keep a light wrapper:
 export async function getMyTransactions() {
-  const { data } = await api.get("/api/transactions/me");
-  return data;
+  const data = await getWalletMe();
+  return data?.transactions || [];
 }
 
 /* =========================================

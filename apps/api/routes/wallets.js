@@ -7,13 +7,14 @@ import { Application } from "../models.js";
 
 /**
  * Wallet + Txn schemas (UI-compatible).
+ * (Embedded transactions; simple & works with your existing code.)
  */
 const TxnSchema = new mongoose.Schema(
   {
-    type: { type: String, default: "" },
-    direction: { type: String, default: "debit" },
+    type: { type: String, default: "" },            // e.g. topup_init, topup_credit, withdraw_pending, fee, cashout_transfer
+    direction: { type: String, default: "debit" },  // credit | debit | neutral
     amountKobo: { type: Number, default: 0 },
-    meta: { type: Object, default: {} },
+    meta: { type: Object, default: {} },            // { reference, paystack:{...}, feeKobo, etc. }
     createdAt: { type: Date, default: () => new Date() },
   },
   { _id: true }
@@ -22,8 +23,8 @@ const TxnSchema = new mongoose.Schema(
 const WalletSchema = new mongoose.Schema(
   {
     ownerUid: { type: String, unique: true, index: true },
-    pendingKobo: { type: Number, default: 0 },
-    availableKobo: { type: Number, default: 0 },
+    pendingKobo: { type: Number, default: 0 },      // escrow-like (for pros)
+    availableKobo: { type: Number, default: 0 },    // spendable (clients) / withdrawable (pros)
     withdrawnKobo: { type: Number, default: 0 },
     earnedKobo: { type: Number, default: 0 },
     transactions: { type: [TxnSchema], default: [] },
@@ -41,7 +42,9 @@ try {
   Settings = mongoose.models.Settings || null;
 } catch {}
 
+/* ----------------------------- helpers ----------------------------- */
 const isPosInt = (n) => Number.isInteger(n) && n > 0;
+const koboInt = (v) => Math.round(Number(v || 0)) || 0;
 
 async function getFeePercent() {
   try {
@@ -67,11 +70,202 @@ async function verifyPinForUid(uid, pin) {
   return { ok, code: ok ? "ok" : "invalid_pin" };
 }
 
+function requirePaystackKey(res) {
+  const key = process.env.PAYSTACK_SECRET_KEY || "";
+  if (!key) {
+    res.status(500).json({ error: "paystack_not_configured" });
+    return null;
+  }
+  return key;
+}
+
+function makeTopupReference(uid) {
+  return `TOPUP-${uid}-${Date.now()}`;
+}
+
 /* ------------------------------------------------------------------ */
 export function withAuth(requireAuth, requireAdmin) {
   const router = express.Router();
 
-  /** GET /api/wallet/me */
+  /* ======================= CLIENT FUNDING ENDPOINTS ======================= */
+
+  /**
+   * GET /api/wallet/client/me
+   * - For client Wallet screen (balance usable for bookings + activity feed)
+   */
+  router.get("/wallet/client/me", requireAuth, async (req, res) => {
+    try {
+      const w = await ensureWallet(req.user.uid);
+      // Return last 50, newest first (consistent with your ClientWallet page)
+      const tx = (w.transactions || []).slice(-50).reverse();
+      res.json({
+        creditsKobo: Number(w.availableKobo || 0),
+        transactions: tx.map((t) => ({
+          id: String(t._id),
+          type: t.type,
+          direction: t.direction,
+          amountKobo: t.amountKobo,
+          ts: t.createdAt,
+          meta: t.meta || {},
+        })),
+      });
+    } catch (e) {
+      console.error("[wallet/client/me] error:", e);
+      res.status(500).json({ error: "wallet_load_failed" });
+    }
+  });
+
+  /**
+   * POST /api/wallet/topup/init
+   * Body: { amountKobo, callbackUrl? }
+   * - Initializes a Paystack *redirect* checkout (fallback if inline fails).
+   * - Records a 'topup_init' txn with the reference (for traceability).
+   * Returns: { authorization_url, reference }
+   */
+  router.post("/wallet/topup/init", requireAuth, async (req, res) => {
+    try {
+      const { amountKobo, callbackUrl } = req.body || {};
+      const amt = koboInt(amountKobo);
+      if (!isPosInt(amt)) return res.status(400).json({ error: "amount_invalid" });
+
+      const PAYSTACK_SECRET_KEY = requirePaystackKey(res);
+      if (!PAYSTACK_SECRET_KEY) return;
+
+      const w = await ensureWallet(req.user.uid);
+      const reference = makeTopupReference(req.user.uid);
+
+      // trace init (doesn't affect balances)
+      w.transactions.push({
+        type: "topup_init",
+        direction: "neutral",
+        amountKobo: amt,
+        meta: { reference },
+      });
+      await w.save();
+
+      // Init Paystack
+      const psResp = await fetch("https://api.paystack.co/transaction/initialize", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${PAYSTACK_SECRET_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email: req.user.email || "customer@example.com",
+          amount: amt,
+          reference,
+          callback_url: callbackUrl || process.env.PAYSTACK_WALLET_CALLBACK_URL || undefined,
+          metadata: {
+            type: "wallet_topup",
+            ownerUid: req.user.uid,
+          },
+        }),
+      });
+      const data = await psResp.json();
+      if (!psResp.ok || !data?.status || !data?.data?.authorization_url) {
+        console.error("[wallet/topup/init] paystack init failed:", data);
+        return res.status(502).json({ error: "paystack_init_failed" });
+      }
+
+      res.json({
+        authorization_url: data.data.authorization_url,
+        reference,
+      });
+    } catch (e) {
+      console.error("[wallet/topup/init] error:", e);
+      res.status(500).json({ error: "topup_init_failed" });
+    }
+  });
+
+  /**
+   * POST /api/wallet/topup/verify
+   * Body: { reference }
+   * - Verifies a Paystack reference and credits the wallet exactly once.
+   * Returns: { ok: true, credited: boolean, creditsKobo }
+   */
+  router.post("/wallet/topup/verify", requireAuth, async (req, res) => {
+    try {
+      const { reference } = req.body || {};
+      if (!reference) return res.status(400).json({ error: "reference_required" });
+
+      const PAYSTACK_SECRET_KEY = requirePaystackKey(res);
+      if (!PAYSTACK_SECRET_KEY) return;
+
+      // Verify on Paystack
+      const vResp = await fetch(
+        `https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`,
+        { headers: { Authorization: `Bearer ${PAYSTACK_SECRET_KEY}` } }
+      );
+      const verify = await vResp.json();
+      if (!vResp.ok || !verify?.status) {
+        console.error("[wallet/topup/verify] paystack verify failed:", verify);
+        return res.status(502).json({ error: "paystack_verify_failed" });
+      }
+
+      const ps = verify.data || {};
+      if (ps.status !== "success") {
+        return res.status(400).json({ error: "payment_not_successful", status: ps.status });
+      }
+
+      // Amount is in kobo
+      const paidKobo = koboInt(ps.amount);
+      if (!isPosInt(paidKobo)) {
+        return res.status(400).json({ error: "amount_invalid" });
+      }
+
+      // Idempotency: only credit once per (ownerUid, reference)
+      const w = await ensureWallet(req.user.uid);
+
+      const alreadyCredited = (w.transactions || []).some(
+        (t) => t.type === "topup_credit" && t.meta && t.meta.reference === reference
+      );
+
+      if (!alreadyCredited) {
+        w.availableKobo += paidKobo;
+        w.transactions.push({
+          type: "topup_credit",
+          direction: "credit",
+          amountKobo: paidKobo,
+          meta: {
+            reference,
+            gateway: "paystack",
+            currency: ps.currency,
+            paid_at: ps.paid_at,
+            channel: ps.channel,
+            customer: ps.customer,
+            authorization: ps.authorization,
+          },
+        });
+        // Optionally mark any matching init as verified
+        const initIdx = (w.transactions || []).findIndex(
+          (t) => t.type === "topup_init" && t.meta?.reference === reference
+        );
+        if (initIdx >= 0) {
+          w.transactions[initIdx].meta = {
+            ...(w.transactions[initIdx].meta || {}),
+            verified: true,
+            verifiedAt: new Date().toISOString(),
+          };
+        }
+        await w.save();
+      }
+
+      res.json({
+        ok: true,
+        credited: !alreadyCredited,
+        creditsKobo: Number(w.availableKobo || 0),
+      });
+    } catch (e) {
+      console.error("[wallet/topup/verify] error:", e);
+      res.status(500).json({ error: "topup_verify_failed" });
+    }
+  });
+
+  /* ======================= EXISTING PRO WALLET ENDPOINTS ======================= */
+
+  /** GET /api/wallet/me
+   *  - Keeps your existing pro-style summary (pending/available/withdrawn/earned).
+   */
   router.get("/wallet/me", requireAuth, async (req, res) => {
     try {
       const w = await ensureWallet(req.user.uid);
@@ -91,7 +285,9 @@ export function withAuth(requireAuth, requireAdmin) {
     }
   });
 
-  /** POST /api/wallet/withdraw-pending */
+  /** POST /api/wallet/withdraw-pending
+   *  - Moves funds from pending → available (minus fee). Pro flow.
+   */
   router.post("/wallet/withdraw-pending", requireAuth, async (req, res) => {
     try {
       const { amountKobo, pin } = req.body || {};
@@ -125,7 +321,9 @@ export function withAuth(requireAuth, requireAdmin) {
     }
   });
 
-  /** POST /api/wallet/withdraw (Paystack transfer) */
+  /** POST /api/wallet/withdraw
+   *  - Initiates a Paystack transfer (pro cashout) from available balance.
+   */
   router.post("/wallet/withdraw", requireAuth, async (req, res) => {
     try {
       const { amountKobo, pin } = req.body || {};
@@ -138,6 +336,9 @@ export function withAuth(requireAuth, requireAdmin) {
       const w = await ensureWallet(req.user.uid);
       if (amt > w.availableKobo) return res.status(400).json({ error: "insufficient_available" });
 
+      const PAYSTACK_SECRET_KEY = requirePaystackKey(res);
+      if (!PAYSTACK_SECRET_KEY) return;
+
       // Get user's payout account
       const appDoc = await Application.findOne({ uid: req.user.uid }).lean();
       const bank = appDoc?.payoutBank || {};
@@ -145,15 +346,15 @@ export function withAuth(requireAuth, requireAdmin) {
         return res.status(400).json({ error: "no_payout_account" });
       }
 
-      // Deduct from available balance first
+      // Deduct first (your original logic)
       w.availableKobo -= amt;
       w.withdrawnKobo += amt;
 
-      /* Create Paystack transferrecipient (test/live both work) */
+      // Create recipient
       const createRecipient = await fetch("https://api.paystack.co/transferrecipient", {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+          Authorization: `Bearer ${PAYSTACK_SECRET_KEY}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -170,20 +371,19 @@ export function withAuth(requireAuth, requireAdmin) {
         return res.status(400).json({ error: "recipient_create_failed", details: recData.message });
       }
 
-      /* Initiate transfer */
-      const transferPayload = {
-        source: "balance",
-        amount: amt,
-        recipient: recData.data.recipient_code,
-        reason: "Kpocha Touch withdrawal",
-      };
+      // Initiate transfer
       const payReq = await fetch("https://api.paystack.co/transfer", {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+          Authorization: `Bearer ${PAYSTACK_SECRET_KEY}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(transferPayload),
+        body: JSON.stringify({
+          source: "balance",
+          amount: amt,
+          recipient: recData.data.recipient_code,
+          reason: "Kpocha Touch withdrawal",
+        }),
       });
       const payData = await payReq.json();
       if (!payData.status) {
@@ -191,7 +391,7 @@ export function withAuth(requireAuth, requireAdmin) {
         return res.status(400).json({ error: "transfer_failed", details: payData.message });
       }
 
-      /* Record transaction */
+      // Record transaction
       w.transactions.push({
         type: "cashout_transfer",
         direction: "debit",
@@ -207,7 +407,9 @@ export function withAuth(requireAuth, requireAdmin) {
     }
   });
 
-  /** POST /api/wallet/release (admin only) */
+  /** POST /api/wallet/release (admin only)
+   *  - Moves ALL pending → available (admin action).
+   */
   router.post("/wallet/release", requireAuth, requireAdmin, async (req, res) => {
     try {
       const { uid = req.user.uid } = req.body || {};

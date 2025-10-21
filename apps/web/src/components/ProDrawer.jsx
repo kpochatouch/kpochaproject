@@ -33,7 +33,7 @@ function svcRows(services) {
 }
 
 /* ------------------------------ component ------------------------------ */
-export default function ProDrawer({ open, pro, onClose }) {
+export default function ProDrawer({ open, pro, onClose, onBook }) {
   if (!open || !pro) return null;
 
   const verified =
@@ -41,6 +41,7 @@ export default function ProDrawer({ open, pro, onClose }) {
   const photos = toArray(pro.photos);
   const services = svcRows(pro.services);
   const rating = typeof pro.rating === "number" ? pro.rating.toFixed(1) : "5.0";
+  const proId = pro.id || pro._id;
 
   return (
     <div className="fixed inset-0 z-50">
@@ -49,7 +50,7 @@ export default function ProDrawer({ open, pro, onClose }) {
 
       {/* Panel */}
       <div className="absolute right-0 top-0 h-full w-full sm:w-[560px] bg-[#0f1116] text-white border-l border-zinc-800 shadow-2xl overflow-hidden">
-        {/* Decorative creamy-pinky rail */}
+        {/* Decorative rail */}
         <LeftCarvedRail />
 
         {/* Header */}
@@ -96,6 +97,7 @@ export default function ProDrawer({ open, pro, onClose }) {
                       <th className="text-left px-3 py-2">Service</th>
                       <th className="text-left px-3 py-2">Price</th>
                       <th className="text-left px-3 py-2">Duration</th>
+                      <th className="text-left px-3 py-2">Action</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -107,6 +109,26 @@ export default function ProDrawer({ open, pro, onClose }) {
                         </td>
                         <td className="px-3 py-2">{money(s.price)}</td>
                         <td className="px-3 py-2">{s.durationMin ? `${s.durationMin} min` : "—"}</td>
+                        <td className="px-3 py-2">
+                          {onBook ? (
+                            <button
+                              className="rounded-lg bg-gold text-black px-3 py-1.5 text-sm font-semibold disabled:opacity-50"
+                              onClick={() => s.name && onBook(s.name)}
+                              disabled={!s.name}
+                              title={s.name ? `Book ${s.name}` : "Service not available"}
+                            >
+                              Book
+                            </button>
+                          ) : (
+                            <Link
+                              to={proId ? `/book/${proId}?service=${encodeURIComponent(s.name || "")}` : "#"}
+                              className="rounded-lg bg-gold text-black px-3 py-1.5 text-sm font-semibold aria-disabled:opacity-50"
+                              onClick={(e) => { if (!proId) e.preventDefault(); }}
+                            >
+                              Book
+                            </Link>
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -148,13 +170,27 @@ export default function ProDrawer({ open, pro, onClose }) {
           )}
 
           <div className="pt-2 flex gap-2">
-            <Link
-              to={`/book/${pro.id || pro._id}`}
-              className="inline-block rounded-lg bg-black text-white px-4 py-2 font-bold shadow-md hover:opacity-90"
+            {onBook ? (
+              <button
+                className="inline-block rounded-lg bg-black text-white px-4 py-2 font-bold shadow-md hover:opacity-90"
+                onClick={() => onBook(null)}
+                title="Book now"
+              >
+                Book now
+              </button>
+            ) : (
+              <Link
+                to={proId ? `/book/${proId}` : "#"}
+                className="inline-block rounded-lg bg-black text-white px-4 py-2 font-bold shadow-md hover:opacity-90"
+                onClick={(e) => { if (!proId) e.preventDefault(); }}
+              >
+                Book now
+              </Link>
+            )}
+            <button
+              className="rounded-lg border border-zinc-700 px-4 py-2 hover:bg-zinc-900"
+              onClick={onClose}
             >
-              Book now
-            </Link>
-            <button className="rounded-lg border border-zinc-700 px-4 py-2 hover:bg-zinc-900" onClick={onClose}>
               Close
             </button>
           </div>
@@ -175,26 +211,20 @@ export default function ProDrawer({ open, pro, onClose }) {
 function LeftCarvedRail() {
   return (
     <div className="pointer-events-none absolute inset-y-0 left-0 w-20 sm:w-24">
-      {/* Creamy-pinky base with carved edge (full height) */}
       <svg
         className="absolute inset-y-0 left-0 h-full w-full"
         viewBox="0 0 96 720"
         preserveAspectRatio="none"
       >
         <defs>
-          {/* Cream→Pinky vertical gradient */}
           <linearGradient id="ktRailGrad" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor="#FFE9DC" />
             <stop offset="100%" stopColor="#FFC7D6" />
           </linearGradient>
-
-          {/* Soft dotted accent (subtle) */}
           <pattern id="ktDots" x="0" y="0" width="4" height="4" patternUnits="userSpaceOnUse">
             <circle cx="1" cy="1" r="0.6" fill="#ff7a00" />
           </pattern>
         </defs>
-
-        {/* Outer layer */}
         <path
           d="
             M0,0
@@ -206,12 +236,9 @@ function LeftCarvedRail() {
           "
           fill="url(#ktRailGrad)"
         />
-
-        {/* Subtle dot triangle high up */}
         <path d="M12,28 L88,28 L50,88 Z" fill="url(#ktDots)" opacity="0.22" />
       </svg>
 
-      {/* Inner inset to create the “double layer” edge */}
       <svg
         className="absolute inset-y-0 left-0 h-full w-full"
         viewBox="0 0 96 720"
@@ -231,7 +258,6 @@ function LeftCarvedRail() {
         />
       </svg>
 
-      {/* Gradient sweep near bottom (ties to card theme) */}
       <div
         className="absolute left-0 right-0 bottom-10 h-12"
         style={{
@@ -242,40 +268,12 @@ function LeftCarvedRail() {
         }}
       />
 
-      {/* Round logo */}
       <img
         src={LOGO_URL}
         alt="Kpocha Touch"
         className="absolute top-3 left-3 h-10 w-10 sm:h-12 sm:w-12 rounded-full object-cover ring-1 ring-black/10 bg-white p-0.5 z-10"
         loading="lazy"
       />
-
-      {/* Vertical scrolling text — pure black, fades near logo so it looks like it disappears into it */}
-      <div className="absolute left-0 right-0 top-20 bottom-24 overflow-hidden">
-        <div
-          className="absolute left-1/2 -translate-x-1/2 h-[220%] w-[calc(100%-18px)] text-[11px] sm:text-xs font-medium"
-          style={{
-            color: "#000000",
-            writingMode: "vertical-rl",
-            animation: "kt-marquee-y 10s linear infinite",
-            whiteSpace: "nowrap",
-            // mask so the text "disappears" into the logo region + soft fade at very top
-            WebkitMaskImage:
-              "linear-gradient(to bottom, transparent 0px, transparent 56px, black 80px), radial-gradient(40px 40px at 50% 0px, transparent 0 22px, black 30px)",
-            maskImage:
-              "linear-gradient(to bottom, transparent 0px, transparent 56px, black 80px), radial-gradient(40px 40px at 50% 0px, transparent 0 22px, black 30px)",
-            WebkitMaskComposite: "destination-over",
-            maskComposite: "exclude",
-          }}
-          aria-hidden
-        >
-          {/* Repeat line several times for a seamless loop */}
-          <span>Connecting You To Top Barbers and Stylists • </span>
-          <span>Connecting You To Top Barbers and Stylists • </span>
-          <span>Connecting You To Top Barbers and Stylists • </span>
-          <span>Connecting You To Top Barbers and Stylists • </span>
-        </div>
-      </div>
     </div>
   );
 }
