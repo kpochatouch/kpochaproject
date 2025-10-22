@@ -4,10 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import NgGeoPicker from "../components/NgGeoPicker.jsx";
 import PhoneOTP from "../components/PhoneOTP.jsx";
-
-/* ---------- Cloudinary config (frontend env) ---------- */
-const CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || "";
-const UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET || "";
+import SmartUpload from "../components/SmartUpload.jsx";
 
 /* ---------- Services ---------- */
 const SERVICE_OPTIONS = [
@@ -22,6 +19,10 @@ const SERVICE_OPTIONS = [
   "Skincare / Facial",
   "Others",
 ];
+
+/* ---------- Unified dark field style ---------- */
+const FIELD =
+  "w-full rounded-lg border border-zinc-800 bg-zinc-950 text-zinc-200 placeholder-zinc-500 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#d4af37]/30";
 
 export default function BecomePro() {
   const nav = useNavigate();
@@ -103,7 +104,7 @@ export default function BecomePro() {
     testimonials: "",
   });
 
-  // ✅ Only two checkboxes now
+  // ✅ Two checkboxes
   const [agreements, setAgreements] = useState({
     terms: false,
     privacy: false,
@@ -119,72 +120,7 @@ export default function BecomePro() {
     })();
   }, []);
 
-  // ---------- Cloudinary widget
-  const [widgetReady, setWidgetReady] = useState(!!window.cloudinary?.createUploadWidget);
-  useEffect(() => {
-    if (widgetReady) return;
-    if (!document.querySelector('script[data-cld="1"]')) {
-      const s = document.createElement("script");
-      s.src = "https://widget.cloudinary.com/v2.0/global/all.js";
-      s.async = true;
-      s.defer = true;
-      s.setAttribute("data-cld", "1");
-      s.onload = () => setWidgetReady(!!window.cloudinary?.createUploadWidget);
-      document.body.appendChild(s);
-    }
-    const poll = setInterval(() => {
-      if (window.cloudinary?.createUploadWidget) {
-        setWidgetReady(true);
-        clearInterval(poll);
-      }
-    }, 200);
-    const timeout = setTimeout(() => clearInterval(poll), 10000);
-    return () => { clearInterval(poll); clearTimeout(timeout); };
-  }, [widgetReady]);
-
-  const widgetFactory = useMemo(() => {
-    return (onSuccess) => {
-      if (!widgetReady || !CLOUD_NAME || !UPLOAD_PRESET) return null;
-      try {
-        return window.cloudinary.createUploadWidget(
-          {
-            cloudName: CLOUD_NAME,
-            uploadPreset: UPLOAD_PRESET,
-            multiple: false,
-            maxFiles: 1,
-            clientAllowedFormats: ["jpg","jpeg","png","webp"],
-            maxImageFileSize: 5 * 1024 * 1024,
-            sources: ["local", "camera", "url"],
-            showPoweredBy: false,
-            folder: "kpocha/pro-apps",
-          },
-          (err, res) => {
-            if (!err && res && res.event === "success") onSuccess(res.info.secure_url);
-          }
-        );
-      } catch {
-        return null;
-      }
-    };
-  }, [widgetReady]);
-
-  // Helpers
-  const toggleService = (name) =>
-    setProfessional((p) => {
-      const has = p.services.includes(name);
-      return { ...p, services: has ? p.services.filter(s => s!==name) : [...p.services, name] };
-    });
-
-  const toggleDay = (key) =>
-    setAvailability((p) => ({ ...p, days: { ...p.days, [key]: !p.days[key] }}));
-
-  const toggleStateCovered = (st) =>
-    setAvailability((p) => {
-      const has = p.statesCovered.includes(st);
-      return { ...p, statesCovered: has ? p.statesCovered.filter(x=>x!==st) : [...p.statesCovered, st] };
-    });
-
-  // Pull states list
+  // Pull states list (soft — no error banner)
   const [allStates, setAllStates] = useState([]);
   useEffect(() => {
     let alive = true;
@@ -193,13 +129,15 @@ export default function BecomePro() {
         const { data } = await api.get("/api/geo/ng");
         if (!alive) return;
         setAllStates(Array.isArray(data?.states) ? data.states : []);
-      } catch {}
+      } catch {
+        if (alive) setAllStates([]);
+      }
     })();
     return () => { alive = false; };
   }, []);
   const stateList = useMemo(() => (allStates || []).slice().sort(), [allStates]);
 
-  // ✅ canSubmit includes only required fields and terms/privacy
+  // ✅ Required fields + agreements
   const canSubmit =
     identity.firstName &&
     identity.lastName &&
@@ -252,8 +190,6 @@ export default function BecomePro() {
         portfolio,
         ...(phoneVerifiedAt ? { phoneVerifiedAt } : {}),
         status: "submitted",
-
-        // ✅ Enforce server-side visibility of agreements
         acceptedTerms: !!agreements.terms,
         acceptedPrivacy: !!agreements.privacy,
         agreements: { terms: !!agreements.terms, privacy: !!agreements.privacy },
@@ -294,10 +230,11 @@ export default function BecomePro() {
             <div>
               <Label>Phone Number</Label>
               <input
-                className="w-full bg-black border border-zinc-800 rounded-lg px-3 py-2"
+                className={FIELD}
                 value={identity.phone}
                 onChange={(e)=>{ setIdentity({...identity, phone: e.target.value}); setPhoneVerifiedAt(null); }}
                 required
+                placeholder="080..."
               />
               <PhoneOTP phone={identity.phone} disabled={!identity.phone} onVerified={(iso)=>setPhoneVerifiedAt(iso)} />
               {phoneVerifiedAt && <div className="text-xs text-emerald-300 mt-1">Verified</div>}
@@ -307,16 +244,16 @@ export default function BecomePro() {
               <Label>Profile Photo</Label>
               <div className="flex gap-2">
                 <input
-                  className="flex-1 bg-black border border-zinc-800 rounded-lg px-3 py-2"
+                  className={FIELD}
                   placeholder="Photo URL"
                   value={identity.photoUrl}
                   onChange={(e)=>setIdentity({...identity, photoUrl: e.target.value})}
                 />
-                <UploadButton
-                  title={widgetReady ? "Upload" : "Upload (loading…)"}
+                <SmartUpload
+                  title="Upload"
+                  camera="user"
+                  folder="kpocha/pro-apps"
                   onUploaded={(url)=>setIdentity({...identity, photoUrl: url})}
-                  widgetFactory={widgetFactory}
-                  disabled={!widgetReady}
                 />
               </div>
             </div>
@@ -345,7 +282,7 @@ export default function BecomePro() {
                 }
               }}
               valueLga={identity.lga}
-              onChangeLga={(lga) => setIdentity({ ...identity, lga })}
+              onChangeLga={(l) => setIdentity({ ...identity, lga: l })}
               required
               className="grid grid-cols-1 gap-3"
             />
@@ -359,7 +296,12 @@ export default function BecomePro() {
                       <input
                         type="checkbox"
                         checked={availability.statesCovered.includes(st)}
-                        onChange={()=>toggleStateCovered(st)}
+                        onChange={()=>setAvailability((p)=>({
+                          ...p,
+                          statesCovered: p.statesCovered.includes(st)
+                            ? p.statesCovered.filter((x)=>x!==st)
+                            : [...p.statesCovered, st],
+                        }))}
                       />
                       {st}
                     </label>
@@ -390,7 +332,12 @@ export default function BecomePro() {
                 <input
                   type="checkbox"
                   checked={professional.services.includes(opt)}
-                  onChange={() => toggleService(opt)}
+                  onChange={() =>
+                    setProfessional((p) => {
+                      const has = p.services.includes(opt);
+                      return { ...p, services: has ? p.services.filter(s => s!==opt) : [...p.services, opt] };
+                    })
+                  }
                 />
                 {opt}
               </label>
@@ -415,16 +362,16 @@ export default function BecomePro() {
                 <Label>Certificate</Label>
                 <div className="flex gap-2">
                   <input
-                    className="flex-1 bg-black border border-zinc-800 rounded-lg px-3 py-2"
+                    className={FIELD}
                     placeholder="Certificate URL"
                     value={professional.certUrl}
                     onChange={(e)=>setProfessional({...professional, certUrl: e.target.value})}
                   />
-                  <UploadButton
-                    title={widgetReady ? "Upload" : "Upload (loading…)"}
+                  <SmartUpload
+                    title="Upload"
+                    camera="user"
+                    folder="kpocha/pro-apps"
                     onUploaded={(url)=>setProfessional({...professional, certUrl: url})}
-                    widgetFactory={widgetFactory}
-                    disabled={!widgetReady}
                   />
                 </div>
               </div>
@@ -436,7 +383,7 @@ export default function BecomePro() {
             {professional.workPhotos.map((u, idx) => (
               <div key={idx} className="flex items-center gap-2 mb-2">
                 <input
-                  className="flex-1 bg-black border border-zinc-800 rounded-lg px-3 py-2"
+                  className={FIELD}
                   placeholder={`Photo URL ${idx+1}`}
                   value={u}
                   onChange={(e)=>{
@@ -444,14 +391,14 @@ export default function BecomePro() {
                     setProfessional({...professional, workPhotos: arr});
                   }}
                 />
-                <UploadButton
-                  title={widgetReady ? "Upload" : "Upload (loading…)"}
+                <SmartUpload
+                  title="Upload"
+                  camera="environment"
+                  folder="kpocha/pro-apps"
                   onUploaded={(url)=>{
                     const arr=[...professional.workPhotos]; arr[idx]=url;
                     setProfessional({...professional, workPhotos: arr});
                   }}
-                  widgetFactory={widgetFactory}
-                  disabled={!widgetReady}
                 />
                 {idx>0 && (
                   <button
@@ -487,16 +434,16 @@ export default function BecomePro() {
                 <Label>Photo (outside)</Label>
                 <div className="flex gap-2">
                   <input
-                    className="flex-1 bg-black border border-zinc-800 rounded-lg px-3 py-2"
+                    className={FIELD}
                     placeholder="URL"
                     value={business.shopPhotoOutside}
                     onChange={(e)=>setBusiness({...business, shopPhotoOutside: e.target.value})}
                   />
-                  <UploadButton
-                    title={widgetReady ? "Upload" : "Upload (loading…)"}
+                  <SmartUpload
+                    title="Upload"
+                    camera="environment"
+                    folder="kpocha/pro-apps"
                     onUploaded={(url)=>setBusiness({...business, shopPhotoOutside: url})}
-                    widgetFactory={widgetFactory}
-                    disabled={!widgetReady}
                   />
                 </div>
               </div>
@@ -504,16 +451,16 @@ export default function BecomePro() {
                 <Label>Photo (inside)</Label>
                 <div className="flex gap-2">
                   <input
-                    className="flex-1 bg-black border border-zinc-800 rounded-lg px-3 py-2"
+                    className={FIELD}
                     placeholder="URL"
                     value={business.shopPhotoInside}
                     onChange={(e)=>setBusiness({...business, shopPhotoInside: e.target.value})}
                   />
-                  <UploadButton
-                    title={widgetReady ? "Upload" : "Upload (loading…)"}
+                  <SmartUpload
+                    title="Upload"
+                    camera="environment"
+                    folder="kpocha/pro-apps"
                     onUploaded={(url)=>setBusiness({...business, shopPhotoInside: url})}
-                    widgetFactory={widgetFactory}
-                    disabled={!widgetReady}
                   />
                 </div>
               </div>
@@ -527,13 +474,15 @@ export default function BecomePro() {
           <div className="grid grid-cols-4 sm:grid-cols-7 gap-2 text-sm">
             {Object.keys(availability.days).map((d) => (
               <label key={d} className="flex items-center gap-2">
-                <input type="checkbox" checked={availability.days[d]} onChange={()=>toggleDay(d)} />
+                <input type="checkbox" checked={availability.days[d]} onChange={()=>
+                  setAvailability((p)=>({ ...p, days: { ...p.days, [d]: !p.days[d] } }))
+                } />
                 {d}
               </label>
             ))}
           </div>
 
-          <div className="grid grid-cols-1 md-grid-cols-3 md:grid-cols-3 gap-3 mt-3">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
             <Input label="Start time" type="time" value={availability.start} onChange={(e)=>setAvailability({...availability, start: e.target.value})} />
             <Input label="End time" type="time" value={availability.end} onChange={(e)=>setAvailability({...availability, end: e.target.value})} />
             <Select label="Emergency service?" value={availability.emergency} onChange={(e)=>setAvailability({...availability, emergency:e.target.value})} options={["no","yes"]} />
@@ -557,10 +506,11 @@ export default function BecomePro() {
             <Input label="Pedicure (₦)" value={pricing.pedicure} onChange={(e)=>setPricing({...pricing, pedicure: e.target.value})}/>
           </div>
           <textarea
-            className="w-full mt-3 bg-black border border-zinc-800 rounded-lg px-3 py-2"
+            className={`${FIELD} mt-3`}
             placeholder="Other services & prices"
             value={pricing.otherServices}
             onChange={(e)=>setPricing({...pricing, otherServices: e.target.value})}
+            rows={4}
           />
         </Section>
 
@@ -573,16 +523,16 @@ export default function BecomePro() {
               <Label>Government ID</Label>
               <div className="flex gap-2">
                 <input
-                  className="flex-1 bg-black border border-zinc-800 rounded-lg px-3 py-2"
+                  className={FIELD}
                   placeholder="ID Image URL"
                   value={verification.idUrl}
                   onChange={(e)=>setVerification({...verification, idUrl: e.target.value})}
                 />
-                <UploadButton
-                  title={widgetReady ? "Upload" : "Upload (loading…)"}
+                <SmartUpload
+                  title="Upload"
+                  camera="environment"
+                  folder="kpocha/pro-apps"
                   onUploaded={(url)=>setVerification({...verification, idUrl: url})}
-                  widgetFactory={widgetFactory}
-                  disabled={!widgetReady}
                 />
               </div>
             </div>
@@ -590,16 +540,16 @@ export default function BecomePro() {
               <Label>Selfie holding ID</Label>
               <div className="flex gap-2">
                 <input
-                  className="flex-1 bg-black border border-zinc-800 rounded-lg px-3 py-2"
+                  className={FIELD}
                   placeholder="Selfie Image URL"
                   value={verification.selfieWithIdUrl}
                   onChange={(e)=>setVerification({...verification, selfieWithIdUrl: e.target.value})}
                 />
-                <UploadButton
-                  title={widgetReady ? "Upload" : "Upload (loading…)"}
+                <SmartUpload
+                  title="Upload"
+                  camera="user"
+                  folder="kpocha/pro-apps"
                   onUploaded={(url)=>setVerification({...verification, selfieWithIdUrl: url})}
-                  widgetFactory={widgetFactory}
-                  disabled={!widgetReady}
                 />
               </div>
             </div>
@@ -635,14 +585,15 @@ export default function BecomePro() {
             <Input label="Website / Portfolio" value={portfolio.website} onChange={(e)=>setPortfolio({...portfolio, website: e.target.value})} />
           </div>
           <textarea
-            className="w-full mt-3 bg-black border border-zinc-800 rounded-lg px-3 py-2"
+            className={`${FIELD} mt-3`}
             placeholder="Testimonials / Reviews"
             value={portfolio.testimonials}
             onChange={(e)=>setPortfolio({...portfolio, testimonials: e.target.value})}
+            rows={4}
           />
         </Section>
 
-        {/* SECTION 9: Agreements (only two) */}
+        {/* SECTION 9: Agreements */}
         <Section title="User Agreements" id="agreements">
           <div className="space-y-2 text-sm">
             <Check
@@ -684,7 +635,7 @@ function Input({ label, required, ...props }) {
   return (
     <label className="block">
       <Label>{label}{required ? " *" : ""}</Label>
-      <input {...props} className="w-full bg-black border border-zinc-800 rounded-lg px-3 py-2" />
+      <input {...props} className={FIELD} />
     </label>
   );
 }
@@ -692,7 +643,7 @@ function Select({ label, options=[], required, ...props }) {
   return (
     <label className="block">
       <Label>{label}{required ? " *" : ""}</Label>
-      <select {...props} className="w-full bg-black border border-zinc-800 rounded-lg px-3 py-2">
+      <select {...props} className={FIELD}>
         <option value="">{required ? "Select…" : "Select (optional)…"}</option>
         {options.map((o)=> <option key={o} value={o}>{o}</option>)}
       </select>
@@ -705,26 +656,5 @@ function Check({ label, ...props }) {
       <input type="checkbox" {...props} />
       <span>{label}</span>
     </label>
-  );
-}
-function UploadButton({ title="Upload", onUploaded, widgetFactory, disabled }) {
-  function open() {
-    const widget = widgetFactory?.(onUploaded);
-    if (!widget) {
-      alert("Upload unavailable. Enter a URL manually.");
-      return;
-    }
-    widget.open();
-  }
-  return (
-    <button
-      type="button"
-      onClick={open}
-      disabled={disabled}
-      className="px-3 py-2 rounded-lg border border-zinc-700 text-sm hover:bg-zinc-900 disabled:opacity-50"
-      title="Upload with Cloudinary"
-    >
-      {title}
-    </button>
   );
 }

@@ -6,12 +6,13 @@ import BarberCard from "../components/BarberCard";
 import ServicePicker from "../components/ServicePicker";
 import ProDrawer from "../components/ProDrawer";
 import FeedCard from "../components/FeedCard";
+import FeedEmptyDemo from "../components/FeedEmptyDemo.jsx"; // <-- demo
 
 /** Pro-only composer (simple: text + media URL) */
 function FeedComposer({ lga, onPosted }) {
   const [text, setText] = useState("");
   const [mediaUrl, setMediaUrl] = useState("");
-  const [mediaType, setMediaType] = useState("image"); // image | video
+  const [mediaType, setMediaType] = useState("image");
   const [posting, setPosting] = useState(false);
   const [msg, setMsg] = useState("");
 
@@ -34,7 +35,7 @@ function FeedComposer({ lga, onPosted }) {
       setText("");
       setMediaUrl("");
       setMsg("Posted!");
-      onPosted?.(); // refresh feed after posting
+      onPosted?.();
     } catch (e) {
       setMsg(e?.response?.data?.error || "Post failed.");
     } finally {
@@ -245,13 +246,9 @@ export default function Browse() {
   }, [lga]);
 
   useEffect(() => {
-    let on = true;
     (async () => {
       await fetchFeed();
     })();
-    return () => {
-      on = false;
-    };
   }, [fetchFeed, tab]);
 
   // go to book with carry-forward context
@@ -281,9 +278,7 @@ export default function Browse() {
         <h1 className="text-2xl font-semibold">Discover</h1>
         <div className="inline-flex rounded-xl border border-zinc-800 overflow-hidden">
           <button
-            className={`px-4 py-2 text-sm ${
-              tab === "pros" ? "bg-gold text-black font-semibold" : "hover:bg-zinc-900"
-            }`}
+            className={`px-4 py-2 text-sm ${tab === "pros" ? "bg-gold text-black font-semibold" : "hover:bg-zinc-900"}`}
             onClick={() => setTab("pros")}
           >
             Pros
@@ -359,7 +354,12 @@ export default function Browse() {
           ) : filteredAndRanked.length ? (
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {filteredAndRanked.map((pro) => (
-                <BarberCard key={pro.id || pro._id} barber={pro} onOpen={setOpenPro} onBook={(svc) => goBook(pro, svc)} />
+                <BarberCard
+                  key={pro.id || pro._id}
+                  barber={pro}
+                  onOpen={setOpenPro}
+                  onBook={(svc) => goBook(pro, svc)}
+                />
               ))}
             </div>
           ) : (
@@ -383,10 +383,7 @@ export default function Browse() {
               ))}
             </div>
           ) : (
-            <div className="rounded-lg border border-zinc-800 p-6 text-zinc-400">
-              No updates yet. Once professionals start posting photos and promos, they’ll appear here. You can still
-              book from the Pros tab.
-            </div>
+            <FeedEmptyDemo isPro={isPro} /> // <-- HERE: demo when empty
           )}
         </>
       )}

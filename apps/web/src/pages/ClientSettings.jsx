@@ -1,6 +1,6 @@
-// apps/web/src/pages/ClientSettings.jsx
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api";
+import SmartUpload from "../components/SmartUpload.jsx";
 
 export default function ClientSettings() {
   const [loading, setLoading] = useState(true);
@@ -156,6 +156,26 @@ export default function ClientSettings() {
           {/* General */}
           <section>
             <h2 className="text-lg font-semibold mb-3">General</h2>
+
+            {/* Avatar + upload */}
+            <div className="flex items-center gap-3 mb-3">
+              <Avatar url={form.photoUrl} />
+              <SmartUpload
+                title="Upload Photo"
+                onUploaded={(url) => setForm((f) => ({ ...f, photoUrl: url }))}
+                folder="kpocha/client-avatars"
+              />
+              {form.photoUrl && (
+                <button
+                  type="button"
+                  onClick={() => setForm((f) => ({ ...f, photoUrl: "" }))}
+                  className="text-xs px-2 py-1 rounded border border-red-800 text-red-300"
+                >
+                  Remove
+                </button>
+              )}
+            </div>
+
             <div className="grid sm:grid-cols-2 gap-4">
               <Field label="Display Name *">
                 <input
@@ -270,5 +290,18 @@ function Field({ label, children }) {
       <span className="text-xs text-zinc-400">{label}</span>
       <div className="mt-1">{children}</div>
     </label>
+  );
+}
+function Avatar({ url }) {
+  return (
+    <div className="relative w-16 h-16 rounded-full border border-zinc-800 overflow-hidden shrink-0">
+      {url ? (
+        <img src={url} alt="Avatar" className="w-full h-full object-cover" />
+      ) : (
+        <div className="w-full h-full bg-zinc-900 flex items-center justify-center text-zinc-500">
+          <span className="text-xs">No Photo</span>
+        </div>
+      )}
+    </div>
   );
 }

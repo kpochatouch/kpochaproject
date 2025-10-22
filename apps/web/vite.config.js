@@ -1,19 +1,39 @@
-// vite.config.js
-import { defineConfig } from "vite";
+// apps/web/vite.config.js
+import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 
-export default defineConfig({
-  plugins: [react()],
-  base: "/",                // Keep '/' unless you're deploying to a subpath (e.g. '/app/')
-  server: {
-    port: 5173,             // Local dev port
-    host: true,             // Lets you test on phone over LAN (optional)
-  },
-  build: {
-    outDir: "dist",         // Where final files go
-    emptyOutDir: true,      // Ensures clean builds
-    sourcemap: false,       // Avoid shipping source maps to production
-    target: "es2019",       // Broad browser support
-  },
-  envPrefix: "VITE_",       // Only expose intended vars
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), "");
+  const allowed = [];
+
+  // IMPORTANT: this must be just the host, no protocol, e.g.
+  // VITE_NGROK_HOST=50ed8a1728e5.ngrok-free.app
+  if (env.VITE_NGROK_HOST) {
+    allowed.push(env.VITE_NGROK_HOST);
+  }
+
+  return {
+    plugins: [react()],
+    base: "/",
+    server: {
+      port: 5173,
+      host: true,
+      allowedHosts: allowed, // lets ngrok reach your dev server
+      proxy: {
+        // Anything starting with /api goes to your local Node server
+        "/api": {
+          target: "http://localhost:8080",
+          changeOrigin: true,
+          secure: false,
+        },
+      },
+    },
+    build: {
+      outDir: "dist",
+      emptyOutDir: true,
+      sourcemap: false,
+      target: "es2019",
+    },
+    envPrefix: "VITE_",
+  };
 });

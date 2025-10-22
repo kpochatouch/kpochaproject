@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+// apps/web/src/pages/Admin.jsx
+import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
+import { api } from "../lib/api"; // <- shared axios instance (handles baseURL + auth)
 
-const API =
-  import.meta.env.VITE_API_BASE_URL ||
-  import.meta.env.VITE_API_BASE ||
-  "http://localhost:8080";
+/** Unified field styling (dark) */
+const FIELD =
+  "w-full rounded-lg border border-zinc-800 bg-zinc-950 text-zinc-200 placeholder-zinc-500 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#d4af37]/30";
 
 export default function Admin() {
   const location = useLocation();
@@ -14,11 +15,6 @@ export default function Admin() {
 
   const [tab, setTab] = useState(initialTab);
 
-  // ---------- Shared helpers ----------
-  const token = useMemo(() => localStorage.getItem("token") || "", []);
-  function authHeaders() {
-    return token ? { Authorization: `Bearer ${token}` } : {};
-  }
   function switchTab(next) {
     setTab(next);
     const q = new URLSearchParams(location.search);
@@ -40,11 +36,9 @@ export default function Admin() {
     setListError("");
     setListLoading(true);
     try {
-      const res = await fetch(`${API}/api/pros/pending`, { headers: { ...authHeaders() } });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "Failed to load");
+      const { data } = await api.get(`/api/pros/pending`);
       setPending(Array.isArray(data) ? data : []);
-    } catch (e) {
+    } catch {
       setListError("Could not load pending applications.");
     } finally {
       setListLoading(false);
@@ -55,19 +49,12 @@ export default function Admin() {
     setBusyId(id);
     setListError("");
     try {
-      const res = await fetch(`${API}/api/pros/approve/${id}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...authHeaders(),
-        },
-      });
-      const json = await res.json();
-      if (!res.ok || !json?.ok) throw new Error(json?.error || "Approve failed");
-      await loadPending(); // refresh
+      const { data: json } = await api.post(`/api/pros/approve/${id}`);
+      if (!json?.ok) throw new Error(json?.error || "Approve failed");
+      await loadPending();
       alert("Approved ✅");
     } catch (e) {
-      setListError(e.message || "Approve failed");
+      setListError(e?.message || "Approve failed");
     } finally {
       setBusyId(null);
     }
@@ -79,7 +66,7 @@ export default function Admin() {
   });
 
   // ======================================================================
-  // TAB 2: Admin Settings (server-driven)
+  // TAB 2: Admin Settings
   // ======================================================================
   const [settings, setSettings] = useState(null);
   const [sLoading, setSLoading] = useState(false);
@@ -99,14 +86,10 @@ export default function Admin() {
     setSOk("");
     setSLoading(true);
     try {
-      const res = await fetch(`${API}/api/settings/admin`, {
-        headers: { ...authHeaders() },
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error || "Failed to load settings");
-      setSettings(json);
+      const { data } = await api.get(`/api/settings/admin`);
+      setSettings(data);
     } catch (e) {
-      setSError(e.message || "Failed to load settings");
+      setSError(e?.response?.data?.error || e?.message || "Failed to load settings");
     } finally {
       setSLoading(false);
     }
@@ -117,20 +100,11 @@ export default function Admin() {
     setSOk("");
     setSSaving(true);
     try {
-      const res = await fetch(`${API}/api/settings`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          ...authHeaders(),
-        },
-        body: JSON.stringify(settings),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error || "Failed to save");
-      setSettings(json);
+      const { data } = await api.put(`/api/settings`, settings);
+      setSettings(data);
       setSOk("Settings saved. Schedulers restarted.");
     } catch (e) {
-      setSError(e.message || "Failed to save settings");
+      setSError(e?.response?.data?.error || e?.message || "Failed to save settings");
     } finally {
       setSSaving(false);
     }
@@ -138,30 +112,26 @@ export default function Admin() {
 
   async function manualReleaseNow() {
     setMrBusy(true);
-    setMrOk(""); setMrError(""); setMrPayload(null);
+    setMrOk("");
+    setMrError("");
+    setMrPayload(null);
     try {
-      const res = await fetch(
-        `${API}/api/admin/release-booking/${encodeURIComponent(mrBookingId.trim())}`,
-        { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() } }
-      );
-      const json = await res.json();
+      const bid = encodeURIComponent(mrBookingId.trim());
+      const { data: json } = await api.post(`/api/admin/release-booking/${bid}`);
       setMrPayload(json);
-      if (!res.ok || !json?.ok) {
-        throw new Error(json?.error || "Release failed");
-      }
+      if (!json?.ok) throw new Error(json?.error || "Release failed");
       setMrOk(
         json.alreadyReleased
           ? "Already released earlier."
           : `Released ₦${((json.releasedKobo || 0) / 100).toLocaleString()} to Available.`
       );
     } catch (e) {
-      setMrError(e.message || "Release failed");
+      setMrError(e?.response?.data?.error || e?.message || "Release failed");
     } finally {
       setMrBusy(false);
     }
   }
 
-  // ---------- lifecycle ----------
   useEffect(() => {
     if (tab === "pending") loadPending();
     if (tab === "settings") loadSettings();
@@ -195,7 +165,7 @@ export default function Admin() {
                 placeholder="Search by name/email/phone/LGA…"
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
-                className="w-full md:w-96 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2"
+                className={`md:w-96 ${FIELD}`}
               />
               <button
                 onClick={loadPending}
@@ -454,7 +424,7 @@ export default function Admin() {
                     Allowed Origins (CORS) — comma separated. These merge with your .env CORS_ORIGIN.
                   </label>
                   <input
-                    className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2"
+                    className={FIELD}
                     value={(settings?.security?.allowedOrigins || []).join(", ")}
                     onChange={(e) =>
                       setSettings({
@@ -490,7 +460,7 @@ export default function Admin() {
                   )}
                   <div className="flex gap-2 flex-col sm:flex-row">
                     <input
-                      className="flex-1 bg-zinc-950 border border-zinc-800 rounded px-3 py-2"
+                      className={FIELD}
                       placeholder="Booking ID (Mongo _id)"
                       value={mrBookingId}
                       onChange={(e) => setMrBookingId(e.target.value)}
@@ -573,10 +543,7 @@ function Input({ label, ...rest }) {
   return (
     <label className="block">
       <span className="text-xs text-zinc-400">{label}</span>
-      <input
-        className="mt-1 w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2"
-        {...rest}
-      />
+      <input className={`mt-1 ${FIELD}`} {...rest} />
     </label>
   );
 }

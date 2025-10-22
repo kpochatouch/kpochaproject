@@ -8,6 +8,7 @@ import {
 import { auth } from "../lib/firebase";
 import { useAuth } from "../context/AuthContext";
 import PasswordInput from "../components/PasswordInput";
+import { api, setAuthToken } from "../lib/api";
 
 export default function Signup() {
   const [name, setName] = useState("");
@@ -34,14 +35,20 @@ export default function Signup() {
 
   function cacheDraft(next) {
     try {
-      const current = {
-        name,
-        phone,
-        email,
-        ...next,
-      };
+      const current = { name, phone, email, ...next };
       localStorage.setItem("profileDraft", JSON.stringify(current));
     } catch {}
+  }
+
+  async function afterSignupRoute() {
+    try {
+      // if username already set, go to browse; else go pick username
+      const me = await api.get("/api/profile/me").then(r => r.data).catch(() => null);
+      const hasUsername = !!me?.username || !!me?.usernameLC;
+      nav(hasUsername ? "/browse" : "/client-register", { replace: true });
+    } catch {
+      nav("/browse", { replace: true });
+    }
   }
 
   async function submit(e) {
@@ -63,18 +70,30 @@ export default function Signup() {
         await updateProfile(cred.user, { displayName: name.trim() });
       }
 
-      // Send non-blocking verification email
+      // store token for API calls immediately
+      try {
+        const tok = await cred.user.getIdToken(true);
+        setAuthToken(tok);
+      } catch {}
+
+      // non-blocking verification email
       try {
         await sendEmailVerification(cred.user);
         setOk("Verification email sent. You can continue and verify later.");
-      } catch {
-        /* non-blocking */
-      }
+      } catch {}
+
+      // seed profile with name/phone if available (optional)
+      try {
+        await api.put("/api/profile/me", {
+          displayName: name?.trim() || undefined,
+          identity: { phone: phone?.trim() || undefined },
+        });
+      } catch {}
 
       // Cache lightweight profile so later forms can prefill
       cacheDraft({});
 
-      nav("/browse"); // keep flow simple
+      await afterSignupRoute();
     } catch (e) {
       setErr(e?.message || "Sign up failed");
     } finally {
@@ -141,6 +160,11 @@ export default function Signup() {
       <p className="text-sm text-zinc-400 mt-4">
         Already have an account?{" "}
         <Link to="/login" className="text-[#d4af37] underline">Sign in</Link>
+      </p>
+
+      <p className="text-sm text-zinc-400 mt-2">
+        Prefer phone only?{" "}
+        <Link to="/login/phone" className="text-[#d4af37] underline">Use phone sign-in</Link>
       </p>
     </div>
   );

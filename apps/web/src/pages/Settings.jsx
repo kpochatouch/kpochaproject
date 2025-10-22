@@ -2,10 +2,7 @@ import { useEffect, useRef, useState, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import NgGeoPicker from "../components/NgGeoPicker.jsx";
-
-/* ---------- Cloudinary config (frontend env) ---------- */
-const CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || "";
-const UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET || "";
+import SmartUpload from "../components/SmartUpload.jsx";
 
 /* ---------- Services ---------- */
 const SERVICE_OPTIONS = [
@@ -21,19 +18,23 @@ const SERVICE_OPTIONS = [
   "Others",
 ];
 
+// unified dark field styling (matches screenshot)
+const FIELD =
+  "w-full rounded-lg border border-zinc-800 bg-zinc-950 text-zinc-200 placeholder-zinc-500 px-3 py-2 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[#d4af37]/30";
+
 export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
-  const [me, setMe] = useState(null);         // user document
-  const [appDoc, setAppDoc] = useState(null); // professional application/profile doc (optional)
+  const [me, setMe] = useState(null);
+  const [appDoc, setAppDoc] = useState(null);
   const [err, setErr] = useState("");
   const [ok, setOk] = useState("");
 
-  // General / identity (user-level)
+  // General / identity
   const [displayName, setDisplayName] = useState("");
   const [phone, setPhone] = useState("");
   const [avatarUrl, setAvatarUrl] = useState("");
 
-  // Location (user-level)
+  // Location
   const [stateVal, setStateVal] = useState("");
   const [lga, setLga] = useState("");
 
@@ -51,7 +52,7 @@ export default function SettingsPage() {
   // Gallery
   const [workPhotos, setWorkPhotos] = useState([""]);
 
-  // Payments (Pro)
+  // Payments
   const [bankName, setBankName] = useState("");
   const [accountName, setAccountName] = useState("");
   const [accountNumber, setAccountNumber] = useState("");
@@ -75,7 +76,7 @@ export default function SettingsPage() {
   }
   const digitsOnly = (s = "") => String(s).replace(/\D/g, "");
 
-  /* ---------- Pull states list for “states you cover” ---------- */
+  /* ---------- Pull states list ---------- */
   const [allStates, setAllStates] = useState([]);
   useEffect(() => {
     let alive = true;
@@ -97,60 +98,7 @@ export default function SettingsPage() {
     setServices((p) => (p.includes(name) ? p.filter(s => s !== name) : [...p, name]));
   }
 
-  /* ---------- Cloudinary widget ---------- */
-  const [widgetReady, setWidgetReady] = useState(
-    typeof window !== "undefined" && !!window.cloudinary?.createUploadWidget
-  );
-  useEffect(() => {
-    if (widgetReady) return;
-    if (typeof window === "undefined") return;
-
-    if (!document.querySelector('script[data-cld="1"]')) {
-      const s = document.createElement("script");
-      s.src = "https://widget.cloudinary.com/v2.0/global/all.js";
-      s.async = true;
-      s.defer = true;
-      s.setAttribute("data-cld", "1");
-      s.onload = () => setWidgetReady(!!window.cloudinary?.createUploadWidget);
-      document.body.appendChild(s);
-    }
-    const poll = setInterval(() => {
-      if (window.cloudinary?.createUploadWidget) {
-        setWidgetReady(true);
-        clearInterval(poll);
-      }
-    }, 200);
-    const timeout = setTimeout(() => clearInterval(poll), 10000);
-    return () => { clearInterval(poll); clearTimeout(timeout); };
-  }, [widgetReady]);
-
-  const widgetFactory = useMemo(() => {
-    return (onSuccess) => {
-      if (!widgetReady || !CLOUD_NAME || !UPLOAD_PRESET) return null;
-      try {
-        return window.cloudinary.createUploadWidget(
-          {
-            cloudName: CLOUD_NAME,
-            uploadPreset: UPLOAD_PRESET, // unsigned
-            multiple: false,
-            maxFiles: 1,
-            clientAllowedFormats: ["jpg","jpeg","png","webp"],
-            maxImageFileSize: 5 * 1024 * 1024,
-            sources: ["local", "camera", "url"],
-            showPoweredBy: false,
-            folder: "kpocha/pro-apps",
-          },
-          (err, res) => {
-            if (!err && res && res.event === "success") onSuccess(res.info.secure_url);
-          }
-        );
-      } catch {
-        return null;
-      }
-    };
-  }, [widgetReady]);
-
-  /* ---------- Load me (user) + appDoc (pro) ---------- */
+  /* ---------- Load me + appDoc ---------- */
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -169,7 +117,6 @@ export default function SettingsPage() {
         setMe(meData);
         setAppDoc(app);
 
-        // hydrate General (user) fields from user doc primarily; fallback to pro doc
         setDisplayName(meData?.displayName || app?.displayName || meData?.email || "");
         setPhone(meData?.identity?.phone || app?.phone || app?.identity?.phone || "");
         setAvatarUrl(meData?.identity?.photoUrl || app?.identity?.photoUrl || "");
@@ -179,7 +126,6 @@ export default function SettingsPage() {
         setLga(lgaUpper);
         setStateVal(stateUpper);
 
-        // pro details
         setProfileVisible(Boolean(app?.professional?.profileVisible ?? true));
         setNationwide(Boolean(app?.professional?.nationwide ?? false));
         setStatesCovered(Array.isArray(app?.availability?.statesCovered) ? app.availability.statesCovered : []);
@@ -194,7 +140,6 @@ export default function SettingsPage() {
             : [""]
         );
 
-        // bank
         const bk = app?.bank || {};
         setBankName(bk.bankName || "");
         setAccountName(bk.accountName || "");
@@ -214,7 +159,7 @@ export default function SettingsPage() {
   }, []);
 
   /* ---------- Flags & validation ---------- */
-  const hasPro = !!appDoc?._id; // gate for pro-only updates — prevents creation from Settings
+  const hasPro = !!appDoc?._id;
   const canSaveProfile = useMemo(
     () => !!displayName && !!phone && (!!lga || !!stateVal),
     [displayName, phone, lga, stateVal]
@@ -231,11 +176,7 @@ export default function SettingsPage() {
   /* ---------- Helpers ---------- */
   function withProIdentifiers(base = {}) {
     if (!hasPro) return null;
-    const idFields = {
-      _id: appDoc?._id,
-      uid: me?.uid,
-      createdAt: appDoc?.createdAt,
-    };
+    const idFields = { _id: appDoc?._id, uid: me?.uid, createdAt: appDoc?.createdAt };
     return { ...base, ...idFields };
   }
   function blockIfNoPro() {
@@ -247,8 +188,6 @@ export default function SettingsPage() {
   }
 
   /* ---------- Save handlers ---------- */
-
-  // 1) Save GENERAL PROFILE via Profile router (backend supports this)
   async function saveProfile() {
     clearMsg();
     try {
@@ -263,12 +202,10 @@ export default function SettingsPage() {
         },
       };
 
-      // Primary: Profile router
       let res;
       try {
         res = await api.put("/api/profile/me", payload);
-      } catch (e) {
-        // fallback if router path is slightly different in your tree
+      } catch {
         res = await api.put("/api/profile", payload);
       }
 
@@ -284,7 +221,6 @@ export default function SettingsPage() {
     }
   }
 
-  // 2) Save PRO DETAILS to /api/pros/me — ONLY if pro exists
   async function saveProDetails() {
     clearMsg();
     if (blockIfNoPro()) return;
@@ -317,7 +253,6 @@ export default function SettingsPage() {
     }
   }
 
-  // 3) Save BANK to /api/pros/me — ONLY if pro exists
   async function saveBank() {
     clearMsg();
     if (blockIfNoPro()) return;
@@ -381,7 +316,6 @@ export default function SettingsPage() {
 
           {/* Content */}
           <div className="lg:col-span-2 space-y-8">
-            {/* Banner if no pro profile */}
             {!hasPro && (
               <div className="rounded-lg border border-yellow-700 bg-yellow-900/20 text-yellow-200 px-4 py-3">
                 You don’t have a professional profile yet. You can browse & book as a client, but to
@@ -396,16 +330,12 @@ export default function SettingsPage() {
 
               {/* Avatar + name/phone */}
               <div className="flex items-center gap-4 mb-3">
-                <Avatar
-                  url={avatarUrl}
-                  onClick={() => avatarUrl && setLightboxUrl(avatarUrl)}
-                />
+                <Avatar url={avatarUrl} onClick={() => avatarUrl && setLightboxUrl(avatarUrl)} />
                 <div className="flex items-center gap-2">
-                  <UploadButton
-                    title={widgetReady ? "Upload Photo" : "Upload (loading…)"}
-                    widgetFactory={widgetFactory}
+                  <SmartUpload
+                    title="Upload Photo"
                     onUploaded={setAvatarUrl}
-                    disabled={!widgetReady}
+                    folder="kpocha/pro-apps"
                   />
                   {avatarUrl && (
                     <button
@@ -427,7 +357,7 @@ export default function SettingsPage() {
                 <Label>State & LGA</Label>
                 <NgGeoPicker
                   valueState={stateVal}
-                  onChangeState={(st)=>{ /* clear LGA on state change */ setStateVal(st); setLga(""); }}
+                  onChangeState={(st)=>{ setStateVal(st); setLga(""); }}
                   valueLga={lga}
                   onChangeLga={setLga}
                   required
@@ -522,16 +452,16 @@ export default function SettingsPage() {
                     <Label>Certificate</Label>
                     <div className="flex gap-2">
                       <input
-                        className="flex-1 bg-black border border-zinc-800 rounded-lg px-3 py-2"
+                        className={FIELD}
                         placeholder="Certificate URL"
                         value={certUrl}
                         onChange={(e)=>setCertUrl(e.target.value)}
                       />
-                      <UploadButton
-                        title={widgetReady ? "Upload" : "Upload (loading…)"}
+                      <SmartUpload
+                        title="Upload"
                         onUploaded={setCertUrl}
-                        widgetFactory={widgetFactory}
-                        disabled={!widgetReady}
+                        folder="kpocha/pro-apps"
+                        disabled={!hasPro}
                       />
                     </div>
                   </div>
@@ -570,7 +500,7 @@ export default function SettingsPage() {
                 {workPhotos.map((u, idx) => (
                   <div key={idx} className="flex items-center gap-2 mb-2">
                     <input
-                      className="flex-1 bg-black border border-zinc-800 rounded-lg px-3 py-2"
+                      className={FIELD}
                       placeholder={`Photo URL ${idx+1}`}
                       value={u}
                       onChange={(e)=>{
@@ -579,14 +509,14 @@ export default function SettingsPage() {
                       }}
                       disabled={!hasPro}
                     />
-                    <UploadButton
-                      title={widgetReady ? "Upload" : "Upload (loading…)"}
+                    <SmartUpload
+                      title="Upload"
                       onUploaded={(url)=>{
                         const arr=[...workPhotos]; arr[idx]=url;
                         setWorkPhotos(arr);
                       }}
-                      widgetFactory={widgetFactory}
-                      disabled={!widgetReady || !hasPro}
+                      folder="kpocha/pro-apps"
+                      disabled={!hasPro}
                     />
                     {idx>0 && (
                       <button
@@ -668,7 +598,6 @@ export default function SettingsPage() {
             <section id="advanced" className="rounded-lg border border-zinc-800 p-4">
               <h2 className="text-lg font-semibold mb-3">Advanced</h2>
 
-              {/* Deactivate link */}
               <div className="flex flex-col gap-2">
                 <Link
                   to="/deactivate"
@@ -719,11 +648,7 @@ function Input({ label, required, disabled, ...props }) {
   return (
     <label className="block">
       <Label>{label}{required ? " *" : ""}</Label>
-      <input
-        {...props}
-        disabled={disabled}
-        className="w-full bg-black border border-zinc-800 rounded-lg px-3 py-2 disabled:opacity-50"
-      />
+      <input {...props} disabled={disabled} className={FIELD} />
     </label>
   );
 }
@@ -731,36 +656,11 @@ function Select({ label, options=[], required, disabled, ...props }) {
   return (
     <label className="block">
       <Label>{label}{required ? " *" : ""}</Label>
-      <select
-        {...props}
-        disabled={disabled}
-        className="w-full bg-black border border-zinc-800 rounded-lg px-3 py-2 disabled:opacity-50"
-      >
+      <select {...props} disabled={disabled} className={FIELD}>
         <option value="">{required ? "Select…" : "Select (optional)…"}</option>
         {options.map((o)=> <option key={o} value={o}>{o}</option>)}
       </select>
     </label>
-  );
-}
-function UploadButton({ title="Upload", onUploaded, widgetFactory, disabled }) {
-  function open() {
-    const widget = widgetFactory?.(onUploaded);
-    if (!widget) {
-      alert("Upload unavailable. Enter a URL manually.");
-      return;
-    }
-    widget.open();
-  }
-  return (
-    <button
-      type="button"
-      onClick={open}
-      disabled={disabled}
-      className="px-3 py-2 rounded-lg border border-zinc-700 text-sm hover:bg-zinc-900 disabled:opacity-50"
-      title="Upload with Cloudinary"
-    >
-      {title}
-    </button>
   );
 }
 function Avatar({ url, onClick }) {

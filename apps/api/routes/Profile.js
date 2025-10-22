@@ -1,4 +1,3 @@
-// apps/api/routes/profile.js
 import express from "express";
 import admin from "firebase-admin";
 import { ClientProfile, ProProfile } from "../models/Profile.js";
@@ -55,6 +54,18 @@ function filterProPublic(p) {
   };
 }
 
+/* -------------------- Username (handle) helpers -------------------- */
+const USERNAME_RE = /^[a-z0-9](?:[a-z0-9._-]{1,18}[a-z0-9])$/; // 3–20 total, no trailing punctuation
+const RESERVED = new Set([
+  "admin","root","support","help","kpocha","api","www",
+  "login","signup","register","settings","wallet","profile","browse",
+  "terms","privacy","cookies"
+]);
+
+function normalizeUsername(s = "") {
+  return String(s).trim().toLowerCase();
+}
+
 /* ============================================================
    CLIENT PROFILE
    ============================================================ */
@@ -73,11 +84,19 @@ async function handlePutClientMe(req, res) {
   try {
     const payload = req.body || {};
     if (payload.lga) payload.lga = String(payload.lga).toUpperCase();
+
+    // never allow username change here (must use /profile/username/set)
+    if (payload.username || payload.usernameLC) {
+      delete payload.username;
+      delete payload.usernameLC;
+    }
+
     const updated = await ClientProfile.findOneAndUpdate(
       { ownerUid: req.user.uid },
       { $set: { ...payload, ownerUid: req.user.uid } },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     ).lean();
+
     return res.json(maskClientProfileForClientView(updated));
   } catch {
     return res.status(500).json({ error: "Failed to save profile" });
@@ -121,6 +140,78 @@ router.get("/profile/client/:uid/for-booking/:bookingId", requireAuth, async (re
     return res.json(p || null);
   } catch {
     return res.status(500).json({ error: "Failed to load client profile for booking" });
+  }
+});
+
+/* -------------------- Username (handle) endpoints -------------------- */
+
+/**
+ * GET /api/profile/username/check/:name
+ * -> { ok: true, available: boolean, reason?: string }
+ */
+router.get("/profile/username/check/:name", requireAuth, async (req, res) => {
+  try {
+    const raw = req.params.name || "";
+    const u = normalizeUsername(raw);
+
+    if (!u || u.length < 3 || u.length > 20 || !USERNAME_RE.test(u)) {
+      return res.json({ ok: true, available: false, reason: "Invalid format" });
+    }
+    if (RESERVED.has(u)) {
+      return res.json({ ok: true, available: false, reason: "Reserved" });
+    }
+
+    const exists = await ClientProfile.findOne({ usernameLC: u }).select("_id").lean();
+    return res.json({ ok: true, available: !exists });
+  } catch {
+    return res.status(500).json({ error: "Check failed" });
+  }
+});
+
+/**
+ * POST /api/profile/username/set
+ * body: { username }
+ * First-come, first-served. Only once per user.
+ */
+router.post("/profile/username/set", requireAuth, async (req, res) => {
+  try {
+    const raw = req.body?.username || "";
+    const u = normalizeUsername(raw);
+
+    if (!u || u.length < 3 || u.length > 20 || !USERNAME_RE.test(u)) {
+      return res.status(400).json({ error: "Invalid username" });
+    }
+    if (RESERVED.has(u)) {
+      return res.status(400).json({ error: "Username is reserved" });
+    }
+
+    const me = await ClientProfile.findOne({ ownerUid: req.user.uid }).lean();
+
+    // if already set, block edits
+    if (me?.usernameLC) {
+      return res.status(409).json({ error: "Username already set" });
+    }
+
+    // unique across collection
+    const taken = await ClientProfile.findOne({ usernameLC: u }).select("_id").lean();
+    if (taken) return res.status(409).json({ error: "Username already taken" });
+
+    const doc = await ClientProfile.findOneAndUpdate(
+      { ownerUid: req.user.uid },
+      {
+        $set: {
+          ownerUid: req.user.uid,
+          username: raw.trim(),
+          usernameLC: u,
+          usernameSetAt: new Date().toISOString(),
+        },
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    ).lean();
+
+    return res.json({ ok: true, item: maskClientProfileForClientView(doc) });
+  } catch {
+    return res.status(500).json({ error: "Failed to set username" });
   }
 });
 

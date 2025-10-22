@@ -1,4 +1,3 @@
-// apps/web/src/App.jsx
 import { Routes, Route, Navigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { api, setAuthToken } from "./lib/api";
@@ -17,6 +16,7 @@ import ClientWallet from "./pages/ClientWallet.jsx";
 import Profile from "./pages/Profile.jsx";
 import Login from "./pages/Login.jsx";
 import Signup from "./pages/Signup.jsx";
+import PhoneLogin from "./pages/PhoneLogin.jsx";       // ✅ NEW
 import BecomePro from "./pages/BecomePro.jsx";
 import ProDashboard from "./pages/ProDashboard.jsx";
 import Admin from "./pages/Admin.jsx";
@@ -145,8 +145,8 @@ export default function App() {
   useEffect(() => {
     const unsub = onIdTokenChanged(auth, async (user) => {
       try {
-        const token = user ? await user.getIdToken() : null; // fresh token
-        setAuthToken(token); // your api.js helper updates axios + localStorage
+        const token = user ? await user.getIdToken() : null;
+        setAuthToken(token);
       } catch {
         setAuthToken(null);
       }
@@ -157,7 +157,8 @@ export default function App() {
   return (
     <div className="min-h-screen flex flex-col bg-black text-white">
       <Navbar />
-      <main className="flex-1">
+      {/* 🔹 Prevent content from hiding under the sticky navbar */}
+      <main className="flex-1 pt-14">
         <Routes>
           {/* Public */}
           <Route path="/" element={<Home />} />
@@ -182,6 +183,7 @@ export default function App() {
             }
           />
           <Route path="/login" element={<Login />} />
+          <Route path="/login/phone" element={<PhoneLogin />} /> {/* ✅ NEW */}
           <Route path="/signup" element={<Signup />} />
           <Route path="/legal" element={<Legal />} />
           <Route path="/legal/*" element={<Legal />} />
@@ -239,7 +241,7 @@ export default function App() {
             }
           />
 
-          {/* Client registration */}
+          {/* Client registration (username step) */}
           <Route
             path="/client-register"
             element={

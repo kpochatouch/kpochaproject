@@ -11,20 +11,47 @@ async function requireAuth(req, res, next) {
     const token = h.startsWith("Bearer ") ? h.slice(7) : null;
     if (!token) return res.status(401).json({ error: "Missing token" });
     const decoded = await admin.auth().verifyIdToken(token);
-    req.user = { uid: decoded.uid, email: decoded.email || null };
+    req.user = { uid: decoded.uid, email: decoded.email || null, name: decoded.name || null };
     next();
   } catch (err) {
     return res.status(401).json({ error: "Invalid or expired token" });
   }
 }
 
+const ADMIN_UIDS = (process.env.ADMIN_UIDS || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+function requireAdmin(req, res, next) {
+  if (!req.user?.uid || !ADMIN_UIDS.includes(req.user.uid)) {
+    return res.status(403).json({ error: "Admin only" });
+  }
+  next();
+}
+
 /* ------------------------------ Model ------------------------------ */
-// Keep the post schema local to this route to minimize integration churn.
-// If you already have a Post model elsewhere, feel free to replace this with an import.
 const MediaSchema = new mongoose.Schema(
   {
     url: { type: String, required: true },
     type: { type: String, enum: ["image", "video"], default: "image" },
+  },
+  { _id: false }
+);
+
+const CommentSchema = new mongoose.Schema(
+  {
+    uid: { type: String, required: true },
+    name: { type: String, default: "User" },
+    text: { type: String, required: true },
+  },
+  { _id: true, timestamps: true }
+);
+
+const ViewPingSchema = new mongoose.Schema(
+  {
+    uid: { type: String, default: null }, // nullable (anonymous)
+    dayKey: { type: String, required: true }, // e.g. "2025-10-22"
   },
   { _id: false }
 );
@@ -44,16 +71,22 @@ const PostSchema = new mongoose.Schema(
     },
 
     // content
-    text: { type: String, default: "" }, // keep short on FE (e.g., <= 600 chars)
-    media: { type: [MediaSchema], default: [] }, // 0 or more
+    text: { type: String, default: "" },
+    media: { type: [MediaSchema], default: [] },
     tags: { type: [String], default: [] },
 
     // visibility + scoping
     isPublic: { type: Boolean, default: true, index: true },
-    lga: { type: String, default: "", index: true }, // UPPERCASE to match your filters
-
-    // moderation flags (future)
     hidden: { type: Boolean, default: false, index: true },
+    lga: { type: String, default: "", index: true }, // uppercase
+
+    // social
+    likes: { type: [String], default: [] }, // array of user UIDs
+    likesCount: { type: Number, default: 0, index: true },
+    comments: { type: [CommentSchema], default: [] },
+    commentsCount: { type: Number, default: 0, index: true },
+    viewsCount: { type: Number, default: 0, index: true },
+    recentViews: { type: [ViewPingSchema], default: [] }, // small ring buffer to dedupe today
   },
   { timestamps: true }
 );
@@ -67,13 +100,9 @@ const Post = mongoose.models.Post || mongoose.model("Post", PostSchema);
 const toUpper = (v) => (typeof v === "string" ? v.trim().toUpperCase() : v);
 const trim = (v) => (typeof v === "string" ? v.trim() : v);
 
-function sanitizePostForClient(p) {
-  // FE expects:
-  // - post.pro { _id, name, lga, photoUrl }
-  // - post.media: [{url,type}]
-  // - post.text, post.tags, post.createdAt
-  // - (optional) post.authorName, post.authorAvatar, post.lga
+function sanitizePostForClient(p, viewerUid = null) {
   const obj = typeof p.toObject === "function" ? p.toObject() : { ...p };
+  const liked = viewerUid ? (obj.likes || []).includes(viewerUid) : false;
   return {
     _id: obj._id,
     pro: obj.pro,
@@ -86,10 +115,21 @@ function sanitizePostForClient(p) {
     isPublic: !!obj.isPublic,
     hidden: !!obj.hidden,
     createdAt: obj.createdAt,
-    // legacy-friendly fields FeedCard already knows how to read
+
+    likesCount: obj.likesCount || 0,
+    commentsCount: obj.commentsCount || 0,
+    viewsCount: obj.viewsCount || 0,
+    likedByMe: liked,
+
+    // legacy-friendly fields FeedCard already supports
     authorName: obj.pro?.name || "Professional",
     authorAvatar: obj.pro?.photoUrl || "",
   };
+}
+
+function todayKey() {
+  const d = new Date();
+  return d.toISOString().slice(0, 10); // YYYY-MM-DD
 }
 
 /* ============================== ROUTER ============================== */
@@ -105,20 +145,19 @@ router.post("/posts", requireAuth, async (req, res) => {
     const body = req.body || {};
     let { text = "", media = [], lga = "", isPublic = true, tags = [] } = body;
 
-    // Find pro doc for the current user (1:1 ownership assumed; if many, use the first)
     const proDoc = await Pro.findOne({ ownerUid: req.user.uid }).lean();
-    if (!proDoc) {
-      return res.status(403).json({ error: "not_a_pro" });
-    }
+    if (!proDoc) return res.status(403).json({ error: "not_a_pro" });
 
-    // basic validation / normalization
-    text = trim(text || "");
+    text = trim(text || "").slice(0, 2000);
     if (!Array.isArray(media)) media = [];
     media = media
       .filter((m) => m && typeof m.url === "string" && m.url.trim())
-      .map((m) => ({ url: trim(m.url), type: m.type === "video" ? "video" : "image" }));
+      .map((m) => ({ url: trim(m.url), type: m.type === "video" ? "video" : "image" }))
+      .slice(0, 6);
 
-    tags = Array.isArray(tags) ? tags.map((t) => String(t || "").trim()).filter(Boolean).slice(0, 10) : [];
+    tags = Array.isArray(tags)
+      ? tags.map((t) => String(t || "").trim()).filter(Boolean).slice(0, 10)
+      : [];
     const lgaFinal = toUpper(lga || proDoc.lga || "");
 
     const post = await Post.create({
@@ -137,7 +176,7 @@ router.post("/posts", requireAuth, async (req, res) => {
       isPublic: !!isPublic,
     });
 
-    return res.json({ ok: true, post: sanitizePostForClient(post) });
+    return res.json({ ok: true, post: sanitizePostForClient(post, req.user.uid) });
   } catch (err) {
     console.error("[posts:create] error:", err);
     return res.status(500).json({ error: "post_create_failed" });
@@ -157,10 +196,21 @@ router.get("/feed/public", async (req, res) => {
 
     const items = await Post.find(q)
       .sort({ createdAt: -1 })
-      .limit(Math.max(1, Math.min(Number(limit) || 20, 50)))
-      .lean();
+      .limit(Math.max(1, Math.min(Number(limit) || 20, 50)));
 
-    return res.json(items.map(sanitizePostForClient));
+    const viewerUid = (() => {
+      try {
+        const h = req.headers.authorization || "";
+        const token = h.startsWith("Bearer ") ? h.slice(7) : null;
+        if (!token) return null;
+        const decoded = admin.auth().verifyIdToken(token); // note: do NOT await here (best effort)
+        return decoded?.uid || null;
+      } catch {
+        return null;
+      }
+    })();
+
+    return res.json(items.map((p) => sanitizePostForClient(p, viewerUid)));
   } catch (err) {
     console.error("[feed:public] error:", err);
     return res.status(500).json({ error: "feed_load_failed" });
@@ -169,15 +219,14 @@ router.get("/feed/public", async (req, res) => {
 
 /**
  * GET /api/posts/me
- * List the current pro’s posts (for potential future “My posts” UI).
+ * List the current pro’s posts
  */
 router.get("/posts/me", requireAuth, async (req, res) => {
   try {
     const items = await Post.find({ proOwnerUid: req.user.uid })
       .sort({ createdAt: -1 })
-      .limit(100)
-      .lean();
-    return res.json(items.map(sanitizePostForClient));
+      .limit(100);
+    return res.json(items.map((p) => sanitizePostForClient(p, req.user.uid)));
   } catch (err) {
     console.error("[posts:me] error:", err);
     return res.status(500).json({ error: "posts_load_failed" });
@@ -186,7 +235,7 @@ router.get("/posts/me", requireAuth, async (req, res) => {
 
 /**
  * DELETE /api/posts/:id
- * Only the owning pro (or future admin middleware) may delete.
+ * Only the owning pro may delete.
  */
 router.delete("/posts/:id", requireAuth, async (req, res) => {
   try {
@@ -202,6 +251,135 @@ router.delete("/posts/:id", requireAuth, async (req, res) => {
   } catch (err) {
     console.error("[posts:delete] error:", err);
     return res.status(500).json({ error: "delete_failed" });
+  }
+});
+
+/* ---------------------------- Social actions ---------------------------- */
+
+/** POST /api/posts/:id/like  (toggle) */
+router.post("/posts/:id/like", requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!/^[0-9a-fA-F]{24}$/.test(id)) return res.status(400).json({ error: "invalid_id" });
+
+    const p = await Post.findById(id);
+    if (!p || p.hidden || !p.isPublic) return res.status(404).json({ error: "not_found" });
+
+    const has = p.likes.includes(req.user.uid);
+    if (has) {
+      p.likes = p.likes.filter((u) => u !== req.user.uid);
+    } else {
+      p.likes.push(req.user.uid);
+    }
+    p.likesCount = p.likes.length;
+    await p.save();
+    return res.json({ ok: true, liked: !has, likesCount: p.likesCount });
+  } catch (err) {
+    console.error("[posts:like] error:", err);
+    return res.status(500).json({ error: "like_failed" });
+  }
+});
+
+/** GET /api/posts/:id/comments  */
+router.get("/posts/:id/comments", async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!/^[0-9a-fA-F]{24}$/.test(id)) return res.status(400).json({ error: "invalid_id" });
+    const p = await Post.findById(id).lean();
+    if (!p || p.hidden || !p.isPublic) return res.status(404).json({ error: "not_found" });
+    const items = (p.comments || []).slice(-100).map((c) => ({
+      _id: c._id,
+      uid: c.uid,
+      name: c.name,
+      text: c.text,
+      createdAt: c.createdAt,
+    }));
+    return res.json(items);
+  } catch (err) {
+    console.error("[posts:comments:list] error:", err);
+    return res.status(500).json({ error: "comments_load_failed" });
+  }
+});
+
+/** POST /api/posts/:id/comments {text} */
+router.post("/posts/:id/comments", requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const text = trim(req.body?.text || "").slice(0, 500);
+    if (!text) return res.status(400).json({ error: "empty" });
+    if (!/^[0-9a-fA-F]{24}$/.test(id)) return res.status(400).json({ error: "invalid_id" });
+
+    const p = await Post.findById(id);
+    if (!p || p.hidden || !p.isPublic) return res.status(404).json({ error: "not_found" });
+
+    p.comments.push({ uid: req.user.uid, name: req.user.name || "User", text });
+    p.comments = p.comments.slice(-200); // trim
+    p.commentsCount = p.comments.length;
+    await p.save();
+
+    const last = p.comments[p.comments.length - 1];
+    return res.json({
+      ok: true,
+      comment: { _id: last._id, uid: last.uid, name: last.name, text: last.text, createdAt: last.createdAt },
+      commentsCount: p.commentsCount,
+    });
+  } catch (err) {
+    console.error("[posts:comments:add] error:", err);
+    return res.status(500).json({ error: "comment_failed" });
+  }
+});
+
+/** POST /api/posts/:id/view  (counts once per user per day) */
+router.post("/posts/:id/view", async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!/^[0-9a-fA-F]{24}$/.test(id)) return res.status(400).json({ error: "invalid_id" });
+
+    // best effort: identify user if token is present
+    let uid = null;
+    try {
+      const h = req.headers.authorization || "";
+      const token = h.startsWith("Bearer ") ? h.slice(7) : null;
+      if (token) {
+        const decoded = await admin.auth().verifyIdToken(token);
+        uid = decoded?.uid || null;
+      }
+    } catch {}
+
+    const day = todayKey();
+    const p = await Post.findById(id);
+    if (!p || p.hidden || !p.isPublic) return res.status(404).json({ error: "not_found" });
+
+    const already = (p.recentViews || []).some((v) => v.uid === uid && v.dayKey === day);
+    if (!already) {
+      p.viewsCount += 1;
+      p.recentViews.push({ uid, dayKey: day });
+      // keep buffer small (last ~500 pings)
+      if (p.recentViews.length > 500) p.recentViews = p.recentViews.slice(-500);
+      await p.save();
+    }
+    return res.json({ ok: true, viewsCount: p.viewsCount });
+  } catch (err) {
+    console.error("[posts:view] error:", err);
+    return res.status(500).json({ error: "view_failed" });
+  }
+});
+
+/* --------------------------- Admin moderation --------------------------- */
+
+/** PUT /api/posts/:id/hide {hidden:true|false} */
+router.put("/posts/:id/hide", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { hidden = true } = req.body || {};
+    if (!/^[0-9a-fA-F]{24}$/.test(id)) return res.status(400).json({ error: "invalid_id" });
+
+    const p = await Post.findByIdAndUpdate(id, { $set: { hidden: !!hidden } }, { new: true });
+    if (!p) return res.status(404).json({ error: "not_found" });
+    return res.json({ ok: true, post: sanitizePostForClient(p) });
+  } catch (err) {
+    console.error("[posts:hide] error:", err);
+    return res.status(500).json({ error: "moderation_failed" });
   }
 });
 

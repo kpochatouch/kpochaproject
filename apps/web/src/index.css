@@ -1,0 +1,20 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+.gradient-hero {
+  background: radial-gradient(1200px 600px at 20% 0%, rgba(212,175,55,0.15), transparent 60%),
+              radial-gradient(800px 400px at 80% 0%, rgba(212,175,55,0.08), transparent 60%),
+              #000;
+}
+
+/* 🔹 Light input utility for dark UI */
+.input-light {
+  @apply w-full rounded-lg border px-3 py-2;
+  @apply bg-white text-black border-zinc-300;
+}
+.input-light:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(212, 175, 55, 0.35);
+  border-color: #D4AF37;
+}

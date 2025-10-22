@@ -10,7 +10,7 @@ import {
 import { auth, googleProvider } from "../lib/firebase";
 import { useAuth } from "../context/AuthContext";
 import PasswordInput from "../components/PasswordInput";
-import { setAuthToken } from "../lib/api";
+import { api, setAuthToken } from "../lib/api";
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -33,23 +33,30 @@ export default function Login() {
     try { localStorage.removeItem("g_state"); } catch {}
   }, []);
 
-  // if already signed in, go where they intended
+  // if already signed in, go where they intended (after username check)
   useEffect(() => {
     if (!user) return;
-    const next = qs.get("next") || "/browse";
-    nav(next, { replace: true });
-  }, [user, nav, qs]);
+    afterSignInRedirect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
+  async function routeAfterUsernameCheck() {
+    try {
+      const me = await api.get("/api/profile/me").then(r => r.data).catch(() => null);
+      const hasUsername = !!me?.username || !!me?.usernameLC;
+      const next = qs.get("next") || "/browse";
+      nav(hasUsername ? next : "/client-register", { replace: true });
+    } catch {
+      nav("/browse", { replace: true });
+    }
+  }
 
   async function afterSignInRedirect() {
     try {
-      // ensure ID token is available to axios interceptor
       const tok = await auth.currentUser.getIdToken(true);
       setAuthToken(tok);
-    } catch {
-      // fail-soft — interceptor may still pick it up from AuthContext if you store there
-    }
-    const next = qs.get("next") || "/browse";
-    nav(next, { replace: true });
+    } catch {}
+    await routeAfterUsernameCheck();
   }
 
   async function submit(e) {
@@ -102,7 +109,7 @@ export default function Login() {
     <div className="max-w-sm mx-auto px-4 py-10">
       <h2 className="text-2xl font-semibold mb-1">Sign in</h2>
       <p className="text-sm text-zinc-400 mb-4">
-        {signedOut ? "You’ve been signed out." : "Use your email or Google account."}
+        {signedOut ? "You’ve been signed out." : "Use your email, Google or phone."}
       </p>
 
       {err && <div className="text-red-400 text-sm mb-3">{err}</div>}
@@ -153,6 +160,13 @@ export default function Login() {
       >
         Continue with Google
       </button>
+
+      <Link
+        to="/login/phone"
+        className="mt-3 block w-full text-center rounded-lg border border-zinc-700 px-4 py-2"
+      >
+        Continue with Phone
+      </Link>
 
       <p className="text-sm text-zinc-400 mt-4">
         No account?{" "}

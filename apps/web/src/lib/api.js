@@ -3,14 +3,22 @@ import axios from "axios";
 import { getAuth, onAuthStateChanged } from "firebase/auth";
 
 /* =========================================
-   BASE URL (no hardcoding)
+   BASE URL
+   - Dev (Vite proxy / ngrok): leave VITE_API_BASE_URL empty => relative "/api" calls go to the same origin.
+   - Prod (Vercel or separate API): set VITE_API_BASE_URL to the API ORIGIN ONLY
+     e.g. "https://api.example.com"   (❌ do NOT include "/api")
    ========================================= */
-const ROOT =
-  (import.meta.env.VITE_API_BASE_URL || "http://localhost:8080").replace(/\/+$/, "");
+let RAW = (import.meta.env.VITE_API_BASE_URL ?? "").trim();
 
-// Points to server root. Your functions already include "/api/..."
+// If someone accidentally put "/api" in the env var, strip it because all routes below already start with "/api".
+if (RAW.endsWith("/api")) RAW = RAW.slice(0, -4);
+
+// Remove trailing slashes (keep it as a bare origin like "https://api.example.com")
+const ROOT = RAW.replace(/\/+$/, "");
+
+// When ROOT === "" we let axios use the current origin; our paths already include "/api/..."
 export const api = axios.create({
-  baseURL: ROOT,
+  baseURL: ROOT || undefined,
   headers: { "Content-Type": "application/json", Accept: "application/json" },
 });
 
@@ -40,16 +48,12 @@ api.interceptors.request.use(async (config) => {
       if (idToken) config.headers.Authorization = `Bearer ${idToken}`;
       return config;
     }
-  } catch {
-    // ignore and try fallback
-  }
+  } catch {}
 
   try {
     const token = localStorage.getItem("token");
     if (token) config.headers.Authorization = `Bearer ${token}`;
-  } catch {
-    // ignore
-  }
+  } catch {}
 
   return config;
 });
@@ -240,7 +244,9 @@ export async function updateClientProfile(payload) {
   return data;
 }
 export async function getClientProfileForBooking(clientUid, bookingId) {
-  const { data } = await api.get(`/api/profile/client/${clientUid}/for-booking/${encodeURIComponent(bookingId)}`);
+  const { data } = await api.get(
+    `/api/profile/client/${clientUid}/for-booking/${encodeURIComponent(bookingId)}`
+  );
   return data;
 }
 export async function getClientProfileAdmin(clientUid) {
@@ -263,3 +269,24 @@ export async function getProProfileAdmin(proId) {
   const { data } = await api.get(`/api/profile/pro/${proId}/admin`);
   return data;
 }
+
+/* =========================================
+   POSTS — social actions
+   ========================================= */
+export async function likePost(id) {
+  const { data } = await api.post(`/api/posts/${id}/like`);
+  return data; // {ok, liked, likesCount}
+}
+export async function addPostComment(id, text) {
+  const { data } = await api.post(`/api/posts/${id}/comments`, { text });
+  return data; // {ok, comment, commentsCount}
+}
+export async function listPostComments(id) {
+  const { data } = await api.get(`/api/posts/${id}/comments`);
+  return data; // array
+}
+export async function pingPostView(id) {
+  const { data } = await api.post(`/api/posts/${id}/view`);
+  return data; // {ok, viewsCount}
+}
+
