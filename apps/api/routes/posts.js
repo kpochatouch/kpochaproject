@@ -4,6 +4,16 @@ import mongoose from "mongoose";
 import admin from "firebase-admin";
 import { Pro } from "../models.js";
 
+/* --------------------------- Admin helpers --------------------------- */
+const ADMIN_UIDS = (process.env.ADMIN_UIDS || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+function isAdmin(uid) {
+  return !!uid && ADMIN_UIDS.includes(uid);
+}
+
 /* --------------------------- Auth middleware --------------------------- */
 async function requireAuth(req, res, next) {
   try {
@@ -11,20 +21,20 @@ async function requireAuth(req, res, next) {
     const token = h.startsWith("Bearer ") ? h.slice(7) : null;
     if (!token) return res.status(401).json({ error: "Missing token" });
     const decoded = await admin.auth().verifyIdToken(token);
-    req.user = { uid: decoded.uid, email: decoded.email || null, name: decoded.name || null };
+    req.user = {
+      uid: decoded.uid,
+      email: decoded.email || null,
+      name: decoded.name || null,
+      role: isAdmin(decoded.uid) ? "admin" : "user",
+    };
     next();
   } catch (err) {
     return res.status(401).json({ error: "Invalid or expired token" });
   }
 }
 
-const ADMIN_UIDS = (process.env.ADMIN_UIDS || "")
-  .split(",")
-  .map((s) => s.trim())
-  .filter(Boolean);
-
 function requireAdmin(req, res, next) {
-  if (!req.user?.uid || !ADMIN_UIDS.includes(req.user.uid)) {
+  if (!req.user?.uid || !isAdmin(req.user.uid)) {
     return res.status(403).json({ error: "Admin only" });
   }
   next();
@@ -100,14 +110,29 @@ const Post = mongoose.models.Post || mongoose.model("Post", PostSchema);
 const toUpper = (v) => (typeof v === "string" ? v.trim().toUpperCase() : v);
 const trim = (v) => (typeof v === "string" ? v.trim() : v);
 
-function sanitizePostForClient(p, viewerUid = null) {
+/** Best-effort viewer info on public endpoints (no throw) */
+async function getViewer(req) {
+  try {
+    const h = req.headers.authorization || "";
+    const token = h.startsWith("Bearer ") ? h.slice(7) : null;
+    if (!token) return { uid: null, isAdmin: false };
+    const decoded = await admin.auth().verifyIdToken(token);
+    return { uid: decoded?.uid || null, isAdmin: isAdmin(decoded?.uid) };
+  } catch {
+    return { uid: null, isAdmin: false };
+  }
+}
+
+/** Hide UIDs from non-admins */
+function sanitizePostForClient(p, { viewerUid = null, viewerIsAdmin = false } = {}) {
   const obj = typeof p.toObject === "function" ? p.toObject() : { ...p };
   const liked = viewerUid ? (obj.likes || []).includes(viewerUid) : false;
-  return {
+
+  const base = {
     _id: obj._id,
     pro: obj.pro,
     proId: obj.proId,
-    proOwnerUid: obj.proOwnerUid,
+    // proOwnerUid: OMIT unless admin
     text: obj.text,
     media: obj.media,
     tags: obj.tags || [],
@@ -125,6 +150,20 @@ function sanitizePostForClient(p, viewerUid = null) {
     authorName: obj.pro?.name || "Professional",
     authorAvatar: obj.pro?.photoUrl || "",
   };
+
+  if (viewerIsAdmin) {
+    base.proOwnerUid = obj.proOwnerUid || null;
+  }
+  return base;
+}
+
+/** Hide commenter UID unless admin */
+function sanitizeComments(list = [], { viewerIsAdmin = false } = {}) {
+  return (list || []).map((c) =>
+    viewerIsAdmin
+      ? { _id: c._id, uid: c.uid, name: c.name, text: c.text, createdAt: c.createdAt }
+      : { _id: c._id, name: c.name, text: c.text, createdAt: c.createdAt }
+  );
 }
 
 function todayKey() {
@@ -176,7 +215,10 @@ router.post("/posts", requireAuth, async (req, res) => {
       isPublic: !!isPublic,
     });
 
-    return res.json({ ok: true, post: sanitizePostForClient(post, req.user.uid) });
+    return res.json({
+      ok: true,
+      post: sanitizePostForClient(post, { viewerUid: req.user.uid, viewerIsAdmin: req.user.role === "admin" }),
+    });
   } catch (err) {
     console.error("[posts:create] error:", err);
     return res.status(500).json({ error: "post_create_failed" });
@@ -198,19 +240,9 @@ router.get("/feed/public", async (req, res) => {
       .sort({ createdAt: -1 })
       .limit(Math.max(1, Math.min(Number(limit) || 20, 50)));
 
-    const viewerUid = (() => {
-      try {
-        const h = req.headers.authorization || "";
-        const token = h.startsWith("Bearer ") ? h.slice(7) : null;
-        if (!token) return null;
-        const decoded = admin.auth().verifyIdToken(token); // note: do NOT await here (best effort)
-        return decoded?.uid || null;
-      } catch {
-        return null;
-      }
-    })();
+    const viewer = await getViewer(req);
 
-    return res.json(items.map((p) => sanitizePostForClient(p, viewerUid)));
+    return res.json(items.map((p) => sanitizePostForClient(p, viewer)));
   } catch (err) {
     console.error("[feed:public] error:", err);
     return res.status(500).json({ error: "feed_load_failed" });
@@ -219,14 +251,15 @@ router.get("/feed/public", async (req, res) => {
 
 /**
  * GET /api/posts/me
- * List the current pro’s posts
+ * List the current pro’s posts (no UID leakage)
  */
 router.get("/posts/me", requireAuth, async (req, res) => {
   try {
     const items = await Post.find({ proOwnerUid: req.user.uid })
       .sort({ createdAt: -1 })
       .limit(100);
-    return res.json(items.map((p) => sanitizePostForClient(p, req.user.uid)));
+    const viewer = { viewerUid: req.user.uid, viewerIsAdmin: req.user.role === "admin" };
+    return res.json(items.map((p) => sanitizePostForClient(p, viewer)));
   } catch (err) {
     console.error("[posts:me] error:", err);
     return res.status(500).json({ error: "posts_load_failed" });
@@ -287,13 +320,9 @@ router.get("/posts/:id/comments", async (req, res) => {
     if (!/^[0-9a-fA-F]{24}$/.test(id)) return res.status(400).json({ error: "invalid_id" });
     const p = await Post.findById(id).lean();
     if (!p || p.hidden || !p.isPublic) return res.status(404).json({ error: "not_found" });
-    const items = (p.comments || []).slice(-100).map((c) => ({
-      _id: c._id,
-      uid: c.uid,
-      name: c.name,
-      text: c.text,
-      createdAt: c.createdAt,
-    }));
+
+    const viewer = await getViewer(req);
+    const items = sanitizeComments((p.comments || []).slice(-100), viewer);
     return res.json(items);
   } catch (err) {
     console.error("[posts:comments:list] error:", err);
@@ -318,11 +347,12 @@ router.post("/posts/:id/comments", requireAuth, async (req, res) => {
     await p.save();
 
     const last = p.comments[p.comments.length - 1];
-    return res.json({
-      ok: true,
-      comment: { _id: last._id, uid: last.uid, name: last.name, text: last.text, createdAt: last.createdAt },
-      commentsCount: p.commentsCount,
-    });
+    const viewerIsAdmin = req.user.role === "admin";
+    const comment = viewerIsAdmin
+      ? { _id: last._id, uid: last.uid, name: last.name, text: last.text, createdAt: last.createdAt }
+      : { _id: last._id, name: last.name, text: last.text, createdAt: last.createdAt };
+
+    return res.json({ ok: true, comment, commentsCount: p.commentsCount });
   } catch (err) {
     console.error("[posts:comments:add] error:", err);
     return res.status(500).json({ error: "comment_failed" });
@@ -376,7 +406,7 @@ router.put("/posts/:id/hide", requireAuth, requireAdmin, async (req, res) => {
 
     const p = await Post.findByIdAndUpdate(id, { $set: { hidden: !!hidden } }, { new: true });
     if (!p) return res.status(404).json({ error: "not_found" });
-    return res.json({ ok: true, post: sanitizePostForClient(p) });
+    return res.json({ ok: true, post: sanitizePostForClient(p, { viewerIsAdmin: true }) });
   } catch (err) {
     console.error("[posts:hide] error:", err);
     return res.status(500).json({ error: "moderation_failed" });

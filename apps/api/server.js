@@ -13,6 +13,7 @@ import path from "path";
 import http from "http";
 import { fileURLToPath } from "url";
 import cron from "node-cron";
+import { v2 as cloudinary } from "cloudinary";
 
 import { Application, Pro, proToBarber } from "./models.js";
 import bookingsRouter from "./routes/bookings.js";
@@ -60,8 +61,11 @@ const ADMIN_UIDS = (process.env.ADMIN_UIDS || "")
   .map((s) => s.trim())
   .filter(Boolean);
 
+function isAdmin(uid) {
+  return !!uid && ADMIN_UIDS.includes(uid);
+}
 function requireAdmin(req, res, next) {
-  if (!req.user?.uid || !ADMIN_UIDS.includes(req.user.uid)) {
+  if (!req.user?.uid || !isAdmin(req.user.uid)) {
     return res.status(403).json({ error: "Admin only" });
   }
   next();
@@ -369,7 +373,7 @@ async function requireAuth(req, res, next) {
     if (!token) return res.status(401).json({ error: "Missing token" });
 
     const decoded = await admin.auth().verifyIdToken(token);
-    req.user = { uid: decoded.uid, email: decoded.email || null };
+    req.user = { uid: decoded.uid, email: decoded.email || null, role: isAdmin(decoded.uid) ? "admin" : "user" };
     next();
   } catch (err) {
     return res.status(401).json({
@@ -391,6 +395,26 @@ async function requirePro(req, res, next) {
   }
 }
 
+/* ------------------- 🔒 Sanitizers (inline) ------------------- */
+// hide fields for non-admins
+function sanitizePro(doc, viewerRole = "user") {
+  if (!doc) return doc;
+  const o = typeof doc.toObject === "function" ? doc.toObject() : { ...doc };
+  if (viewerRole !== "admin") {
+    delete o.ownerUid;   // 🔒 UID hidden from owners/clients
+    delete o.__v;
+  }
+  return o;
+}
+function sanitizeBarberCard(obj, viewerRole = "user") {
+  const o = { ...(obj || {}) };
+  if (viewerRole !== "admin") {
+    delete o.ownerUid;
+    delete o.uid;
+  }
+  return o;
+}
+
 /* ------------------- Maintenance Mode Gate ------------------- */
 function maintenanceBypass(req) {
   if (req.path === "/api/health") return true;
@@ -408,7 +432,7 @@ app.use(async (req, res, next) => {
       const token = h.startsWith("Bearer ") ? h.slice(7) : null;
       if (token) {
         const decoded = await admin.auth().verifyIdToken(token);
-        if (decoded?.uid && ADMIN_UIDS.includes(decoded.uid)) return next();
+        if (decoded?.uid && isAdmin(decoded.uid)) return next();
       }
     } catch {}
 
@@ -448,11 +472,12 @@ async function getVerifiedClientIdentity(uid) {
 }
 
 /** Public endpoint for the web app to show read-only identity on Book page */
+// 🔒 hide UID from owners: do not return uid
 app.get("/api/profile/client/me", requireAuth, async (req, res) => {
   try {
     if (mongoose.connection.readyState !== 1) return res.status(503).json({ error: "Database not connected" });
     const { fullName, phone } = await getVerifiedClientIdentity(req.user.uid);
-    res.json({ uid: req.user.uid, email: req.user.email, fullName, phone });
+    res.json({ /* uid hidden */ email: req.user.email, fullName, phone });
   } catch (e) {
     res.status(500).json({ error: "failed" });
   }
@@ -473,8 +498,7 @@ app.use("/api/bookings", requireAuth, async (req, _res, next) => {
       name: fullName || req.body?.client?.name || "",
       phone: phone || req.body?.client?.phone || "",
     };
-    req.body.clientUid = req.user.uid;
-
+    req.body.clientUid = req.user.uid; // kept server-side only
     next();
   } catch {
     next();
@@ -633,25 +657,25 @@ app.post("/api/admin/release-booking/:id", requireAuth, requireAdmin, async (req
     });
   } catch (err) {
     console.error("[admin:release-booking]", err?.message || err);
-    res.status(500).json({ error: "release_error" });
+  res.status(500).json({ error: "release_error" });
   }
 });
 
 /* ------------------- Minimal /api/pros/me (for Settings page) ------------------- */
-// GET: read current user's Pro doc (if any)
+// GET: read current user's Pro doc (if any) — 🔒 hide ownerUid from non-admins
 app.get("/api/pros/me", requireAuth, async (req, res) => {
   try {
     if (mongoose.connection.readyState !== 1) return res.status(503).json({ error: "Database not connected" });
-    const pro = await Pro.findOne({ ownerUid: req.user.uid }).lean();
+    const pro = await Pro.findOne({ ownerUid: req.user.uid });
     if (!pro) return res.json(null);
-    res.json(pro);
+    res.json(sanitizePro(pro, req.user.role));
   } catch (e) {
     console.error("[pros:me:get]", e?.message || e);
     res.status(500).json({ error: "failed" });
   }
 });
 
-// PUT: update current user's Pro doc (only if exists; this does not create)
+// PUT: update current user's Pro doc (only if exists; this does not create) — returns sanitized
 app.put("/api/pros/me", requireAuth, async (req, res) => {
   try {
     if (mongoose.connection.readyState !== 1) return res.status(503).json({ error: "Database not connected" });
@@ -675,7 +699,7 @@ app.put("/api/pros/me", requireAuth, async (req, res) => {
     Object.assign(existing, allowed);
     await existing.save();
 
-    res.json({ ok: true, item: existing.toObject() });
+    res.json({ ok: true, item: sanitizePro(existing, req.user.role) });
   } catch (e) {
     console.error("[pros:me:put]", e?.message || e);
     res.status(500).json({ error: "failed" });
@@ -724,7 +748,8 @@ app.get("/api/account/deactivation/me", requireAuth, async (req, res) => {
   try {
     if (mongoose.connection.readyState !== 1) return res.status(503).json({ error: "Database not connected" });
     const doc = await DeactivationRequest.findOne({ uid: req.user.uid }).sort({ createdAt: -1 }).lean();
-    return res.json(doc || null);
+    const { uid, ...rest } = doc || {};
+    return res.json(rest || null);
   } catch (err) {
     console.error("[deactivation:me] error:", err);
     res.status(500).json({ error: "failed" });
@@ -734,7 +759,7 @@ app.get("/api/account/deactivation/me", requireAuth, async (req, res) => {
 app.get("/api/admin/deactivation-requests", requireAuth, requireAdmin, async (_req, res) => {
   try {
     const docs = await DeactivationRequest.find({}).sort({ createdAt: -1 }).limit(500).lean();
-    res.json(docs);
+    res.json(docs); // Admins can see uid
   } catch (err) {
     console.error("[admin:deactivation list] error:", err);
     res.status(500).json({ error: "failed" });
@@ -776,6 +801,7 @@ app.post("/api/admin/deactivation-requests/:id/decision", requireAuth, requireAd
 });
 
 /* ------------------- Who am I ------------------- */
+// 🔒 Hide uid for non-admins (owners shouldn't see their UID)
 app.get("/api/me", requireAuth, async (req, res) => {
   try {
     let pro = null;
@@ -791,38 +817,23 @@ app.get("/api/me", requireAuth, async (req, res) => {
         .lean();
     }
 
-    res.json({
-      uid: req.user.uid,
+    const payload = {
+      // uid hidden on purpose
       email: req.user.email,
       isPro: !!pro,
       proId: pro?._id?.toString() || null,
       proName: pro?.name || null,
       lga: pro?.lga || null,
-      isAdmin: ADMIN_UIDS.includes(req.user.uid),
+      isAdmin: isAdmin(req.user.uid),
       hasPin: !!appDoc?.withdrawPinHash,
       deactivationPending: latestDeact?.status === "pending",
       deactivationStatus: latestDeact?.status || null,
-    });
+    };
+
+    res.json(payload);
   } catch (err) {
     console.error("[me] error:", err);
     res.status(500).json({ error: "failed" });
-  }
-});
-
-/* ------------------- Dev reset ------------------- */
-app.delete("/api/dev/reset", async (_req, res) => {
-  try {
-    if (mongoose.connection.readyState === 1) {
-      await Application.deleteMany({});
-      await Pro.deleteMany({});
-      await Booking.deleteMany({});
-      await DeactivationRequest.deleteMany({});
-      console.log("[reset] ✅ MongoDB collections cleared.");
-    }
-    res.json({ ok: true, message: "All applications, pros, bookings, deactivation requests deleted." });
-  } catch (err) {
-    console.error("[reset] ❌ Reset error:", err);
-    res.status(500).json({ error: "Failed to reset database" });
   }
 });
 
@@ -830,6 +841,7 @@ app.delete("/api/dev/reset", async (_req, res) => {
 app.get("/api/health", (_req, res) => res.json({ ok: true, time: new Date().toISOString() }));
 
 /* ------------------- Barbers ------------------- */
+// 🔒 make sure no UID leaks in public cards
 app.get("/api/barbers", async (req, res) => {
   try {
     if (mongoose.connection.readyState !== 1) return res.status(503).json({ error: "Database not connected" });
@@ -837,7 +849,7 @@ app.get("/api/barbers", async (req, res) => {
     const q = {};
     if (lga) q.lga = lga.toUpperCase();
     const docs = await Pro.find(q).lean();
-    return res.json(docs.map(proToBarber));
+    return res.json(docs.map((d) => sanitizeBarberCard(proToBarber(d))));
   } catch (err) {
     console.error("[barbers] DB error:", err);
     res.status(500).json({ error: "Failed to load barbers" });
@@ -849,7 +861,7 @@ app.get("/api/barbers/:id", async (req, res) => {
     if (mongoose.connection.readyState !== 1) return res.status(503).json({ error: "Database not connected" });
     const doc = await Pro.findById(req.params.id).lean();
     if (!doc) return res.status(404).json({ error: "Not found" });
-    return res.json(proToBarber(doc));
+    return res.json(sanitizeBarberCard(proToBarber(doc)));
   } catch (err) {
     console.error("[barbers:id] DB error:", err);
     res.status(500).json({ error: "Failed to load barber" });
@@ -899,7 +911,7 @@ app.get("/api/barbers/nearby", async (req, res) => {
         { $limit: 100 },
       ]);
       items = agg.map((d) => {
-        const shaped = proToBarber(d);
+        const shaped = sanitizeBarberCard(proToBarber(d));
         return { ...shaped, distanceKm: Math.round((d.dist / 1000) * 10) / 10 };
       });
     } catch {
@@ -911,7 +923,7 @@ app.get("/api/barbers/nearby", async (req, res) => {
       if (lga) q = { lga };
       else if (state) q = { lga: new RegExp(`^${state}\\b`, "i") };
       const docs = await Pro.find(q).limit(100).lean();
-      items = docs.map((d) => ({ ...proToBarber(d), distanceKm: null }));
+      items = docs.map((d) => ({ ...sanitizeBarberCard(proToBarber(d)), distanceKm: null }));
     }
 
     return res.json({ mode: used, radiusKm, count: items.length, items });
@@ -921,37 +933,43 @@ app.get("/api/barbers/nearby", async (req, res) => {
   }
 });
 
-/* ------------------- Nigeria Geo (static) ------------------- */
+/* ------------------- Nigeria Geo (robust) ------------------- */
 app.get("/api/geo/ng", (_req, res) => {
   try {
-    if (!NG_GEO) return res.status(500).json({ error: "geo_load_failed" });
-    res.json({ states: Object.keys(NG_GEO), lgas: NG_GEO });
+    const states = Object.keys(NG_GEO || {});
+    return res.json({ states, lgas: NG_GEO });
   } catch (e) {
     console.error("[geo/ng] error:", e);
-    res.status(500).json({ error: "geo_load_failed" });
+    // ✅ Return safe empty response instead of 500
+    return res.json({ states: [], lgas: {} });
   }
 });
+
 app.get("/api/geo/ng/states", (_req, res) => {
   try {
-    if (!NG_GEO) return res.status(500).json({ error: "geo_load_failed" });
-    res.json(Object.keys(NG_GEO));
+    const states = Object.keys(NG_GEO || {});
+    return res.json(states);
   } catch (e) {
     console.error("[geo/ng/states] error:", e);
-    res.status(500).json({ error: "geo_states_failed" });
+    return res.json([]);
   }
 });
+
 app.get("/api/geo/ng/lgas/:state", (req, res) => {
   try {
-    if (!NG_GEO) return res.status(500).json({ error: "geo_load_failed" });
     const st = decodeURIComponent(req.params.state || "").trim();
-    const lgas = NG_GEO[st];
-    if (!lgas) return res.status(404).json({ error: "state_not_found" });
-    res.json(lgas);
+    const lgas = (NG_GEO && NG_GEO[st]) || [];
+    if (!Array.isArray(lgas) || lgas.length === 0) {
+      return res.status(404).json({ error: "state_not_found" });
+    }
+    return res.json(lgas);
   } catch (e) {
     console.error("[geo/ng/lgas/:state] error:", e);
-    res.status(500).json({ error: "geo_lgas_failed" });
+    // ✅ Never crash — return friendly error
+    return res.status(404).json({ error: "state_not_found" });
   }
 });
+
 
 /* ------------------- WebRTC: ICE servers ------------------- */
 app.get("/api/webrtc/ice", (_req, res) => {
@@ -978,17 +996,99 @@ app.get("/api/webrtc/ice", (_req, res) => {
   }
 });
 
+/* ------------------- ☁️ Cloudinary SDK config ------------------- */
+const CLOUDINARY_CLOUD_NAME =
+  process.env.CLOUDINARY_CLOUD_NAME ||
+  process.env.VITE_CLOUDINARY_CLOUD_NAME ||
+  process.env.CLOUDINARY_CLOUD ||
+  process.env.VITE_CLOUDINARY_CLOUD ||
+  "";
+const CLOUDINARY_API_KEY = process.env.CLOUDINARY_API_KEY || "";
+const CLOUDINARY_API_SECRET = process.env.CLOUDINARY_API_SECRET || "";
+
+if (CLOUDINARY_CLOUD_NAME && CLOUDINARY_API_KEY && CLOUDINARY_API_SECRET) {
+  cloudinary.config({
+    cloud_name: CLOUDINARY_CLOUD_NAME,
+    api_key: CLOUDINARY_API_KEY,
+    api_secret: CLOUDINARY_API_SECRET,
+  });
+  console.log("[cloudinary] ✅ SDK configured");
+} else {
+  console.warn("[cloudinary] ⚠️ Missing env (CLOUDINARY_CLOUD_NAME / API_KEY / API_SECRET). Signed uploads disabled.");
+}
+
+/* ------------------- ☁️ Signed uploads helper ------------------- */
+// Frontend can call this to get a signature (works with your SmartUpload/NativeUpload)
+app.post("/api/uploads/sign", requireAuth, async (req, res) => {
+  try {
+    if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_API_KEY || !CLOUDINARY_API_SECRET) {
+      return res.status(500).json({ error: "cloudinary_env_missing" });
+    }
+    const folder = (req.body && req.body.folder) || "kpocha/pro-apps";
+    const timestamp = Math.floor(Date.now() / 1000);
+    // Sign the exact params you'll send (do NOT include file or api_key in the signature)
+    const paramsToSign = { folder, timestamp };
+    const signature = cloudinary.utils.api_sign_request(paramsToSign, CLOUDINARY_API_SECRET);
+
+    res.json({
+      cloudName: CLOUDINARY_CLOUD_NAME,
+      apiKey: CLOUDINARY_API_KEY,
+      timestamp,
+      signature,
+      folder,
+    });
+  } catch (e) {
+    console.error("[cloudinary:sign] error", e?.message || e);
+    res.status(500).json({ error: "sign_failed" });
+  }
+});
+
+/* ------------------- ☁️ (Optional) Server-side liveness upload ------------------- */
+/* If you ever want the browser to POST the captured video to your server (instead of direct Cloudinary),
+   you can send JSON { dataUrl: "data:video/webm;base64,...." } to this endpoint.
+   NOTE: Your current frontend already works with unsigned preset; this is just available if needed. */
+app.post("/api/uploads/liveness", requireAuth, express.json({ limit: "50mb" }), async (req, res) => {
+  try {
+    if (!CLOUDINARY_API_SECRET) return res.status(500).json({ error: "cloudinary_env_missing" });
+
+    const dataUrl = req.body?.dataUrl;
+    if (!dataUrl || typeof dataUrl !== "string" || !dataUrl.startsWith("data:")) {
+      return res.status(400).json({ error: "invalid_data" });
+    }
+
+    const folder = "kpocha/pro-apps/liveness";
+    const result = await cloudinary.uploader.upload(dataUrl, {
+      folder,
+      resource_type: "video",
+      overwrite: true,
+      context: { owner_uid: req.user.uid },
+    });
+
+    return res.json({
+      ok: true,
+      url: result.secure_url,
+      publicId: result.public_id,
+      bytes: result.bytes,
+      format: result.format,
+      duration: result.duration,
+    });
+  } catch (e) {
+    console.error("[cloudinary:liveness] upload error", e?.message || e);
+    res.status(500).json({ error: "upload_failed" });
+  }
+});
+
 /* ------------------- Chatbase user verification ------------------- */
+// If you must also hide UID here, keep EXPOSE false (default)
 const CHATBASE_SECRET = process.env.CHATBASE_SECRET || "";
+const CHATBASE_EXPOSE_UID = (process.env.CHATBASE_EXPOSE_UID || "false").toLowerCase() === "true";
 
 app.get("/api/chatbase/userhash", requireAuth, async (req, res) => {
   try {
-    if (!CHATBASE_SECRET) {
-      return res.status(500).json({ error: "chatbase_secret_missing" });
-    }
-    const userId = req.user.uid; // Firebase UID
+    if (!CHATBASE_SECRET) return res.status(500).json({ error: "chatbase_secret_missing" });
+    const userId = req.user.uid;
     const userHash = crypto.createHmac("sha256", CHATBASE_SECRET).update(userId).digest("hex");
-    return res.json({ userId, userHash });
+    return res.json(CHATBASE_EXPOSE_UID ? { userId, userHash } : { userHash });
   } catch (e) {
     return res.status(500).json({ error: "hash_failed" });
   }
