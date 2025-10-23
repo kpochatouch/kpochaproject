@@ -76,11 +76,16 @@ export default function Signup() {
         setAuthToken(tok);
       } catch {}
 
-      // non-blocking verification email
+      // 🔑 Send verification email with a return URL to our handler page
       try {
-        await sendEmailVerification(cred.user);
-        setOk("Verification email sent. You can continue and verify later.");
-      } catch {}
+        await sendEmailVerification(cred.user, {
+          url: `${window.location.origin}/auth/verify`,
+        });
+        setOk("Verification email sent. Please check your inbox (and spam). You can continue and verify later.");
+      } catch (e) {
+        // Non-blocking
+        console.warn("sendEmailVerification failed:", e);
+      }
 
       // seed profile with name/phone if available (optional)
       try {

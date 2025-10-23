@@ -2,40 +2,56 @@
 import { useMemo, useRef, useState } from "react";
 import { api } from "../lib/api";
 
-// Optional unsigned preset fallback
+// Optional unsigned preset fallback (only used if /api/uploads/sign is unavailable)
 const CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || "";
-const UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET || "";
+const UPLOAD_PRESET =
+  import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET ||
+  import.meta.env.VITE_CLOUDINARY_UNSIGNED_PRESET ||
+  "";
 
 /**
  * SmartUpload: iOS-friendly uploader with 3 choices:
- *  - Upload from files (Photos / Files picker; supports images & PDFs)
+ *  - Upload from files (Photos / Files picker; supports images & PDFs based on `accept`)
  *  - Take a selfie (front camera)
  *  - Take photo/video (rear camera)
  *
  * Props:
  *  - title?: string (button label)
  *  - folder?: string (Cloudinary folder; default "kpocha")
- *  - onUploaded: (url: string) => void
- *  - accept?: string (override accepted MIME list)
+ *  - onUploaded?: (url: string) => void
+ *  - onUploadedMany?: (urls: string[]) => void
+ *  - accept?: string (override accepted MIME list; defaults to "image/*,application/pdf")
+ *  - multiple?: boolean (default false; used in the Files picker only)
  *  - disabled?: boolean
+ *
+ * Usage example:
+ *  <SmartUpload
+ *     title="Upload"
+ *     folder="kpocha/pro-apps"
+ *     accept="image/*,application/pdf"
+ *     onUploaded={(url) => setIdentity({ ...identity, idUrl: url })}
+ *  />
  */
 export default function SmartUpload({
   title = "Upload",
   folder = "kpocha",
   onUploaded,
+  onUploadedMany,
   accept,
+  multiple = false,
   disabled = false,
 }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
+  const [err, setErr] = useState("");
 
   // 3 hidden inputs for 3 flows (avoid toggling capture dynamically)
   const inputFilesRef = useRef(null);
   const inputSelfieRef = useRef(null);
   const inputRearRef = useRef(null);
 
-  // Defaults: allow images + PDFs for “files” path
+  // Defaults: allow images + PDFs for “files” path unless caller overrides
   const acceptFiles = useMemo(
     () => accept || "image/*,application/pdf",
     [accept]
@@ -43,9 +59,9 @@ export default function SmartUpload({
 
   async function getSignedParams(targetFolder) {
     try {
-      // If your /api/uploads/sign route exists, use it.
+      // Prefer your server signature route (safer than unsigned presets)
       const { data } = await api.post("/api/uploads/sign", { folder: targetFolder });
-      if (data?.signature && data?.apiKey && data?.timestamp) {
+      if (data?.signature && data?.apiKey && data?.timestamp && data?.cloudName) {
         return {
           type: "signed",
           cloudName: data.cloudName,
@@ -56,16 +72,16 @@ export default function SmartUpload({
         };
       }
     } catch {
-      // fall back below
+      // falls through to unsigned
     }
-    // Fallback to unsigned preset (must be configured in Cloudinary)
+    // Fallback to unsigned preset (must exist in Cloudinary)
     if (!CLOUD_NAME || !UPLOAD_PRESET) {
-      throw new Error("Uploads unavailable (no signature or unsigned preset).");
+      throw new Error("Uploads unavailable (no signature and no unsigned preset configured).");
     }
     return { type: "unsigned", cloudName: CLOUD_NAME, uploadPreset: UPLOAD_PRESET, folder: targetFolder };
   }
 
-  async function uploadToCloudinary(file) {
+  async function uploadOne(file) {
     const meta = await getSignedParams(folder);
     const form = new FormData();
 
@@ -93,23 +109,37 @@ export default function SmartUpload({
   }
 
   async function handlePicked(e) {
-    const file = e?.target?.files?.[0];
-    if (!file) return;
+    const list = Array.from(e?.target?.files || []);
+    // reset input so picking the same file again re-fires change
+    e.target.value = "";
+
+    if (!list.length) return;
     setMsg("");
+    setErr("");
     setBusy(true);
+
     try {
-      const url = await uploadToCloudinary(file);
-      onUploaded?.(url);
-      setMsg("Uploaded ✓");
-    } catch (err) {
-      setMsg(err?.message || "Upload failed");
+      const urls = [];
+      for (const f of list) {
+        // Defensive: small size hint (optional)
+        // if (f.size > 50 * 1024 * 1024) throw new Error("File too large (50MB max).");
+        const u = await uploadOne(f);
+        urls.push(u);
+      }
+      if (urls.length > 1) {
+        onUploadedMany?.(urls);
+      }
+      if (urls.length >= 1) {
+        onUploaded?.(urls[0]);
+      }
+      setMsg(urls.length > 1 ? `Uploaded ${urls.length} files ✓` : "Uploaded ✓");
+      // Clear success message shortly
+      setTimeout(() => setMsg(""), 1800);
+    } catch (error) {
+      setErr(error?.message || "Upload failed");
     } finally {
       setBusy(false);
-      // reset input value so picking the same file again re-fires change
-      e.target.value = "";
       setOpen(false);
-      // Clear success msg after a short while
-      setTimeout(() => setMsg(""), 1800);
     }
   }
 
@@ -125,18 +155,19 @@ export default function SmartUpload({
         {busy ? "Uploading…" : title}
       </button>
 
-      {msg ? <div className="text-xs text-zinc-400 mt-1">{msg}</div> : null}
+      {msg ? <div className="text-xs text-emerald-400 mt-1">{msg}</div> : null}
+      {err ? <div className="text-xs text-red-400 mt-1">{err}</div> : null}
 
       {/* Small dropdown menu */}
       {open && !disabled && (
-        <div className="absolute z-10 mt-1 w-56 rounded-md border border-zinc-800 bg-black shadow-lg">
+        <div className="absolute z-10 mt-1 w-64 rounded-md border border-zinc-800 bg-black shadow-lg">
           <MenuItem
             onClick={() => {
               setOpen(false);
               inputFilesRef.current?.click();
             }}
-            text="Upload from files (Photos / Files, supports PDF)"
-            sub="Recommended on iOS"
+            text={`Upload from files${multiple ? " (multi-select)" : ""}`}
+            sub="Photos / Files (iOS-friendly)"
           />
           <Divider />
           <MenuItem
@@ -157,15 +188,16 @@ export default function SmartUpload({
       )}
 
       {/* Hidden inputs */}
-      {/* 1) Files picker — no capture (shows Photos/Files picker on iOS) */}
+      {/* 1) Files picker — no capture (shows Photos/Files picker on iOS). Respects accept & multiple */}
       <input
         ref={inputFilesRef}
         type="file"
         accept={acceptFiles}
+        multiple={multiple}
         className="hidden"
         onChange={handlePicked}
       />
-      {/* 2) Front camera still image capture */}
+      {/* 2) Front camera still image capture (forces camera UI on mobile) */}
       <input
         ref={inputSelfieRef}
         type="file"
@@ -174,7 +206,7 @@ export default function SmartUpload({
         className="hidden"
         onChange={handlePicked}
       />
-      {/* 3) Rear camera: allow image or video */}
+      {/* 3) Rear camera: allow image or video (forces camera UI on mobile) */}
       <input
         ref={inputRearRef}
         type="file"

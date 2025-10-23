@@ -1,3 +1,4 @@
+// apps/web/src/App.jsx
 import { Routes, Route, Navigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { api, setAuthToken } from "./lib/api";
@@ -34,38 +35,66 @@ import Navbar from "./components/Navbar.jsx";
 import Footer from "./components/Footer.jsx";
 import RequireAuth from "./components/RequireAuth.jsx";
 
-/* ---------- Chatbase loader (verified users when logged in) ---------- */
+/* ---------- Chatbase loader (only for verified pros OR verified users) ---------- */
 function useChatbase() {
   useEffect(() => {
     const CHATBOT_ID = import.meta.env.VITE_CHATBASE_ID;
     if (!CHATBOT_ID) return;
 
-    async function init() {
-      const cfg = { chatbotId: CHATBOT_ID };
+    let alive = true;
 
+    async function init() {
       try {
-        const r = await api.get("/api/chatbase/userhash");
-        if (r?.data?.userId && r?.data?.userHash) {
-          cfg.userId = r.data.userId;
-          cfg.userHash = r.data.userHash;
+        // Load minimal user state
+        const meRes = await api.get("/api/me").catch(() => ({ data: null }));
+        const me = meRes?.data || null;
+
+        // Only show widget for signed-in users
+        if (!me) return;
+
+        // If user is a pro, check their verification status
+        let verifiedOk = false;
+        if (me.isPro) {
+          const pro = await api.get("/api/pros/me").then(r => r.data).catch(() => null);
+          verifiedOk = pro?.verificationStatus === "verified";
+        } else {
+          // For non-pros, you can also allow verified email-only users to access the bot if desired.
+          // If you want to strictly limit to verified pros, leave verifiedOk = false here.
+          verifiedOk = false;
+        }
+
+        if (!alive || !verifiedOk) return;
+
+        const cfg = { chatbotId: CHATBOT_ID };
+
+        // Optionally pass userId/userHash if your backend supports it
+        try {
+          const r = await api.get("/api/chatbase/userhash");
+          if (r?.data?.userId && r?.data?.userHash) {
+            cfg.userId = r.data.userId;
+            cfg.userHash = r.data.userHash;
+          }
+        } catch {
+          // anonymous fallback (still verified for showing widget)
+        }
+
+        window.chatbaseConfig = cfg;
+
+        if (!document.getElementById(CHATBOT_ID)) {
+          const s = document.createElement("script");
+          s.src = "https://www.chatbase.co/embed.min.js";
+          s.id = CHATBOT_ID;
+          s.domain = "www.chatbase.co";
+          s.defer = true;
+          document.body.appendChild(s);
         }
       } catch {
-        // anonymous fallback
-      }
-
-      window.chatbaseConfig = cfg;
-
-      if (!document.getElementById(CHATBOT_ID)) {
-        const s = document.createElement("script");
-        s.src = "https://www.chatbase.co/embed.min.js";
-        s.id = CHATBOT_ID;
-        s.domain = "www.chatbase.co";
-        s.defer = true;
-        document.body.appendChild(s);
+        // ignore
       }
     }
 
     init();
+    return () => { alive = false; };
   }, []);
 }
 
@@ -92,6 +121,35 @@ function RequireRole({ role, children }) {
 
   if (ok === null) return <div className="p-6">Loading…</div>;
   return ok ? children : <Navigate to="/" replace />;
+}
+
+/* ---------- Verified Pro guard ---------- */
+function RequireProVerified({ children }) {
+  const [state, setState] = useState({ loading: true, ok: false });
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        // Must be a pro
+        const me = await api.get("/api/me").then(r => r.data);
+        if (!me?.isPro) {
+          if (alive) setState({ loading: false, ok: false });
+          return;
+        }
+        // Must be verified
+        const pro = await api.get("/api/pros/me").then(r => r.data).catch(() => null);
+        const isVerified = pro?.verificationStatus === "verified";
+        if (alive) setState({ loading: false, ok: !!isVerified });
+      } catch {
+        if (alive) setState({ loading: false, ok: false });
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  if (state.loading) return <div className="p-6">Loading…</div>;
+  return state.ok ? children : <Navigate to="/become" replace />;
 }
 
 /* ---------- Smart Wallet ---------- */
@@ -262,13 +320,13 @@ export default function App() {
             }
           />
 
-          {/* Pro Dashboard */}
+          {/* Pro Dashboard — ✅ verified-only */}
           <Route
             path="/pro-dashboard"
             element={
-              <RequireRole role="pro">
+              <RequireProVerified>
                 <ProDashboard />
-              </RequireRole>
+              </RequireProVerified>
             }
           />
           <Route path="/pro" element={<Navigate to="/pro-dashboard" replace />} />

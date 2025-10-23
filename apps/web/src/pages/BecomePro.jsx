@@ -4,12 +4,13 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import NgGeoPicker from "../components/NgGeoPicker.jsx";
 import PhoneOTP from "../components/PhoneOTP.jsx";
+import SmartUpload from "../components/SmartUpload.jsx";
 
-/** ========= Cloudinary tiny helper (frontend, unsigned) ========= **/
-/* Accept either naming style:
-   - VITE_CLOUDINARY_CLOUD, VITE_CLOUDINARY_UNSIGNED_PRESET
-   - VITE_CLOUDINARY_CLOUD_NAME, VITE_CLOUDINARY_UPLOAD_PRESET
-*/
+// ✅ Email verification helpers (Firebase)
+import { auth } from "../lib/firebase";
+import { sendEmailVerification, reload } from "firebase/auth";
+
+/** ========= Cloudinary tiny helper (signed first, unsigned fallback) ========= **/
 const CLOUD =
   import.meta.env.VITE_CLOUDINARY_CLOUD ||
   import.meta.env.VITE_CLOUDINARY_CLOUD_NAME ||
@@ -19,7 +20,30 @@ const PRESET =
   import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET ||
   "";
 
+// used by LivenessCapture (webcam recorder)
 async function uploadToCloudinary(file, { folder = "kpocha/pro-apps" } = {}) {
+  // Try signed first (safer), fall back to unsigned preset
+  try {
+    const { data } = await api.post("/api/uploads/sign", { folder });
+    if (data?.signature && data?.apiKey && data?.timestamp && data?.cloudName) {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("api_key", data.apiKey);
+      fd.append("timestamp", data.timestamp);
+      fd.append("signature", data.signature);
+      fd.append("folder", data.folder || folder);
+      const res = await fetch(`https://api.cloudinary.com/v1_1/${data.cloudName}/auto/upload`, {
+        method: "POST",
+        body: fd,
+      });
+      const json = await res.json();
+      if (!res.ok || !json.secure_url) throw new Error(json.error?.message || "Upload failed");
+      return json.secure_url;
+    }
+  } catch {
+    // ignore, try unsigned below
+  }
+  // Unsigned fallback
   if (!CLOUD || !PRESET) {
     const missing = [
       !CLOUD && "(cloud) VITE_CLOUDINARY_CLOUD or VITE_CLOUDINARY_CLOUD_NAME",
@@ -46,160 +70,63 @@ async function uploadToCloudinary(file, { folder = "kpocha/pro-apps" } = {}) {
 const FIELD =
   "w-full rounded-lg border border-zinc-800 bg-zinc-950 text-zinc-200 placeholder-zinc-500 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#d4af37]/30";
 
-/** ========= Camera-aware uploader: file + camera fallback ========= */
-function NativeUpload({
-  label = "Upload",
-  accept = "image/*,video/*",
-  capture = "user",
-  onUploaded,
-  folder = "kpocha/pro-apps",
-  className = "",
-}) {
-  const [busy, setBusy] = useState(false);
-  const inputRef = useRef();
+/** ========= Quick camera buttons (always visible for iOS/Android) ========= **/
+function IOSCameraButtons({ onUploaded, folder = "kpocha/pro-apps", allowVideo = false }) {
+  const selfieRef = useRef(null);
+  const rearRef = useRef(null);
 
-  async function handleFiles(files) {
-    if (!files?.length) return;
-    setBusy(true);
+  async function handle(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
     try {
-      const url = await uploadToCloudinary(files[0], { folder });
+      const url = await uploadToCloudinary(file, { folder });
       onUploaded?.(url);
-    } catch (e) {
-      alert(e.message || "Upload failed");
+    } catch (err) {
+      alert(err?.message || "Upload failed");
     } finally {
-      setBusy(false);
+      e.target.value = ""; // allow re-selecting same capture
     }
   }
 
-  const [showCam, setShowCam] = useState(false);
   return (
-    <div className={`flex items-center gap-2 ${className}`}>
+    <div className="flex gap-2">
       <input
-        ref={inputRef}
+        ref={selfieRef}
         type="file"
-        accept={accept}
-        capture={capture}
+        accept="image/*"
+        capture="user"
         className="hidden"
-        onChange={(e) => handleFiles(e.target.files)}
+        onChange={handle}
+      />
+      <input
+        ref={rearRef}
+        type="file"
+        accept={allowVideo ? "image/*,video/*" : "image/*"}
+        capture="environment"
+        className="hidden"
+        onChange={handle}
       />
       <button
         type="button"
-        className="px-3 py-2 rounded border border-zinc-700 hover:bg-zinc-900"
-        onClick={() => inputRef.current?.click()}
-        disabled={busy}
-        title="Open camera on mobile; file picker on desktop"
+        className="px-2 py-1 text-xs rounded border border-zinc-700 hover:bg-zinc-900"
+        onClick={() => selfieRef.current?.click()}
+        title="Open front camera"
       >
-        {busy ? "Uploading…" : label}
+        Selfie Camera
       </button>
-
-      {/* Desktop camera */}
       <button
         type="button"
-        className="text-xs underline text-zinc-400"
-        onClick={() => setShowCam(true)}
-        title="Use webcam (desktop fallback)"
+        className="px-2 py-1 text-xs rounded border border-zinc-700 hover:bg-zinc-900"
+        onClick={() => rearRef.current?.click()}
+        title="Open rear camera"
       >
-        Open Camera (beta)
+        Rear Camera
       </button>
-
-      {showCam && (
-        <CameraModal
-          onClose={() => setShowCam(false)}
-          onCapture={async (blob) => {
-            setBusy(true);
-            try {
-              const file = new File([blob], "capture.jpg", { type: blob.type || "image/jpeg" });
-              const url = await uploadToCloudinary(file, { folder });
-              onUploaded?.(url);
-              setShowCam(false);
-            } catch (e) {
-              alert(e.message || "Upload failed");
-            } finally {
-              setBusy(false);
-            }
-          }}
-        />
-      )}
     </div>
   );
 }
 
-/** Simple webcam modal that snaps 1 frame (Safari-friendly) */
-function CameraModal({ onClose, onCapture }) {
-  const videoRef = useRef(null);
-  const canvasRef = useRef(null);
-  const [err, setErr] = useState("");
-
-  useEffect(() => {
-    let stream;
-    (async () => {
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: "user" } },
-          audio: false,
-        });
-        if (videoRef.current) {
-          // iOS/Safari quirks
-          videoRef.current.muted = true;
-          videoRef.current.setAttribute("playsinline", "true");
-          videoRef.current.srcObject = stream;
-          videoRef.current.onloadedmetadata = () => {
-            videoRef.current?.play?.();
-          };
-        }
-      } catch {
-        setErr("Camera access failed. Please allow permission and use HTTPS.");
-      }
-    })();
-    return () => {
-      stream?.getTracks()?.forEach((t) => t.stop());
-    };
-  }, []);
-
-  const snap = () => {
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    if (!video || !canvas) return;
-    canvas.width = video.videoWidth || 720;
-    canvas.height = video.videoHeight || 720;
-    const ctx = canvas.getContext("2d");
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    canvas.toBlob((blob) => blob && onCapture(blob), "image/jpeg", 0.9);
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[9999]">
-      <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-4 w-[min(92vw,480px)]">
-        <div className="text-sm text-zinc-400 mb-2">
-          Tip: On iOS use Safari, and ensure the site is HTTPS. Video is muted &amp; plays inline.
-        </div>
-        {err && <div className="text-red-400 text-sm mb-2">{err}</div>}
-        <video
-          ref={videoRef}
-          playsInline
-          muted
-          autoPlay
-          className="w-full rounded-lg bg-black aspect-video"
-        />
-        <canvas ref={canvasRef} className="hidden" />
-        <div className="mt-3 flex gap-2 justify-end">
-          <button type="button" onClick={onClose} className="px-3 py-2 rounded border border-zinc-700">
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={snap}
-            className="px-3 py-2 rounded bg-[#d4af37] text-black font-semibold"
-          >
-            Capture
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/** ========= SMART Liveness (video) with on-device checks ========= */
+/** ========= SMART Liveness (video) with on-device checks ========= **/
 /* Loads MediaPipe Tasks from CDN. Falls back to simple prompts if unavailable. */
 function LivenessCapture({ onUploaded, folder = "kpocha/pro-apps/liveness" }) {
   const [open, setOpen] = useState(false);
@@ -243,13 +170,11 @@ let _faceLmPromise = null;
 async function loadFaceLandmarkerFromCDN() {
   if (_faceLmPromise) return _faceLmPromise;
   _faceLmPromise = new Promise((resolve, reject) => {
-    // If already available
     if (window.FaceLandmarker && window.FilesetResolver) {
       resolve({ FaceLandmarker: window.FaceLandmarker, FilesetResolver: window.FilesetResolver });
       return;
     }
     const script = document.createElement("script");
-    // Pinned version known to work broadly
     const ver = "0.10.0";
     script.src = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${ver}/vision_bundle.js`;
     script.async = true;
@@ -284,21 +209,13 @@ function LivenessModal({ onClose, onUploaded, onError, onBusy, folder }) {
   const [step, setStep] = useState(0); // 0 straight, 1 right, 2 left, 3 blink twice, 4 done
   const [status, setStatus] = useState({ straight: false, right: false, left: false, blinks: 0 });
   const [yawDeg, setYawDeg] = useState(0);
-  const [blinkNow, setBlinkNow] = useState(false);
-  const rightSignRef = useRef(null); // determines which sign means "right" on this device
-  const straightHoldMsRef = useRef(0);
   const lastBlinkStateRef = useRef(false);
+  const rightSignRef = useRef(null);
+  const straightHoldMsRef = useRef(0);
   const lastTsRef = useRef(0);
 
   // Simple fallback timer (used if AI fails)
   const timerRef = useRef(null);
-
-  const stepsLabels = [
-    "Look straight",
-    "Turn your head to the right",
-    "Turn your head to the left",
-    "Blink twice",
-  ];
 
   useEffect(() => {
     let stream;
@@ -416,8 +333,8 @@ function LivenessModal({ onClose, onUploaded, onError, onBusy, folder }) {
       let i = 0;
       timerRef.current = setInterval(() => {
         i += 1;
-        if (i < stepsLabels.length) setStep(i);
-        if (i >= stepsLabels.length + 2) {
+        if (i < 4) setStep(i);
+        if (i >= 6) {
           clearInterval(timerRef.current);
           stopRecordingAndUpload();
         }
@@ -439,42 +356,30 @@ function LivenessModal({ onClose, onUploaded, onError, onBusy, folder }) {
       const now = performance.now();
       const res = faceLm.detectForVideo(video, now);
       if (res?.faceLandmarks?.length) {
-        // --- Orientation (yaw) from the 4x4 transform matrix ---
+        // yaw from transform matrix
         const mat = res.facialTransformationMatrixes?.[0]?.data || null;
         if (mat && mat.length >= 12) {
-          // 3x3 rotation (row-major) elements
-          const r00 = mat[0], r01 = mat[1], r02 = mat[2];
-          const r10 = mat[4], r11 = mat[5], r12 = mat[6];
-          const r20 = mat[8], r21 = mat[9], r22 = mat[10];
-          // Estimate yaw (rotation around Y). This convention is robust enough for our purpose.
+          const r20 = mat[8];
           const yaw = Math.asin(Math.max(-1, Math.min(1, -r20)));
           const yawDegrees = (yaw * 180) / Math.PI;
           setYawDeg(Math.round(yawDegrees));
 
-          // --- Blink detection from blendshapes (edge-detect) ---
+          // blinks
           const blend = res.faceBlendshapes?.[0]?.categories || [];
-          const blinkL = getBlend(blend, "eyeBlinkLeft") > 0.5;
-          const blinkR = getBlend(blend, "eyeBlinkRight") > 0.5;
-          const bothBlink = blinkL && blinkR;
-          setBlinkNow(bothBlink);
-
-          // Edge detect: count a blink only when transitioning from open -> blink
+          const bothBlink = getBlend(blend, "eyeBlinkLeft") > 0.5 && getBlend(blend, "eyeBlinkRight") > 0.5;
           if (bothBlink && !lastBlinkStateRef.current) {
             setStatus((s) => ({ ...s, blinks: Math.min(2, s.blinks + 1) }));
           }
           lastBlinkStateRef.current = bothBlink;
 
-          // --- Step logic ---
+          // steps
           const dt = now - (lastTsRef.current || now);
           lastTsRef.current = now;
-
-          const thrYaw = 12; // degrees
+          const thrYaw = 12;
           const nearCenter = Math.abs(yawDegrees) < 8;
 
           setStatus((s) => {
             let next = { ...s };
-
-            // Step 0: look straight for ~0.6s
             if (!next.straight) {
               if (nearCenter) {
                 straightHoldMsRef.current += dt;
@@ -486,29 +391,21 @@ function LivenessModal({ onClose, onUploaded, onError, onBusy, folder }) {
                 straightHoldMsRef.current = 0;
               }
             } else if (!next.right) {
-              // Step 1: turn right (define sign on first success)
               if (Math.abs(yawDegrees) > thrYaw) {
-                const sgn = yawDegrees > 0 ? 1 : -1;
-                rightSignRef.current = sgn; // define which sign is "right"
+                rightSignRef.current = yawDegrees > 0 ? 1 : -1;
                 next.right = true;
                 setStep(2);
               }
             } else if (!next.left) {
-              // Step 2: turn left (opposite sign)
               const rs = rightSignRef.current || 1;
               if (yawDegrees * rs < -thrYaw) {
                 next.left = true;
                 setStep(3);
               }
-            } else {
-              // Step 3: blink twice
-              if (next.blinks >= 2) {
-                setStep(4);
-                // Done!
-                stopRecordingAndUpload();
-                // Stop loop a moment later
-                setTimeout(() => cancelAnimationFrame(rafRef.current), 100);
-              }
+            } else if (next.blinks >= 2) {
+              setStep(4);
+              stopRecordingAndUpload();
+              setTimeout(() => cancelAnimationFrame(rafRef.current), 120);
             }
             return next;
           });
@@ -518,6 +415,8 @@ function LivenessModal({ onClose, onUploaded, onError, onBusy, folder }) {
     };
     rafRef.current = requestAnimationFrame(loop);
   }
+
+  const stepsLabels = ["Look straight", "Turn your head to the right", "Turn your head to the left", "Blink twice"];
 
   return (
     <div className="fixed inset-0 bg-black/70 z-[9999] flex items-center justify-center">
@@ -535,20 +434,10 @@ function LivenessModal({ onClose, onUploaded, onError, onBusy, folder }) {
             <Badge ok={status.left}>Left</Badge>
             <Badge ok={status.blinks >= 2}>Blink x2</Badge>
           </div>
-          {aiReady && !aiFailed ? (
-            <div className="text-zinc-400">AI ✓ {yawDeg ? `Yaw ${yawDeg}°` : ""}</div>
-          ) : (
-            <div className="text-zinc-400">Simple mode</div>
-          )}
+          <div className="text-zinc-400">{aiReady && !aiFailed ? `AI ✓ Yaw ${yawDeg}°` : "Simple mode"}</div>
         </div>
 
-        <video
-          ref={videoRef}
-          playsInline
-          muted
-          autoPlay
-          className="w-full rounded-lg bg-black aspect-video"
-        />
+        <video ref={videoRef} playsInline muted autoPlay className="w-full rounded-lg bg-black aspect-video" />
 
         {/* Instruction + controls */}
         <div className="mt-3 flex items-center justify-between">
@@ -556,11 +445,7 @@ function LivenessModal({ onClose, onUploaded, onError, onBusy, folder }) {
             {step < 4 ? (stepsLabels[step] || "Get ready…") : "All checks passed ✓"}
           </div>
           {!recording ? (
-            <button
-              type="button"
-              onClick={begin}
-              className="px-3 py-2 rounded bg-[#d4af37] text-black font-semibold"
-            >
+            <button type="button" onClick={begin} className="px-3 py-2 rounded bg-[#d4af37] text-black font-semibold">
               Start
             </button>
           ) : (
@@ -574,9 +459,7 @@ function LivenessModal({ onClose, onUploaded, onError, onBusy, folder }) {
           </button>
         </div>
 
-        {!aiReady && !aiFailed && (
-          <div className="text-xs text-zinc-400 mt-2">Loading liveness checks…</div>
-        )}
+        {!aiReady && !aiFailed && <div className="text-xs text-zinc-400 mt-2">Loading liveness checks…</div>}
       </div>
     </div>
   );
@@ -591,6 +474,82 @@ function Badge({ ok, children }) {
     >
       {children} {ok ? "✓" : ""}
     </span>
+  );
+}
+
+/** ========= Location: Detect (GPS) + Reverse geocode (OSM) ========= **/
+function DetectLocationButton({ onSelect }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  function titleCase(s = "") {
+    return s
+      .toLowerCase()
+      .replace(/\b[a-z]/g, (m) => m.toUpperCase())
+      .trim();
+  }
+
+  function normalizeNgState(raw = "") {
+    let s = raw.trim();
+    s = s.replace(/\s+State$/i, ""); // drop trailing "State"
+    if (/^federal\s+capital\s+territory$/i.test(s) || /^abuja$/i.test(s) || /^fct$/i.test(s)) return "FCT";
+    return titleCase(s);
+  }
+
+  function normalizeNgLga(raw = "") {
+    return titleCase(raw); // keep punctuation; just title-case
+  }
+
+  async function detect() {
+    setBusy(true);
+    setErr("");
+    try {
+      // 1) get GPS from browser
+      const pos = await new Promise((resolve, reject) =>
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          maximumAge: 30_000,
+          timeout: 20_000,
+          enableHighAccuracy: true,
+        })
+      );
+      const lat = pos.coords.latitude;
+      const lon = pos.coords.longitude;
+
+      // 2) reverse geocode via OSM (no custom headers; browsers forbid User-Agent)
+      const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(
+        lat
+      )}&lon=${encodeURIComponent(lon)}&zoom=14&addressdetails=1`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("Location service unavailable.");
+      const j = await res.json();
+
+      const a = j?.address || {};
+      const state = normalizeNgState(a.state || a.region || "");
+      const lga = normalizeNgLga(a.county || a.city || a.district || a.town || a.suburb || a.village || "");
+      const niceAddress = (j?.display_name || "").trim();
+
+      if (!state) throw new Error("Could not detect state.");
+      onSelect?.({ state, lga, address: niceAddress });
+    } catch (e) {
+      setErr(e?.message || "Failed to detect location.");
+    } finally {
+      setBusy(false);
+      setTimeout(() => setErr(""), 3500);
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        type="button"
+        onClick={detect}
+        className="px-2 py-1 text-xs rounded border border-zinc-700 hover:bg-zinc-900"
+        disabled={busy}
+      >
+        {busy ? "Detecting…" : "Use my location"}
+      </button>
+      {err && <span className="text-[11px] text-red-400">{err}</span>}
+    </div>
   );
 }
 
@@ -616,14 +575,20 @@ export default function BecomePro() {
   // Minimal, client-like required fields
   const [identity, setIdentity] = useState({
     firstName: "",
+    middleName: "", // ✅ new optional
     lastName: "",
-    phone: "",
+    phone: "", // ✅ optional now
     email: "",
     state: "",
     lga: "",
     photoUrl: "",
   });
   const [phoneVerifiedAt, setPhoneVerifiedAt] = useState(null);
+
+  // Email verification state
+  const [emailVerified, setEmailVerified] = useState(!!auth.currentUser?.emailVerified);
+  const [emailVerificationSent, setEmailVerificationSent] = useState(false);
+  const [emailVerifyMsg, setEmailVerifyMsg] = useState("");
 
   // Pro basics
   const [professional, setProfessional] = useState({
@@ -670,6 +635,10 @@ export default function BecomePro() {
     idUrl: "",
     livenessVideoUrl: "",
     deferred: true,
+    // Required for "Verified", optional for submit:
+    residentialAddress: "",
+    originState: "",
+    originLga: "",
   });
 
   const [agreements, setAgreements] = useState({ terms: false, privacy: false });
@@ -683,6 +652,37 @@ export default function BecomePro() {
       } catch {}
     })();
   }, []);
+
+  // Keep a fresh emailVerified flag if user returns after verifying
+  async function recheckEmailVerification() {
+    try {
+      if (auth.currentUser) {
+        await reload(auth.currentUser);
+        setEmailVerified(!!auth.currentUser.emailVerified);
+        setEmailVerifyMsg(auth.currentUser.emailVerified ? "Email verified ✓" : "Not verified yet.");
+        setTimeout(() => setEmailVerifyMsg(""), 3000);
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  async function sendVerification() {
+    try {
+      if (auth.currentUser) {
+        await sendEmailVerification(auth.currentUser);
+        setEmailVerificationSent(true);
+        setEmailVerifyMsg("Verification email sent. Check your inbox.");
+        setTimeout(() => setEmailVerifyMsg(""), 4000);
+      } else {
+        setEmailVerifyMsg("Please sign in first.");
+        setTimeout(() => setEmailVerifyMsg(""), 4000);
+      }
+    } catch (e) {
+      setEmailVerifyMsg(e?.message || "Failed to send verification email.");
+      setTimeout(() => setEmailVerifyMsg(""), 4000);
+    }
+  }
 
   // States list (soft)
   const [allStates, setAllStates] = useState([]);
@@ -703,9 +703,9 @@ export default function BecomePro() {
   }, []);
   const stateList = useMemo(() => (allStates || []).slice().sort(), [allStates]);
 
+  // Submit gate (✅ phone no longer required)
   const canSubmit =
     identity.firstName &&
-    identity.phone &&
     identity.state &&
     (professional.nationwide || identity.lga) &&
     professional.services.length > 0 &&
@@ -714,7 +714,14 @@ export default function BecomePro() {
 
   function computeVerificationStatus() {
     if (verification.deferred) return "unverified";
-    const docOk = verification.idType && verification.idUrl && verification.livenessVideoUrl;
+    const docOk =
+      emailVerified && // ✅ email must be verified
+      verification.idType &&
+      verification.idUrl &&
+      verification.livenessVideoUrl &&
+      verification.residentialAddress &&
+      verification.originState &&
+      verification.originLga;
     return docOk ? "verified" : "unverified";
   }
 
@@ -728,7 +735,10 @@ export default function BecomePro() {
       const verificationStatus = computeVerificationStatus();
 
       const payload = {
-        identity,
+        identity: {
+          ...identity,
+          // optional phone; middleName included
+        },
         professional,
         business,
         availability: {
@@ -741,7 +751,16 @@ export default function BecomePro() {
           idUrl: verification.idUrl || "",
           livenessVideoUrl: verification.livenessVideoUrl || "",
           deferred: !!verification.deferred,
+          residentialAddress: verification.residentialAddress || "",
+          originState: verification.originState || "",
+          originLga: verification.originLga || "",
           ...(phoneVerifiedAt ? { phoneVerifiedAt } : {}),
+          ...(emailVerified
+            ? {
+                emailVerified: true,
+                emailVerifiedAt: new Date().toISOString(),
+              }
+            : { emailVerified: false }),
         },
         status: "submitted",
         acceptedTerms: !!agreements.terms,
@@ -779,21 +798,31 @@ export default function BecomePro() {
               required
             />
             <Input
+              label="Middle Name (optional)"
+              value={identity.middleName}
+              onChange={(e) => setIdentity({ ...identity, middleName: e.target.value })}
+            />
+            <Input
               label="Last Name"
               value={identity.lastName}
               onChange={(e) => setIdentity({ ...identity, lastName: e.target.value })}
             />
-            <Input
-              label="Email"
-              type="email"
-              value={identity.email}
-              onChange={(e) => setIdentity({ ...identity, email: e.target.value })}
-            />
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
-            <div>
-              <Label>Phone Number *</Label>
+            <div className="md:col-span-1">
+              <Label>Email</Label>
+              <input
+                className={FIELD}
+                type="email"
+                value={identity.email}
+                onChange={(e) => setIdentity({ ...identity, email: e.target.value })}
+                placeholder="you@example.com"
+              />
+            </div>
+
+            <div className="md:col-span-1">
+              <Label>Phone Number (optional)</Label>
               <input
                 className={FIELD}
                 value={identity.phone}
@@ -801,30 +830,41 @@ export default function BecomePro() {
                   setIdentity({ ...identity, phone: e.target.value });
                   setPhoneVerifiedAt(null);
                 }}
-                required
                 placeholder="080..."
               />
-              <PhoneOTP
-                phone={identity.phone}
-                disabled={!identity.phone}
-                onVerified={(iso) => setPhoneVerifiedAt(iso)}
-              />
-              {phoneVerifiedAt && <div className="text-xs text-emerald-300 mt-1">Phone verified</div>}
+              {/* Only show OTP if phone is present */}
+              {identity.phone ? (
+                <>
+                  <PhoneOTP
+                    phone={identity.phone}
+                    disabled={!identity.phone}
+                    onVerified={(iso) => setPhoneVerifiedAt(iso)}
+                  />
+                  {phoneVerifiedAt && <div className="text-xs text-emerald-300 mt-1">Phone verified</div>}
+                </>
+              ) : (
+                <div className="text-xs text-zinc-500 mt-1">Phone is optional.</div>
+              )}
             </div>
 
-            <div>
+            <div className="md:col-span-1">
               <Label>Profile Photo</Label>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <input
                   className={FIELD}
                   placeholder="Photo URL"
                   value={identity.photoUrl}
                   onChange={(e) => setIdentity({ ...identity, photoUrl: e.target.value })}
                 />
-                <NativeUpload
-                  label="Upload"
+                {/* Menu (files/selfie/rear) */}
+                <SmartUpload
+                  title="Upload"
+                  folder="kpocha/pro-apps"
                   accept="image/*"
-                  capture="user"
+                  onUploaded={(url) => setIdentity({ ...identity, photoUrl: url })}
+                />
+                {/* Always-visible camera buttons */}
+                <IOSCameraButtons
                   folder="kpocha/pro-apps"
                   onUploaded={(url) => setIdentity({ ...identity, photoUrl: url })}
                 />
@@ -843,60 +883,35 @@ export default function BecomePro() {
               Offer services nationwide (Nigeria)
             </label>
 
-            <NgGeoPicker
-              valueState={identity.state}
-              onChangeState={(st) => {
-                setIdentity({ ...identity, state: st, lga: "" });
-                if (st && !professional.nationwide) {
-                  setAvailability((p) => ({
-                    ...p,
-                    statesCovered: p.statesCovered.includes(st)
-                      ? p.statesCovered
-                      : [...p.statesCovered, st],
-                  }));
-                }
-              }}
-              valueLga={identity.lga}
-              onChangeLga={(l) => setIdentity({ ...identity, lga: l })}
-              required
-              className="grid grid-cols-1 gap-3"
-            />
-          </div>
-
-          <div className="mt-4">
-            <Label>What service do you offer? *</Label>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {SERVICE_OPTIONS.map((opt) => (
-                <label key={opt} className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={professional.services.includes(opt)}
-                    onChange={() =>
-                      setProfessional((p) => {
-                        const has = p.services.includes(opt);
-                        return { ...p, services: has ? p.services.filter((s) => s !== opt) : [...p.services, opt] };
-                      })
+            <div className="flex items-center justify-between">
+              <div className="flex-1">
+                <NgGeoPicker
+                  valueState={identity.state}
+                  onChangeState={(st) => {
+                    setIdentity({ ...identity, state: st, lga: "" });
+                    if (st && !professional.nationwide) {
+                      setAvailability((p) => ({
+                        ...p,
+                        statesCovered: p.statesCovered.includes(st) ? p.statesCovered : [...p.statesCovered, st],
+                      }));
                     }
-                  />
-                  {opt}
-                </label>
-              ))}
-            </div>
-
-            {/* When "Others" is checked, ask for details + price list */}
-            {professional.services.includes("Others") && (
-              <div className="mt-3">
-                <textarea
-                  className={FIELD}
-                  placeholder="Please specify other services & prices"
-                  rows={4}
-                  value={professional.otherServicesDetailed}
-                  onChange={(e) =>
-                    setProfessional({ ...professional, otherServicesDetailed: e.target.value })
-                  }
+                  }}
+                  valueLga={identity.lga}
+                  onChangeLga={(l) => setIdentity({ ...identity, lga: l })}
+                  required
+                  className="grid grid-cols-1 gap-3"
                 />
               </div>
-            )}
+              <div className="ml-3">
+                <DetectLocationButton
+                  onSelect={({ state, lga, address }) => {
+                    if (state) setIdentity((p) => ({ ...p, state }));
+                    if (lga) setIdentity((p) => ({ ...p, lga }));
+                    if (address) setBusiness((b) => ({ ...b, shopAddress: b.shopAddress || address }));
+                  }}
+                />
+              </div>
+            </div>
           </div>
 
           <div className="mt-3 space-y-2 text-sm">
@@ -929,6 +944,40 @@ export default function BecomePro() {
 
         {/* Verification section */}
         <OptionalSection title="Verification — required for the Verified badge">
+          <div className="mb-3 space-y-2">
+            {/* ✅ Email verification block */}
+            <Label>Email Verification (required for Verified)</Label>
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                className={`text-xs px-2 py-1 rounded border ${
+                  emailVerified ? "border-emerald-600 text-emerald-300" : "border-zinc-700 text-zinc-300"
+                }`}
+              >
+                {emailVerified ? "Verified ✓" : "Not verified"}
+              </span>
+              {!emailVerified && (
+                <>
+                  <button
+                    type="button"
+                    className="px-2 py-1 text-xs rounded border border-zinc-700 hover:bg-zinc-900"
+                    onClick={sendVerification}
+                  >
+                    Send verification email
+                  </button>
+                  <button
+                    type="button"
+                    className="px-2 py-1 text-xs rounded border border-zinc-700 hover:bg-zinc-900"
+                    onClick={recheckEmailVerification}
+                  >
+                    I’ve verified, re-check
+                  </button>
+                </>
+              )}
+              {emailVerificationSent && <span className="text-[11px] text-zinc-400">Sent — check your inbox</span>}
+              {emailVerifyMsg && <span className="text-[11px] text-zinc-400">{emailVerifyMsg}</span>}
+            </div>
+          </div>
+
           <div className="mb-2">
             <label className="flex items-center gap-2 text-sm">
               <input
@@ -949,20 +998,43 @@ export default function BecomePro() {
                 options={["National ID", "Voter’s Card", "Driver’s License", "International Passport"]}
               />
 
+              {/* Residential address (house address) */}
+              <div className="mt-3">
+                <Label>Residential / House Address (required for verification)</Label>
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    className={FIELD}
+                    placeholder="Your house address"
+                    value={verification.residentialAddress}
+                    onChange={(e) => setVerification({ ...verification, residentialAddress: e.target.value })}
+                  />
+                  <DetectLocationButton
+                    onSelect={({ address }) => {
+                      if (address) setVerification((v) => ({ ...v, residentialAddress: address }));
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* ID + Liveness */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
                 <div>
                   <Label>Government ID</Label>
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <input
                       className={FIELD}
-                      placeholder="ID Image URL"
+                      placeholder="ID Image/PDF URL"
                       value={verification.idUrl}
                       onChange={(e) => setVerification({ ...verification, idUrl: e.target.value })}
                     />
-                    <NativeUpload
-                      label="Upload"
+                    <SmartUpload
+                      title="Upload"
+                      folder="kpocha/pro-apps"
                       accept="image/*,application/pdf"
-                      capture="environment"
+                      onUploaded={(url) => setVerification({ ...verification, idUrl: url })}
+                    />
+                    <IOSCameraButtons
+                      folder="kpocha/pro-apps"
                       onUploaded={(url) => setVerification({ ...verification, idUrl: url })}
                     />
                   </div>
@@ -971,9 +1043,7 @@ export default function BecomePro() {
                 <div>
                   <Label>Selfie (liveness video)</Label>
                   <div className="space-y-2">
-                    <LivenessCapture
-                      onUploaded={(url) => setVerification({ ...verification, livenessVideoUrl: url })}
-                    />
+                    <LivenessCapture onUploaded={(url) => setVerification({ ...verification, livenessVideoUrl: url })} />
                     {verification.livenessVideoUrl && (
                       <input
                         className={FIELD}
@@ -984,6 +1054,19 @@ export default function BecomePro() {
                     )}
                   </div>
                 </div>
+              </div>
+
+              {/* State & LGA of Origin */}
+              <div className="mt-3">
+                <Label>State & Local Government of Origin (required for verification)</Label>
+                <NgGeoPicker
+                  valueState={verification.originState}
+                  onChangeState={(st) => setVerification((v) => ({ ...v, originState: st, originLga: "" }))}
+                  valueLga={verification.originLga}
+                  onChangeLga={(l) => setVerification((v) => ({ ...v, originLga: l }))}
+                  required={false}
+                  className="grid grid-cols-1 md:grid-cols-2 gap-3"
+                />
               </div>
             </>
           )}
@@ -1005,19 +1088,23 @@ export default function BecomePro() {
               options={["no", "yes"]}
             />
             {professional.hasCert === "yes" && (
-              <div>
+              <div className="md:col-span-1">
                 <Label>Certificate</Label>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <input
                     className={FIELD}
                     placeholder="Certificate URL"
                     value={professional.certUrl}
                     onChange={(e) => setProfessional({ ...professional, certUrl: e.target.value })}
                   />
-                  <NativeUpload
-                    label="Upload"
+                  <SmartUpload
+                    title="Upload"
+                    folder="kpocha/pro-apps"
                     accept="image/*,application/pdf"
-                    capture="user"
+                    onUploaded={(url) => setProfessional({ ...professional, certUrl: url })}
+                  />
+                  <IOSCameraButtons
+                    folder="kpocha/pro-apps"
                     onUploaded={(url) => setProfessional({ ...professional, certUrl: url })}
                   />
                 </div>
@@ -1031,7 +1118,7 @@ export default function BecomePro() {
               <div key={idx} className="flex items-center gap-2 mb-2">
                 <input
                   className={FIELD}
-                  placeholder={`Photo URL ${idx + 1}`}
+                  placeholder={`Photo/Video URL ${idx + 1}`}
                   value={u}
                   onChange={(e) => {
                     const arr = [...professional.workPhotos];
@@ -1039,10 +1126,19 @@ export default function BecomePro() {
                     setProfessional({ ...professional, workPhotos: arr });
                   }}
                 />
-                <NativeUpload
-                  label="Upload"
+                <SmartUpload
+                  title="Upload"
+                  folder="kpocha/pro-apps"
                   accept="image/*,video/*"
-                  capture="environment"
+                  onUploaded={(url) => {
+                    const arr = [...professional.workPhotos];
+                    arr[idx] = url;
+                    setProfessional({ ...professional, workPhotos: arr });
+                  }}
+                />
+                <IOSCameraButtons
+                  folder="kpocha/pro-apps"
+                  allowVideo
                   onUploaded={(url) => {
                     const arr = [...professional.workPhotos];
                     arr[idx] = url;
@@ -1075,7 +1171,7 @@ export default function BecomePro() {
           </div>
         </OptionalSection>
 
-        {/* Business information */}
+        {/* Business information (includes address) */}
         <OptionalSection title="Business information">
           <Select
             label="Work Mode"
@@ -1090,41 +1186,58 @@ export default function BecomePro() {
                 value={business.shopName}
                 onChange={(e) => setBusiness({ ...business, shopName: e.target.value })}
               />
-              <Input
-                label="Business Address"
-                value={business.shopAddress}
-                onChange={(e) => setBusiness({ ...business, shopAddress: e.target.value })}
-              />
+              <div className="md:col-span-1">
+                <Input
+                  label="Business Address"
+                  value={business.shopAddress}
+                  onChange={(e) => setBusiness({ ...business, shopAddress: e.target.value })}
+                />
+                <div className="mt-1">
+                  <DetectLocationButton
+                    onSelect={({ address }) => {
+                      if (address) setBusiness((b) => ({ ...b, shopAddress: address }));
+                    }}
+                  />
+                </div>
+              </div>
               <div>
                 <Label>Photo (outside)</Label>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <input
                     className={FIELD}
                     placeholder="URL"
                     value={business.shopPhotoOutside}
                     onChange={(e) => setBusiness({ ...business, shopPhotoOutside: e.target.value })}
                   />
-                  <NativeUpload
-                    label="Upload"
+                  <SmartUpload
+                    title="Upload"
+                    folder="kpocha/pro-apps"
                     accept="image/*"
-                    capture="environment"
+                    onUploaded={(url) => setBusiness({ ...business, shopPhotoOutside: url })}
+                  />
+                  <IOSCameraButtons
+                    folder="kpocha/pro-apps"
                     onUploaded={(url) => setBusiness({ ...business, shopPhotoOutside: url })}
                   />
                 </div>
               </div>
               <div>
                 <Label>Photo (inside)</Label>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <input
                     className={FIELD}
                     placeholder="URL"
                     value={business.shopPhotoInside}
                     onChange={(e) => setBusiness({ ...business, shopPhotoInside: e.target.value })}
                   />
-                  <NativeUpload
-                    label="Upload"
+                  <SmartUpload
+                    title="Upload"
+                    folder="kpocha/pro-apps"
                     accept="image/*"
-                    capture="environment"
+                    onUploaded={(url) => setBusiness({ ...business, shopPhotoInside: url })}
+                  />
+                  <IOSCameraButtons
+                    folder="kpocha/pro-apps"
                     onUploaded={(url) => setBusiness({ ...business, shopPhotoInside: url })}
                   />
                 </div>
@@ -1152,10 +1265,7 @@ export default function BecomePro() {
         </OptionalSection>
 
         {/* FINAL STEP */}
-        <button
-          disabled={!canSubmit || busy}
-          className="w-full bg-gold text-black font-semibold rounded-lg py-2 disabled:opacity-60"
-        >
+        <button disabled={!canSubmit || busy} className="w-full bg-gold text-black font-semibold rounded-lg py-2 disabled:opacity-60">
           {busy ? "Submitting..." : "Submit Application"}
         </button>
 
