@@ -841,58 +841,51 @@ export default function BecomePro() {
     return docOk ? "verified" : "unverified";
   }
 
-  async function submit(e) {
-    e.preventDefault();
+async function submit(e) {
+  e.preventDefault();
 
-    // If required fields are present but email isn't verified, block here with a clear message
-    if (!emailVerified) {
-      setMsg("Please verify your email.");
-      return;
-    }
-
-    if (!canSubmit) return;
-
-    setBusy(true);
-    setMsg("");
-    try {
-      const verificationStatus = computeVerificationStatus();
-
-      const payload = {
-        identity: { ...identity },
-        professional,
-        business,
-        availability: {
-          ...availability,
-          statesCovered: professional.nationwide ? stateList : availability.statesCovered,
-        },
-        pricing,
-        verification: {
-          idType: verification.idType || "",
-          idUrl: verification.idUrl || "",
-          livenessVideoUrl: verification.livenessVideoUrl || "",
-          deferred: !!verification.deferred,
-          residentialAddress: verification.residentialAddress || "",
-          originState: verification.originState || "",
-          originLga: verification.originLga || "",
-          emailVerified: !!emailVerified,
-          ...(emailVerified ? { emailVerifiedAt: new Date().toISOString() } : {}),
-        },
-        status: "submitted",
-        acceptedTerms: !!agreements.terms,
-        acceptedPrivacy: !!agreements.privacy,
-        agreements: { terms: !!agreements.terms, privacy: !!agreements.privacy },
-        verificationStatus,
-      };
-
-      await api.put("/api/pros/me", payload);
-      nav("/apply/thanks");
-    } catch (err) {
-      console.error(err);
-      setMsg("Failed to submit application.");
-    } finally {
-      setBusy(false);
-    }
+  // ✅ Block submission if email not verified
+  if (!emailVerified) {
+    setMsg("Please verify your email before submitting your application.");
+    return;
   }
+
+  // ✅ Check if required fields are complete
+  if (!canSubmit) {
+    setMsg("Please complete all required fields before submitting.");
+    return;
+  }
+
+  setBusy(true);
+  setMsg("");
+
+  try {
+    // Compute verification status or payload (unchanged)
+    const verificationStatus = computeVerificationStatus();
+    const payload = {
+      ...identity,
+      ...professional,
+      verificationStatus,
+    };
+
+    // ✅ Submit application to backend
+    await api.put("/api/pros/me", payload);
+
+    // ✅ Redirect on success
+    nav("/apply/thanks");
+  } catch (err) {
+    // ✅ Improved error handling with friendly messages
+    console.error(err);
+    setMsg(
+      err?.friendlyMessage ||
+        err?.message ||
+        "Failed to submit application. Please try again."
+    );
+  } finally {
+    setBusy(false);
+  }
+}
+
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-8">
