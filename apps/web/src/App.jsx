@@ -1,5 +1,5 @@
 // apps/web/src/App.jsx
-import { Routes, Route, Navigate } from "react-router-dom";
+import { Routes, Route, Navigate, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { api, setAuthToken } from "./lib/api";
 
@@ -17,7 +17,7 @@ import ClientWallet from "./pages/ClientWallet.jsx";
 import Profile from "./pages/Profile.jsx";
 import Login from "./pages/Login.jsx";
 import Signup from "./pages/Signup.jsx";
-import PhoneLogin from "./pages/PhoneLogin.jsx";       // ✅ NEW
+import PhoneLogin from "./pages/PhoneLogin.jsx";
 import BecomePro from "./pages/BecomePro.jsx";
 import ProDashboard from "./pages/ProDashboard.jsx";
 import Admin from "./pages/Admin.jsx";
@@ -58,8 +58,7 @@ function useChatbase() {
           const pro = await api.get("/api/pros/me").then(r => r.data).catch(() => null);
           verifiedOk = pro?.verificationStatus === "verified";
         } else {
-          // For non-pros, you can also allow verified email-only users to access the bot if desired.
-          // If you want to strictly limit to verified pros, leave verifiedOk = false here.
+          // for non-pros, keep it off by default (can change later)
           verifiedOk = false;
         }
 
@@ -96,6 +95,96 @@ function useChatbase() {
     init();
     return () => { alive = false; };
   }, []);
+}
+
+/* ---------- Email verification guard ---------- */
+/** Allows:
+ * - Users with verified emails
+ * - Users with no email (e.g., phone-only login)
+ * Blocks:
+ * - Users with an email that is not verified yet
+ */
+function RequireVerified({ children }) {
+  const [state, setState] = useState({ loading: true, ok: false });
+
+  useEffect(() => {
+    const unsub = onIdTokenChanged(auth, async (user) => {
+      if (!user) {
+        setState({ loading: false, ok: false });
+        return;
+      }
+      try { await user.reload(); } catch {}
+      const ok = !user.email || user.emailVerified === true;
+      setState({ loading: false, ok });
+    });
+    return () => unsub();
+  }, []);
+
+  if (state.loading) return <div className="p-6">Loading…</div>;
+  return state.ok ? children : <Navigate to="/auth/verify" replace />;
+}
+
+/* ---------- Simple verification page (for the link & gating) ---------- */
+function VerifyGate() {
+  const [checking, setChecking] = useState(false);
+  const [sent, setSent] = useState(false);
+  const nav = useNavigate();
+
+  async function refreshStatus() {
+    setChecking(true);
+    try {
+      const u = auth.currentUser;
+      if (!u) return;
+      await u.reload();
+      if (!u.email || u.emailVerified) {
+        nav("/client-register", { replace: true });
+      }
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  async function resend() {
+    try {
+      const u = auth.currentUser;
+      if (!u?.email) return;
+      await u.sendEmailVerification({
+        url: `${window.location.origin}/auth/verify`,
+      });
+      setSent(true);
+      setTimeout(() => setSent(false), 2500);
+    } catch {
+      // ignore surface; user can try again
+    }
+  }
+
+  return (
+    <div className="max-w-lg mx-auto px-4 py-12">
+      <h1 className="text-2xl font-semibold mb-2">Verify your email</h1>
+      <p className="text-zinc-400 mb-4">
+        We’ve sent a verification link to your inbox. Click it, then come back here.
+      </p>
+      <div className="flex gap-2">
+        <button
+          onClick={refreshStatus}
+          className="rounded-lg bg-gold text-black font-semibold px-4 py-2 disabled:opacity-60"
+          disabled={checking}
+        >
+          {checking ? "Checking…" : "I’ve verified — continue"}
+        </button>
+        <button
+          onClick={resend}
+          className="rounded-lg border border-zinc-700 px-4 py-2"
+        >
+          Resend email
+        </button>
+      </div>
+      {sent && <div className="text-emerald-400 text-sm mt-3">Verification email re-sent.</div>}
+      <div className="text-xs text-zinc-500 mt-6">
+        If you used phone-only login, you don’t need email verification.
+      </div>
+    </div>
+  );
 }
 
 /* ---------- Role guard ---------- */
@@ -222,12 +311,15 @@ export default function App() {
           <Route path="/" element={<Home />} />
           <Route path="/browse" element={<Browse />} />
           <Route path="/book/:barberId" element={<BookService />} />
+          <Route path="/auth/verify" element={<VerifyGate />} />
           {/* Booking details requires auth on the API → gate it here */}
           <Route
             path="/bookings/:id"
             element={
               <RequireAuth>
-                <BookingDetails />
+                <RequireVerified>
+                  <BookingDetails />
+                </RequireVerified>
               </RequireAuth>
             }
           />
@@ -236,12 +328,14 @@ export default function App() {
             path="/profile"
             element={
               <RequireAuth>
-                <Profile />
+                <RequireVerified>
+                  <Profile />
+                </RequireVerified>
               </RequireAuth>
             }
           />
           <Route path="/login" element={<Login />} />
-          <Route path="/login/phone" element={<PhoneLogin />} /> {/* ✅ NEW */}
+          <Route path="/login/phone" element={<PhoneLogin />} />
           <Route path="/signup" element={<Signup />} />
           <Route path="/legal" element={<Legal />} />
           <Route path="/legal/*" element={<Legal />} />
@@ -259,7 +353,9 @@ export default function App() {
             path="/wallet"
             element={
               <RequireAuth>
-                <WalletSmart />
+                <RequireVerified>
+                  <WalletSmart />
+                </RequireVerified>
               </RequireAuth>
             }
           />
@@ -269,7 +365,9 @@ export default function App() {
             path="/settings"
             element={
               <RequireAuth>
-                <SettingsSmart />
+                <RequireVerified>
+                  <SettingsSmart />
+                </RequireVerified>
               </RequireAuth>
             }
           />
@@ -277,7 +375,9 @@ export default function App() {
             path="/settings/pro"
             element={
               <RequireRole role="pro">
-                <Settings />
+                <RequireVerified>
+                  <Settings />
+                </RequireVerified>
               </RequireRole>
             }
           />
@@ -285,7 +385,9 @@ export default function App() {
             path="/settings/client"
             element={
               <RequireAuth>
-                <ClientSettings />
+                <RequireVerified>
+                  <ClientSettings />
+                </RequireVerified>
               </RequireAuth>
             }
           />
@@ -294,17 +396,21 @@ export default function App() {
             path="/become"
             element={
               <RequireAuth>
-                <BecomePro />
+                <RequireVerified>
+                  <BecomePro />
+                </RequireVerified>
               </RequireAuth>
             }
           />
 
-          {/* Client registration (username step) */}
+          {/* Client registration (profile details step) */}
           <Route
             path="/client-register"
             element={
               <RequireAuth>
-                <ClientRegister />
+                <RequireVerified>
+                  <ClientRegister />
+                </RequireVerified>
               </RequireAuth>
             }
           />
@@ -315,7 +421,9 @@ export default function App() {
             path="/deactivate"
             element={
               <RequireAuth>
-                <DeactivateAccount />
+                <RequireVerified>
+                  <DeactivateAccount />
+                </RequireVerified>
               </RequireAuth>
             }
           />

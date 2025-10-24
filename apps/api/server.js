@@ -298,28 +298,29 @@ async function restartSchedulers() {
 /* ------------------- Express App ------------------- */
 const app = express();
 
-/* ------------------- CORS (hardened, with Vercel previews) ------------------- */
+//* ------------------- CORS (hardened, with Vercel & ngrok previews) ------------------- */
 const ALLOW_LIST = (process.env.CORS_ORIGIN || "http://localhost:5173")
   .split(/[,\s]+/)
   .map((s) => s.trim())
   .filter(Boolean);
 
+const ALLOW_VERCEL_PREVIEWS = (process.env.ALLOW_VERCEL_PREVIEWS || "true").toLowerCase() !== "false";
+const ALLOW_NGROK_PREVIEWS  = (process.env.ALLOW_NGROK_PREVIEWS  || "true").toLowerCase() !== "false";
+
+function hostFrom(url) { try { return new URL(url).host; } catch { return ""; } }
+
 function originAllowed(origin) {
-  if (!origin) return true; // non-browser / same-origin
-  try {
-    const oh = new URL(origin).host;
-    // Allow explicit allow-list
-    for (const o of ALLOW_LIST) {
-      try {
-        if (new URL(o).host === oh) return true;
-        if (o === origin) return true;
-      } catch {}
-    }
-    // Allow any *.vercel.app preview unless disabled
-    if ((process.env.ALLOW_VERCEL_PREVIEWS || "true") !== "false") {
-      if (oh.endsWith(".vercel.app")) return true;
-    }
-  } catch {}
+  if (!origin) return true; // same-origin / server-to-server
+  const oh = hostFrom(origin);
+
+  for (const o of ALLOW_LIST) {
+    const h = hostFrom(o);
+    if (o === origin || (h && h === oh)) return true;
+  }
+
+  if (ALLOW_VERCEL_PREVIEWS && oh.endsWith(".vercel.app")) return true;
+  if (ALLOW_NGROK_PREVIEWS && (oh.endsWith(".ngrok-free.app") || oh.endsWith(".ngrok.app"))) return true;
+
   return false;
 }
 
@@ -327,7 +328,12 @@ const corsOptions = {
   origin(origin, cb) {
     const ok = originAllowed(origin);
     if (ok) return cb(null, true);
-    console.warn("[CORS] Blocked:", origin, "Allowed:", ALLOW_LIST, "VercelPreviews=on");
+    console.warn(
+      "[CORS] Blocked:", origin,
+      "Allowed:", ALLOW_LIST,
+      `VercelPreviews=${ALLOW_VERCEL_PREVIEWS}`,
+      `Ngrok=${ALLOW_NGROK_PREVIEWS}`
+    );
     return cb(new Error("CORS blocked"));
   },
   credentials: true,
@@ -339,6 +345,8 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 app.options("*", cors(corsOptions));
+
+
 app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 
 /* ------------------- Webhooks need raw body ------------------- */
@@ -369,6 +377,7 @@ app.use(express.json());
 async function requireAuth(req, res, next) {
   try {
     const h = req.headers.authorization || "";
+    aconst: {}; // keep diff minimal; no-op
     const token = h.startsWith("Bearer ") ? h.slice(7) : null;
     if (!token) return res.status(401).json({ error: "Missing token" });
 
@@ -396,12 +405,11 @@ async function requirePro(req, res, next) {
 }
 
 /* ------------------- 🔒 Sanitizers (inline) ------------------- */
-// hide fields for non-admins
 function sanitizePro(doc, viewerRole = "user") {
   if (!doc) return doc;
   const o = typeof doc.toObject === "function" ? doc.toObject() : { ...doc };
   if (viewerRole !== "admin") {
-    delete o.ownerUid;   // 🔒 UID hidden from owners/clients
+    delete o.ownerUid;
     delete o.__v;
   }
   return o;
@@ -419,7 +427,7 @@ function sanitizeBarberCard(obj, viewerRole = "user") {
 function maintenanceBypass(req) {
   if (req.path === "/api/health") return true;
   if (req.path.startsWith("/api/paystack/webhook")) return true;
-  if (req.path.startsWith("/api/settings")) return true; // allow admins to toggle
+  if (req.path.startsWith("/api/settings")) return true;
   return false;
 }
 app.use(async (req, res, next) => {
@@ -446,50 +454,101 @@ app.use(async (req, res, next) => {
   }
 });
 
-/* ------------------- Verified client identity helpers ------------------- */
-async function getVerifiedClientIdentity(uid) {
-  try {
-    const col = mongoose.connection.db.collection("profiles");
-    const p = await col.findOne(
-      { uid },
-      { projection: { fullName: 1, name: 1, displayName: 1, phone: 1, identity: 1 } }
-    );
-    if (!p) return { fullName: "", phone: "" };
-
-    const fullName =
-      p.fullName ||
-      p.name ||
-      p.displayName ||
-      [p?.identity?.firstName, p?.identity?.middleName, p?.identity?.lastName].filter(Boolean).join(" ").trim() ||
-      "";
-
-    const phone = p.phone || p?.identity?.phone || "";
-
-    return { fullName, phone };
-  } catch {
-    return { fullName: "", phone: "" };
-  }
-}
-
-/** Public endpoint for the web app to show read-only identity on Book page */
-// 🔒 hide UID from owners: do not return uid
+/* ------------------- CLIENT PROFILE (GET full) ------------------- */
+// replaces the earlier minimal read-only version so pages (Register/Settings) can preload everything
 app.get("/api/profile/client/me", requireAuth, async (req, res) => {
   try {
     if (mongoose.connection.readyState !== 1) return res.status(503).json({ error: "Database not connected" });
-    const { fullName, phone } = await getVerifiedClientIdentity(req.user.uid);
-    res.json({ /* uid hidden */ email: req.user.email, fullName, phone });
+    const col = mongoose.connection.db.collection("profiles");
+    const p = await col.findOne({ uid: req.user.uid });
+    if (!p) return res.json(null);
+    // hide uid from owners/clients
+    const { uid, __v, ...safe } = p || {};
+    return res.json(safe);
   } catch (e) {
+    console.error("[clientProfile:GET] error:", e?.message || e);
     res.status(500).json({ error: "failed" });
   }
 });
 
-/** 🔒 Enforce verified name/phone on bookings POST */
+/* ------------------- CLIENT PROFILE (PUT upsert) ------------------- */
+app.put("/api/profile/client/me", requireAuth, async (req, res) => {
+  try {
+    if (mongoose.connection.readyState !== 1) return res.status(503).json({ error: "Database not connected" });
+    const col = mongoose.connection.db.collection("profiles");
+
+    const b = req.body || {};
+    const now = new Date();
+
+    // normalize
+    const state = (b.state || "").toString().trim();
+    const lga = (b.lga || "").toString().toUpperCase().trim();
+
+    const doc = {
+      uid: req.user.uid,
+      email: req.user.email || "",
+      fullName: (b.fullName || "").toString().trim(),
+      phone: (b.phone || "").toString().trim(),
+      state,
+      lga,
+      // keep both keys for backward compatibility
+      houseAddress: (b.houseAddress || b.address || "").toString().trim(),
+      address: (b.houseAddress || b.address || "").toString().trim(),
+      photoUrl: b.photoUrl || "",
+      lat: Number.isFinite(b.lat) ? b.lat : b.lat ?? null,
+      lon: Number.isFinite(b.lon) ? b.lon : b.lon ?? null,
+      acceptedTerms: !!b.acceptedTerms,
+      acceptedPrivacy: !!b.acceptedPrivacy,
+      agreements: {
+        terms: !!(b.agreements?.terms ?? b.acceptedTerms),
+        privacy: !!(b.agreements?.privacy ?? b.acceptedPrivacy),
+      },
+      // optional KYC blob
+      kyc: b.kyc
+        ? {
+            idType: b.kyc.idType || "",
+            idUrl: b.kyc.idUrl || "",
+            selfieWithIdUrl: b.kyc.selfieWithIdUrl || "",
+            livenessUrl: b.kyc.livenessUrl || "",
+            status: b.kyc.status || "pending",
+          }
+        : undefined,
+      updatedAt: now,
+    };
+
+    await col.updateOne(
+      { uid: req.user.uid },
+      {
+        $set: doc,
+        $setOnInsert: { createdAt: now },
+      },
+      { upsert: true }
+    );
+
+    // return sanitized doc
+    const saved = await col.findOne({ uid: req.user.uid });
+    const { uid, __v, ...safe } = saved || {};
+    return res.json({ ok: true, profile: safe });
+  } catch (e) {
+    console.error("[clientProfile:PUT] error:", e?.message || e);
+    res.status(500).json({ error: "save_failed" });
+  }
+});
+
+/* ------------------- Enforce verified name/phone on bookings POST ------------------- */
 app.use("/api/bookings", requireAuth, async (req, _res, next) => {
   try {
     if (req.method !== "POST") return next();
     if (mongoose.connection.readyState !== 1) return next();
 
-    const { fullName, phone } = await getVerifiedClientIdentity(req.user.uid);
+    const col = mongoose.connection.db.collection("profiles");
+    const p = await col.findOne(
+      { uid: req.user.uid },
+      { projection: { fullName: 1, phone: 1 } }
+    );
+    const fullName = p?.fullName || "";
+    const phone = p?.phone || "";
+
     req.body = req.body || {};
     req.body.clientName = fullName || req.body.clientName || "";
     req.body.clientPhone = phone || req.body.clientPhone || "";
@@ -498,7 +557,7 @@ app.use("/api/bookings", requireAuth, async (req, _res, next) => {
       name: fullName || req.body?.client?.name || "",
       phone: phone || req.body?.client?.phone || "",
     };
-    req.body.clientUid = req.user.uid; // kept server-side only
+    req.body.clientUid = req.user.uid;
     next();
   } catch {
     next();
@@ -541,7 +600,6 @@ try {
 
 /* ------------------- Admin & Pros endpoints required by your frontend ------------------- */
 
-/** Settings: GET for admin panel */
 app.get("/api/settings/admin", requireAuth, requireAdmin, async (_req, res) => {
   try {
     const s = await loadSettings();
@@ -552,7 +610,6 @@ app.get("/api/settings/admin", requireAuth, requireAdmin, async (_req, res) => {
   }
 });
 
-/** Settings: PUT (admin). UI calls PUT /api/settings, so we provide both */
 async function saveSettingsAndRestart(req, res) {
   try {
     const doc = await updateSettings(req.body || {}, req.user?.email || req.user?.uid || "admin");
@@ -566,7 +623,6 @@ async function saveSettingsAndRestart(req, res) {
 app.put("/api/settings", requireAuth, requireAdmin, saveSettingsAndRestart);
 app.put("/api/settings/admin", requireAuth, requireAdmin, saveSettingsAndRestart);
 
-/** Applications: list pending for Admin.jsx */
 app.get("/api/pros/pending", requireAuth, requireAdmin, async (_req, res) => {
   try {
     const docs = await Application.find({ status: { $in: ["submitted", "pending"] } })
@@ -580,7 +636,6 @@ app.get("/api/pros/pending", requireAuth, requireAdmin, async (_req, res) => {
   }
 });
 
-/** Approve application → upsert Pro (Admin.jsx calls POST /api/pros/approve/:id) */
 app.post("/api/pros/approve/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
@@ -633,7 +688,6 @@ app.post("/api/pros/approve/:id", requireAuth, requireAdmin, async (req, res) =>
   }
 });
 
-/** Manual Release (Admin tool) */
 app.post("/api/admin/release-booking/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
@@ -657,12 +711,11 @@ app.post("/api/admin/release-booking/:id", requireAuth, requireAdmin, async (req
     });
   } catch (err) {
     console.error("[admin:release-booking]", err?.message || err);
-  res.status(500).json({ error: "release_error" });
+    res.status(500).json({ error: "release_error" });
   }
 });
 
 /* ------------------- Minimal /api/pros/me (for Settings page) ------------------- */
-// GET: read current user's Pro doc (if any) — 🔒 hide ownerUid from non-admins
 app.get("/api/pros/me", requireAuth, async (req, res) => {
   try {
     if (mongoose.connection.readyState !== 1) return res.status(503).json({ error: "Database not connected" });
@@ -675,7 +728,6 @@ app.get("/api/pros/me", requireAuth, async (req, res) => {
   }
 });
 
-// PUT: update current user's Pro doc (only if exists; this does not create) — returns sanitized
 app.put("/api/pros/me", requireAuth, async (req, res) => {
   try {
     if (mongoose.connection.readyState !== 1) return res.status(503).json({ error: "Database not connected" });
@@ -683,7 +735,6 @@ app.put("/api/pros/me", requireAuth, async (req, res) => {
     if (!existing) return res.status(400).json({ error: "no_pro_profile" });
 
     const payload = req.body || {};
-    // Only allow safe fields to be updated
     const allowed = {
       name: payload.name ?? existing.name,
       email: payload.email ?? existing.email,
@@ -756,52 +807,7 @@ app.get("/api/account/deactivation/me", requireAuth, async (req, res) => {
   }
 });
 
-app.get("/api/admin/deactivation-requests", requireAuth, requireAdmin, async (_req, res) => {
-  try {
-    const docs = await DeactivationRequest.find({}).sort({ createdAt: -1 }).limit(500).lean();
-    res.json(docs); // Admins can see uid
-  } catch (err) {
-    console.error("[admin:deactivation list] error:", err);
-    res.status(500).json({ error: "failed" });
-  }
-});
-
-app.post("/api/admin/deactivation-requests/:id/decision", requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { action, note = "" } = req.body || {};
-    if (!/^[0-9a-fA-F]{24}$/.test(id)) return res.status(400).json({ error: "invalid_id" });
-    if (!["approve", "reject"].includes(action)) return res.status(400).json({ error: "invalid_action" });
-
-    const doc = await DeactivationRequest.findById(id);
-    if (!doc) return res.status(404).json({ error: "not_found" });
-    if (doc.status !== "pending") return res.status(400).json({ error: "already_decided" });
-
-    if (action === "approve") {
-      try {
-        await admin.auth().updateUser(doc.uid, { disabled: true });
-      } catch (e) {
-        console.warn("[admin] disable warn:", e?.message || e);
-      }
-      doc.status = "approved";
-    } else {
-      doc.status = "rejected";
-    }
-
-    doc.note = String(note || "").slice(0, 2000);
-    doc.decidedBy = req.user?.email || req.user?.uid || "admin";
-    doc.decidedAt = new Date();
-    await doc.save();
-
-    res.json({ ok: true, request: doc });
-  } catch (err) {
-    console.error("[admin:deactivation decide] error:", err);
-    res.status(500).json({ error: "failed" });
-  }
-});
-
 /* ------------------- Who am I ------------------- */
-// 🔒 Hide uid for non-admins (owners shouldn't see their UID)
 app.get("/api/me", requireAuth, async (req, res) => {
   try {
     let pro = null;
@@ -818,7 +824,6 @@ app.get("/api/me", requireAuth, async (req, res) => {
     }
 
     const payload = {
-      // uid hidden on purpose
       email: req.user.email,
       isPro: !!pro,
       proId: pro?._id?.toString() || null,
@@ -841,7 +846,6 @@ app.get("/api/me", requireAuth, async (req, res) => {
 app.get("/api/health", (_req, res) => res.json({ ok: true, time: new Date().toISOString() }));
 
 /* ------------------- Barbers ------------------- */
-// 🔒 make sure no UID leaks in public cards
 app.get("/api/barbers", async (req, res) => {
   try {
     if (mongoose.connection.readyState !== 1) return res.status(503).json({ error: "Database not connected" });
@@ -880,56 +884,39 @@ async function reverseGeocode(lat, lon) {
   );
   if (!r.ok) return null;
   const j = await r.json();
-  const p = j?.features?.[0]?.properties || {};
-  const state = (p.state || p.region || "").toString().toUpperCase();
-  const lga = (p.county || p.city || p.district || p.suburb || "").toString().toUpperCase();
-  return { state, lga };
+  return j;
 }
 
-app.get("/api/barbers/nearby", async (req, res) => {
+/* ------------------- GEO reverse used by client register ------------------- */
+app.get("/api/geo/rev", async (req, res) => {
   try {
-    if (mongoose.connection.readyState !== 1) return res.status(503).json({ error: "Database not connected" });
-
     const lat = Number(req.query.lat);
-    thelon: { /* label to keep diff minimal */ }
     const lon = Number(req.query.lon);
-    const radiusKm = Math.max(1, Math.min(200, Number(req.query.radiusKm || 25)));
-    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return res.status(400).json({ error: "lat & lon required" });
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return res.status(400).json({ error: "lat_lon_required" });
 
-    let used = "geo", items = [];
-    try {
-      const agg = await Pro.aggregate([
+    const j = await reverseGeocode(lat, lon);
+    if (j?.features?.length) return res.json(j);
+
+    // Fallback: return a minimal, compatible structure
+    return res.json({
+      features: [
         {
-          $geoNear: {
-            near: { type: "Point", coordinates: [lon, lat] },
-            distanceField: "dist",
-            spherical: true,
-            maxDistance: radiusKm * 1000,
-            key: "loc",
+          properties: {
+            state: "",
+            region: "",
+            county: "",
+            city: "",
+            district: "",
+            suburb: "",
+            address_line1: "",
+            address_line2: "",
           },
         },
-        { $limit: 100 },
-      ]);
-      items = agg.map((d) => {
-        const shaped = sanitizeBarberCard(proToBarber(d));
-        return { ...shaped, distanceKm: Math.round((d.dist / 1000) * 10) / 10 };
-      });
-    } catch {
-      used = "lga";
-      const rev = await reverseGeocode(lat, lon);
-      const lga = rev?.lga || "";
-      const state = rev?.state || "";
-      let q = {};
-      if (lga) q = { lga };
-      else if (state) q = { lga: new RegExp(`^${state}\\b`, "i") };
-      const docs = await Pro.find(q).limit(100).lean();
-      items = docs.map((d) => ({ ...sanitizeBarberCard(proToBarber(d)), distanceKm: null }));
-    }
-
-    return res.json({ mode: used, radiusKm, count: items.length, items });
-  } catch (err) {
-    console.error("[barbers/nearby] error:", err);
-    res.status(500).json({ error: "nearby_failed" });
+      ],
+    });
+  } catch (e) {
+    console.error("[geo:rev] error:", e?.message || e);
+    return res.json({ features: [] });
   }
 });
 
@@ -940,7 +927,6 @@ app.get("/api/geo/ng", (_req, res) => {
     return res.json({ states, lgas: NG_GEO });
   } catch (e) {
     console.error("[geo/ng] error:", e);
-    // ✅ Return safe empty response instead of 500
     return res.json({ states: [], lgas: {} });
   }
 });
@@ -965,11 +951,9 @@ app.get("/api/geo/ng/lgas/:state", (req, res) => {
     return res.json(lgas);
   } catch (e) {
     console.error("[geo/ng/lgas/:state] error:", e);
-    // ✅ Never crash — return friendly error
     return res.status(404).json({ error: "state_not_found" });
   }
 });
-
 
 /* ------------------- WebRTC: ICE servers ------------------- */
 app.get("/api/webrtc/ice", (_req, res) => {
@@ -1018,7 +1002,6 @@ if (CLOUDINARY_CLOUD_NAME && CLOUDINARY_API_KEY && CLOUDINARY_API_SECRET) {
 }
 
 /* ------------------- ☁️ Signed uploads helper ------------------- */
-// Frontend can call this to get a signature (works with your SmartUpload/NativeUpload)
 app.post("/api/uploads/sign", requireAuth, async (req, res) => {
   try {
     if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_API_KEY || !CLOUDINARY_API_SECRET) {
@@ -1026,7 +1009,6 @@ app.post("/api/uploads/sign", requireAuth, async (req, res) => {
     }
     const folder = (req.body && req.body.folder) || "kpocha/pro-apps";
     const timestamp = Math.floor(Date.now() / 1000);
-    // Sign the exact params you'll send (do NOT include file or api_key in the signature)
     const paramsToSign = { folder, timestamp };
     const signature = cloudinary.utils.api_sign_request(paramsToSign, CLOUDINARY_API_SECRET);
 
@@ -1043,10 +1025,7 @@ app.post("/api/uploads/sign", requireAuth, async (req, res) => {
   }
 });
 
-/* ------------------- ☁️ (Optional) Server-side liveness upload ------------------- */
-/* If you ever want the browser to POST the captured video to your server (instead of direct Cloudinary),
-   you can send JSON { dataUrl: "data:video/webm;base64,...." } to this endpoint.
-   NOTE: Your current frontend already works with unsigned preset; this is just available if needed. */
+/* ------------------- ☁️ Optional server-side liveness upload ------------------- */
 app.post("/api/uploads/liveness", requireAuth, express.json({ limit: "50mb" }), async (req, res) => {
   try {
     if (!CLOUDINARY_API_SECRET) return res.status(500).json({ error: "cloudinary_env_missing" });
@@ -1079,7 +1058,6 @@ app.post("/api/uploads/liveness", requireAuth, express.json({ limit: "50mb" }), 
 });
 
 /* ------------------- Chatbase user verification ------------------- */
-// If you must also hide UID here, keep EXPOSE false (default)
 const CHATBASE_SECRET = process.env.CHATBASE_SECRET || "";
 const CHATBASE_EXPOSE_UID = (process.env.CHATBASE_EXPOSE_UID || "false").toLowerCase() === "true";
 

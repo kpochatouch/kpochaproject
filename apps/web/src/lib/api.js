@@ -4,26 +4,18 @@ import { getAuth, onAuthStateChanged } from "firebase/auth";
 
 /* =========================================
    BASE URL
-   - Dev (Vite proxy / ngrok): leave VITE_API_BASE_URL empty => relative "/api" calls go to the same origin.
-   - Prod (Vercel or separate API): set VITE_API_BASE_URL to the API ORIGIN ONLY
-     e.g. "https://api.example.com"   (❌ do NOT include "/api")
    ========================================= */
 let RAW = (import.meta.env.VITE_API_BASE_URL ?? "").trim();
-
-// If someone accidentally put "/api" in the env var, strip it because all routes below already start with "/api".
 if (RAW.endsWith("/api")) RAW = RAW.slice(0, -4);
-
-// Remove trailing slashes (keep it as a bare origin like "https://api.example.com")
 const ROOT = RAW.replace(/\/+$/, "");
 
-// When ROOT === "" we let axios use the current origin; our paths already include "/api/..."
 export const api = axios.create({
   baseURL: ROOT || undefined,
   headers: { "Content-Type": "application/json", Accept: "application/json" },
 });
 
 /* =========================================
-   AUTH TOKEN (Firebase preferred, localStorage fallback)
+   AUTH TOKEN
    ========================================= */
 let authReady = new Promise((resolve) => {
   try {
@@ -58,6 +50,80 @@ api.interceptors.request.use(async (config) => {
   return config;
 });
 
+/* =========================================
+   FRIENDLY ERROR INTERCEPTOR
+   ========================================= */
+api.interceptors.response.use(
+  (r) => r,
+  (err) => {
+    // Network / CORS
+    if (!err?.response) {
+      err.friendlyMessage = navigator.onLine
+        ? "Cannot reach the server. It might be offline or blocked by CORS."
+        : "You appear to be offline. Please check your connection.";
+      return Promise.reject(err);
+    }
+
+    const { status, data } = err.response;
+    const serverMsg =
+      data?.message ||
+      data?.error ||
+      (typeof data === "string" ? data : "") ||
+      "";
+
+    // Map common cases to crisp wording
+    let msg = serverMsg;
+    switch (status) {
+      case 400:
+        msg = serverMsg || "Invalid data. Please review the highlighted fields.";
+        break;
+      case 401:
+        msg = "Your session has expired. Please sign in again.";
+        break;
+      case 403:
+        msg = "You don’t have permission to do this.";
+        break;
+      case 404:
+        msg = serverMsg || "Not found.";
+        break;
+      case 413:
+        msg = "One of the files is too large (max 5MB).";
+        break;
+      case 422:
+        // If the API ever returns field errors: { errors: { field: "reason", ... } }
+        if (data?.errors && typeof data.errors === "object") {
+          const details = Object.entries(data.errors)
+            .map(([k, v]) => `${k}: ${v}`)
+            .join("; ");
+          msg = `Please fix: ${details}`;
+        } else {
+          msg = serverMsg || "Some fields are invalid.";
+        }
+        break;
+      case 429:
+        msg = "Too many attempts. Please try again in a moment.";
+        break;
+      case 500:
+        msg = serverMsg || "Server error. Please try again shortly.";
+        break;
+      case 503:
+        msg =
+          serverMsg ||
+          "Service temporarily unavailable. Please try again in a moment.";
+        break;
+      default:
+        msg = serverMsg || `Request failed (${status}).`;
+    }
+
+    err.friendlyMessage = msg;
+    err.debugPayload = data;
+    return Promise.reject(err);
+  }
+);
+
+/* =========================================
+   HELPERS
+   ========================================= */
 export function setAuthToken(token) {
   if (!token) localStorage.removeItem("token");
   else localStorage.setItem("token", token);
@@ -271,22 +337,21 @@ export async function getProProfileAdmin(proId) {
 }
 
 /* =========================================
-   POSTS — social actions
+   POSTS
    ========================================= */
 export async function likePost(id) {
   const { data } = await api.post(`/api/posts/${id}/like`);
-  return data; // {ok, liked, likesCount}
+  return data;
 }
 export async function addPostComment(id, text) {
   const { data } = await api.post(`/api/posts/${id}/comments`, { text });
-  return data; // {ok, comment, commentsCount}
+  return data;
 }
 export async function listPostComments(id) {
   const { data } = await api.get(`/api/posts/${id}/comments`);
-  return data; // array
+  return data;
 }
 export async function pingPostView(id) {
   const { data } = await api.post(`/api/posts/${id}/view`);
-  return data; // {ok, viewsCount}
+  return data;
 }
-

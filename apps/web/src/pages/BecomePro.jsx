@@ -3,12 +3,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import NgGeoPicker from "../components/NgGeoPicker.jsx";
-import PhoneOTP from "../components/PhoneOTP.jsx";
 import SmartUpload from "../components/SmartUpload.jsx";
 
 // ✅ Email verification helpers (Firebase)
 import { auth } from "../lib/firebase";
-import { sendEmailVerification, reload } from "firebase/auth";
+import { sendEmailVerification, reload, onAuthStateChanged } from "firebase/auth";
 
 /** ========= Cloudinary tiny helper (signed first, unsigned fallback) ========= **/
 const CLOUD =
@@ -20,7 +19,7 @@ const PRESET =
   import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET ||
   "";
 
-// used by LivenessCapture (webcam recorder)
+// used by LivenessCapture & CameraCapture (webcam uploads)
 async function uploadToCloudinary(file, { folder = "kpocha/pro-apps" } = {}) {
   // Try signed first (safer), fall back to unsigned preset
   try {
@@ -70,64 +69,129 @@ async function uploadToCloudinary(file, { folder = "kpocha/pro-apps" } = {}) {
 const FIELD =
   "w-full rounded-lg border border-zinc-800 bg-zinc-950 text-zinc-200 placeholder-zinc-500 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#d4af37]/30";
 
-/** ========= Quick camera buttons (always visible for iOS/Android) ========= **/
-function IOSCameraButtons({ onUploaded, folder = "kpocha/pro-apps", allowVideo = false }) {
-  const selfieRef = useRef(null);
-  const rearRef = useRef(null);
+/** ========= Desktop & Mobile Camera (still photo) ========= **/
+function CameraCaptureButton({ label = "Camera", folder = "kpocha/pro-apps", onUploaded, accept = "image/*" }) {
+  const [open, setOpen] = useState(false);
+  const [err, setErr] = useState("");
+  return (
+    <>
+      <button
+        type="button"
+        className="px-2 py-1 text-xs rounded border border-zinc-700 hover:bg-zinc-900"
+        onClick={() => setOpen(true)}
+      >
+        {label}
+      </button>
+      {open && (
+        <CameraShotModal
+          accept={accept}
+          folder={folder}
+          onClose={() => setOpen(false)}
+          onError={(m) => setErr(m)}
+          onUploaded={(url) => {
+            onUploaded?.(url);
+            setOpen(false);
+          }}
+        />
+      )}
+      {err && <span className="text-[11px] text-red-400 ml-2">{err}</span>}
+    </>
+  );
+}
 
-  async function handle(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+function CameraShotModal({ onClose, onUploaded, onError, folder, accept = "image/*" }) {
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const [busy, setBusy] = useState(false);
+  const [hasCam, setHasCam] = useState(true);
+  const [hint, setHint] = useState("");
+
+  useEffect(() => {
+    let stream;
+    (async () => {
+      try {
+        // Prefer user/front camera if available
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: "user" }, width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: false,
+        });
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.muted = true;
+          videoRef.current.setAttribute("playsinline", "true");
+          await videoRef.current.play();
+        }
+        setHint("Align your document/face and tap Capture.");
+      } catch {
+        setHasCam(false);
+        setHint("Camera not available. Use the Upload button instead.");
+      }
+    })();
+    return () => {
+      stream?.getTracks()?.forEach((t) => t.stop());
+    };
+  }, []);
+
+  async function capture() {
     try {
+      setBusy(true);
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      if (!video || !canvas) throw new Error("Camera not ready.");
+      const w = video.videoWidth || 1280;
+      const h = video.videoHeight || 720;
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(video, 0, 0, w, h);
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
+      if (!blob) throw new Error("Capture failed.");
+      const file = new File([blob], "capture.jpg", { type: "image/jpeg" });
       const url = await uploadToCloudinary(file, { folder });
       onUploaded?.(url);
-    } catch (err) {
-      alert(err?.message || "Upload failed");
+    } catch (e) {
+      onError?.(e?.message || "Capture failed.");
     } finally {
-      e.target.value = ""; // allow re-selecting same capture
+      setBusy(false);
     }
   }
 
   return (
-    <div className="flex gap-2">
-      <input
-        ref={selfieRef}
-        type="file"
-        accept="image/*"
-        capture="user"
-        className="hidden"
-        onChange={handle}
-      />
-      <input
-        ref={rearRef}
-        type="file"
-        accept={allowVideo ? "image/*,video/*" : "image/*"}
-        capture="environment"
-        className="hidden"
-        onChange={handle}
-      />
-      <button
-        type="button"
-        className="px-2 py-1 text-xs rounded border border-zinc-700 hover:bg-zinc-900"
-        onClick={() => selfieRef.current?.click()}
-        title="Open front camera"
-      >
-        Selfie Camera
-      </button>
-      <button
-        type="button"
-        className="px-2 py-1 text-xs rounded border border-zinc-700 hover:bg-zinc-900"
-        onClick={() => rearRef.current?.click()}
-        title="Open rear camera"
-      >
-        Rear Camera
-      </button>
+    <div className="fixed inset-0 bg-black/70 z-[9999] flex items-center justify-center">
+      <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-4 w-[min(92vw,720px)]">
+        <div className="text-sm text-zinc-400 mb-2">{hint}</div>
+        {hasCam ? (
+          <>
+            <video ref={videoRef} autoPlay playsInline muted className="w-full rounded-lg bg-black aspect-video" />
+            <div className="mt-3 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={capture}
+                className="px-3 py-2 rounded bg-[#d4af37] text-black font-semibold disabled:opacity-60"
+                disabled={busy}
+              >
+                {busy ? "Saving…" : "Capture"}
+              </button>
+              <button type="button" onClick={onClose} className="px-3 py-2 rounded border border-zinc-700">
+                Close
+              </button>
+            </div>
+            <canvas ref={canvasRef} className="hidden" />
+          </>
+        ) : (
+          <div className="flex items-center justify-end">
+            <button type="button" onClick={onClose} className="px-3 py-2 rounded border border-zinc-700">
+              Close
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
 /** ========= SMART Liveness (video) with on-device checks ========= **/
-/* Loads MediaPipe Tasks from CDN. Falls back to simple prompts if unavailable. */
+/* Loads MediaPipe Tasks from CDN. Has resilient fallbacks + clearer guidance. */
 function LivenessCapture({ onUploaded, folder = "kpocha/pro-apps/liveness" }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -209,6 +273,8 @@ function LivenessModal({ onClose, onUploaded, onError, onBusy, folder }) {
   const [step, setStep] = useState(0); // 0 straight, 1 right, 2 left, 3 blink twice, 4 done
   const [status, setStatus] = useState({ straight: false, right: false, left: false, blinks: 0 });
   const [yawDeg, setYawDeg] = useState(0);
+  const [faceLostMs, setFaceLostMs] = useState(0);
+
   const lastBlinkStateRef = useRef(false);
   const rightSignRef = useRef(null);
   const straightHoldMsRef = useRef(0);
@@ -248,9 +314,7 @@ function LivenessModal({ onClose, onUploaded, onError, onBusy, folder }) {
         const wasmBase = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm";
         const filesetResolver = await FilesetResolver.forVisionTasks(wasmBase);
         const faceLandmarker = await FaceLandmarker.createFromOptions(filesetResolver, {
-          baseOptions: {
-            modelAssetPath: `${wasmBase}/face_landmarker.task`,
-          },
+          baseOptions: { modelAssetPath: `${wasmBase}/face_landmarker.task` },
           numFaces: 1,
           runningMode: "VIDEO",
           outputFaceBlendshapes: true,
@@ -259,7 +323,6 @@ function LivenessModal({ onClose, onUploaded, onError, onBusy, folder }) {
         landmarkerRef.current = faceLandmarker;
         setAiReady(true);
       } catch (e) {
-        console.warn("[liveness] AI model load failed; using simple prompts.", e);
         setAiFailed(true);
       }
     })();
@@ -325,6 +388,7 @@ function LivenessModal({ onClose, onUploaded, onError, onBusy, folder }) {
       lastBlinkStateRef.current = false;
       lastTsRef.current = performance.now();
       rightSignRef.current = null;
+      setFaceLostMs(0);
       tickAI();
     } else {
       // Fallback to timed prompts
@@ -347,6 +411,30 @@ function LivenessModal({ onClose, onUploaded, onError, onBusy, folder }) {
     return it ? it.score : 0;
   }
 
+  function estimateYawDegrees(res) {
+    // Prefer transformation matrix if present
+    const mat = res.facialTransformationMatrixes?.[0]?.data || null;
+    if (mat && mat.length >= 12) {
+      // r20 term gives yaw-ish angle; empirically the sign can vary by platform
+      const r20 = mat[8];
+      const yaw = Math.asin(Math.max(-1, Math.min(1, -r20)));
+      return (yaw * 180) / Math.PI;
+    }
+    // Fallback: coarse heuristic using landmark spread (left/right eye outer corners)
+    // Landmarks 33 (right eye outer) and 263 (left eye outer) are common in FaceMesh
+    const lm = res.faceLandmarks?.[0] || [];
+    const a = lm[33], b = lm[263];
+    if (a && b) {
+      // As head turns right, left eye projected width shrinks: use normalized delta to infer sign
+      const delta = (b.x - a.x); // positive if facing camera
+      // Compare eye heights to sign the turn (crude but works)
+      const eyeYDelta = (b.y - a.y);
+      const sign = eyeYDelta > 0 ? 1 : -1;
+      return sign * (1 - Math.min(1, Math.max(0.3, delta))) * 25; // ~±25°
+    }
+    return 0;
+  }
+
   function tickAI() {
     const faceLm = landmarkerRef.current;
     const video = videoRef.current;
@@ -355,62 +443,74 @@ function LivenessModal({ onClose, onUploaded, onError, onBusy, folder }) {
     const loop = () => {
       const now = performance.now();
       const res = faceLm.detectForVideo(video, now);
+
       if (res?.faceLandmarks?.length) {
-        // yaw from transform matrix
-        const mat = res.facialTransformationMatrixes?.[0]?.data || null;
-        if (mat && mat.length >= 12) {
-          const r20 = mat[8];
-          const yaw = Math.asin(Math.max(-1, Math.min(1, -r20)));
-          const yawDegrees = (yaw * 180) / Math.PI;
-          setYawDeg(Math.round(yawDegrees));
+        // Reset "face lost" tracker
+        setFaceLostMs(0);
 
-          // blinks
-          const blend = res.faceBlendshapes?.[0]?.categories || [];
-          const bothBlink = getBlend(blend, "eyeBlinkLeft") > 0.5 && getBlend(blend, "eyeBlinkRight") > 0.5;
-          if (bothBlink && !lastBlinkStateRef.current) {
-            setStatus((s) => ({ ...s, blinks: Math.min(2, s.blinks + 1) }));
-          }
-          lastBlinkStateRef.current = bothBlink;
+        // yaw
+        const yawDegrees = estimateYawDegrees(res);
+        setYawDeg(Math.round(yawDegrees));
 
-          // steps
-          const dt = now - (lastTsRef.current || now);
-          lastTsRef.current = now;
-          const thrYaw = 12;
-          const nearCenter = Math.abs(yawDegrees) < 8;
-
-          setStatus((s) => {
-            let next = { ...s };
-            if (!next.straight) {
-              if (nearCenter) {
-                straightHoldMsRef.current += dt;
-                if (straightHoldMsRef.current > 600) {
-                  next.straight = true;
-                  setStep(1);
-                }
-              } else {
-                straightHoldMsRef.current = 0;
-              }
-            } else if (!next.right) {
-              if (Math.abs(yawDegrees) > thrYaw) {
-                rightSignRef.current = yawDegrees > 0 ? 1 : -1;
-                next.right = true;
-                setStep(2);
-              }
-            } else if (!next.left) {
-              const rs = rightSignRef.current || 1;
-              if (yawDegrees * rs < -thrYaw) {
-                next.left = true;
-                setStep(3);
-              }
-            } else if (next.blinks >= 2) {
-              setStep(4);
-              stopRecordingAndUpload();
-              setTimeout(() => cancelAnimationFrame(rafRef.current), 120);
-            }
-            return next;
-          });
+        // blinks
+        const blend = res.faceBlendshapes?.[0]?.categories || [];
+        const bothBlink = getBlend(blend, "eyeBlinkLeft") > 0.5 && getBlend(blend, "eyeBlinkRight") > 0.5;
+        if (bothBlink && !lastBlinkStateRef.current) {
+          setStatus((s) => ({ ...s, blinks: Math.min(2, s.blinks + 1) }));
         }
+        lastBlinkStateRef.current = bothBlink;
+
+        // steps
+        const dt = now - (lastTsRef.current || now);
+        lastTsRef.current = now;
+
+        // Tuned thresholds (more responsive)
+        const thrYaw = 9;            // degrees required to mark left/right
+        const nearCenterYaw = 7;     // degrees to consider "straight"
+        const straightHoldMsNeeded = 450;
+
+        setStatus((s) => {
+          let next = { ...s };
+          if (!next.straight) {
+            if (Math.abs(yawDegrees) < nearCenterYaw) {
+              straightHoldMsRef.current += dt;
+              if (straightHoldMsRef.current > straightHoldMsNeeded) {
+                next.straight = true;
+                setStep(1);
+              }
+            } else {
+              straightHoldMsRef.current = 0;
+            }
+          } else if (!next.right) {
+            if (yawDegrees > thrYaw) {
+              next.right = true;
+              setStep(2);
+              rightSignRef.current = 1;
+            } else if (yawDegrees < -thrYaw) {
+              // If user did left first, accept that and swap order gracefully
+              next.left = true;
+              setStep(3);
+              rightSignRef.current = -1;
+            }
+          } else if (!next.left) {
+            const wantOpposite = rightSignRef.current === 1 ? yawDegrees < -thrYaw : yawDegrees > thrYaw;
+            if (wantOpposite) {
+              next.left = true;
+              setStep(3);
+            }
+          } else if (next.blinks >= 2) {
+            setStep(4);
+            stopRecordingAndUpload();
+            setTimeout(() => cancelAnimationFrame(rafRef.current), 120);
+          }
+          return next;
+        });
+      } else {
+        // no face detected; track how long it's lost and show a hint
+        setFaceLostMs((t) => Math.min(2000, t + (now - (lastTsRef.current || now))));
+        lastTsRef.current = now;
       }
+
       rafRef.current = requestAnimationFrame(loop);
     };
     rafRef.current = requestAnimationFrame(loop);
@@ -434,7 +534,10 @@ function LivenessModal({ onClose, onUploaded, onError, onBusy, folder }) {
             <Badge ok={status.left}>Left</Badge>
             <Badge ok={status.blinks >= 2}>Blink x2</Badge>
           </div>
-          <div className="text-zinc-400">{aiReady && !aiFailed ? `AI ✓ Yaw ${yawDeg}°` : "Simple mode"}</div>
+          <div className="text-zinc-400">
+            {aiReady && !aiFailed ? `Yaw ${yawDeg}°` : "Simple mode"}
+            {faceLostMs > 600 && <span className="ml-2 text-red-400">Face not detected — move closer & center.</span>}
+          </div>
         </div>
 
         <video ref={videoRef} playsInline muted autoPlay className="w-full rounded-lg bg-black aspect-video" />
@@ -458,8 +561,6 @@ function LivenessModal({ onClose, onUploaded, onError, onBusy, folder }) {
             Close
           </button>
         </div>
-
-        {!aiReady && !aiFailed && <div className="text-xs text-zinc-400 mt-2">Loading liveness checks…</div>}
       </div>
     </div>
   );
@@ -575,15 +676,14 @@ export default function BecomePro() {
   // Minimal, client-like required fields
   const [identity, setIdentity] = useState({
     firstName: "",
-    middleName: "", // ✅ new optional
+    middleName: "", // optional
     lastName: "",
-    phone: "", // ✅ optional now
+    phone: "", // optional
     email: "",
     state: "",
     lga: "",
     photoUrl: "",
   });
-  const [phoneVerifiedAt, setPhoneVerifiedAt] = useState(null);
 
   // Email verification state
   const [emailVerified, setEmailVerified] = useState(!!auth.currentUser?.emailVerified);
@@ -643,17 +743,32 @@ export default function BecomePro() {
 
   const [agreements, setAgreements] = useState({ terms: false, privacy: false });
 
-  // Prefill email from /api/me
+  // Prefill email from /api/me and/or Firebase user + keep emailVerified in sync
   useEffect(() => {
+    const authEmail = auth.currentUser?.email || "";
+    if (authEmail) setIdentity((p) => ({ ...p, email: authEmail }));
+
     (async () => {
       try {
         const { data } = await api.get("/api/me");
-        setIdentity((p) => ({ ...p, email: data?.email || p.email }));
+        if (data?.email) setIdentity((p) => ({ ...p, email: data.email }));
       } catch {}
     })();
+
+    // listen for auth changes to auto-detect emailVerified from signup
+    const unsub = onAuthStateChanged(auth, async (u) => {
+      if (!u) return;
+      setIdentity((p) => ({ ...p, email: u.email || p.email }));
+      try {
+        await reload(u); // ensure fresh flag
+      } catch {}
+      setEmailVerified(!!u.emailVerified);
+    });
+
+    return () => unsub?.();
   }, []);
 
-  // Keep a fresh emailVerified flag if user returns after verifying
+  // Allow user-triggered re-check
   async function recheckEmailVerification() {
     try {
       if (auth.currentUser) {
@@ -703,9 +818,10 @@ export default function BecomePro() {
   }, []);
   const stateList = useMemo(() => (allStates || []).slice().sort(), [allStates]);
 
-  // Submit gate (✅ phone no longer required)
+  // Submit gate (release button once required fields are filled)
   const canSubmit =
-    identity.firstName &&
+    identity.firstName.trim() &&
+    identity.lastName.trim() &&
     identity.state &&
     (professional.nationwide || identity.lga) &&
     professional.services.length > 0 &&
@@ -715,7 +831,7 @@ export default function BecomePro() {
   function computeVerificationStatus() {
     if (verification.deferred) return "unverified";
     const docOk =
-      emailVerified && // ✅ email must be verified
+      emailVerified && // email must be verified for "Verified" badge
       verification.idType &&
       verification.idUrl &&
       verification.livenessVideoUrl &&
@@ -727,6 +843,13 @@ export default function BecomePro() {
 
   async function submit(e) {
     e.preventDefault();
+
+    // If required fields are present but email isn't verified, block here with a clear message
+    if (!emailVerified) {
+      setMsg("Please verify your email.");
+      return;
+    }
+
     if (!canSubmit) return;
 
     setBusy(true);
@@ -735,10 +858,7 @@ export default function BecomePro() {
       const verificationStatus = computeVerificationStatus();
 
       const payload = {
-        identity: {
-          ...identity,
-          // optional phone; middleName included
-        },
+        identity: { ...identity },
         professional,
         business,
         availability: {
@@ -754,13 +874,8 @@ export default function BecomePro() {
           residentialAddress: verification.residentialAddress || "",
           originState: verification.originState || "",
           originLga: verification.originLga || "",
-          ...(phoneVerifiedAt ? { phoneVerifiedAt } : {}),
-          ...(emailVerified
-            ? {
-                emailVerified: true,
-                emailVerifiedAt: new Date().toISOString(),
-              }
-            : { emailVerified: false }),
+          emailVerified: !!emailVerified,
+          ...(emailVerified ? { emailVerifiedAt: new Date().toISOString() } : {}),
         },
         status: "submitted",
         acceptedTerms: !!agreements.terms,
@@ -783,14 +898,14 @@ export default function BecomePro() {
     <div className="max-w-3xl mx-auto px-4 py-8">
       <h2 className="text-2xl font-semibold mb-6">Become a Pro</h2>
       <p className="text-zinc-400 -mt-4 mb-6 text-sm">
-        Start with a few basics. You can complete verification and other details later.
+        Start with a few basics. Email must be verified, and your first &amp; last name are required.
       </p>
       {msg && <div className="mb-4 text-sm text-red-400">{msg}</div>}
 
       <form onSubmit={submit} className="space-y-6">
         {/* SECTION A: Minimal */}
         <Section title="Basic Info (required)" id="basic">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
             <Input
               label="First Name *"
               value={identity.firstName}
@@ -803,15 +918,13 @@ export default function BecomePro() {
               onChange={(e) => setIdentity({ ...identity, middleName: e.target.value })}
             />
             <Input
-              label="Last Name"
+              label="Last Name *"
               value={identity.lastName}
               onChange={(e) => setIdentity({ ...identity, lastName: e.target.value })}
+              required
             />
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
-            <div className="md:col-span-1">
-              <Label>Email</Label>
+            <div>
+              <Label>Email (required)</Label>
               <input
                 className={FIELD}
                 type="email"
@@ -819,35 +932,54 @@ export default function BecomePro() {
                 onChange={(e) => setIdentity({ ...identity, email: e.target.value })}
                 placeholder="you@example.com"
               />
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <span
+                  className={`text-xs px-2 py-1 rounded border ${
+                    emailVerified ? "border-emerald-600 text-emerald-300" : "border-zinc-700 text-zinc-300"
+                  }`}
+                >
+                  {emailVerified ? "Verified ✓" : "Not verified"}
+                </span>
+                {!emailVerified && (
+                  <>
+                    <button
+                      type="button"
+                      className="px-2 py-1 text-xs rounded border border-zinc-700 hover:bg-zinc-900"
+                      onClick={sendVerification}
+                    >
+                      Send verification email
+                    </button>
+                    <button
+                      type="button"
+                      className="px-2 py-1 text-xs rounded border border-zinc-700 hover:bg-zinc-900"
+                      onClick={recheckEmailVerification}
+                    >
+                      I’ve verified, re-check
+                    </button>
+                  </>
+                )}
+                {emailVerificationSent && <span className="text-[11px] text-zinc-400">Sent — check your inbox</span>}
+                {emailVerifyMsg && <span className="text-[11px] text-zinc-400">{emailVerifyMsg}</span>}
+              </div>
+              {!emailVerified && (
+                <div className="text-[11px] text-red-400 mt-1">Email must be verified to submit this form.</div>
+              )}
             </div>
+          </div>
 
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
             <div className="md:col-span-1">
               <Label>Phone Number (optional)</Label>
               <input
                 className={FIELD}
                 value={identity.phone}
-                onChange={(e) => {
-                  setIdentity({ ...identity, phone: e.target.value });
-                  setPhoneVerifiedAt(null);
-                }}
+                onChange={(e) => setIdentity({ ...identity, phone: e.target.value })}
                 placeholder="080..."
               />
-              {/* Only show OTP if phone is present */}
-              {identity.phone ? (
-                <>
-                  <PhoneOTP
-                    phone={identity.phone}
-                    disabled={!identity.phone}
-                    onVerified={(iso) => setPhoneVerifiedAt(iso)}
-                  />
-                  {phoneVerifiedAt && <div className="text-xs text-emerald-300 mt-1">Phone verified</div>}
-                </>
-              ) : (
-                <div className="text-xs text-zinc-500 mt-1">Phone is optional.</div>
-              )}
+              <div className="text-xs text-zinc-500 mt-1">Phone is optional.</div>
             </div>
 
-            <div className="md:col-span-1">
+            <div className="md:col-span-2">
               <Label>Profile Photo</Label>
               <div className="flex flex-wrap items-center gap-2">
                 <input
@@ -856,16 +988,18 @@ export default function BecomePro() {
                   value={identity.photoUrl}
                   onChange={(e) => setIdentity({ ...identity, photoUrl: e.target.value })}
                 />
-                {/* Menu (files/selfie/rear) */}
+                {/* File picker */}
                 <SmartUpload
                   title="Upload"
                   folder="kpocha/pro-apps"
                   accept="image/*"
                   onUploaded={(url) => setIdentity({ ...identity, photoUrl: url })}
                 />
-                {/* Always-visible camera buttons */}
-                <IOSCameraButtons
+                {/* NEW: Works on computer & mobile */}
+                <CameraCaptureButton
+                  label="Camera"
                   folder="kpocha/pro-apps"
+                  accept="image/*"
                   onUploaded={(url) => setIdentity({ ...identity, photoUrl: url })}
                 />
               </div>
@@ -914,6 +1048,47 @@ export default function BecomePro() {
             </div>
           </div>
 
+          {/* Services (RESTORED) */}
+          <div className="mt-4">
+            <Label>Services you offer (required)</Label>
+            <div className="flex flex-wrap gap-2">
+              {SERVICE_OPTIONS.map((s) => {
+                const checked = professional.services.includes(s);
+                return (
+                  <label
+                    key={s}
+                    className={`flex items-center gap-2 text-sm rounded px-2 py-1 border cursor-pointer ${
+                      checked ? "border-emerald-600 text-emerald-300" : "border-zinc-700 text-zinc-300"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={(e) => {
+                        const next = e.target.checked
+                          ? [...professional.services, s]
+                          : professional.services.filter((x) => x !== s);
+                        setProfessional({ ...professional, services: next });
+                      }}
+                    />
+                    <span>{s}</span>
+                  </label>
+                );
+              })}
+            </div>
+            {professional.services.includes("Others") && (
+              <input
+                className={`${FIELD} mt-2`}
+                placeholder="Please specify other services"
+                value={professional.otherServicesDetailed}
+                onChange={(e) => setProfessional({ ...professional, otherServicesDetailed: e.target.value })}
+              />
+            )}
+            {professional.services.length === 0 && (
+              <div className="text-[11px] text-red-400 mt-1">Select at least one service.</div>
+            )}
+          </div>
+
           <div className="mt-3 space-y-2 text-sm">
             <Check
               label={
@@ -944,40 +1119,7 @@ export default function BecomePro() {
 
         {/* Verification section */}
         <OptionalSection title="Verification — required for the Verified badge">
-          <div className="mb-3 space-y-2">
-            {/* ✅ Email verification block */}
-            <Label>Email Verification (required for Verified)</Label>
-            <div className="flex flex-wrap items-center gap-2">
-              <span
-                className={`text-xs px-2 py-1 rounded border ${
-                  emailVerified ? "border-emerald-600 text-emerald-300" : "border-zinc-700 text-zinc-300"
-                }`}
-              >
-                {emailVerified ? "Verified ✓" : "Not verified"}
-              </span>
-              {!emailVerified && (
-                <>
-                  <button
-                    type="button"
-                    className="px-2 py-1 text-xs rounded border border-zinc-700 hover:bg-zinc-900"
-                    onClick={sendVerification}
-                  >
-                    Send verification email
-                  </button>
-                  <button
-                    type="button"
-                    className="px-2 py-1 text-xs rounded border border-zinc-700 hover:bg-zinc-900"
-                    onClick={recheckEmailVerification}
-                  >
-                    I’ve verified, re-check
-                  </button>
-                </>
-              )}
-              {emailVerificationSent && <span className="text-[11px] text-zinc-400">Sent — check your inbox</span>}
-              {emailVerifyMsg && <span className="text-[11px] text-zinc-400">{emailVerifyMsg}</span>}
-            </div>
-          </div>
-
+          {/* Note: Email verification is handled above and is required to submit */}
           <div className="mb-2">
             <label className="flex items-center gap-2 text-sm">
               <input
@@ -985,7 +1127,7 @@ export default function BecomePro() {
                 checked={!!verification.deferred}
                 onChange={(e) => setVerification({ ...verification, deferred: e.target.checked })}
               />
-              Verify later
+              Verify documents later
             </label>
           </div>
 
@@ -1033,8 +1175,10 @@ export default function BecomePro() {
                       accept="image/*,application/pdf"
                       onUploaded={(url) => setVerification({ ...verification, idUrl: url })}
                     />
-                    <IOSCameraButtons
+                    <CameraCaptureButton
+                      label="Camera"
                       folder="kpocha/pro-apps"
+                      accept="image/*"
                       onUploaded={(url) => setVerification({ ...verification, idUrl: url })}
                     />
                   </div>
@@ -1103,8 +1247,10 @@ export default function BecomePro() {
                     accept="image/*,application/pdf"
                     onUploaded={(url) => setProfessional({ ...professional, certUrl: url })}
                   />
-                  <IOSCameraButtons
+                  <CameraCaptureButton
+                    label="Camera"
                     folder="kpocha/pro-apps"
+                    accept="image/*"
                     onUploaded={(url) => setProfessional({ ...professional, certUrl: url })}
                   />
                 </div>
@@ -1136,9 +1282,10 @@ export default function BecomePro() {
                     setProfessional({ ...professional, workPhotos: arr });
                   }}
                 />
-                <IOSCameraButtons
+                <CameraCaptureButton
+                  label="Camera"
                   folder="kpocha/pro-apps"
-                  allowVideo
+                  accept="image/*"
                   onUploaded={(url) => {
                     const arr = [...professional.workPhotos];
                     arr[idx] = url;
@@ -1215,8 +1362,10 @@ export default function BecomePro() {
                     accept="image/*"
                     onUploaded={(url) => setBusiness({ ...business, shopPhotoOutside: url })}
                   />
-                  <IOSCameraButtons
+                  <CameraCaptureButton
+                    label="Camera"
                     folder="kpocha/pro-apps"
+                    accept="image/*"
                     onUploaded={(url) => setBusiness({ ...business, shopPhotoOutside: url })}
                   />
                 </div>
@@ -1236,8 +1385,10 @@ export default function BecomePro() {
                     accept="image/*"
                     onUploaded={(url) => setBusiness({ ...business, shopPhotoInside: url })}
                   />
-                  <IOSCameraButtons
+                  <CameraCaptureButton
+                    label="Camera"
                     folder="kpocha/pro-apps"
+                    accept="image/*"
                     onUploaded={(url) => setBusiness({ ...business, shopPhotoInside: url })}
                   />
                 </div>
@@ -1269,9 +1420,14 @@ export default function BecomePro() {
           {busy ? "Submitting..." : "Submit Application"}
         </button>
 
-        <p className="text-xs text-zinc-500 text-center">
-          After submission, complete verification to get a <span className="text-emerald-400">Verified</span> tick.
-          Until then, clients see a warning when booking.
+        {!emailVerified && (
+          <p className="text-xs text-red-400 text-center mt-2">
+            Email must be verified to submit.
+          </p>
+        )}
+
+        <p className="text-xs text-zinc-500 text-center mt-1">
+          After submission, complete document checks to get a <span className="text-emerald-400">Verified</span> tick.
         </p>
       </form>
     </div>

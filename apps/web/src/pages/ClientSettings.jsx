@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import SmartUpload from "../components/SmartUpload.jsx";
 
 export default function ClientSettings() {
+  const nav = useNavigate();
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -18,9 +21,10 @@ export default function ClientSettings() {
     lga: "",
     address: "",
     photoUrl: "",
+    username: "",
   });
 
-  // Load me + profile + NG geo
+  // Pull from me + client register (so the page always reflects latest saved details)
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -36,7 +40,7 @@ export default function ClientSettings() {
         setMe(meData || null);
         setStates(geo?.states || []);
 
-        // client profile (route provided by your Profile router)
+        // client profile (register data)
         let profile = null;
         try {
           const { data } = await api.get("/api/profile/client/me");
@@ -48,15 +52,15 @@ export default function ClientSettings() {
         setForm((cur) => ({
           ...cur,
           displayName:
-            profile?.fullName ||
-            meData?.displayName ||
+            (profile?.fullName || meData?.displayName || "").trim() ||
             meData?.email ||
             "",
           phone: profile?.phone || meData?.phone || "",
           state: profile?.state || "",
           lga: profile?.lga || meData?.lga || "",
-          address: profile?.houseAddress || "",
+          address: profile?.houseAddress || profile?.address || "",
           photoUrl: profile?.photoUrl || meData?.photoUrl || "",
+          username: meData?.username || meData?.usernameLC || "",
         }));
 
         // preload LGAs if state exists
@@ -105,22 +109,32 @@ export default function ClientSettings() {
       setError("");
       setOk("");
 
-      // Persist via your profile router (client endpoint)
+      // Persist via the client profile endpoint (same structure as ClientRegister)
       await api.put("/api/profile/client/me", {
         fullName: form.displayName?.trim(),
         phone: form.phone?.trim(),
         state: form.state,
         lga: form.lga,
-        houseAddress: form.address?.trim(),
+        houseAddress: form.address?.trim(), // <-- unified key
         photoUrl: form.photoUrl || "",
       });
 
+      // optional: keep /api/me displayName in sync (best-effort)
+      try {
+        await api.put("/api/profile/me", {
+          displayName: form.displayName?.trim() || undefined,
+        });
+      } catch {}
+
       setOk("Saved!");
+      setTimeout(() => setOk(""), 1200);
+
+      // redirect to profile page after save
+      nav("/profile", { replace: true });
     } catch (e) {
       setError("Could not save your changes. Please try again.");
     } finally {
       setSaving(false);
-      setTimeout(() => setOk(""), 1800);
     }
   }
 
@@ -162,7 +176,9 @@ export default function ClientSettings() {
               <Avatar url={form.photoUrl} />
               <SmartUpload
                 title="Upload Photo"
-                onUploaded={(url) => setForm((f) => ({ ...f, photoUrl: url }))}
+                onUploaded={(url) =>
+                  setForm((f) => ({ ...f, photoUrl: url }))
+                }
                 folder="kpocha/client-avatars"
               />
               {form.photoUrl && (
@@ -240,9 +256,9 @@ export default function ClientSettings() {
                   }
                 />
               </Field>
-              <Field label="User ID">
-                <div className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 font-mono break-all">
-                  {me?.uid || "—"}
+              <Field label="Username">
+                <div className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 break-all">
+                  {form.username || "—"}
                 </div>
               </Field>
             </div>
