@@ -15,7 +15,7 @@ export const api = axios.create({
 });
 
 /* =========================================
-   AUTH TOKEN
+   AUTH TOKEN (no loops, no forced refresh)
    ========================================= */
 let authReady = new Promise((resolve) => {
   try {
@@ -29,34 +29,76 @@ let authReady = new Promise((resolve) => {
   }
 });
 
+// Attach Firebase ID token if available (no force refresh)
 api.interceptors.request.use(async (config) => {
   await authReady;
-
   try {
     const auth = getAuth();
     const user = auth?.currentUser || null;
     if (user) {
-      const idToken = await user.getIdToken();
+      const idToken = await user.getIdToken(); // <-- no "true"
       if (idToken) config.headers.Authorization = `Bearer ${idToken}`;
-      return config;
+    } else {
+      delete config.headers.Authorization;
     }
-  } catch {}
-
-  try {
-    const token = localStorage.getItem("token");
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-  } catch {}
-
+  } catch {
+    // fall back to any stored token (optional)
+    try {
+      const token = localStorage.getItem("token");
+      if (token) config.headers.Authorization = `Bearer ${token}`;
+    } catch {}
+  }
   return config;
 });
 
 /* =========================================
-   FRIENDLY ERROR INTERCEPTOR
+   LIGHTWEIGHT CACHE for GET /api/me (60s)
    ========================================= */
+const ME_TTL_MS = 60_000;
+let meCache = { ts: 0, data: null };
+
+// Helper to check if this request is for /api/me
+function isMeEndpoint(cfg) {
+  const base = (cfg.baseURL || "").replace(/\/+$/, "");
+  const url = (cfg.url || "").replace(/^\/+/, "");
+  const full = `${base}/${url}`;
+  return /\/api\/me(?:[?#]|$)/.test(full);
+}
+
+// Serve cached /api/me response when fresh
+api.interceptors.request.use((config) => {
+  if ((config.method || "get").toLowerCase() === "get" && isMeEndpoint(config) && !config.__bypassCache) {
+    const now = Date.now();
+    if (meCache.data && now - meCache.ts < ME_TTL_MS) {
+      // Use a custom adapter to return a resolved cached response
+      const cached = meCache.data;
+      config.adapter = async () => ({
+        data: cached,
+        status: 200,
+        statusText: "OK (cache)",
+        headers: { "x-cache": "me-60s" },
+        config,
+      });
+    } else {
+      // Mark so we store fresh response below
+      config.__cacheMe = true;
+    }
+  }
+  return config;
+});
+
+// Store fresh /api/me responses in cache
 api.interceptors.response.use(
-  (r) => r,
-  (err) => {
-    // Network / CORS
+  (r) => {
+    try {
+      if (r?.config && isMeEndpoint(r.config)) {
+        meCache = { ts: Date.now(), data: r.data };
+      }
+    } catch {}
+    return r;
+  },
+  async (err) => {
+    // If no response (network/CORS), map a friendly message and exit
     if (!err?.response) {
       err.friendlyMessage = navigator.onLine
         ? "Cannot reach the server. It might be offline or blocked by CORS."
@@ -64,14 +106,38 @@ api.interceptors.response.use(
       return Promise.reject(err);
     }
 
-    const { status, data } = err.response;
+    const { status, data, config } = err.response;
+
+    // One-time 401 retry with forced refresh
+    if (status === 401 && config && !config.__retried) {
+      try {
+        const auth = getAuth();
+        const u = auth.currentUser;
+        if (u) {
+          await u.getIdToken(true); // force refresh once
+          const fresh = await u.getIdToken();
+          if (fresh) {
+            config.headers = { ...(config.headers || {}), Authorization: `Bearer ${fresh}` };
+            config.__retried = true;
+            return api(config);
+          }
+        } else {
+          if (config.headers) delete config.headers.Authorization;
+        }
+      } catch {
+        // fall through to friendly message
+      }
+    }
+
+    /* =========================================
+       FRIENDLY ERROR MESSAGES
+       ========================================= */
     const serverMsg =
       data?.message ||
       data?.error ||
       (typeof data === "string" ? data : "") ||
       "";
 
-    // Map common cases to crisp wording
     let msg = serverMsg;
     switch (status) {
       case 400:
@@ -90,7 +156,6 @@ api.interceptors.response.use(
         msg = "One of the files is too large (max 5MB).";
         break;
       case 422:
-        // If the API ever returns field errors: { errors: { field: "reason", ... } }
         if (data?.errors && typeof data.errors === "object") {
           const details = Object.entries(data.errors)
             .map(([k, v]) => `${k}: ${v}`)
@@ -132,8 +197,9 @@ export function setAuthToken(token) {
 /* =========================================
    BASIC / COMMON
    ========================================= */
-export async function getMe() {
-  const { data } = await api.get("/api/me");
+export async function getMe({ fresh = false } = {}) {
+  // If a screen really needs a fresh copy right now, pass { fresh: true }
+  const { data } = await api.get("/api/me", fresh ? { __bypassCache: true } : undefined);
   return data;
 }
 

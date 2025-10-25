@@ -10,17 +10,23 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    return onIdTokenChanged(auth, async (u) => {
+    // Listen once; do NOT force token refresh here
+    const unsub = onIdTokenChanged(auth, async (u) => {
       setUser(u || null);
       setLoading(false);
 
-      if (u) {
-        const token = await u.getIdToken(true);
-        localStorage.setItem("token", token);
-      } else {
-        localStorage.removeItem("token");
+      try {
+        if (u) {
+          const tok = await u.getIdToken(); // no "true" here
+          localStorage.setItem("token", tok);
+        } else {
+          localStorage.removeItem("token");
+        }
+      } catch {
+        // ignore token storage errors
       }
     });
+    return () => unsub();
   }, []);
 
   const logout = () => signOut(auth);

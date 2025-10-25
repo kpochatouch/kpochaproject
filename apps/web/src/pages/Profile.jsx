@@ -1,18 +1,13 @@
 // apps/web/src/pages/Profile.jsx
 import { useEffect, useState } from "react";
+import { getMe } from "../lib/api"; // ✅ use cached getMe instead of api.get("/api/me")
 import { api } from "../lib/api";
 
 export default function Profile() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-
-  // /api/me (auth + high-level flags, username, email, pro status, etc.)
   const [me, setMe] = useState(null);
-
-  // /api/profile/client/me (client register record)
   const [client, setClient] = useState(null);
-
-  // Optional: /api/pros/me if you want richer pro details later
   const [pro, setPro] = useState(null);
 
   useEffect(() => {
@@ -22,11 +17,12 @@ export default function Profile() {
         setLoading(true);
         setError("");
 
-        const { data: meData } = await api.get("/api/me");
+        // ✅ Cached getMe() — prevents /api/me spam
+        const meData = await getMe();
         if (!alive) return;
         setMe(meData || null);
 
-        // Client profile (the same endpoint used by ClientRegister/ClientSettings)
+        // Optional extra info
         try {
           const { data: clientData } = await api.get("/api/profile/client/me");
           if (alive) setClient(clientData || null);
@@ -34,7 +30,6 @@ export default function Profile() {
           if (alive) setClient(null);
         }
 
-        // Optional pro details
         try {
           const { data: proData } = await api.get("/api/pros/me");
           if (alive) setPro(proData || null);
@@ -50,7 +45,7 @@ export default function Profile() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, []); // ✅ Only runs once on mount
 
   // ---------- helpers ----------
   function maskId(id = "") {
@@ -63,17 +58,14 @@ export default function Profile() {
   const email = me?.email || "";
   const username =
     me?.username || me?.usernameLC || me?.userName || me?.user || me?.uid || "—";
-
   const displayName =
     client?.fullName ||
     me?.displayName ||
     (email ? email.split("@")[0] : "Your Account");
-
   const avatarUrl = client?.photoUrl || me?.photoUrl || "";
   const phone = client?.phone || me?.phone || "";
-
   const preferredLga = client?.lga || me?.lga || "—";
-  const houseAddress = client?.houseAddress || client?.address || "—"; // tolerate older saves
+  const houseAddress = client?.houseAddress || client?.address || "—";
 
   const idType = client?.kyc?.idType || client?.idType || "";
   const idNumber = client?.kyc?.idNumber || client?.idNumber || "";
@@ -111,7 +103,6 @@ export default function Profile() {
         </div>
       </div>
 
-      {/* States */}
       {error && (
         <div className="rounded-lg border border-red-800 bg-red-900/40 text-red-100 px-3 py-2 mb-6">
           {error}
@@ -130,7 +121,7 @@ export default function Profile() {
               <ReadOnly label="Username / ID" value={username} mono />
             </div>
 
-            {/* Optional deactivation */}
+            {/* Deactivation */}
             {typeof me?.deactivationStatus !== "undefined" && (
               <div className="mt-3 grid sm:grid-cols-2 gap-4">
                 <ReadOnly
@@ -158,7 +149,7 @@ export default function Profile() {
           {/* Private client info */}
           <Section
             title="Private Client Info"
-            hint="Only visible to you, admins, and a professional who has accepted your booking. Never shown publicly."
+            hint="Only visible to you, admins, and a professional who has accepted your booking."
           >
             <div className="grid sm:grid-cols-2 gap-4">
               <ReadOnly label="House Address" value={houseAddress} />
@@ -173,7 +164,7 @@ export default function Profile() {
             </div>
           </Section>
 
-          {/* Professional block */}
+          {/* Professional */}
           <Section title="Professional">
             {me?.isPro || pro?.id ? (
               <>
@@ -208,7 +199,7 @@ export default function Profile() {
             )}
           </Section>
 
-          {/* Security overview */}
+          {/* Security */}
           <Section title="Security & Wallet">
             <div className="grid sm:grid-cols-2 gap-4">
               <ReadOnly label="Wallet PIN" value={me?.hasPin ? "Set" : "Not set"} />
@@ -229,8 +220,7 @@ export default function Profile() {
   );
 }
 
-/* ------------------------------ UI bits ------------------------------ */
-
+/* ------------------ UI helpers ------------------ */
 function Section({ title, hint, children }) {
   return (
     <section className="rounded-lg border border-zinc-800 p-4 bg-black/40">
@@ -240,7 +230,6 @@ function Section({ title, hint, children }) {
     </section>
   );
 }
-
 function ReadOnly({ label, value, mono }) {
   return (
     <label className="block">
@@ -255,9 +244,8 @@ function ReadOnly({ label, value, mono }) {
     </label>
   );
 }
-
 function Avatar({ url, seed }) {
-  if (url) {
+  if (url)
     return (
       <img
         src={url}
@@ -265,7 +253,6 @@ function Avatar({ url, seed }) {
         className="w-14 h-14 rounded-full border border-zinc-800 object-cover"
       />
     );
-  }
   const base = String(seed || "?").split("@")[0];
   const initials =
     base

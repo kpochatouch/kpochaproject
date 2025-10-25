@@ -1,7 +1,7 @@
 // apps/web/src/pages/BecomePro.jsx
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api } from "../lib/api";
+import { api, getMe } from "../lib/api";
 import NgGeoPicker from "../components/NgGeoPicker.jsx";
 import SmartUpload from "../components/SmartUpload.jsx";
 
@@ -415,22 +415,18 @@ function LivenessModal({ onClose, onUploaded, onError, onBusy, folder }) {
     // Prefer transformation matrix if present
     const mat = res.facialTransformationMatrixes?.[0]?.data || null;
     if (mat && mat.length >= 12) {
-      // r20 term gives yaw-ish angle; empirically the sign can vary by platform
       const r20 = mat[8];
       const yaw = Math.asin(Math.max(-1, Math.min(1, -r20)));
       return (yaw * 180) / Math.PI;
     }
-    // Fallback: coarse heuristic using landmark spread (left/right eye outer corners)
-    // Landmarks 33 (right eye outer) and 263 (left eye outer) are common in FaceMesh
+    // Fallback: coarse heuristic using landmark spread
     const lm = res.faceLandmarks?.[0] || [];
     const a = lm[33], b = lm[263];
     if (a && b) {
-      // As head turns right, left eye projected width shrinks: use normalized delta to infer sign
-      const delta = (b.x - a.x); // positive if facing camera
-      // Compare eye heights to sign the turn (crude but works)
+      const delta = (b.x - a.x);
       const eyeYDelta = (b.y - a.y);
       const sign = eyeYDelta > 0 ? 1 : -1;
-      return sign * (1 - Math.min(1, Math.max(0.3, delta))) * 25; // ~±25°
+      return sign * (1 - Math.min(1, Math.max(0.3, delta))) * 25;
     }
     return 0;
   }
@@ -440,19 +436,16 @@ function LivenessModal({ onClose, onUploaded, onError, onBusy, folder }) {
     const video = videoRef.current;
     if (!faceLm || !video) return;
 
-    const loop = () => {
+    const raf = () => {
       const now = performance.now();
       const res = faceLm.detectForVideo(video, now);
 
       if (res?.faceLandmarks?.length) {
-        // Reset "face lost" tracker
         setFaceLostMs(0);
 
-        // yaw
         const yawDegrees = estimateYawDegrees(res);
         setYawDeg(Math.round(yawDegrees));
 
-        // blinks
         const blend = res.faceBlendshapes?.[0]?.categories || [];
         const bothBlink = getBlend(blend, "eyeBlinkLeft") > 0.5 && getBlend(blend, "eyeBlinkRight") > 0.5;
         if (bothBlink && !lastBlinkStateRef.current) {
@@ -460,26 +453,23 @@ function LivenessModal({ onClose, onUploaded, onError, onBusy, folder }) {
         }
         lastBlinkStateRef.current = bothBlink;
 
-        // steps
-        const dt = now - (lastTsRef.current || now);
-        lastTsRef.current = now;
-
-        // Tuned thresholds (more responsive)
-        const thrYaw = 9;            // degrees required to mark left/right
-        const nearCenterYaw = 7;     // degrees to consider "straight"
+        const dt = now - (performance.timing?.navigationStart || now);
+        const thrYaw = 9;
+        const nearCenterYaw = 7;
         const straightHoldMsNeeded = 450;
 
         setStatus((s) => {
           let next = { ...s };
           if (!next.straight) {
             if (Math.abs(yawDegrees) < nearCenterYaw) {
-              straightHoldMsRef.current += dt;
-              if (straightHoldMsRef.current > straightHoldMsNeeded) {
+              // keep a small local timer to avoid global deps
+              next._hold = (next._hold || 0) + dt * 0.06;
+              if (next._hold > straightHoldMsNeeded) {
                 next.straight = true;
                 setStep(1);
               }
             } else {
-              straightHoldMsRef.current = 0;
+              next._hold = 0;
             }
           } else if (!next.right) {
             if (yawDegrees > thrYaw) {
@@ -487,7 +477,6 @@ function LivenessModal({ onClose, onUploaded, onError, onBusy, folder }) {
               setStep(2);
               rightSignRef.current = 1;
             } else if (yawDegrees < -thrYaw) {
-              // If user did left first, accept that and swap order gracefully
               next.left = true;
               setStep(3);
               rightSignRef.current = -1;
@@ -506,14 +495,12 @@ function LivenessModal({ onClose, onUploaded, onError, onBusy, folder }) {
           return next;
         });
       } else {
-        // no face detected; track how long it's lost and show a hint
-        setFaceLostMs((t) => Math.min(2000, t + (now - (lastTsRef.current || now))));
-        lastTsRef.current = now;
+        setFaceLostMs((t) => Math.min(2000, t + 50));
       }
 
-      rafRef.current = requestAnimationFrame(loop);
+      rafRef.current = requestAnimationFrame(raf);
     };
-    rafRef.current = requestAnimationFrame(loop);
+    rafRef.current = requestAnimationFrame(raf);
   }
 
   const stepsLabels = ["Look straight", "Turn your head to the right", "Turn your head to the left", "Blink twice"];
@@ -605,7 +592,6 @@ function DetectLocationButton({ onSelect }) {
     setBusy(true);
     setErr("");
     try {
-      // 1) get GPS from browser
       const pos = await new Promise((resolve, reject) =>
         navigator.geolocation.getCurrentPosition(resolve, reject, {
           maximumAge: 30_000,
@@ -616,7 +602,6 @@ function DetectLocationButton({ onSelect }) {
       const lat = pos.coords.latitude;
       const lon = pos.coords.longitude;
 
-      // 2) reverse geocode via OSM (no custom headers; browsers forbid User-Agent)
       const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(
         lat
       )}&lon=${encodeURIComponent(lon)}&zoom=14&addressdetails=1`;
@@ -743,19 +728,24 @@ export default function BecomePro() {
 
   const [agreements, setAgreements] = useState({ terms: false, privacy: false });
 
-  // Prefill email from /api/me and/or Firebase user + keep emailVerified in sync
+  // ===== Prefill email once (guard StrictMode) & listen for verify flag
+  const initOnce = useRef(false);
   useEffect(() => {
+    if (initOnce.current) return;
+    initOnce.current = true;
+
     const authEmail = auth.currentUser?.email || "";
     if (authEmail) setIdentity((p) => ({ ...p, email: authEmail }));
 
+    // One-time /api/me (cached by api.js for 60s)
     (async () => {
       try {
-        const { data } = await api.get("/api/me");
-        if (data?.email) setIdentity((p) => ({ ...p, email: data.email }));
+        const me = await getMe(); // cached; no spam
+        if (me?.email) setIdentity((p) => ({ ...p, email: me.email }));
       } catch {}
     })();
 
-    // listen for auth changes to auto-detect emailVerified from signup
+    // Keep verified flag synced
     const unsub = onAuthStateChanged(auth, async (u) => {
       if (!u) return;
       setIdentity((p) => ({ ...p, email: u.email || p.email }));
@@ -841,51 +831,50 @@ export default function BecomePro() {
     return docOk ? "verified" : "unverified";
   }
 
-async function submit(e) {
-  e.preventDefault();
+  async function submit(e) {
+    e.preventDefault();
 
-  // ✅ Block submission if email not verified
-  if (!emailVerified) {
-    setMsg("Please verify your email before submitting your application.");
-    return;
+    // ✅ Block submission if email not verified
+    if (!emailVerified) {
+      setMsg("Please verify your email before submitting your application.");
+      return;
+    }
+
+    // ✅ Check if required fields are complete
+    if (!canSubmit) {
+      setMsg("Please complete all required fields before submitting.");
+      return;
+    }
+
+    setBusy(true);
+    setMsg("");
+
+    try {
+      // Compute verification status or payload (unchanged)
+      const verificationStatus = computeVerificationStatus();
+      const payload = {
+        ...identity,
+        ...professional,
+        verificationStatus,
+      };
+
+      // ✅ Submit application to backend
+      await api.put("/api/pros/me", payload);
+
+      // ✅ Redirect on success
+      nav("/apply/thanks");
+    } catch (err) {
+      // ✅ Improved error handling with friendly messages
+      console.error(err);
+      setMsg(
+        err?.friendlyMessage ||
+          err?.message ||
+          "Failed to submit application. Please try again."
+      );
+    } finally {
+      setBusy(false);
+    }
   }
-
-  // ✅ Check if required fields are complete
-  if (!canSubmit) {
-    setMsg("Please complete all required fields before submitting.");
-    return;
-  }
-
-  setBusy(true);
-  setMsg("");
-
-  try {
-    // Compute verification status or payload (unchanged)
-    const verificationStatus = computeVerificationStatus();
-    const payload = {
-      ...identity,
-      ...professional,
-      verificationStatus,
-    };
-
-    // ✅ Submit application to backend
-    await api.put("/api/pros/me", payload);
-
-    // ✅ Redirect on success
-    nav("/apply/thanks");
-  } catch (err) {
-    // ✅ Improved error handling with friendly messages
-    console.error(err);
-    setMsg(
-      err?.friendlyMessage ||
-        err?.message ||
-        "Failed to submit application. Please try again."
-    );
-  } finally {
-    setBusy(false);
-  }
-}
-
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-8">
@@ -1041,7 +1030,7 @@ async function submit(e) {
             </div>
           </div>
 
-          {/* Services (RESTORED) */}
+          {/* Services */}
           <div className="mt-4">
             <Label>Services you offer (required)</Label>
             <div className="flex flex-wrap gap-2">
