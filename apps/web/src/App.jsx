@@ -3,7 +3,7 @@ import { Routes, Route, Navigate, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { api, setAuthToken } from "./lib/api";
 
-// 🔐 keep Firebase token -> API header in sync
+// 🔐 Firebase
 import { onIdTokenChanged } from "firebase/auth";
 import { auth } from "./lib/firebase";
 
@@ -28,12 +28,39 @@ import Legal from "./pages/Legal.jsx";
 import ClientRegister from "./pages/ClientRegister.jsx";
 import DeactivateAccount from "./pages/DeactivateAccount.jsx";
 import ApplyThanks from "./pages/ApplyThanks.jsx";
-import PaymentConfirm from "./pages/PaymentConfirm.jsx"; // payment confirmation page
+import PaymentConfirm from "./pages/PaymentConfirm.jsx";
 
 // Layout
 import Navbar from "./components/Navbar.jsx";
 import Footer from "./components/Footer.jsx";
 import RequireAuth from "./components/RequireAuth.jsx";
+
+/* ------------------------------ Auth Bootstrap ------------------------------ */
+/**
+ * Waits for the first onIdTokenChanged tick, writes the token once (so axios can
+ * use it), then renders children. Prevents early /api/me calls without a token,
+ * which caused 401 + securetoken quota noise.
+ */
+function AuthBootstrap({ children }) {
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    const unsub = onIdTokenChanged(auth, async (user) => {
+      try {
+        const token = user ? await user.getIdToken() : null;
+        setAuthToken(token); // stored for api layer fallback if needed
+      } catch {
+        setAuthToken(null);
+      } finally {
+        setReady(true);
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  if (!ready) return <div className="p-6">Loading…</div>;
+  return children;
+}
 
 /* ---------- Chatbase loader (only for verified pros OR verified users) ---------- */
 function useChatbase() {
@@ -45,20 +72,18 @@ function useChatbase() {
 
     async function init() {
       try {
-        // Load minimal user state
+        // Load minimal user state (now safe: AuthBootstrap waits for token first)
         const meRes = await api.get("/api/me").catch(() => ({ data: null }));
         const me = meRes?.data || null;
 
-        // Only show widget for signed-in users
         if (!me) return;
 
-        // If user is a pro, check their verification status
+        // If user is a pro, only show when verified
         let verifiedOk = false;
         if (me.isPro) {
           const pro = await api.get("/api/pros/me").then(r => r.data).catch(() => null);
           verifiedOk = pro?.verificationStatus === "verified";
         } else {
-          // for non-pros, keep it off by default (can change later)
           verifiedOk = false;
         }
 
@@ -66,16 +91,14 @@ function useChatbase() {
 
         const cfg = { chatbotId: CHATBOT_ID };
 
-        // Optionally pass userId/userHash if your backend supports it
+        // Optional user hash
         try {
           const r = await api.get("/api/chatbase/userhash");
           if (r?.data?.userId && r?.data?.userHash) {
             cfg.userId = r.data.userId;
             cfg.userHash = r.data.userHash;
           }
-        } catch {
-          // anonymous fallback (still verified for showing widget)
-        }
+        } catch {}
 
         window.chatbaseConfig = cfg;
 
@@ -98,12 +121,6 @@ function useChatbase() {
 }
 
 /* ---------- Email verification guard ---------- */
-/** Allows:
- * - Users with verified emails
- * - Users with no email (e.g., phone-only login)
- * Blocks:
- * - Users with an email that is not verified yet
- */
 function RequireVerified({ children }) {
   const [state, setState] = useState({ loading: true, ok: false });
 
@@ -124,7 +141,7 @@ function RequireVerified({ children }) {
   return state.ok ? children : <Navigate to="/auth/verify" replace />;
 }
 
-/* ---------- Simple verification page (for the link & gating) ---------- */
+/* ---------- Simple verification page ---------- */
 function VerifyGate() {
   const [checking, setChecking] = useState(false);
   const [sent, setSent] = useState(false);
@@ -153,9 +170,7 @@ function VerifyGate() {
       });
       setSent(true);
       setTimeout(() => setSent(false), 2500);
-    } catch {
-      // ignore surface; user can try again
-    }
+    } catch {}
   }
 
   return (
@@ -220,13 +235,11 @@ function RequireProVerified({ children }) {
     let alive = true;
     (async () => {
       try {
-        // Must be a pro
         const me = await api.get("/api/me").then(r => r.data);
         if (!me?.isPro) {
           if (alive) setState({ loading: false, ok: false });
           return;
         }
-        // Must be verified
         const pro = await api.get("/api/pros/me").then(r => r.data).catch(() => null);
         const isVerified = pro?.verificationStatus === "verified";
         if (alive) setState({ loading: false, ok: !!isVerified });
@@ -288,178 +301,169 @@ function SettingsSmart() {
 export default function App() {
   useChatbase();
 
-  // 🔐 Write/refresh token → axios header + localStorage
-  useEffect(() => {
-    const unsub = onIdTokenChanged(auth, async (user) => {
-      try {
-        const token = user ? await user.getIdToken() : null;
-        setAuthToken(token);
-      } catch {
-        setAuthToken(null);
-      }
-    });
-    return () => unsub();
-  }, []);
-
   return (
     <div className="min-h-screen flex flex-col bg-black text-white">
       <Navbar />
-      {/* 🔹 Prevent content from hiding under the sticky navbar */}
+      {/* keep content clear of sticky navbar */}
       <main className="flex-1 pt-14">
-        <Routes>
-          {/* Public */}
-          <Route path="/" element={<Home />} />
-          <Route path="/browse" element={<Browse />} />
-          <Route path="/book/:barberId" element={<BookService />} />
-          <Route path="/auth/verify" element={<VerifyGate />} />
-          {/* Booking details requires auth on the API → gate it here */}
-          <Route
-            path="/bookings/:id"
-            element={
-              <RequireAuth>
-                <RequireVerified>
-                  <BookingDetails />
-                </RequireVerified>
-              </RequireAuth>
-            }
-          />
-          {/* Profile is user-specific → gate it */}
-          <Route
-            path="/profile"
-            element={
-              <RequireAuth>
-                <RequireVerified>
-                  <Profile />
-                </RequireVerified>
-              </RequireAuth>
-            }
-          />
-          <Route path="/login" element={<Login />} />
-          <Route path="/login/phone" element={<PhoneLogin />} />
-          <Route path="/signup" element={<Signup />} />
-          <Route path="/legal" element={<Legal />} />
-          <Route path="/legal/*" element={<Legal />} />
-          <Route path="/apply/thanks" element={<ApplyThanks />} />
-          <Route path="/payment/confirm" element={<PaymentConfirm />} />
+        <AuthBootstrap>
+          <Routes>
+            {/* Public */}
+            <Route path="/" element={<Home />} />
+            <Route path="/browse" element={<Browse />} />
+            <Route path="/book/:barberId" element={<BookService />} />
+            <Route path="/auth/verify" element={<VerifyGate />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/login/phone" element={<PhoneLogin />} />
+            <Route path="/signup" element={<Signup />} />
+            <Route path="/legal" element={<Legal />} />
+            <Route path="/legal/*" element={<Legal />} />
+            <Route path="/apply/thanks" element={<ApplyThanks />} />
+            <Route path="/payment/confirm" element={<PaymentConfirm />} />
 
-          {/* Helpful legal shortcuts */}
-          <Route path="/terms" element={<Navigate to="/legal#terms" replace />} />
-          <Route path="/privacy" element={<Navigate to="/legal#privacy" replace />} />
-          <Route path="/cookies" element={<Navigate to="/legal#cookies" replace />} />
-          <Route path="/refunds" element={<Navigate to="/legal#refunds" replace />} />
+            {/* Helpful legal shortcuts */}
+            <Route path="/terms" element={<Navigate to="/legal#terms" replace />} />
+            <Route path="/privacy" element={<Navigate to="/legal#privacy" replace />} />
+            <Route path="/cookies" element={<Navigate to="/legal#cookies" replace />} />
+            <Route path="/refunds" element={<Navigate to="/legal#refunds" replace />} />
 
-          {/* Auth-required */}
-          <Route
-            path="/wallet"
-            element={
-              <RequireAuth>
-                <RequireVerified>
-                  <WalletSmart />
-                </RequireVerified>
-              </RequireAuth>
-            }
-          />
+            {/* Booking details requires auth on the API → gate it here */}
+            <Route
+              path="/bookings/:id"
+              element={
+                <RequireAuth>
+                  <RequireVerified>
+                    <BookingDetails />
+                  </RequireVerified>
+                </RequireAuth>
+              }
+            />
 
-          {/* Settings */}
-          <Route
-            path="/settings"
-            element={
-              <RequireAuth>
-                <RequireVerified>
-                  <SettingsSmart />
-                </RequireVerified>
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/settings/pro"
-            element={
-              <RequireRole role="pro">
-                <RequireVerified>
-                  <Settings />
-                </RequireVerified>
-              </RequireRole>
-            }
-          />
-          <Route
-            path="/settings/client"
-            element={
-              <RequireAuth>
-                <RequireVerified>
-                  <ClientSettings />
-                </RequireVerified>
-              </RequireAuth>
-            }
-          />
+            {/* Profile is user-specific → gate it */}
+            <Route
+              path="/profile"
+              element={
+                <RequireAuth>
+                  <RequireVerified>
+                    <Profile />
+                  </RequireVerified>
+                </RequireAuth>
+              }
+            />
 
-          <Route
-            path="/become"
-            element={
-              <RequireAuth>
-                <RequireVerified>
-                  <BecomePro />
-                </RequireVerified>
-              </RequireAuth>
-            }
-          />
+            {/* Auth-required */}
+            <Route
+              path="/wallet"
+              element={
+                <RequireAuth>
+                  <RequireVerified>
+                    <WalletSmart />
+                  </RequireVerified>
+                </RequireAuth>
+              }
+            />
 
-          {/* Client registration (profile details step) */}
-          <Route
-            path="/client-register"
-            element={
-              <RequireAuth>
-                <RequireVerified>
-                  <ClientRegister />
-                </RequireVerified>
-              </RequireAuth>
-            }
-          />
-          <Route path="/register" element={<Navigate to="/client-register" replace />} />
+            {/* Settings */}
+            <Route
+              path="/settings"
+              element={
+                <RequireAuth>
+                  <RequireVerified>
+                    <SettingsSmart />
+                  </RequireVerified>
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/settings/pro"
+              element={
+                <RequireRole role="pro">
+                  <RequireVerified>
+                    <Settings />
+                  </RequireVerified>
+                </RequireRole>
+              }
+            />
+            <Route
+              path="/settings/client"
+              element={
+                <RequireAuth>
+                  <RequireVerified>
+                    <ClientSettings />
+                  </RequireVerified>
+                </RequireAuth>
+              }
+            />
 
-          {/* Account deactivation */}
-          <Route
-            path="/deactivate"
-            element={
-              <RequireAuth>
-                <RequireVerified>
-                  <DeactivateAccount />
-                </RequireVerified>
-              </RequireAuth>
-            }
-          />
+            <Route
+              path="/become"
+              element={
+                <RequireAuth>
+                  <RequireVerified>
+                    <BecomePro />
+                  </RequireVerified>
+                </RequireAuth>
+              }
+            />
 
-          {/* Pro Dashboard — ✅ verified-only */}
-          <Route
-            path="/pro-dashboard"
-            element={
-              <RequireProVerified>
-                <ProDashboard />
-              </RequireProVerified>
-            }
-          />
-          <Route path="/pro" element={<Navigate to="/pro-dashboard" replace />} />
+            {/* Client registration (profile details step) */}
+            <Route
+              path="/client-register"
+              element={
+                <RequireAuth>
+                  <RequireVerified>
+                    <ClientRegister />
+                  </RequireVerified>
+                </RequireAuth>
+              }
+            />
+            <Route path="/register" element={<Navigate to="/client-register" replace />} />
 
-          {/* Admin */}
-          <Route
-            path="/admin"
-            element={
-              <RequireRole role="admin">
-                <Admin />
-              </RequireRole>
-            }
-          />
-          <Route
-            path="/admin/decline/:id"
-            element={
-              <RequireRole role="admin">
-                <AdminDecline />
-              </RequireRole>
-            }
-          />
+            {/* Account deactivation */}
+            <Route
+              path="/deactivate"
+              element={
+                <RequireAuth>
+                  <RequireVerified>
+                    <DeactivateAccount />
+                  </RequireVerified>
+                </RequireAuth>
+              }
+            />
 
-          {/* Fallback */}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+            {/* Pro Dashboard — verified-only */}
+            <Route
+              path="/pro-dashboard"
+              element={
+                <RequireProVerified>
+                  <ProDashboard />
+                </RequireProVerified>
+              }
+            />
+            <Route path="/pro" element={<Navigate to="/pro-dashboard" replace />} />
+
+            {/* Admin */}
+            <Route
+              path="/admin"
+              element={
+                <RequireRole role="admin">
+                  <Admin />
+                </RequireRole>
+              }
+            />
+            <Route
+              path="/admin/decline/:id"
+              element={
+                <RequireRole role="admin">
+                  <AdminDecline />
+                </RequireRole>
+              }
+            />
+
+            {/* Fallback */}
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </AuthBootstrap>
       </main>
       <Footer />
     </div>
