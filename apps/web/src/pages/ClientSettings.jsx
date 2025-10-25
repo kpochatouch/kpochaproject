@@ -1,4 +1,3 @@
-// apps/web/src/pages/ClientSettings.jsx
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api";
 
@@ -55,7 +54,8 @@ export default function ClientSettings() {
           phone: profile?.phone || meData?.phone || "",
           state: profile?.state || "",
           lga: profile?.lga || meData?.lga || "",
-          address: profile?.houseAddress || "",
+          // 🔧 use 'address' (schema field), not 'houseAddress'
+          address: profile?.address || "",
           photoUrl: profile?.photoUrl || meData?.photoUrl || "",
         }));
 
@@ -111,7 +111,8 @@ export default function ClientSettings() {
         phone: form.phone?.trim(),
         state: form.state,
         lga: form.lga,
-        houseAddress: form.address?.trim(),
+        // 🔧 send 'address' (matches schema & router)
+        address: form.address?.trim(),
         photoUrl: form.photoUrl || "",
       });
 

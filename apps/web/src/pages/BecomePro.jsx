@@ -1,7 +1,6 @@
-// apps/web/src/pages/BecomePro.jsx
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api } from "../lib/api";
+import { api, submitProApplication } from "../lib/api";
 import NgGeoPicker from "../components/NgGeoPicker.jsx";
 import PhoneOTP from "../components/PhoneOTP.jsx";
 
@@ -42,6 +41,9 @@ export default function BecomePro() {
     lga: "",
     originState: "",
     photoUrl: "",
+    // ⬇️ will optionally hold GPS too for redundancy
+    lat: "",
+    lon: "",
   });
   const [phoneVerifiedAt, setPhoneVerifiedAt] = useState(null);
 
@@ -61,6 +63,9 @@ export default function BecomePro() {
     shopAddress: "",
     shopPhotoOutside: "",
     shopPhotoInside: "",
+    // ⬇️ GPS for shop / work location (preferred source on server)
+    lat: "",
+    lon: "",
   });
 
   const [availability, setAvailability] = useState({
@@ -224,6 +229,57 @@ export default function BecomePro() {
     return String(s).replace(/\D/g, "");
   }
 
+  /* -------- GPS: Use my location (sets business.lat/lon, tries to auto-fill state/LGA/address) -------- */
+  async function useMyLocation() {
+    try {
+      setMsg("");
+      if (!("geolocation" in navigator)) {
+        setMsg("Your browser does not support geolocation.");
+        return;
+      }
+      await new Promise((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 15000,
+          maximumAge: 0,
+        });
+      }).then(async (pos) => {
+        const lat = Number(pos.coords.latitude.toFixed(6));
+        const lon = Number(pos.coords.longitude.toFixed(6));
+
+        // Save GPS both in business and identity (redundant on purpose)
+        setBusiness((b) => ({ ...b, lat, lon }));
+        setIdentity((i) => ({ ...i, lat, lon }));
+
+        // Try to reverse geocode to suggest state/LGA/address
+        try {
+          const { data } = await api.get(`/api/geo/rev?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`);
+          const props = data?.features?.[0]?.properties || {};
+          const guessedState = String(props.state || props.region || "").toUpperCase();
+          const guessedLga = String(props.county || props.city || props.district || props.suburb || "").toUpperCase();
+          const formatted = props.formatted || "";
+
+          setIdentity((prev) => ({
+            ...prev,
+            state: prev.state || guessedState || prev.state,
+            lga: prev.lga || guessedLga || prev.lga,
+          }));
+
+          setBusiness((prev) => ({
+            ...prev,
+            shopAddress: prev.shopAddress || formatted || prev.shopAddress,
+          }));
+        } catch (e) {
+          // reverse geocode is best-effort; keep silent if it fails
+          console.warn("[reverse geocode] failed", e);
+        }
+      });
+    } catch (err) {
+      console.error(err);
+      setMsg(err?.message || "Failed to get your location.");
+    }
+  }
+
   async function submit(e) {
     e.preventDefault();
     if (!canSubmit) return;
@@ -231,10 +287,22 @@ export default function BecomePro() {
     setBusy(true);
     setMsg("");
     try {
+      const topLat = business.lat || identity.lat || "";
+      const topLon = business.lon || identity.lon || "";
+
       const payload = {
-        identity,
+        // ⬇️ top-level for server convenience
+        ...(topLat && topLon ? { lat: topLat, lon: topLon } : {}),
+
+        identity: {
+          ...identity,
+          ...(topLat && topLon ? { lat: topLat, lon: topLon } : {}),
+        },
         professional,
-        business,
+        business: {
+          ...business,
+          ...(topLat && topLon ? { lat: topLat, lon: topLon } : {}),
+        },
         availability: {
           ...availability,
           statesCovered: professional.nationwide ? stateList : availability.statesCovered,
@@ -259,11 +327,18 @@ export default function BecomePro() {
         agreements: { terms: !!agreements.terms, privacy: !!agreements.privacy },
       };
 
-      await api.put("/api/pros/me", payload);
+      // 🔁 First-time apply: POST /api/applications (not PUT /api/pros/me)
+      await submitProApplication(payload);
+
       nav("/apply/thanks");
     } catch (err) {
       console.error(err);
-      setMsg("Failed to submit application.");
+      const apiMsg =
+        err?.response?.data?.error ||
+        (err?.response?.status === 409
+          ? "You already have an active or pending application."
+          : "Failed to submit application.");
+      setMsg(apiMsg);
     } finally {
       setBusy(false);
     }
@@ -294,7 +369,7 @@ export default function BecomePro() {
             <div>
               <Label>Phone Number</Label>
               <input
-                className="w-full bg-black border border-zinc-800 rounded-lg px-3 py-2"
+                className="w-full bg-black border border-zinc-800 rounded-lg px3 py-2"
                 value={identity.phone}
                 onChange={(e)=>{ setIdentity({...identity, phone: e.target.value}); setPhoneVerifiedAt(null); }}
                 required
@@ -519,6 +594,37 @@ export default function BecomePro() {
               </div>
             </div>
           )}
+
+          {/* ⬇️ GPS helpers (works for any mode) */}
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+            <Input
+              label="Latitude (optional)"
+              value={business.lat}
+              onChange={(e)=>setBusiness({...business, lat: e.target.value})}
+              placeholder="e.g. 6.5244"
+            />
+            <Input
+              label="Longitude (optional)"
+              value={business.lon}
+              onChange={(e)=>setBusiness({...business, lon: e.target.value})}
+              placeholder="e.g. 3.3792"
+            />
+            <div className="flex items-end">
+              <button
+                type="button"
+                onClick={useMyLocation}
+                className="w-full px-3 py-2 rounded-lg border border-zinc-700 text-sm hover:bg-zinc-900"
+                title="Fill GPS from your current location"
+              >
+                Use my location
+              </button>
+            </div>
+            {(business.lat && business.lon) && (
+              <div className="md:col-span-3 text-xs text-zinc-400">
+                Tip: Your GPS helps clients find you in “nearby” search.
+              </div>
+            )}
+          </div>
         </Section>
 
         {/* SECTION 4: Availability */}

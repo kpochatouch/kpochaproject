@@ -1,5 +1,5 @@
 // apps/web/src/App.jsx
-import { Routes, Route, Navigate } from "react-router-dom";
+import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { api, setAuthToken } from "./lib/api";
 
@@ -7,7 +7,7 @@ import { api, setAuthToken } from "./lib/api";
 import { onIdTokenChanged } from "firebase/auth";
 import { auth } from "./lib/firebase";
 
-// Pages
+/* ---------- Pages ---------- */
 import Home from "./pages/Home.jsx";
 import Browse from "./pages/Browse.jsx";
 import BookService from "./pages/BookService.jsx";
@@ -27,9 +27,9 @@ import Legal from "./pages/Legal.jsx";
 import ClientRegister from "./pages/ClientRegister.jsx";
 import DeactivateAccount from "./pages/DeactivateAccount.jsx";
 import ApplyThanks from "./pages/ApplyThanks.jsx";
-import PaymentConfirm from "./pages/PaymentConfirm.jsx"; // payment confirmation page
+import PaymentConfirm from "./pages/PaymentConfirm.jsx";
 
-// Layout
+/* ---------- Layout ---------- */
 import Navbar from "./components/Navbar.jsx";
 import Footer from "./components/Footer.jsx";
 import RequireAuth from "./components/RequireAuth.jsx";
@@ -40,7 +40,7 @@ function useChatbase() {
     const CHATBOT_ID = import.meta.env.VITE_CHATBASE_ID;
     if (!CHATBOT_ID) return;
 
-    async function init() {
+    (async () => {
       const cfg = { chatbotId: CHATBOT_ID };
 
       try {
@@ -63,15 +63,14 @@ function useChatbase() {
         s.defer = true;
         document.body.appendChild(s);
       }
-    }
-
-    init();
+    })();
   }, []);
 }
 
-/* ---------- Role guard ---------- */
+/* ---------- Role guard (admin / pro) ---------- */
 function RequireRole({ role, children }) {
   const [ok, setOk] = useState(null);
+  const loc = useLocation();
 
   useEffect(() => {
     let alive = true;
@@ -91,7 +90,7 @@ function RequireRole({ role, children }) {
   }, [role]);
 
   if (ok === null) return <div className="p-6">Loading…</div>;
-  return ok ? children : <Navigate to="/" replace />;
+  return ok ? children : <Navigate to="/" replace state={{ from: loc }} />;
 }
 
 /* ---------- Smart Wallet ---------- */
@@ -146,7 +145,7 @@ export default function App() {
     const unsub = onIdTokenChanged(auth, async (user) => {
       try {
         const token = user ? await user.getIdToken() : null; // fresh token
-        setAuthToken(token); // your api.js helper updates axios + localStorage
+        setAuthToken(token); // api.js updates axios + localStorage
       } catch {
         setAuthToken(null);
       }
@@ -163,7 +162,8 @@ export default function App() {
           <Route path="/" element={<Home />} />
           <Route path="/browse" element={<Browse />} />
           <Route path="/book/:barberId" element={<BookService />} />
-          {/* Booking details requires auth on the API → gate it here */}
+
+          {/* Booking details require auth (server validates token too) */}
           <Route
             path="/bookings/:id"
             element={
@@ -172,7 +172,8 @@ export default function App() {
               </RequireAuth>
             }
           />
-          {/* Profile is user-specific → gate it */}
+
+          {/* Profile (client) */}
           <Route
             path="/profile"
             element={
@@ -181,20 +182,24 @@ export default function App() {
               </RequireAuth>
             }
           />
+
+          {/* Auth pages */}
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
+
+          {/* Legal */}
           <Route path="/legal" element={<Legal />} />
           <Route path="/legal/*" element={<Legal />} />
-          <Route path="/apply/thanks" element={<ApplyThanks />} />
-          <Route path="/payment/confirm" element={<PaymentConfirm />} />
-
-          {/* Helpful legal shortcuts */}
           <Route path="/terms" element={<Navigate to="/legal#terms" replace />} />
           <Route path="/privacy" element={<Navigate to="/legal#privacy" replace />} />
           <Route path="/cookies" element={<Navigate to="/legal#cookies" replace />} />
           <Route path="/refunds" element={<Navigate to="/legal#refunds" replace />} />
 
-          {/* Auth-required */}
+          {/* Application / payments */}
+          <Route path="/apply/thanks" element={<ApplyThanks />} />
+          <Route path="/payment/confirm" element={<PaymentConfirm />} />
+
+          {/* Wallet (smart: pro vs client) */}
           <Route
             path="/wallet"
             element={
@@ -204,7 +209,7 @@ export default function App() {
             }
           />
 
-          {/* Settings */}
+          {/* Settings (smart: pro vs client) */}
           <Route
             path="/settings"
             element={
@@ -213,6 +218,7 @@ export default function App() {
               </RequireAuth>
             }
           />
+          {/* Direct access variants (optional deep links) */}
           <Route
             path="/settings/pro"
             element={
@@ -230,6 +236,7 @@ export default function App() {
             }
           />
 
+          {/* Become a Pro (application) */}
           <Route
             path="/become"
             element={
@@ -239,7 +246,7 @@ export default function App() {
             }
           />
 
-          {/* Client registration */}
+          {/* Client register wizard */}
           <Route
             path="/client-register"
             element={
@@ -271,7 +278,7 @@ export default function App() {
           />
           <Route path="/pro" element={<Navigate to="/pro-dashboard" replace />} />
 
-          {/* Admin */}
+          {/* Admin (server also enforces requireAdmin) */}
           <Route
             path="/admin"
             element={

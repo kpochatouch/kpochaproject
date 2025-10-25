@@ -1,14 +1,13 @@
-// apps/web/src/lib/api.js
 import axios from "axios";
 import { getAuth, onAuthStateChanged } from "firebase/auth";
 
 /* =========================================
-   BASE URL (no hardcoding)
+   BASE URL (normalize, no trailing slash, no /api suffix)
    ========================================= */
-const ROOT =
-  (import.meta.env.VITE_API_BASE_URL || "http://localhost:8080").replace(/\/+$/, "");
+let ROOT = (import.meta.env.VITE_API_BASE_URL || "http://localhost:8080").replace(/\/+$/, "");
+if (/\/api$/i.test(ROOT)) ROOT = ROOT.replace(/\/api$/i, "");
 
-// Points to server root. Your functions already include "/api/..."
+// Points to server root. Your paths below already start with "/api/..."
 export const api = axios.create({
   baseURL: ROOT,
   headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -80,6 +79,10 @@ export async function getNgStates() {
 }
 export async function getNgLgas(stateName) {
   const { data } = await api.get(`/api/geo/ng/lgas/${encodeURIComponent(stateName)}`);
+  return data;
+}
+export async function reverseGeocode({ lat, lon }) {
+  const { data } = await api.get("/api/geo/rev", { params: { lat, lon } });
   return data;
 }
 
@@ -229,8 +232,13 @@ export async function updateSettings(payload) {
 }
 
 /* =========================================
-   PROFILES
+   PRO APPLICATIONS / PROFILES
    ========================================= */
+export async function submitProApplication(payload) {
+  const { data } = await api.post("/api/applications", payload);
+  return data; // expect { ok: true, id, ... }
+}
+
 export async function getClientProfile() {
   const { data } = await api.get("/api/profile/client/me");
   return data;

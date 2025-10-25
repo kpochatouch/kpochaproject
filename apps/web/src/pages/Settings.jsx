@@ -24,7 +24,7 @@ const SERVICE_OPTIONS = [
 export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [me, setMe] = useState(null);         // user document
-  const [appDoc, setAppDoc] = useState(null); // professional application/profile doc (optional)
+  const [appDoc, setAppDoc] = useState(null); // professional doc (optional)
   const [err, setErr] = useState("");
   const [ok, setOk] = useState("");
 
@@ -65,12 +65,12 @@ export default function SettingsPage() {
   function clearMsg() {
     setErr("");
     setOk("");
-    clearTimeout(okTimerRef.current);
-    clearTimeout(errTimerRef.current);
+    if (okTimerRef.current) clearTimeout(okTimerRef.current);
+    if (errTimerRef.current) clearTimeout(errTimerRef.current);
   }
   function flashOK(msg) {
     setOk(msg);
-    clearTimeout(okTimerRef.current);
+    if (okTimerRef.current) clearTimeout(okTimerRef.current);
     okTimerRef.current = setTimeout(() => setOk(""), 2500);
   }
   const digitsOnly = (s = "") => String(s).replace(/\D/g, "");
@@ -163,19 +163,25 @@ export default function SettingsPage() {
         ]);
         if (!alive) return;
 
-        const meData = meRes.data;
+        const meData = meRes.data || {};
         const app = proRes?.data || null;
 
         setMe(meData);
         setAppDoc(app);
 
-        // hydrate General (user) fields from user doc primarily; fallback to pro doc
-        setDisplayName(meData?.displayName || app?.displayName || meData?.email || "");
-        setPhone(meData?.identity?.phone || app?.phone || app?.identity?.phone || "");
-        setAvatarUrl(meData?.identity?.photoUrl || app?.identity?.photoUrl || "");
+        // hydrate General (user) fields
+        const meIdentity = meData.identity || {};
+        setDisplayName(
+          meData?.displayName ||
+          app?.displayName ||
+          meData?.email ||
+          ""
+        );
+        setPhone(meIdentity?.phone || app?.phone || app?.identity?.phone || "");
+        setAvatarUrl(meIdentity?.photoUrl || app?.identity?.photoUrl || "");
 
-        const lgaUpper = (meData?.identity?.city || app?.lga || app?.identity?.city || "").toString().toUpperCase();
-        const stateUpper = (meData?.identity?.state || app?.identity?.state || "").toString().toUpperCase();
+        const lgaUpper = (meIdentity?.city || app?.lga || app?.identity?.city || "").toString().toUpperCase();
+        const stateUpper = (meIdentity?.state || app?.identity?.state || "").toString().toUpperCase();
         setLga(lgaUpper);
         setStateVal(stateUpper);
 
@@ -208,8 +214,8 @@ export default function SettingsPage() {
     })();
     return () => {
       alive = false;
-      clearTimeout(okTimerRef.current);
-      clearTimeout(errTimerRef.current);
+      if (okTimerRef.current) clearTimeout(okTimerRef.current);
+      if (errTimerRef.current) clearTimeout(errTimerRef.current);
     };
   }, []);
 
@@ -267,8 +273,8 @@ export default function SettingsPage() {
       let res;
       try {
         res = await api.put("/api/profile/me", payload);
-      } catch (e) {
-        // fallback if router path is slightly different in your tree
+      } catch {
+        // fallback if router path differs slightly
         res = await api.put("/api/profile", payload);
       }
 
