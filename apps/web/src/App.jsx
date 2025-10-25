@@ -62,23 +62,26 @@ function AuthBootstrap({ children }) {
   return children;
 }
 
-/* ---------- Chatbase loader (only for verified pros OR verified users) ---------- */
+/* ---------- Chatbase loader (only after user exists; verified pros only) ---------- */
 function useChatbase() {
   useEffect(() => {
     const CHATBOT_ID = import.meta.env.VITE_CHATBASE_ID;
     if (!CHATBOT_ID) return;
 
-    let alive = true;
+    // Subscribe to auth changes; do nothing if logged out (prevents 401 while logged out)
+    const unsub = onIdTokenChanged(auth, async (user) => {
+      if (!user) return;
 
-    async function init() {
+      let alive = true;
       try {
-        // Load minimal user state (now safe: AuthBootstrap waits for token first)
-        const meRes = await api.get("/api/me").catch(() => ({ data: null }));
-        const me = meRes?.data || null;
+        // Ensure token available (not strictly required, but safe)
+        await user.getIdToken();
 
-        if (!me) return;
+        // Minimal user state
+        const me = await api.get("/api/me").then(r => r.data).catch(() => null);
+        if (!alive || !me) return;
 
-        // If user is a pro, only show when verified
+        // Only show for verified pros
         let verifiedOk = false;
         if (me.isPro) {
           const pro = await api.get("/api/pros/me").then(r => r.data).catch(() => null);
@@ -86,22 +89,23 @@ function useChatbase() {
         } else {
           verifiedOk = false;
         }
-
         if (!alive || !verifiedOk) return;
 
         const cfg = { chatbotId: CHATBOT_ID };
 
-        // Optional user hash
+        // Optional user hash from backend
         try {
           const r = await api.get("/api/chatbase/userhash");
           if (r?.data?.userId && r?.data?.userHash) {
             cfg.userId = r.data.userId;
             cfg.userHash = r.data.userHash;
           }
-        } catch {}
+        } catch {
+          // anonymous is fine
+        }
 
+        // Expose config and inject script if not present
         window.chatbaseConfig = cfg;
-
         if (!document.getElementById(CHATBOT_ID)) {
           const s = document.createElement("script");
           s.src = "https://www.chatbase.co/embed.min.js";
@@ -113,10 +117,13 @@ function useChatbase() {
       } catch {
         // ignore
       }
-    }
 
-    init();
-    return () => { alive = false; };
+      return () => {
+        alive = false;
+      };
+    });
+
+    return () => unsub();
   }, []);
 }
 
