@@ -640,6 +640,140 @@ app.get("/api/wallet/client/me", requireAuth, async (_req, res) => {
 
 app.use("/api", walletWithAuth(requireAuth, requireAdmin));
 app.use("/api", pinRoutes({ requireAuth, Application })); // /pin/me/*
+
+/* ------------------- PRO PROFILE (GET + PUT) — overrides Profile.js ------------------- */
+/**
+ * These handlers are placed BEFORE `app.use("/api", profileRouter)` so they
+ * override any same-path handlers inside routes/Profile.js.
+ *
+ * Behavior:
+ * - GET  /api/profile/pro/me   → returns the Pro doc (sanitized) or null
+ * - PUT  /api/profile/pro/me   → CREATE on first save (status "submitted"), UPDATE thereafter
+ * - GET  /api/pros/me          → same as above (compat)
+ * - PUT  /api/pros/me          → same as above (compat)
+ */
+
+function _normalizeLga(v = "") {
+  return (v || "").toString().trim().toUpperCase();
+}
+function _nameFromIdentity(identity = {}) {
+  const fn = (identity?.firstName || "").trim();
+  const ln = (identity?.lastName || "").trim();
+  const joined = [fn, ln].filter(Boolean).join(" ").trim();
+  return joined || "";
+}
+
+async function getProMe(req, res) {
+  try {
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({ error: "Database not connected" });
+    }
+    const pro = await Pro.findOne({ ownerUid: req.user.uid });
+    return res.json(pro ? sanitizePro(pro, req.user.role) : null);
+  } catch (e) {
+    console.error("[pro:me:get]", e?.message || e);
+    return res.status(500).json({ error: "failed" });
+  }
+}
+
+async function putProMe(req, res) {
+  try {
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({ error: "Database not connected" });
+    }
+
+    const uid = req.user.uid;
+    const payload = req.body || {};
+    let pro = await Pro.findOne({ ownerUid: uid });
+
+    if (!pro) {
+      // first-time creation
+      pro = new Pro({
+        ownerUid: uid,
+        email: payload.email || req.user.email || "",
+        name:
+          payload.name ||
+          payload.displayName ||
+          _nameFromIdentity(payload.identity || {}) ||
+          "Unnamed Professional",
+        phone: payload.phone || payload?.identity?.phone || "",
+        lga: _normalizeLga(
+          payload.lga || payload?.identity?.city || payload?.identity?.state || ""
+        ),
+        identity: payload.identity || {},
+        professional: payload.professional || {},
+        availability: payload.availability || {},
+        bank: payload.bank || {},
+        status: payload.status || "submitted",
+      });
+    } else {
+      // update existing
+      pro.name =
+        payload.name ??
+        payload.displayName ??
+        _nameFromIdentity(payload.identity || {}) ??
+        pro.name;
+
+      pro.email = payload.email ?? pro.email ?? req.user.email ?? "";
+      pro.phone = payload.phone ?? pro.phone ?? payload?.identity?.phone ?? "";
+      pro.lga   = _normalizeLga(payload.lga ?? pro.lga ?? "");
+
+      pro.identity     = payload.identity     ?? pro.identity;
+      pro.professional = payload.professional ?? pro.professional;
+      pro.availability = payload.availability ?? pro.availability;
+      pro.bank         = payload.bank         ?? pro.bank;
+      pro.status       = payload.status       ?? pro.status ?? "submitted";
+    }
+
+    await pro.save();
+
+    // best-effort sync to Application
+    try {
+      const baseIdentity = pro.identity || {};
+      const baseProfessional = pro.professional || {};
+      let appDoc = await Application.findOne({ uid });
+
+      if (!appDoc) {
+        appDoc = await Application.create({
+          uid,
+          email: pro.email || "",
+          displayName: pro.name || "",
+          phone: pro.phone || "",
+          lga: pro.lga || "",
+          identity: baseIdentity,
+          professional: baseProfessional,
+          status: pro.status || "submitted",
+        });
+      } else {
+        appDoc.email = pro.email || appDoc.email || "";
+        appDoc.displayName = pro.name || appDoc.displayName || "";
+        appDoc.phone = pro.phone || appDoc.phone || "";
+        appDoc.lga = pro.lga || appDoc.lga || "";
+        appDoc.identity = baseIdentity;
+        appDoc.professional = baseProfessional;
+        appDoc.status = appDoc.status || pro.status || "submitted";
+        await appDoc.save();
+      }
+    } catch (syncErr) {
+      console.warn("[pro:me:put] application-sync warn:", syncErr?.message || syncErr);
+    }
+
+    return res.json({ ok: true, item: sanitizePro(pro, req.user.role) });
+  } catch (e) {
+    console.error("[pro:me:put]", e?.message || e);
+    return res.status(500).json({ error: "failed" });
+  }
+}
+
+// Mount overrides (BEFORE profileRouter)
+app.get("/api/profile/pro/me", requireAuth, getProMe);
+app.put("/api/profile/pro/me", requireAuth, putProMe);
+
+// Backward-compatible aliases
+app.get("/api/pros/me", requireAuth, getProMe);
+app.put("/api/pros/me", requireAuth, putProMe);
+/* ------------------- PRO PROFILE overrides END ------------------- */
+
 app.use("/api", profileRouter);
 app.use("/api", postsRouter);
 app.use("/api", paymentsRouter({ requireAuth })); // mounts /payments/*
