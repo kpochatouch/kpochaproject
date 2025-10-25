@@ -29,24 +29,20 @@ let authReady = new Promise((resolve) => {
   }
 });
 
-// Attach Firebase ID token if available (no force refresh)
+// Attach Firebase ID token if available (NO localStorage fallback)
 api.interceptors.request.use(async (config) => {
   await authReady;
   try {
     const auth = getAuth();
     const user = auth?.currentUser || null;
     if (user) {
-      const idToken = await user.getIdToken(); // <-- no "true"
+      const idToken = await user.getIdToken(); // no "true"
       if (idToken) config.headers.Authorization = `Bearer ${idToken}`;
-    } else {
+    } else if (config.headers) {
       delete config.headers.Authorization;
     }
   } catch {
-    // fall back to any stored token (optional)
-    try {
-      const token = localStorage.getItem("token");
-      if (token) config.headers.Authorization = `Bearer ${token}`;
-    } catch {}
+    if (config.headers) delete config.headers.Authorization;
   }
   return config;
 });
@@ -70,7 +66,6 @@ api.interceptors.request.use((config) => {
   if ((config.method || "get").toLowerCase() === "get" && isMeEndpoint(config) && !config.__bypassCache) {
     const now = Date.now();
     if (meCache.data && now - meCache.ts < ME_TTL_MS) {
-      // Use a custom adapter to return a resolved cached response
       const cached = meCache.data;
       config.adapter = async () => ({
         data: cached,
@@ -80,7 +75,6 @@ api.interceptors.request.use((config) => {
         config,
       });
     } else {
-      // Mark so we store fresh response below
       config.__cacheMe = true;
     }
   }
@@ -121,8 +115,8 @@ api.interceptors.response.use(
             config.__retried = true;
             return api(config);
           }
-        } else {
-          if (config.headers) delete config.headers.Authorization;
+        } else if (config.headers) {
+          delete config.headers.Authorization;
         }
       } catch {
         // fall through to friendly message
@@ -172,9 +166,7 @@ api.interceptors.response.use(
         msg = serverMsg || "Server error. Please try again shortly.";
         break;
       case 503:
-        msg =
-          serverMsg ||
-          "Service temporarily unavailable. Please try again in a moment.";
+        msg = serverMsg || "Service temporarily unavailable. Please try again in a moment.";
         break;
       default:
         msg = serverMsg || `Request failed (${status}).`;
@@ -189,6 +181,8 @@ api.interceptors.response.use(
 /* =========================================
    HELPERS
    ========================================= */
+// Note: We still expose setAuthToken for compatibility with existing calls,
+// but the token stored here is NOT used for Authorization headers anymore.
 export function setAuthToken(token) {
   if (!token) localStorage.removeItem("token");
   else localStorage.setItem("token", token);
@@ -198,7 +192,6 @@ export function setAuthToken(token) {
    BASIC / COMMON
    ========================================= */
 export async function getMe({ fresh = false } = {}) {
-  // If a screen really needs a fresh copy right now, pass { fresh: true }
   const { data } = await api.get("/api/me", fresh ? { __bypassCache: true } : undefined);
   return data;
 }
