@@ -731,27 +731,67 @@ app.get("/api/pros/me", requireAuth, async (req, res) => {
   }
 });
 
+/* ------------------- /api/pros/me (GET + PUT) ------------------- */
 /**
- * BecomePro.jsx and SettingsPage.jsx both call PUT /api/pros/me.
- * - If a Pro doc doesn't exist yet, we CREATE it (status defaults to "submitted").
- * - If it exists, we UPDATE allowed fields.
+ * BecomePro.jsx and SettingsPage.jsx both call GET/PUT /api/pros/me.
+ * - GET: returns the approved Pro profile if it exists; otherwise returns
+ *        minimal application status (so the UI can show "submitted/pending").
+ * - PUT: if a Pro doc doesn't exist yet, CREATE it (status defaults to "submitted");
+ *        if it exists, UPDATE allowed fields.
  * This removes the old "no_pro_profile" error and prevents duplicate profiles.
  */
+
+// small helpers for name + lga
+function _normalizeLga(v = "") {
+  return (v || "").toString().trim().toUpperCase();
+}
+function _nameFromIdentity(identity = {}) {
+  const fn = (identity.firstName || "").trim();
+  const ln = (identity.lastName || "").trim();
+  const joined = [fn, ln].filter(Boolean).join(" ").trim();
+  return joined || "";
+}
+
+app.get("/api/pros/me", requireAuth, async (req, res) => {
+  try {
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({ error: "Database not connected" });
+    }
+
+    const pro = await Pro.findOne({ ownerUid: req.user.uid });
+    if (pro) {
+      return res.json(sanitizePro(pro, req.user.role));
+    }
+
+    // No approved Pro yet — expose current application status if it exists
+    const appDoc = await Application.findOne({ uid: req.user.uid })
+      .select("_id status createdAt updatedAt")
+      .lean();
+
+    if (appDoc) {
+      return res.json({
+        applicationStatus: appDoc.status || "submitted",
+        applicationId: appDoc._id.toString(),
+        createdAt: appDoc.createdAt,
+        updatedAt: appDoc.updatedAt,
+      });
+    }
+
+    return res.json(null);
+  } catch (e) {
+    console.error("[pros:me:get]", e?.message || e);
+    res.status(500).json({ error: "failed" });
+  }
+});
+
 app.put("/api/pros/me", requireAuth, async (req, res) => {
   try {
-    if (mongoose.connection.readyState !== 1)
+    if (mongoose.connection.readyState !== 1) {
       return res.status(503).json({ error: "Database not connected" });
+    }
 
     const uid = req.user.uid;
     const payload = req.body || {};
-
-    // small helpers for name + lga
-    const nameFromIdentity = () => {
-      const fn = payload?.identity?.firstName || "";
-      const ln = payload?.identity?.lastName || "";
-      return [fn, ln].filter(Boolean).join(" ").trim();
-    };
-    const normalizeLga = (v) => (v ? String(v).toUpperCase() : "");
 
     let pro = await Pro.findOne({ ownerUid: uid });
 
@@ -759,14 +799,14 @@ app.put("/api/pros/me", requireAuth, async (req, res) => {
       // -------- first-time creation (from BecomePro) --------
       pro = new Pro({
         ownerUid: uid,
-        email: req.user.email || payload.email || "",
+        email: payload.email || req.user.email || "",
         name:
           payload.name ||
           payload.displayName ||
-          nameFromIdentity() ||
+          _nameFromIdentity(payload.identity || {}) ||
           "Unnamed Professional",
         phone: payload.phone || payload?.identity?.phone || "",
-        lga: normalizeLga(
+        lga: _normalizeLga(
           payload.lga ||
             payload?.identity?.city ||
             payload?.identity?.state ||
@@ -780,46 +820,59 @@ app.put("/api/pros/me", requireAuth, async (req, res) => {
       });
     } else {
       // -------- update existing --------
-pro.name =
-  payload.name ??
-  payload.displayName ??
-  nameFromIdentity() ??
-  pro.name;
+      pro.name =
+        payload.name ??
+        payload.displayName ??
+        _nameFromIdentity(payload.identity || {}) ??
+        pro.name;
 
-pro.email = payload.email ?? pro.email ?? req.user.email ?? "";
-pro.phone = payload.phone ?? pro.phone ?? payload?.identity?.phone ?? "";
-pro.lga = normalizeLga(payload.lga ?? pro.lga ?? "");
-pro.identity = payload.identity ?? pro.identity;
-pro.professional = payload.professional ?? pro.professional;
-pro.availability = payload.availability ?? pro.availability;
-pro.bank = payload.bank ?? pro.bank;
-pro.status = payload.status ?? pro.status ?? "submitted";
+      pro.email = payload.email ?? pro.email ?? req.user.email ?? "";
+      pro.phone = payload.phone ?? pro.phone ?? payload?.identity?.phone ?? "";
+      pro.lga = _normalizeLga(payload.lga ?? pro.lga ?? "");
 
+      pro.identity = payload.identity ?? pro.identity;
+      pro.professional = payload.professional ?? pro.professional;
+      pro.availability = payload.availability ?? pro.availability;
+      pro.bank = payload.bank ?? pro.bank;
+
+      // keep current status unless explicitly changed
+      pro.status = payload.status ?? pro.status ?? "submitted";
     }
 
     await pro.save();
 
-    // 🔄 keep Application in step (best-effort; won’t throw if model changes)
+    // 🔄 best-effort: keep Application in step (won’t throw if schema differs)
     try {
       const baseIdentity = pro.identity || {};
       const baseProfessional = pro.professional || {};
-      const appDoc =
-        (await Application.findOne({ uid })) ||
-        (await Application.create({
+
+      let appDoc = await Application.findOne({ uid });
+      if (!appDoc) {
+        appDoc = await Application.create({
           uid,
           email: pro.email || "",
+          displayName: pro.name || "",
+          phone: pro.phone || "",
+          lga: pro.lga || "",
           identity: baseIdentity,
           professional: baseProfessional,
           status: pro.status || "submitted",
-        }));
-      // update a few fields if present
-      appDoc.email = pro.email || appDoc.email || "";
-      appDoc.identity = baseIdentity;
-      appDoc.professional = baseProfessional;
-      appDoc.status = appDoc.status || pro.status || "submitted";
-      await appDoc.save();
+        });
+      } else {
+        appDoc.email = pro.email || appDoc.email || "";
+        appDoc.displayName = pro.name || appDoc.displayName || "";
+        appDoc.phone = pro.phone || appDoc.phone || "";
+        appDoc.lga = pro.lga || appDoc.lga || "";
+        appDoc.identity = baseIdentity;
+        appDoc.professional = baseProfessional;
+        appDoc.status = appDoc.status || pro.status || "submitted";
+        await appDoc.save();
+      }
     } catch (syncErr) {
-      console.warn("[pros:me:put] application-sync warn:", syncErr?.message || syncErr);
+      console.warn(
+        "[pros:me:put] application-sync warn:",
+        syncErr?.message || syncErr
+      );
     }
 
     return res.json({ ok: true, item: sanitizePro(pro, req.user.role) });
@@ -828,8 +881,10 @@ pro.status = payload.status ?? pro.status ?? "submitted";
     return res.status(500).json({ error: "failed" });
   }
 });
+/* ------------------- /api/pros/me END ------------------- */
 
 
+/* ------------------- Nigeria states list (unchanged) ------------------- */
 app.get("/api/geo/ng/states", (_req, res) => {
   try {
     const states = Object.keys(NG_GEO || {});
@@ -840,19 +895,6 @@ app.get("/api/geo/ng/states", (_req, res) => {
   }
 });
 
-app.get("/api/geo/ng/lgas/:state", (req, res) => {
-  try {
-    const st = decodeURIComponent(req.params.state || "").trim();
-    const lgas = (NG_GEO && NG_GEO[st]) || [];
-    if (!Array.isArray(lgas) || lgas.length === 0) {
-      return res.status(404).json({ error: "state_not_found" });
-    }
-    return res.json(lgas);
-  } catch (e) {
-    console.error("[geo/ng/lgas/:state] error:", e);
-    return res.status(404).json({ error: "state_not_found" });
-  }
-});
 
 /* ------------------- WebRTC: ICE servers ------------------- */
 app.get("/api/webrtc/ice", (_req, res) => {
