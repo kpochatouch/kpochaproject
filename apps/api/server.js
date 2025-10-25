@@ -47,7 +47,8 @@ const NG_GEO_PATH = path.join(__dirname, "data", "ng-geo.json");
 try {
   const raw = fs.readFileSync(NG_GEO_PATH, "utf8");
   const parsed = JSON.parse(raw);
-  if (!parsed || typeof parsed !== "object") throw new Error("Bad ng-geo.json structure");
+  if (!parsed || typeof parsed !== "object")
+    throw new Error("Bad ng-geo.json structure");
   NG_GEO = parsed;
   console.log("[geo] ✅ Loaded Nigeria geo data");
 } catch (e) {
@@ -74,7 +75,8 @@ function requireAdmin(req, res, next) {
 /* ------------------- Firebase Admin ------------------- */
 try {
   const keyPath =
-    process.env.SERVICE_KEY_PATH || new URL("./serviceAccountKey.json", import.meta.url).pathname;
+    process.env.SERVICE_KEY_PATH ||
+    new URL("./serviceAccountKey.json", import.meta.url).pathname;
 
   const svc = JSON.parse(fs.readFileSync(keyPath, "utf8"));
   admin.initializeApp({ credential: admin.credential.cert(svc) });
@@ -84,7 +86,10 @@ try {
     admin.initializeApp(); // ADC fallback
     console.log("[auth] ✅ Firebase Admin initialized (ADC).");
   } catch (e2) {
-    console.error("[auth] ❌ Firebase Admin failed to initialize:", e2?.message || e2);
+    console.error(
+      "[auth] ❌ Firebase Admin failed to initialize:",
+      e2?.message || e2
+    );
     process.exit(1);
   }
 }
@@ -110,7 +115,9 @@ async function fixWalletCollectionOnce() {
         { $rename: { userUid: "ownerUid" } }
       );
       if (renameRes?.modifiedCount) {
-        console.log(`[wallets] 🔧 Renamed userUid → ownerUid for ${renameRes.modifiedCount} docs`);
+        console.log(
+          `[wallets] 🔧 Renamed userUid → ownerUid for ${renameRes.modifiedCount} docs`
+        );
       }
     } catch {}
 
@@ -134,10 +141,16 @@ async function fixWalletCollectionOnce() {
 
     try {
       const del = await col.deleteMany({
-        $or: [{ ownerUid: null }, { ownerUid: "" }, { ownerUid: { $exists: false } }],
+        $or: [
+          { ownerUid: null },
+          { ownerUid: "" },
+          { ownerUid: { $exists: false } },
+        ],
       });
       if (del?.deletedCount) {
-        console.log(`[wallets] 🧹 Removed ${del.deletedCount} invalid wallet docs`);
+        console.log(
+          `[wallets] 🧹 Removed ${del.deletedCount} invalid wallet docs`
+        );
       }
     } catch {}
   } catch (err) {
@@ -189,7 +202,10 @@ const SettingsSchema = new mongoose.Schema(
     maintenance: { type: MaintenanceSchema, default: () => ({}) },
     notifications: { type: NotificationsSchema, default: () => ({}) },
     withdrawals: {
-      type: new mongoose.Schema({ requireApproval: { type: Boolean, default: true } }, { _id: false }),
+      type: new mongoose.Schema(
+        { requireApproval: { type: Boolean, default: true } },
+        { _id: false }
+      ),
     },
     security: { allowedOrigins: { type: [String], default: [] } },
     webhooks: { paystack: { secret: { type: String, default: "" } } },
@@ -197,7 +213,8 @@ const SettingsSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
-const Settings = mongoose.models.Settings || mongoose.model("Settings", SettingsSchema);
+const Settings =
+  mongoose.models.Settings || mongoose.model("Settings", SettingsSchema);
 
 let SETTINGS_CACHE = null;
 async function loadSettings({ force = false } = {}) {
@@ -254,19 +271,29 @@ async function initSchedulers() {
           .limit(500)
           .lean();
 
-        let ok = 0, fail = 0;
+        let ok = 0,
+          fail = 0;
         for (const b of toRelease) {
           try {
-            const res = await releasePendingToAvailableForBooking(b, { reason: "auto_release_cron" });
-            if (res?.ok) ok++; else fail++;
+            const res = await releasePendingToAvailableForBooking(b, {
+              reason: "auto_release_cron",
+            });
+            if (res?.ok) ok++;
+            else fail++;
           } catch (e) {
             fail++;
-            console.error("[scheduler] release error for booking", b._id?.toString?.(), e?.message || e);
+            console.error(
+              "[scheduler] release error for booking",
+              b._id?.toString?.(),
+              e?.message || e
+            );
           }
         }
 
         console.log(
-          `[scheduler] Auto-release ran in ${Math.round((Date.now() - started) / 1000)}s. Processed=${toRelease.length}, ok=${ok}, fail=${fail}`
+          `[scheduler] Auto-release ran in ${Math.round(
+            (Date.now() - started) / 1000
+          )}s. Processed=${toRelease.length}, ok=${ok}, fail=${fail}`
         );
       } catch (err) {
         console.error("[scheduler] Auto-release error:", err.message);
@@ -280,7 +307,9 @@ async function initSchedulers() {
     const t = cron.schedule(s.bookingRules.noShowSweepCron, async () => {
       try {
         const strikeLimit = s.bookingRules.noShowStrikeLimit ?? 2;
-        console.log(`[scheduler] No-show sweep ran. Strike limit: ${strikeLimit}`);
+        console.log(
+          `[scheduler] No-show sweep ran. Strike limit: ${strikeLimit}`
+        );
       } catch (err) {
         console.error("[scheduler] No-show sweep error:", err.message);
       }
@@ -298,16 +327,24 @@ async function restartSchedulers() {
 /* ------------------- Express App ------------------- */
 const app = express();
 
-//* ------------------- CORS (hardened, with Vercel & ngrok previews) ------------------- */
+/* ------------------- CORS (hardened) ------------------- */
 const ALLOW_LIST = (process.env.CORS_ORIGIN || "http://localhost:5173")
   .split(/[,\s]+/)
   .map((s) => s.trim())
   .filter(Boolean);
 
-const ALLOW_VERCEL_PREVIEWS = (process.env.ALLOW_VERCEL_PREVIEWS || "true").toLowerCase() !== "false";
-const ALLOW_NGROK_PREVIEWS  = (process.env.ALLOW_NGROK_PREVIEWS  || "true").toLowerCase() !== "false";
+const ALLOW_VERCEL_PREVIEWS =
+  (process.env.ALLOW_VERCEL_PREVIEWS || "true").toLowerCase() !== "false";
+const ALLOW_NGROK_PREVIEWS =
+  (process.env.ALLOW_NGROK_PREVIEWS || "true").toLowerCase() !== "false";
 
-function hostFrom(url) { try { return new URL(url).host; } catch { return ""; } }
+function hostFrom(url) {
+  try {
+    return new URL(url).host;
+  } catch {
+    return "";
+  }
+}
 
 function originAllowed(origin) {
   if (!origin) return true; // same-origin / server-to-server
@@ -319,7 +356,11 @@ function originAllowed(origin) {
   }
 
   if (ALLOW_VERCEL_PREVIEWS && oh.endsWith(".vercel.app")) return true;
-  if (ALLOW_NGROK_PREVIEWS && (oh.endsWith(".ngrok-free.app") || oh.endsWith(".ngrok.app"))) return true;
+  if (
+    ALLOW_NGROK_PREVIEWS &&
+    (oh.endsWith(".ngrok-free.app") || oh.endsWith(".ngrok.app"))
+  )
+    return true;
 
   return false;
 }
@@ -329,8 +370,10 @@ const corsOptions = {
     const ok = originAllowed(origin);
     if (ok) return cb(null, true);
     console.warn(
-      "[CORS] Blocked:", origin,
-      "Allowed:", ALLOW_LIST,
+      "[CORS] Blocked:",
+      origin,
+      "Allowed:",
+      ALLOW_LIST,
       `VercelPreviews=${ALLOW_VERCEL_PREVIEWS}`,
       `Ngrok=${ALLOW_NGROK_PREVIEWS}`
     );
@@ -346,7 +389,6 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.options("*", cors(corsOptions));
 
-
 app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 
 /* ------------------- Webhooks need raw body ------------------- */
@@ -355,13 +397,22 @@ app.post(
   express.raw({ type: "application/json" }),
   async (req, res) => {
     try {
-      const secret = process.env.PAYSTACK_SECRET_KEY || process.env.PAYSTACK_WEBHOOK_SECRET || "";
+      const secret =
+        process.env.PAYSTACK_SECRET_KEY ||
+        process.env.PAYSTACK_WEBHOOK_SECRET ||
+        "";
       const signature = req.headers["x-paystack-signature"];
-      const computed = crypto.createHmac("sha512", secret).update(req.body).digest("hex");
-      if (!signature || signature !== computed) return res.status(401).send("Invalid signature");
+      const computed = crypto
+        .createHmac("sha512", secret)
+        .update(req.body)
+        .digest("hex");
+      if (!signature || signature !== computed)
+        return res.status(401).send("Invalid signature");
 
       const event = JSON.parse(req.body.toString());
-      handlePaystackEvent(event).catch((err) => console.error("[paystack] handler error:", err));
+      handlePaystackEvent(event).catch((err) =>
+        console.error("[paystack] handler error:", err)
+      );
       res.sendStatus(200);
     } catch (err) {
       console.error("[paystack] webhook processing error:", err);
@@ -377,12 +428,15 @@ app.use(express.json());
 async function requireAuth(req, res, next) {
   try {
     const h = req.headers.authorization || "";
-    aconst: {}; // keep diff minimal; no-op
     const token = h.startsWith("Bearer ") ? h.slice(7) : null;
     if (!token) return res.status(401).json({ error: "Missing token" });
 
     const decoded = await admin.auth().verifyIdToken(token);
-    req.user = { uid: decoded.uid, email: decoded.email || null, role: isAdmin(decoded.uid) ? "admin" : "user" };
+    req.user = {
+      uid: decoded.uid,
+      email: decoded.email || null,
+      role: isAdmin(decoded.uid) ? "admin" : "user",
+    };
     next();
   } catch (err) {
     return res.status(401).json({
@@ -395,7 +449,9 @@ async function requireAuth(req, res, next) {
 /** ✅ Pro-only guard (used for payout/withdraw routes) */
 async function requirePro(req, res, next) {
   try {
-    const pro = await Pro.findOne({ ownerUid: req.user.uid }).select("_id").lean();
+    const pro = await Pro.findOne({ ownerUid: req.user.uid })
+      .select("_id")
+      .lean();
     if (!pro) return res.status(403).json({ error: "pro_only" });
     req.proId = pro._id.toString();
     next();
@@ -455,14 +511,15 @@ app.use(async (req, res, next) => {
 });
 
 /* ------------------- CLIENT PROFILE (GET full) ------------------- */
-// replaces the earlier minimal read-only version so pages (Register/Settings) can preload everything
 app.get("/api/profile/client/me", requireAuth, async (req, res) => {
   try {
-    if (mongoose.connection.readyState !== 1) return res.status(503).json({ error: "Database not connected" });
+    if (mongoose.connection.readyState !== 1)
+      return res
+        .status(503)
+        .json({ error: "Database not connected" });
     const col = mongoose.connection.db.collection("profiles");
     const p = await col.findOne({ uid: req.user.uid });
     if (!p) return res.json(null);
-    // hide uid from owners/clients
     const { uid, __v, ...safe } = p || {};
     return res.json(safe);
   } catch (e) {
@@ -474,13 +531,15 @@ app.get("/api/profile/client/me", requireAuth, async (req, res) => {
 /* ------------------- CLIENT PROFILE (PUT upsert) ------------------- */
 app.put("/api/profile/client/me", requireAuth, async (req, res) => {
   try {
-    if (mongoose.connection.readyState !== 1) return res.status(503).json({ error: "Database not connected" });
+    if (mongoose.connection.readyState !== 1)
+      return res
+        .status(503)
+        .json({ error: "Database not connected" });
     const col = mongoose.connection.db.collection("profiles");
 
     const b = req.body || {};
     const now = new Date();
 
-    // normalize
     const state = (b.state || "").toString().trim();
     const lga = (b.lga || "").toString().toUpperCase().trim();
 
@@ -491,7 +550,6 @@ app.put("/api/profile/client/me", requireAuth, async (req, res) => {
       phone: (b.phone || "").toString().trim(),
       state,
       lga,
-      // keep both keys for backward compatibility
       houseAddress: (b.houseAddress || b.address || "").toString().trim(),
       address: (b.houseAddress || b.address || "").toString().trim(),
       photoUrl: b.photoUrl || "",
@@ -503,7 +561,6 @@ app.put("/api/profile/client/me", requireAuth, async (req, res) => {
         terms: !!(b.agreements?.terms ?? b.acceptedTerms),
         privacy: !!(b.agreements?.privacy ?? b.acceptedPrivacy),
       },
-      // optional KYC blob
       kyc: b.kyc
         ? {
             idType: b.kyc.idType || "",
@@ -525,7 +582,6 @@ app.put("/api/profile/client/me", requireAuth, async (req, res) => {
       { upsert: true }
     );
 
-    // return sanitized doc
     const saved = await col.findOne({ uid: req.user.uid });
     const { uid, __v, ...safe } = saved || {};
     return res.json({ ok: true, profile: safe });
@@ -570,7 +626,10 @@ app.use("/api", bookingsRouter);
 /** 🔒 Pro payout write-ops guard */
 app.use("/api/wallet", requireAuth, (req, res, next) => {
   const write =
-    req.method === "POST" || req.method === "PUT" || req.method === "DELETE" || req.method === "PATCH";
+    req.method === "POST" ||
+    req.method === "PUT" ||
+    req.method === "DELETE" ||
+    req.method === "PATCH";
   if (!write) return next();
   return requirePro(req, res, next);
 });
@@ -587,9 +646,9 @@ app.use("/api", paymentsRouter({ requireAuth })); // mounts /payments/*
 
 /* ----- Optional availability router ----- */
 try {
-  const { default: availabilityRouter } = await import("./routes/availability.js").catch(() => ({
-    default: null,
-  }));
+  const { default: availabilityRouter } = await import("./routes/availability.js").catch(
+    () => ({ default: null })
+  );
   if (availabilityRouter) {
     app.use("/api", availabilityRouter);
     console.log("[api] ✅ Availability routes mounted");
@@ -612,8 +671,13 @@ app.get("/api/settings/admin", requireAuth, requireAdmin, async (_req, res) => {
 
 async function saveSettingsAndRestart(req, res) {
   try {
-    const doc = await updateSettings(req.body || {}, req.user?.email || req.user?.uid || "admin");
-    await restartSchedulers().catch((e) => console.warn("[settings] restart warn:", e?.message || e));
+    const doc = await updateSettings(
+      req.body || {},
+      req.user?.email || req.user?.uid || "admin"
+    );
+    await restartSchedulers().catch((e) =>
+      console.warn("[settings] restart warn:", e?.message || e)
+    );
     res.json(doc);
   } catch (err) {
     console.error("[settings:put]", err?.message || err);
@@ -654,16 +718,22 @@ app.post("/api/pros/approve/:id", requireAuth, requireAdmin, async (req, res) =>
       ownerUid,
       name:
         appDoc.displayName ||
-        [appDoc?.identity?.firstName, appDoc?.identity?.lastName].filter(Boolean).join(" ") ||
+        [appDoc?.identity?.firstName, appDoc?.identity?.lastName]
+          .filter(Boolean)
+          .join(" ") ||
         appDoc.email ||
         "Unnamed Pro",
       email: appDoc.email || "",
       phone: appDoc.phone || appDoc?.identity?.phone || "",
       lga:
-        (appDoc.lga ||
+        (
+          appDoc.lga ||
           appDoc?.identity?.city ||
           appDoc?.identity?.state ||
-          "").toString().toUpperCase(),
+          ""
+        )
+          .toString()
+          .toUpperCase(),
       identity: appDoc.identity || {},
       professional: appDoc.professional || {},
       availability: appDoc.availability || {},
@@ -681,67 +751,22 @@ app.post("/api/pros/approve/:id", requireAuth, requireAdmin, async (req, res) =>
     appDoc.approvedAt = new Date();
     await appDoc.save();
 
-    res.json({ ok: true, proId: pro._id.toString(), applicationId: appDoc._id.toString() });
+    res.json({
+      ok: true,
+      proId: pro._id.toString(),
+      applicationId: appDoc._id.toString(),
+    });
   } catch (err) {
     console.error("[pros/approve]", err?.message || err);
     res.status(500).json({ error: "approve_failed" });
   }
 });
 
-app.post("/api/admin/release-booking/:id", requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const { id } = req.params;
-    if (!/^[0-9a-fA-F]{24}$/.test(id)) return res.status(400).json({ error: "invalid_booking_id" });
-
-    const booking = await Booking.findById(id);
-    if (!booking) return res.status(404).json({ error: "booking_not_found" });
-
-    if (booking.payoutReleased === true) {
-      return res.json({ ok: true, alreadyReleased: true });
-    }
-
-    const outcome = await releasePendingToAvailableForBooking(booking, { reason: "admin_manual_release" });
-    if (!outcome?.ok) return res.status(400).json({ error: "release_failed", details: outcome });
-
-    res.json({
-      ok: true,
-      releasedKobo: outcome.releasedKobo || 0,
-      walletId: outcome.walletId || null,
-      bookingId: booking._id.toString(),
-    });
-  } catch (err) {
-    console.error("[admin:release-booking]", err?.message || err);
-    res.status(500).json({ error: "release_error" });
-  }
-});
-
-/* ------------------- FIXED /api/pros/me (auto-create on first apply, safe updates later) ------------------- */
-app.get("/api/pros/me", requireAuth, async (req, res) => {
-  try {
-    if (mongoose.connection.readyState !== 1)
-      return res.status(503).json({ error: "Database not connected" });
-
-    const pro = await Pro.findOne({ ownerUid: req.user.uid });
-    if (!pro) return res.json(null);
-
-    return res.json(sanitizePro(pro, req.user.role));
-  } catch (e) {
-    console.error("[pros:me:get]", e?.message || e);
-    return res.status(500).json({ error: "failed" });
-  }
-});
-
 /* ------------------- /api/pros/me (GET + PUT) ------------------- */
 /**
- * BecomePro.jsx and SettingsPage.jsx both call GET/PUT /api/pros/me.
- * - GET: returns the approved Pro profile if it exists; otherwise returns
- *        minimal application status (so the UI can show "submitted/pending").
- * - PUT: if a Pro doc doesn't exist yet, CREATE it (status defaults to "submitted");
- *        if it exists, UPDATE allowed fields.
- * This removes the old "no_pro_profile" error and prevents duplicate profiles.
+ * - GET: returns the Pro profile if it exists; otherwise minimal application status (or null).
+ * - PUT: creates Pro on first save (status "submitted"), updates thereafter. No "no_pro_profile".
  */
-
-// small helpers for name + lga
 function _normalizeLga(v = "") {
   return (v || "").toString().trim().toUpperCase();
 }
@@ -754,16 +779,12 @@ function _nameFromIdentity(identity = {}) {
 
 app.get("/api/pros/me", requireAuth, async (req, res) => {
   try {
-    if (mongoose.connection.readyState !== 1) {
+    if (mongoose.connection.readyState !== 1)
       return res.status(503).json({ error: "Database not connected" });
-    }
 
     const pro = await Pro.findOne({ ownerUid: req.user.uid });
-    if (pro) {
-      return res.json(sanitizePro(pro, req.user.role));
-    }
+    if (pro) return res.json(sanitizePro(pro, req.user.role));
 
-    // No approved Pro yet — expose current application status if it exists
     const appDoc = await Application.findOne({ uid: req.user.uid })
       .select("_id status createdAt updatedAt")
       .lean();
@@ -786,9 +807,8 @@ app.get("/api/pros/me", requireAuth, async (req, res) => {
 
 app.put("/api/pros/me", requireAuth, async (req, res) => {
   try {
-    if (mongoose.connection.readyState !== 1) {
+    if (mongoose.connection.readyState !== 1)
       return res.status(503).json({ error: "Database not connected" });
-    }
 
     const uid = req.user.uid;
     const payload = req.body || {};
@@ -796,7 +816,6 @@ app.put("/api/pros/me", requireAuth, async (req, res) => {
     let pro = await Pro.findOne({ ownerUid: uid });
 
     if (!pro) {
-      // -------- first-time creation (from BecomePro) --------
       pro = new Pro({
         ownerUid: uid,
         email: payload.email || req.user.email || "",
@@ -819,7 +838,6 @@ app.put("/api/pros/me", requireAuth, async (req, res) => {
         status: payload.status || "submitted",
       });
     } else {
-      // -------- update existing --------
       pro.name =
         payload.name ??
         payload.displayName ??
@@ -834,14 +852,12 @@ app.put("/api/pros/me", requireAuth, async (req, res) => {
       pro.professional = payload.professional ?? pro.professional;
       pro.availability = payload.availability ?? pro.availability;
       pro.bank = payload.bank ?? pro.bank;
-
-      // keep current status unless explicitly changed
       pro.status = payload.status ?? pro.status ?? "submitted";
     }
 
     await pro.save();
 
-    // 🔄 best-effort: keep Application in step (won’t throw if schema differs)
+    // Best-effort keep Application in step
     try {
       const baseIdentity = pro.identity || {};
       const baseProfessional = pro.professional || {};
@@ -883,8 +899,49 @@ app.put("/api/pros/me", requireAuth, async (req, res) => {
 });
 /* ------------------- /api/pros/me END ------------------- */
 
+/* ------------------- Nigeria Geo (robust) ------------------- */
+app.get("/api/geo/rev", async (req, res) => {
+  try {
+    const lat = Number(req.query.lat);
+    const lon = Number(req.query.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon))
+      return res.status(400).json({ error: "lat_lon_required" });
 
-/* ------------------- Nigeria states list (unchanged) ------------------- */
+    const j = await reverseGeocode(lat, lon);
+    if (j?.features?.length) return res.json(j);
+
+    return res.json({
+      features: [
+        {
+          properties: {
+            state: "",
+            region: "",
+            county: "",
+            city: "",
+            district: "",
+            suburb: "",
+            address_line1: "",
+            address_line2: "",
+          },
+        },
+      ],
+    });
+  } catch (e) {
+    console.error("[geo:rev] error:", e?.message || e);
+    return res.json({ features: [] });
+  }
+});
+
+app.get("/api/geo/ng", (_req, res) => {
+  try {
+    const states = Object.keys(NG_GEO || {});
+    return res.json({ states, lgas: NG_GEO });
+  } catch (e) {
+    console.error("[geo/ng] error:", e);
+    return res.json({ states: [], lgas: {} });
+  }
+});
+
 app.get("/api/geo/ng/states", (_req, res) => {
   try {
     const states = Object.keys(NG_GEO || {});
@@ -895,25 +952,75 @@ app.get("/api/geo/ng/states", (_req, res) => {
   }
 });
 
+/* ------------------- Barbers ------------------- */
+app.get("/api/barbers", async (req, res) => {
+  try {
+    if (mongoose.connection.readyState !== 1)
+      return res.status(503).json({ error: "Database not connected" });
+    const { lga } = req.query;
+    const q = {};
+    if (lga) q.lga = lga.toUpperCase();
+    const docs = await Pro.find(q).lean();
+    return res.json(docs.map((d) => sanitizeBarberCard(proToBarber(d))));
+  } catch (err) {
+    console.error("[barbers] DB error:", err);
+    res.status(500).json({ error: "Failed to load barbers" });
+  }
+});
+
+app.get("/api/barbers/:id", async (req, res) => {
+  try {
+    if (mongoose.connection.readyState !== 1)
+      return res.status(503).json({ error: "Database not connected" });
+    const doc = await Pro.findById(req.params.id).lean();
+    if (!doc) return res.status(404).json({ error: "Not found" });
+    return res.json(sanitizeBarberCard(proToBarber(doc)));
+  } catch (err) {
+    console.error("[barbers:id] DB error:", err);
+    res.status(500).json({ error: "Failed to load barber" });
+  }
+});
+
+/* ------------------- Barbers Nearby ------------------- */
+const GEOAPIFY_KEY =
+  process.env.GEOAPIFY_KEY || "9258e71a50234a35b0bec3b44515b023";
+
+async function reverseGeocode(lat, lon) {
+  if (!GEOAPIFY_KEY) return null;
+  const r = await fetch(
+    `https://api.geoapify.com/v1/geocode/reverse?lat=${encodeURIComponent(
+      lat
+    )}&lon=${encodeURIComponent(lon)}&apiKey=${encodeURIComponent(
+      GEOAPIFY_KEY
+    )}`
+  );
+  if (!r.ok) return null;
+  const j = await r.json();
+  return j;
+}
 
 /* ------------------- WebRTC: ICE servers ------------------- */
 app.get("/api/webrtc/ice", (_req, res) => {
   try {
-    const stun = (process.env.ICE_STUN_URLS || process.env.VITE_STUN_URLS || "")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
+    const stun =
+      (process.env.ICE_STUN_URLS || process.env.VITE_STUN_URLS || "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
     const turn = (process.env.ICE_TURN_URLS || "")
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean);
-    const username = process.env.ICE_TURN_USERNAME || process.env.VITE_TURN_USERNAME || "";
-    const credential = process.env.ICE_TURN_PASSWORD || process.env.VITE_TURN_PASSWORD || "";
+    const username =
+      process.env.ICE_TURN_USERNAME || process.env.VITE_TURN_USERNAME || "";
+    const credential =
+      process.env.ICE_TURN_PASSWORD || process.env.VITE_TURN_PASSWORD || "";
 
     const iceServers = [];
     if (stun.length) iceServers.push({ urls: stun });
     if (turn.length) iceServers.push({ urls: turn, username, credential });
-    if (!iceServers.length) iceServers.push({ urls: ["stun:stun.l.google.com:19302"] });
+    if (!iceServers.length)
+      iceServers.push({ urls: ["stun:stun.l.google.com:19302"] });
 
     res.json({ iceServers });
   } catch (e) {
@@ -939,19 +1046,28 @@ if (CLOUDINARY_CLOUD_NAME && CLOUDINARY_API_KEY && CLOUDINARY_API_SECRET) {
   });
   console.log("[cloudinary] ✅ SDK configured");
 } else {
-  console.warn("[cloudinary] ⚠️ Missing env (CLOUDINARY_CLOUD_NAME / API_KEY / API_SECRET). Signed uploads disabled.");
+  console.warn(
+    "[cloudinary] ⚠️ Missing env (CLOUDINARY_CLOUD_NAME / API_KEY / API_SECRET). Signed uploads disabled."
+  );
 }
 
 /* ------------------- ☁️ Signed uploads helper ------------------- */
 app.post("/api/uploads/sign", requireAuth, async (req, res) => {
   try {
-    if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_API_KEY || !CLOUDINARY_API_SECRET) {
+    if (
+      !CLOUDINARY_CLOUD_NAME ||
+      !CLOUDINARY_API_KEY ||
+      !CLOUDINARY_API_SECRET
+    ) {
       return res.status(500).json({ error: "cloudinary_env_missing" });
     }
     const folder = (req.body && req.body.folder) || "kpocha/pro-apps";
     const timestamp = Math.floor(Date.now() / 1000);
     const paramsToSign = { folder, timestamp };
-    const signature = cloudinary.utils.api_sign_request(paramsToSign, CLOUDINARY_API_SECRET);
+    const signature = cloudinary.utils.api_sign_request(
+      paramsToSign,
+      CLOUDINARY_API_SECRET
+    );
 
     res.json({
       cloudName: CLOUDINARY_CLOUD_NAME,
@@ -967,46 +1083,57 @@ app.post("/api/uploads/sign", requireAuth, async (req, res) => {
 });
 
 /* ------------------- ☁️ Optional server-side liveness upload ------------------- */
-app.post("/api/uploads/liveness", requireAuth, express.json({ limit: "50mb" }), async (req, res) => {
-  try {
-    if (!CLOUDINARY_API_SECRET) return res.status(500).json({ error: "cloudinary_env_missing" });
+app.post(
+  "/api/uploads/liveness",
+  requireAuth,
+  express.json({ limit: "50mb" }),
+  async (req, res) => {
+    try {
+      if (!CLOUDINARY_API_SECRET)
+        return res.status(500).json({ error: "cloudinary_env_missing" });
 
-    const dataUrl = req.body?.dataUrl;
-    if (!dataUrl || typeof dataUrl !== "string" || !dataUrl.startsWith("data:")) {
-      return res.status(400).json({ error: "invalid_data" });
+      const dataUrl = req.body?.dataUrl;
+      if (!dataUrl || typeof dataUrl !== "string" || !dataUrl.startsWith("data:")) {
+        return res.status(400).json({ error: "invalid_data" });
+      }
+
+      const folder = "kpocha/pro-apps/liveness";
+      const result = await cloudinary.uploader.upload(dataUrl, {
+        folder,
+        resource_type: "video",
+        overwrite: true,
+        context: { owner_uid: req.user.uid },
+      });
+
+      return res.json({
+        ok: true,
+        url: result.secure_url,
+        publicId: result.public_id,
+        bytes: result.bytes,
+        format: result.format,
+        duration: result.duration,
+      });
+    } catch (e) {
+      console.error("[cloudinary:liveness] upload error", e?.message || e);
+      res.status(500).json({ error: "upload_failed" });
     }
-
-    const folder = "kpocha/pro-apps/liveness";
-    const result = await cloudinary.uploader.upload(dataUrl, {
-      folder,
-      resource_type: "video",
-      overwrite: true,
-      context: { owner_uid: req.user.uid },
-    });
-
-    return res.json({
-      ok: true,
-      url: result.secure_url,
-      publicId: result.public_id,
-      bytes: result.bytes,
-      format: result.format,
-      duration: result.duration,
-    });
-  } catch (e) {
-    console.error("[cloudinary:liveness] upload error", e?.message || e);
-    res.status(500).json({ error: "upload_failed" });
   }
-});
+);
 
 /* ------------------- Chatbase user verification ------------------- */
 const CHATBASE_SECRET = process.env.CHATBASE_SECRET || "";
-const CHATBASE_EXPOSE_UID = (process.env.CHATBASE_EXPOSE_UID || "false").toLowerCase() === "true";
+const CHATBASE_EXPOSE_UID =
+  (process.env.CHATBASE_EXPOSE_UID || "false").toLowerCase() === "true";
 
 app.get("/api/chatbase/userhash", requireAuth, async (req, res) => {
   try {
-    if (!CHATBASE_SECRET) return res.status(500).json({ error: "chatbase_secret_missing" });
+    if (!CHATBASE_SECRET)
+      return res.status(500).json({ error: "chatbase_secret_missing" });
     const userId = req.user.uid;
-    const userHash = crypto.createHmac("sha256", CHATBASE_SECRET).update(userId).digest("hex");
+    const userHash = crypto
+      .createHmac("sha256", CHATBASE_SECRET)
+      .update(userId)
+      .digest("hex");
     return res.json(CHATBASE_EXPOSE_UID ? { userId, userHash } : { userHash });
   } catch (e) {
     return res.status(500).json({ error: "hash_failed" });
