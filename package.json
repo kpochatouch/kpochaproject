@@ -1,7 +1,9 @@
 {
   "name": "kpocha-touch-monorepo",
   "private": true,
-  "workspaces": ["apps/*"],
+  "workspaces": [
+    "apps/*"
+  ],
   "scripts": {
     "dev:web": "npm --workspace apps/web run dev",
     "dev:api": "npm --workspace apps/api run dev",
@@ -10,5 +12,8 @@
   },
   "engines": {
     "node": ">=18"
+  },
+  "dependencies": {
+    "firebase": "^12.4.0"
   }
 }

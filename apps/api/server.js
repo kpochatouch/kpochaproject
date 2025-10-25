@@ -715,221 +715,120 @@ app.post("/api/admin/release-booking/:id", requireAuth, requireAdmin, async (req
   }
 });
 
-/* ------------------- Minimal /api/pros/me (for Settings page) ------------------- */
+/* ------------------- FIXED /api/pros/me (auto-create on first apply, safe updates later) ------------------- */
 app.get("/api/pros/me", requireAuth, async (req, res) => {
   try {
-    if (mongoose.connection.readyState !== 1) return res.status(503).json({ error: "Database not connected" });
+    if (mongoose.connection.readyState !== 1)
+      return res.status(503).json({ error: "Database not connected" });
+
     const pro = await Pro.findOne({ ownerUid: req.user.uid });
     if (!pro) return res.json(null);
-    res.json(sanitizePro(pro, req.user.role));
+
+    return res.json(sanitizePro(pro, req.user.role));
   } catch (e) {
     console.error("[pros:me:get]", e?.message || e);
-    res.status(500).json({ error: "failed" });
+    return res.status(500).json({ error: "failed" });
   }
 });
 
+/**
+ * BecomePro.jsx and SettingsPage.jsx both call PUT /api/pros/me.
+ * - If a Pro doc doesn't exist yet, we CREATE it (status defaults to "submitted").
+ * - If it exists, we UPDATE allowed fields.
+ * This removes the old "no_pro_profile" error and prevents duplicate profiles.
+ */
 app.put("/api/pros/me", requireAuth, async (req, res) => {
   try {
-    if (mongoose.connection.readyState !== 1) return res.status(503).json({ error: "Database not connected" });
-    const existing = await Pro.findOne({ ownerUid: req.user.uid });
-    if (!existing) return res.status(400).json({ error: "no_pro_profile" });
+    if (mongoose.connection.readyState !== 1)
+      return res.status(503).json({ error: "Database not connected" });
 
+    const uid = req.user.uid;
     const payload = req.body || {};
-    const allowed = {
-      name: payload.name ?? existing.name,
-      email: payload.email ?? existing.email,
-      phone: payload.phone ?? existing.phone,
-      lga: (payload.lga ?? existing.lga ?? "").toString().toUpperCase(),
-      identity: payload.identity ?? existing.identity,
-      professional: payload.professional ?? existing.professional,
-      availability: payload.availability ?? existing.availability,
-      bank: payload.bank ?? existing.bank,
-      status: payload.status ?? existing.status,
+
+    // small helpers for name + lga
+    const nameFromIdentity = () => {
+      const fn = payload?.identity?.firstName || "";
+      const ln = payload?.identity?.lastName || "";
+      return [fn, ln].filter(Boolean).join(" ").trim();
     };
+    const normalizeLga = (v) => (v ? String(v).toUpperCase() : "");
 
-    Object.assign(existing, allowed);
-    await existing.save();
+    let pro = await Pro.findOne({ ownerUid: uid });
 
-    res.json({ ok: true, item: sanitizePro(existing, req.user.role) });
-  } catch (e) {
-    console.error("[pros:me:put]", e?.message || e);
-    res.status(500).json({ error: "failed" });
-  }
-});
+    if (!pro) {
+      // -------- first-time creation (from BecomePro) --------
+      pro = new Pro({
+        ownerUid: uid,
+        email: req.user.email || payload.email || "",
+        name:
+          payload.name ||
+          payload.displayName ||
+          nameFromIdentity() ||
+          "Unnamed Professional",
+        phone: payload.phone || payload?.identity?.phone || "",
+        lga: normalizeLga(
+          payload.lga ||
+            payload?.identity?.city ||
+            payload?.identity?.state ||
+            ""
+        ),
+        identity: payload.identity || {},
+        professional: payload.professional || {},
+        availability: payload.availability || {},
+        bank: payload.bank || {},
+        status: payload.status || "submitted",
+      });
+    } else {
+      // -------- update existing --------
+pro.name =
+  payload.name ??
+  payload.displayName ??
+  nameFromIdentity() ??
+  pro.name;
 
-/* ------------------- Deactivation Requests ------------------- */
-const DeactivationRequestSchema = new mongoose.Schema(
-  {
-    uid: { type: String, index: true, required: true },
-    email: { type: String, default: "" },
-    reason: { type: String, default: "" },
-    status: { type: String, enum: ["pending", "approved", "rejected"], default: "pending", index: true },
-    note: { type: String, default: "" },
-    decidedBy: { type: String, default: "" },
-    decidedAt: { type: Date },
-  },
-  { timestamps: true }
-);
-const DeactivationRequest =
-  mongoose.models.DeactivationRequest ||
-  mongoose.model("DeactivationRequest", DeactivationRequestSchema);
+pro.email = payload.email ?? pro.email ?? req.user.email ?? "";
+pro.phone = payload.phone ?? pro.phone ?? payload?.identity?.phone ?? "";
+pro.lga = normalizeLga(payload.lga ?? pro.lga ?? "");
+pro.identity = payload.identity ?? pro.identity;
+pro.professional = payload.professional ?? pro.professional;
+pro.availability = payload.availability ?? pro.availability;
+pro.bank = payload.bank ?? pro.bank;
+pro.status = payload.status ?? pro.status ?? "submitted";
 
-app.post("/api/account/deactivate-request", requireAuth, async (req, res) => {
-  try {
-    const reason = String(req.body?.reason || "").slice(0, 1000);
-    if (mongoose.connection.readyState !== 1) return res.status(503).json({ error: "Database not connected" });
-
-    let existing = await DeactivationRequest.findOne({ uid: req.user.uid, status: "pending" }).lean();
-    if (existing) return res.json({ ok: true, request: existing });
-
-    const doc = await DeactivationRequest.create({
-      uid: req.user.uid,
-      email: req.user.email || "",
-      reason,
-      status: "pending",
-    });
-    return res.json({ ok: true, request: doc });
-  } catch (err) {
-    console.error("[deactivate-request] error:", err);
-    res.status(500).json({ error: "failed" });
-  }
-});
-
-app.get("/api/account/deactivation/me", requireAuth, async (req, res) => {
-  try {
-    if (mongoose.connection.readyState !== 1) return res.status(503).json({ error: "Database not connected" });
-    const doc = await DeactivationRequest.findOne({ uid: req.user.uid }).sort({ createdAt: -1 }).lean();
-    const { uid, ...rest } = doc || {};
-    return res.json(rest || null);
-  } catch (err) {
-    console.error("[deactivation:me] error:", err);
-    res.status(500).json({ error: "failed" });
-  }
-});
-
-/* ------------------- Who am I ------------------- */
-app.get("/api/me", requireAuth, async (req, res) => {
-  try {
-    let pro = null;
-    let appDoc = null;
-    let latestDeact = null;
-
-    if (mongoose.connection.readyState === 1) {
-      pro = await Pro.findOne({ ownerUid: req.user.uid }).lean();
-      appDoc = await Application.findOne({ uid: req.user.uid }).lean();
-      latestDeact = await DeactivationRequest.findOne({ uid: req.user.uid })
-        .sort({ createdAt: -1 })
-        .select("status createdAt")
-        .lean();
     }
 
-    const payload = {
-      email: req.user.email,
-      isPro: !!pro,
-      proId: pro?._id?.toString() || null,
-      proName: pro?.name || null,
-      lga: pro?.lga || null,
-      isAdmin: isAdmin(req.user.uid),
-      hasPin: !!appDoc?.withdrawPinHash,
-      deactivationPending: latestDeact?.status === "pending",
-      deactivationStatus: latestDeact?.status || null,
-    };
+    await pro.save();
 
-    res.json(payload);
-  } catch (err) {
-    console.error("[me] error:", err);
-    res.status(500).json({ error: "failed" });
-  }
-});
+    // 🔄 keep Application in step (best-effort; won’t throw if model changes)
+    try {
+      const baseIdentity = pro.identity || {};
+      const baseProfessional = pro.professional || {};
+      const appDoc =
+        (await Application.findOne({ uid })) ||
+        (await Application.create({
+          uid,
+          email: pro.email || "",
+          identity: baseIdentity,
+          professional: baseProfessional,
+          status: pro.status || "submitted",
+        }));
+      // update a few fields if present
+      appDoc.email = pro.email || appDoc.email || "";
+      appDoc.identity = baseIdentity;
+      appDoc.professional = baseProfessional;
+      appDoc.status = appDoc.status || pro.status || "submitted";
+      await appDoc.save();
+    } catch (syncErr) {
+      console.warn("[pros:me:put] application-sync warn:", syncErr?.message || syncErr);
+    }
 
-/* ------------------- Health ------------------- */
-app.get("/api/health", (_req, res) => res.json({ ok: true, time: new Date().toISOString() }));
-
-/* ------------------- Barbers ------------------- */
-app.get("/api/barbers", async (req, res) => {
-  try {
-    if (mongoose.connection.readyState !== 1) return res.status(503).json({ error: "Database not connected" });
-    const { lga } = req.query;
-    const q = {};
-    if (lga) q.lga = lga.toUpperCase();
-    const docs = await Pro.find(q).lean();
-    return res.json(docs.map((d) => sanitizeBarberCard(proToBarber(d))));
-  } catch (err) {
-    console.error("[barbers] DB error:", err);
-    res.status(500).json({ error: "Failed to load barbers" });
-  }
-});
-
-app.get("/api/barbers/:id", async (req, res) => {
-  try {
-    if (mongoose.connection.readyState !== 1) return res.status(503).json({ error: "Database not connected" });
-    const doc = await Pro.findById(req.params.id).lean();
-    if (!doc) return res.status(404).json({ error: "Not found" });
-    return res.json(sanitizeBarberCard(proToBarber(doc)));
-  } catch (err) {
-    console.error("[barbers:id] DB error:", err);
-    res.status(500).json({ error: "Failed to load barber" });
-  }
-});
-
-/* ------------------- Barbers Nearby ------------------- */
-const GEOAPIFY_KEY = process.env.GEOAPIFY_KEY || "9258e71a50234a35b0bec3b44515b023";
-
-async function reverseGeocode(lat, lon) {
-  if (!GEOAPIFY_KEY) return null;
-  const r = await fetch(
-    `https://api.geoapify.com/v1/geocode/reverse?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(
-      lon
-    )}&apiKey=${encodeURIComponent(GEOAPIFY_KEY)}`
-  );
-  if (!r.ok) return null;
-  const j = await r.json();
-  return j;
-}
-
-/* ------------------- GEO reverse used by client register ------------------- */
-app.get("/api/geo/rev", async (req, res) => {
-  try {
-    const lat = Number(req.query.lat);
-    const lon = Number(req.query.lon);
-    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return res.status(400).json({ error: "lat_lon_required" });
-
-    const j = await reverseGeocode(lat, lon);
-    if (j?.features?.length) return res.json(j);
-
-    // Fallback: return a minimal, compatible structure
-    return res.json({
-      features: [
-        {
-          properties: {
-            state: "",
-            region: "",
-            county: "",
-            city: "",
-            district: "",
-            suburb: "",
-            address_line1: "",
-            address_line2: "",
-          },
-        },
-      ],
-    });
+    return res.json({ ok: true, item: sanitizePro(pro, req.user.role) });
   } catch (e) {
-    console.error("[geo:rev] error:", e?.message || e);
-    return res.json({ features: [] });
+    console.error("[pros:me:put]", e?.message || e);
+    return res.status(500).json({ error: "failed" });
   }
 });
 
-/* ------------------- Nigeria Geo (robust) ------------------- */
-app.get("/api/geo/ng", (_req, res) => {
-  try {
-    const states = Object.keys(NG_GEO || {});
-    return res.json({ states, lgas: NG_GEO });
-  } catch (e) {
-    console.error("[geo/ng] error:", e);
-    return res.json({ states: [], lgas: {} });
-  }
-});
 
 app.get("/api/geo/ng/states", (_req, res) => {
   try {
