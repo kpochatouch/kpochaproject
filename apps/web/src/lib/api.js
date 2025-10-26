@@ -1,63 +1,63 @@
-// apps/web/src/lib/api.js
 import axios from "axios";
 import { getAuth, onAuthStateChanged } from "firebase/auth";
 
-/* =========================
-   API ROOT (no trailing /)
-   ========================= */
+/* =========================================
+   BASE URL (normalize, no trailing slash, no /api suffix)
+   - Supports either VITE_API_BASE_URL or VITE_API_BASE
+   ========================================= */
 let ROOT =
-  import.meta.env.VITE_API_BASE_URL ||
-  import.meta.env.VITE_API_BASE ||
-  "http://localhost:8080";
+  (import.meta.env.VITE_API_BASE_URL ||
+   import.meta.env.VITE_API_BASE ||
+   "") // fallback added
+    .toString()
+    .trim();
 
+if (!ROOT) {
+  // last-resort dev fallback
+  ROOT = "http://localhost:8080";
+}
 ROOT = ROOT.replace(/\/+$/, "");
 if (/\/api$/i.test(ROOT)) ROOT = ROOT.replace(/\/api$/i, "");
 
-// All requests below already include "/api/..."
+// Points to server root. Your paths below already start with "/api/...".
 export const api = axios.create({
   baseURL: ROOT,
   headers: { "Content-Type": "application/json", Accept: "application/json" },
 });
 
-/* =========================
-   AUTH READY + HEADER
-   - Wait once for Firebase to init so the first call has a token
-   - Prefer Firebase ID token; fall back to localStorage
-   ========================= */
-const authReady = new Promise((resolve) => {
+/* =========================================
+   AUTH TOKEN (Firebase preferred, localStorage fallback)
+   ========================================= */
+let authReady = new Promise((resolve) => {
   try {
     const auth = getAuth();
-    // Resolve immediately if auth is already ready
-    if (auth?.currentUser !== undefined) {
-      // subscribe once to ensure we catch the first user/null
-      const stop = onAuthStateChanged(auth, () => { stop(); resolve(); });
-    } else {
+    const stop = onAuthStateChanged(auth, () => {
+      stop();
       resolve();
-    }
+    });
   } catch {
     resolve();
   }
 });
 
 api.interceptors.request.use(async (config) => {
-  // Make sure Firebase has had a chance to populate currentUser
   await authReady;
 
-  // Try Firebase token first (no forced refresh)
+  // Try Firebase ID token first
   try {
     const auth = getAuth();
-    const u = auth.currentUser;
-    if (u) {
-      const t = await u.getIdToken(); // no "true" -> faster, still valid
-      if (t) config.headers.Authorization = `Bearer ${t}`;
+    const user = auth?.currentUser || null;
+    if (user) {
+      const idToken = await user.getIdToken();
+      if (idToken) config.headers.Authorization = `Bearer ${idToken}`;
       return config;
     }
   } catch {}
 
-  // Fallback to localStorage token if present
+  // Fallback to localStorage token (for your admin tools)
   try {
-    const t = localStorage.getItem("token");
-    if (t) config.headers.Authorization = `Bearer ${t}`;
+    const token = localStorage.getItem("token");
+    if (token) config.headers.Authorization = `Bearer ${token}`;
   } catch {}
 
   return config;
@@ -68,17 +68,17 @@ export function setAuthToken(token) {
   else localStorage.setItem("token", token);
 }
 
-/* =========================
+/* =========================================
    BASIC / COMMON
-   ========================= */
+   ========================================= */
 export async function getMe() {
   const { data } = await api.get("/api/me");
   return data;
 }
 
-/* =========================
-   GEO
-   ========================= */
+/* =========================================
+   NIGERIA GEO
+   ========================================= */
 export async function getNgGeo() {
   const { data } = await api.get("/api/geo/ng");
   return data;
@@ -96,9 +96,9 @@ export async function reverseGeocode({ lat, lon }) {
   return data;
 }
 
-/* =========================
+/* =========================================
    BROWSE: PROS
-   ========================= */
+   ========================================= */
 export async function listBarbers(params = {}) {
   const { data } = await api.get("/api/barbers", { params });
   return data;
@@ -112,9 +112,9 @@ export async function listNearbyBarbers({ lat, lon, radiusKm = 25 }) {
   return data;
 }
 
-/* =========================
+/* =========================================
    FEED
-   ========================= */
+   ========================================= */
 export async function listPublicFeed(params = {}) {
   const { data } = await api.get("/api/feed/public", { params });
   return data;
@@ -124,9 +124,9 @@ export async function createPost(payload) {
   return data;
 }
 
-/* =========================
-   PAYMENTS
-   ========================= */
+/* =========================================
+   PAYMENTS (Paystack)
+   ========================================= */
 export async function verifyPayment({ bookingId, reference }) {
   const { data } = await api.post("/api/payments/verify", { bookingId, reference });
   return data;
@@ -136,9 +136,9 @@ export async function initPayment({ bookingId, amountKobo, email }) {
   return data;
 }
 
-/* =========================
+/* =========================================
    BOOKINGS — CLIENT
-   ========================= */
+   ========================================= */
 export async function createBooking(payload) {
   const { data } = await api.post("/api/bookings", payload);
   return data.booking;
@@ -164,9 +164,9 @@ export async function cancelBooking(id) {
   return data.booking;
 }
 
-/* =========================
+/* =========================================
    BOOKINGS — PRO OWNER
-   ========================= */
+   ========================================= */
 export async function getProBookings() {
   const { data } = await api.get("/api/bookings/pro/me");
   return data;
@@ -184,9 +184,9 @@ export async function completeBooking(id) {
   return data.booking;
 }
 
-/* =========================
-   WALLET
-   ========================= */
+/* =========================================
+   WALLET (client + pro)
+   ========================================= */
 export async function getWalletMe() {
   const { data } = await api.get("/api/wallet/me");
   return data;
@@ -213,9 +213,15 @@ export async function getMyTransactions() {
   return data?.transactions || [];
 }
 
-/* =========================
+/* Client wallet (credits/refunds) */
+export async function getClientWalletMe() {
+  const { data } = await api.get("/api/wallet/client/me");
+  return data;
+}
+
+/* =========================================
    PIN
-   ========================= */
+   ========================================= */
 export async function setWithdrawPin(pin) {
   const { data } = await api.post("/api/pin/me/set", { pin });
   return data;
@@ -225,9 +231,9 @@ export async function resetWithdrawPin(currentPin, newPin) {
   return data;
 }
 
-/* =========================
+/* =========================================
    SETTINGS
-   ========================= */
+   ========================================= */
 export async function getSettings() {
   const { data } = await api.get("/api/settings");
   return data;
@@ -241,9 +247,9 @@ export async function updateSettings(payload) {
   return data;
 }
 
-/* =========================
-   PRO / CLIENT PROFILES
-   ========================= */
+/* =========================================
+   PRO APPLICATIONS / PROFILES
+   ========================================= */
 export async function submitProApplication(payload) {
   const { data } = await api.post("/api/applications", payload);
   return data;
@@ -265,7 +271,6 @@ export async function getClientProfileAdmin(clientUid) {
   const { data } = await api.get(`/api/profile/client/${clientUid}/admin`);
   return data;
 }
-
 export async function getProProfileMe() {
   const { data } = await api.get("/api/profile/pro/me");
   return data;
