@@ -6,6 +6,7 @@ import BarberCard from "../components/BarberCard";
 import ServicePicker from "../components/ServicePicker";
 import ProDrawer from "../components/ProDrawer";
 import FeedCard from "../components/FeedCard";
+import ErrorBoundary from "../components/ErrorBoundary"; // ✅ wrap page
 
 /** Pro-only composer (simple: text + media URL) */
 function FeedComposer({ lga, onPosted }) {
@@ -107,7 +108,6 @@ export default function Browse() {
   const isPro = !!me?.isPro;
 
   // drawer
-  theDrawer: {}
   const [openPro, setOpenPro] = useState(null);
 
   // feed
@@ -264,7 +264,7 @@ export default function Browse() {
       : [];
     const svcPrice = svcName ? svcList.find((s) => s.name === svcName)?.price : undefined;
 
-    const proId = pro?.id || pro?._id;        // ✅ support both shapes
+    const proId = pro?.id || pro?._id; // ✅ support both shapes
     if (!proId) return;
 
     navigate(`/book/${proId}?service=${encodeURIComponent(svcName || "")}`, {
@@ -280,134 +280,136 @@ export default function Browse() {
   }
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-10">
-      {/* Header + tabs */}
-      <div className="mb-6 flex items-center justify-between gap-3 flex-wrap">
-        <h1 className="text-2xl font-semibold">Discover</h1>
-        <div className="inline-flex rounded-xl border border-zinc-800 overflow-hidden">
-          <button
-            className={`px-4 py-2 text-sm ${
-              tab === "pros" ? "bg-gold text-black font-semibold" : "hover:bg-zinc-900"
-            }`}
-            onClick={() => setTab("pros")}
+    <ErrorBoundary>
+      <div className="max-w-6xl mx-auto px-4 py-10">
+        {/* Header + tabs */}
+        <div className="mb-6 flex items-center justify-between gap-3 flex-wrap">
+          <h1 className="text-2xl font-semibold">Discover</h1>
+          <div className="inline-flex rounded-xl border border-zinc-800 overflow-hidden">
+            <button
+              className={`px-4 py-2 text-sm ${
+                tab === "pros" ? "bg-gold text-black font-semibold" : "hover:bg-zinc-900"
+              }`}
+              onClick={() => setTab("pros")}
+            >
+              Pros
+            </button>
+            <button
+              className={`px-4 py-2 text-sm border-l border-zinc-800 ${
+                tab === "feed" ? "bg-gold text-black font-semibold" : "hover:bg-zinc-900"
+              }`}
+              onClick={() => setTab("feed")}
+            >
+              Feed
+            </button>
+          </div>
+        </div>
+
+        {/* Filters */}
+        <div className="flex flex-wrap items-center gap-2 mb-6">
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search by name or description…"
+            className="bg-black border border-zinc-800 rounded-lg px-3 py-2 w-56"
+          />
+
+          <div className="w-56">
+            <ServicePicker value={service} onChange={setService} placeholder="All services" allowCustom={false} />
+          </div>
+
+          <select
+            value={stateName}
+            onChange={(e) => {
+              setStateName(e.target.value);
+              setLga("");
+            }}
+            className="bg-black border border-zinc-800 rounded-lg px-3 py-2"
           >
-            Pros
-          </button>
-          <button
-            className={`px-4 py-2 text-sm border-l border-zinc-800 ${
-              tab === "feed" ? "bg-gold text-black font-semibold" : "hover:bg-zinc-900"
-            }`}
-            onClick={() => setTab("feed")}
+            <option value="">All States</option>
+            {states.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={lga}
+            onChange={(e) => setLga(e.target.value)}
+            className="bg-black border border-zinc-800 rounded-lg px-3 py-2"
+            disabled={stateName && !lgasForState.length}
           >
-            Feed
+            <option value="">All LGAs</option>
+            {(stateName ? lgasForState : []).map((x) => (
+              <option key={x} value={x}>
+                {x}
+              </option>
+            ))}
+          </select>
+
+          <button onClick={clearFilters} className="rounded-lg border border-zinc-700 px-3 py-2 text-sm">
+            Clear
           </button>
         </div>
-      </div>
 
-      {/* Filters */}
-      <div className="flex flex-wrap items-center gap-2 mb-6">
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Search by name or description…"
-          className="bg-black border border-zinc-800 rounded-lg px-3 py-2 w-56"
+        {/* Content */}
+        {tab === "pros" ? (
+          <>
+            {errPros && (
+              <div className="mb-4 rounded border border-red-800 bg-red-900/30 text-red-100 px-3 py-2">{errPros}</div>
+            )}
+
+            {loadingPros ? (
+              <p className="text-zinc-400">Loading…</p>
+            ) : filteredAndRanked.length ? (
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filteredAndRanked.map((pro) => (
+                  <BarberCard
+                    key={pro.id || pro._id}
+                    barber={pro}
+                    onOpen={setOpenPro}
+                    onBook={(svc) => goBook(pro, svc)}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="text-zinc-400">No professionals match your filters.</div>
+            )}
+          </>
+        ) : (
+          <>
+            {isPro && <FeedComposer lga={lga} onPosted={fetchFeed} />}
+
+            {errFeed && (
+              <div className="mb-4 rounded border border-red-800 bg-red-900/30 text-red-100 px-3 py-2">{errFeed}</div>
+            )}
+
+            {loadingFeed ? (
+              <p className="text-zinc-400">Loading feed…</p>
+            ) : feed.length ? (
+              <div className="grid md:grid-cols-2 gap-4">
+                {feed.map((post) => (
+                  <FeedCard key={post._id || post.id} post={post} />
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-lg border border-zinc-800 p-6 text-zinc-400">
+                No updates yet. Once professionals start posting photos and promos, they’ll appear here. You can still
+                book from the Pros tab.
+              </div>
+            )}
+          </>
+        )}
+
+        {/* Drawer */}
+        <ProDrawer
+          open={!!openPro}
+          pro={openPro}
+          onClose={() => setOpenPro(null)}
+          onBook={(svc) => (openPro ? goBook(openPro, svc) : null)} // ✅ fixed
         />
-
-        <div className="w-56">
-          <ServicePicker value={service} onChange={setService} placeholder="All services" allowCustom={false} />
-        </div>
-
-        <select
-          value={stateName}
-          onChange={(e) => {
-            setStateName(e.target.value);
-            setLga("");
-          }}
-          className="bg-black border border-zinc-800 rounded-lg px-3 py-2"
-        >
-          <option value="">All States</option>
-          {states.map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </select>
-
-        <select
-          value={lga}
-          onChange={(e) => setLga(e.target.value)}
-          className="bg-black border border-zinc-800 rounded-lg px-3 py-2"
-          disabled={stateName && !lgasForState.length}
-        >
-          <option value="">All LGAs</option>
-          {(stateName ? lgasForState : []).map((x) => (
-            <option key={x} value={x}>
-              {x}
-            </option>
-          ))}
-        </select>
-
-        <button onClick={clearFilters} className="rounded-lg border border-zinc-700 px-3 py-2 text-sm">
-          Clear
-        </button>
       </div>
-
-      {/* Content */}
-      {tab === "pros" ? (
-        <>
-          {errPros && (
-            <div className="mb-4 rounded border border-red-800 bg-red-900/30 text-red-100 px-3 py-2">{errPros}</div>
-          )}
-
-          {loadingPros ? (
-            <p className="text-zinc-400">Loading…</p>
-          ) : filteredAndRanked.length ? (
-            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filteredAndRanked.map((pro) => (
-                <BarberCard
-                  key={pro.id || pro._id}
-                  barber={pro}
-                  onOpen={setOpenPro}
-                  onBook={(svc) => goBook(pro, svc)}
-                />
-              ))}
-            </div>
-          ) : (
-            <div className="text-zinc-400">No professionals match your filters.</div>
-          )}
-        </>
-      ) : (
-        <>
-          {isPro && <FeedComposer lga={lga} onPosted={fetchFeed} />}
-
-          {errFeed && (
-            <div className="mb-4 rounded border border-red-800 bg-red-900/30 text-red-100 px-3 py-2">{errFeed}</div>
-          )}
-
-          {loadingFeed ? (
-            <p className="text-zinc-400">Loading feed…</p>
-          ) : feed.length ? (
-            <div className="grid md:grid-cols-2 gap-4">
-              {feed.map((post) => (
-                <FeedCard key={post._id || post.id} post={post} />
-              ))}
-            </div>
-          ) : (
-            <div className="rounded-lg border border-zinc-800 p-6 text-zinc-400">
-              No updates yet. Once professionals start posting photos and promos, they’ll appear here. You can still
-              book from the Pros tab.
-            </div>
-          )}
-        </>
-      )}
-
-      {/* Drawer */}
-      <ProDrawer
-        open={!!openPro}
-        pro={openPro}
-        onClose={() => setOpenPro(null)}
-        onBook={(svc) => (openPro ? goBook(openPro, svc) : null)} // ✅ fixed
-      />
-    </div>
+    </ErrorBoundary>
   );
 }
