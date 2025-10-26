@@ -5,7 +5,7 @@ import { Link } from "react-router-dom";
 const LOGO_URL =
   "https://res.cloudinary.com/dupex2y3k/image/upload/v1760302703/kpocha-touch-logo_srzbiu.jpg";
 
-/** Helpers */
+/* ------------------------------ Helpers ------------------------------ */
 function toArrayServices(svcs) {
   if (Array.isArray(svcs)) {
     return svcs.map((s) => (typeof s === "string" ? s : s?.name)).filter(Boolean);
@@ -15,12 +15,26 @@ function toArrayServices(svcs) {
   }
   return [];
 }
+
 function priceTag(s) {
   const name = typeof s === "string" ? s : s?.name || "Service";
   const price = typeof s === "string" ? null : s?.price;
-  return Number.isFinite(Number(price))
-    ? `${name} ₦${Number(price).toLocaleString()}`
-    : name;
+  return Number.isFinite(Number(price)) ? `${name} ₦${Number(price).toLocaleString()}` : name;
+}
+
+/** Turn availability (string | object) into a short, safe label for UI */
+function availabilityLabel(av) {
+  if (!av) return "Available";
+  if (typeof av === "string") return av;
+  // object shape from server: { days, start, end, emergency, ... } or { status }
+  if (typeof av === "object") {
+    if (typeof av.status === "string" && av.status.trim()) return av.status;
+    const start = av.start ? String(av.start) : null;
+    const end = av.end ? String(av.end) : null;
+    if (start && end) return `Hours ${start}-${end}`;
+    return "Available";
+  }
+  return "Available";
 }
 
 function Avatar({ url, seed }) {
@@ -48,25 +62,26 @@ function Avatar({ url, seed }) {
   );
 }
 
-/**
- * Card with bottom actions:
- * - View (left) — opens drawer
- * - Book now (right) — calls onBook(service?) so Browse can carry state/LGA/service forward
- */
+/* =======================================================================
+   Card with bottom actions:
+   - View (left) — opens drawer
+   - Book now (right) — calls onBook(service?) so Browse can carry state/LGA/service forward
+   ======================================================================= */
 export default function BarberCard({ barber, onOpen, onBook }) {
   const id = barber?.id || barber?._id;
   const name = barber?.name || "Professional";
+
   const role =
     barber?.title ||
     (Array.isArray(barber?.services) && barber.services[0]?.name) ||
-    (typeof barber?.services === "string"
-      ? barber.services.split(",")[0]?.trim()
-      : "") ||
+    (typeof barber?.services === "string" ? barber.services.split(",")[0]?.trim() : "") ||
     "Art Director";
 
-  const rating =
-    typeof barber?.rating === "number" ? barber.rating.toFixed(1) : "4.8";
-  const availability = barber?.availability || "Available";
+  const rating = typeof barber?.rating === "number" ? barber.rating.toFixed(1) : "4.8";
+
+  // 🛡️ Never render raw objects into JSX — convert to a label first
+  const availability = availabilityLabel(barber?.availability);
+
   const verified = !!barber?.verified;
 
   const lga = barber?.lga || "UNSPECIFIED";
@@ -76,9 +91,7 @@ export default function BarberCard({ barber, onOpen, onBook }) {
   const topThree = services.slice(0, 3);
 
   const bio =
-    barber?.bio ||
-    barber?.description ||
-    "Premium grooming & creative styling tailored to you.";
+    barber?.bio || barber?.description || "Premium grooming & creative styling tailored to you.";
 
   const photoUrl = barber?.photoUrl || barber?.avatarUrl || "";
 
@@ -91,8 +104,7 @@ export default function BarberCard({ barber, onOpen, onBook }) {
         text-white
       "
       style={{
-        boxShadow:
-          "0 1px 0 rgba(255,255,255,0.03) inset, 0 10px 30px rgba(0,0,0,0.45)",
+        boxShadow: "0 1px 0 rgba(255,255,255,0.03) inset, 0 10px 30px rgba(0,0,0,0.45)",
       }}
     >
       {/* Subtle dot-decoration */}
@@ -140,15 +152,11 @@ export default function BarberCard({ barber, onOpen, onBook }) {
               <span className="font-semibold">{rating}</span>
             </span>
             <span className="h-3 w-px bg-zinc-700" />
-            <span className="truncate">
-              {state ? `${state}, ${lga}` : lga}
-            </span>
+            <span className="truncate">{state ? `${state}, ${lga}` : lga}</span>
             <span className="h-3 w-px bg-zinc-700" />
             <span
               className={`rounded-full px-2 py-0.5 ${
-                availability === "Available"
-                  ? "bg-green-900/40 text-green-300"
-                  : "bg-zinc-800 text-zinc-300"
+                availability === "Available" ? "bg-green-900/40 text-green-300" : "bg-zinc-800 text-zinc-300"
               }`}
             >
               {availability}
@@ -156,9 +164,7 @@ export default function BarberCard({ barber, onOpen, onBook }) {
             {verified && (
               <>
                 <span className="h-3 w-px bg-zinc-700" />
-                <span className="rounded-full bg-emerald-900/40 px-2 py-0.5 text-emerald-300">
-                  ✓ Verified
-                </span>
+                <span className="rounded-full bg-emerald-900/40 px-2 py-0.5 text-emerald-300">✓ Verified</span>
               </>
             )}
           </div>
@@ -202,10 +208,8 @@ export default function BarberCard({ barber, onOpen, onBook }) {
       <div
         className="pointer-events-none absolute bottom-0 left-0 right-0 h-16"
         style={{
-          background:
-            "linear-gradient(90deg, #ff7a00 0%, #ff3b3b 45%, #ff2d55 100%)",
-          clipPath:
-            "path('M0,0 C120,30 260,-5 360,12 C420,22 480,40 520,0 L520,64 L0,64 Z')",
+          background: "linear-gradient(90deg, #ff7a00 0%, #ff3b3b 45%, #ff2d55 100%)",
+          clipPath: "path('M0,0 C120,30 260,-5 360,12 C420,22 480,40 520,0 L520,64 L0,64 Z')",
         }}
       />
 
