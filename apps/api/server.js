@@ -65,9 +65,12 @@ const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || "")
   .map((s) => s.trim().toLowerCase())
   .filter(Boolean);
 
+function isAdminUid(uid) {
+  return !!uid && ADMIN_UIDS.includes(uid);
+}
+
 function requireAdmin(req, res, next) {
-  const uidOk =
-    !!req.user?.uid && ADMIN_UIDS.includes(req.user.uid);
+  const uidOk = !!req.user?.uid && ADMIN_UIDS.includes(req.user.uid);
   const emailOk =
     !!req.user?.email &&
     ADMIN_EMAILS.includes(String(req.user.email).toLowerCase());
@@ -77,7 +80,6 @@ function requireAdmin(req, res, next) {
   }
   next();
 }
-
 
 /* ------------------- Firebase Admin ------------------- */
 try {
@@ -504,17 +506,6 @@ app.get("/api/me", requireAuth, async (req, res) => {
   }
 });
 
-/** Public endpoint for the web app to show read-only identity on Book page */
-app.get("/api/profile/client/me", requireAuth, async (req, res) => {
-  try {
-    if (mongoose.connection.readyState !== 1) return res.status(503).json({ error: "Database not connected" });
-    const { fullName, phone } = await getVerifiedClientIdentity(req.user.uid);
-    res.json({ uid: req.user.uid, email: req.user.email, fullName, phone });
-  } catch (e) {
-    res.status(500).json({ error: "failed" });
-  }
-});
-
 /** 🔒 Enforce verified name/phone on bookings POST */
 app.use("/api/bookings", requireAuth, async (req, _res, next) => {
   try {
@@ -573,6 +564,23 @@ try {
 } catch {}
 
 /* ------------------- Admin & Pros endpoints required by your frontend ------------------- */
+
+/** ✅ Public, read-only Settings (used by web app) */
+app.get("/api/settings", async (_req, res) => {
+  try {
+    const s = await loadSettings();
+    res.json({
+      appName: s.appName,
+      tagline: s.tagline,
+      payouts: s.payouts,
+      bookingRules: s.bookingRules,
+      maintenance: s.maintenance,
+      updatedAt: s.updatedAt,
+    });
+  } catch (e) {
+    res.status(500).json({ error: "failed" });
+  }
+});
 
 /** Settings: GET for admin panel */
 app.get("/api/settings/admin", requireAuth, requireAdmin, async (_req, res) => {
@@ -962,6 +970,7 @@ app.post("/api/applications", requireAuth, async (req, res) => {
 
     // minimal top-level fields for quick filtering
     const first = payload?.identity?.firstName || "";
+    thelast: {}
     const last = payload?.identity?.lastName || "";
     const displayName =
       payload.displayName ||

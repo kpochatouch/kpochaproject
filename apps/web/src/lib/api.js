@@ -1,54 +1,44 @@
+// apps/web/src/lib/api.js
 import axios from "axios";
-import { getAuth, onAuthStateChanged } from "firebase/auth";
+import { getAuth } from "firebase/auth";
 
-/* =========================================
-   BASE URL (normalize, no trailing slash, no /api suffix)
-   ========================================= */
-let ROOT = (import.meta.env.VITE_API_BASE_URL || "http://localhost:8080").replace(/\/+$/, "");
+/* =========================
+   API ROOT (no trailing /)
+   ========================= */
+let ROOT =
+  import.meta.env.VITE_API_BASE_URL ||
+  import.meta.env.VITE_API_BASE ||
+  "http://localhost:8080";
+ROOT = ROOT.replace(/\/+$/, "");
 if (/\/api$/i.test(ROOT)) ROOT = ROOT.replace(/\/api$/i, "");
 
-// Points to server root. Your paths below already start with "/api/..."
+// All requests below already include "/api/..."
 export const api = axios.create({
   baseURL: ROOT,
   headers: { "Content-Type": "application/json", Accept: "application/json" },
 });
 
-/* =========================================
-   AUTH TOKEN (Firebase preferred, localStorage fallback)
-   ========================================= */
-let authReady = new Promise((resolve) => {
-  try {
-    const auth = getAuth();
-    const stop = onAuthStateChanged(auth, () => {
-      stop();
-      resolve();
-    });
-  } catch {
-    resolve();
-  }
-});
-
+/* =========================
+   AUTH HEADER
+   ========================= */
 api.interceptors.request.use(async (config) => {
-  await authReady;
-
+  // Try a fresh ID token from Firebase
   try {
     const auth = getAuth();
-    const user = auth?.currentUser || null;
-    if (user) {
-      const idToken = await user.getIdToken();
-      if (idToken) config.headers.Authorization = `Bearer ${idToken}`;
+    const u = auth.currentUser;
+    if (u) {
+      // force refresh avoids using an expired cached token
+      const t = await u.getIdToken(true);
+      if (t) config.headers.Authorization = `Bearer ${t}`;
       return config;
     }
-  } catch {
-    // ignore and try fallback
-  }
+  } catch {}
 
+  // Fallback to localStorage token if present
   try {
-    const token = localStorage.getItem("token");
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-  } catch {
-    // ignore
-  }
+    const t = localStorage.getItem("token");
+    if (t) config.headers.Authorization = `Bearer ${t}`;
+  } catch {}
 
   return config;
 });
@@ -58,17 +48,17 @@ export function setAuthToken(token) {
   else localStorage.setItem("token", token);
 }
 
-/* =========================================
+/* =========================
    BASIC / COMMON
-   ========================================= */
+   ========================= */
 export async function getMe() {
   const { data } = await api.get("/api/me");
   return data;
 }
 
-/* =========================================
-   NIGERIA GEO
-   ========================================= */
+/* =========================
+   GEO
+   ========================= */
 export async function getNgGeo() {
   const { data } = await api.get("/api/geo/ng");
   return data;
@@ -86,9 +76,9 @@ export async function reverseGeocode({ lat, lon }) {
   return data;
 }
 
-/* =========================================
+/* =========================
    BROWSE: PROS
-   ========================================= */
+   ========================= */
 export async function listBarbers(params = {}) {
   const { data } = await api.get("/api/barbers", { params });
   return data;
@@ -102,9 +92,9 @@ export async function listNearbyBarbers({ lat, lon, radiusKm = 25 }) {
   return data;
 }
 
-/* =========================================
+/* =========================
    FEED
-   ========================================= */
+   ========================= */
 export async function listPublicFeed(params = {}) {
   const { data } = await api.get("/api/feed/public", { params });
   return data;
@@ -114,9 +104,9 @@ export async function createPost(payload) {
   return data;
 }
 
-/* =========================================
-   PAYMENTS (Paystack)
-   ========================================= */
+/* =========================
+   PAYMENTS
+   ========================= */
 export async function verifyPayment({ bookingId, reference }) {
   const { data } = await api.post("/api/payments/verify", { bookingId, reference });
   return data;
@@ -126,9 +116,9 @@ export async function initPayment({ bookingId, amountKobo, email }) {
   return data;
 }
 
-/* =========================================
+/* =========================
    BOOKINGS — CLIENT
-   ========================================= */
+   ========================= */
 export async function createBooking(payload) {
   const { data } = await api.post("/api/bookings", payload);
   return data.booking;
@@ -154,9 +144,9 @@ export async function cancelBooking(id) {
   return data.booking;
 }
 
-/* =========================================
+/* =========================
    BOOKINGS — PRO OWNER
-   ========================================= */
+   ========================= */
 export async function getProBookings() {
   const { data } = await api.get("/api/bookings/pro/me");
   return data;
@@ -174,10 +164,11 @@ export async function completeBooking(id) {
   return data.booking;
 }
 
-/* =========================================
+/* =========================
    WALLET
-   ========================================= */
+   ========================= */
 export async function getWalletMe() {
+  // keep calling /api/wallet/me (server will alias for clients below)
   const { data } = await api.get("/api/wallet/me");
   return data;
 }
@@ -203,9 +194,9 @@ export async function getMyTransactions() {
   return data?.transactions || [];
 }
 
-/* =========================================
+/* =========================
    PIN
-   ========================================= */
+   ========================= */
 export async function setWithdrawPin(pin) {
   const { data } = await api.post("/api/pin/me/set", { pin });
   return data;
@@ -215,9 +206,9 @@ export async function resetWithdrawPin(currentPin, newPin) {
   return data;
 }
 
-/* =========================================
+/* =========================
    SETTINGS
-   ========================================= */
+   ========================= */
 export async function getSettings() {
   const { data } = await api.get("/api/settings");
   return data;
@@ -231,12 +222,12 @@ export async function updateSettings(payload) {
   return data;
 }
 
-/* =========================================
-   PRO APPLICATIONS / PROFILES
-   ========================================= */
+/* =========================
+   PRO / CLIENT PROFILES
+   ========================= */
 export async function submitProApplication(payload) {
   const { data } = await api.post("/api/applications", payload);
-  return data; // expect { ok: true, id, ... }
+  return data;
 }
 
 export async function getClientProfile() {
@@ -255,6 +246,7 @@ export async function getClientProfileAdmin(clientUid) {
   const { data } = await api.get(`/api/profile/client/${clientUid}/admin`);
   return data;
 }
+
 export async function getProProfileMe() {
   const { data } = await api.get("/api/profile/pro/me");
   return data;
