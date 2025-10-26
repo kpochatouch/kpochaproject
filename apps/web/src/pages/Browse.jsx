@@ -107,6 +107,7 @@ export default function Browse() {
   const isPro = !!me?.isPro;
 
   // drawer
+  theDrawer: {}
   const [openPro, setOpenPro] = useState(null);
 
   // feed
@@ -257,14 +258,18 @@ export default function Browse() {
   // go to book with carry-forward context
   function goBook(pro, chosenService) {
     const svcName = chosenService || service || null;
+
     const svcList = Array.isArray(pro?.services)
       ? pro.services.map((s) => (typeof s === "string" ? { name: s } : s))
       : [];
     const svcPrice = svcName ? svcList.find((s) => s.name === svcName)?.price : undefined;
 
-    navigate(`/book/${pro._id}?service=${encodeURIComponent(svcName || "")}`, {
+    const proId = pro?.id || pro?._id;        // ✅ support both shapes
+    if (!proId) return;
+
+    navigate(`/book/${proId}?service=${encodeURIComponent(svcName || "")}`, {
       state: {
-        proId: pro._id,
+        proId,
         serviceName: svcName || undefined,
         amountNaira: typeof svcPrice !== "undefined" ? svcPrice : undefined,
         country: "Nigeria",
@@ -359,7 +364,12 @@ export default function Browse() {
           ) : filteredAndRanked.length ? (
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {filteredAndRanked.map((pro) => (
-                <BarberCard key={pro.id || pro._id} barber={pro} onOpen={setOpenPro} onBook={(svc) => goBook(pro, svc)} />
+                <BarberCard
+                  key={pro.id || pro._id}
+                  barber={pro}
+                  onOpen={setOpenPro}
+                  onBook={(svc) => goBook(pro, svc)}
+                />
               ))}
             </div>
           ) : (
@@ -396,7 +406,7 @@ export default function Browse() {
         open={!!openPro}
         pro={openPro}
         onClose={() => setOpenPro(null)}
-        onBook={(svc) => (openPro ? goBook(openPro, svc) : null)}
+        onBook={(svc) => (openPro ? goBook(openPro, svc) : null)} // ✅ fixed
       />
     </div>
   );
