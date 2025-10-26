@@ -1,6 +1,6 @@
 // apps/web/src/lib/api.js
 import axios from "axios";
-import { getAuth } from "firebase/auth";
+import { getAuth, onAuthStateChanged } from "firebase/auth";
 
 /* =========================
    API ROOT (no trailing /)
@@ -9,6 +9,7 @@ let ROOT =
   import.meta.env.VITE_API_BASE_URL ||
   import.meta.env.VITE_API_BASE ||
   "http://localhost:8080";
+
 ROOT = ROOT.replace(/\/+$/, "");
 if (/\/api$/i.test(ROOT)) ROOT = ROOT.replace(/\/api$/i, "");
 
@@ -19,16 +20,35 @@ export const api = axios.create({
 });
 
 /* =========================
-   AUTH HEADER
+   AUTH READY + HEADER
+   - Wait once for Firebase to init so the first call has a token
+   - Prefer Firebase ID token; fall back to localStorage
    ========================= */
+const authReady = new Promise((resolve) => {
+  try {
+    const auth = getAuth();
+    // Resolve immediately if auth is already ready
+    if (auth?.currentUser !== undefined) {
+      // subscribe once to ensure we catch the first user/null
+      const stop = onAuthStateChanged(auth, () => { stop(); resolve(); });
+    } else {
+      resolve();
+    }
+  } catch {
+    resolve();
+  }
+});
+
 api.interceptors.request.use(async (config) => {
-  // Try a fresh ID token from Firebase
+  // Make sure Firebase has had a chance to populate currentUser
+  await authReady;
+
+  // Try Firebase token first (no forced refresh)
   try {
     const auth = getAuth();
     const u = auth.currentUser;
     if (u) {
-      // force refresh avoids using an expired cached token
-      const t = await u.getIdToken(true);
+      const t = await u.getIdToken(); // no "true" -> faster, still valid
       if (t) config.headers.Authorization = `Bearer ${t}`;
       return config;
     }
@@ -168,7 +188,6 @@ export async function completeBooking(id) {
    WALLET
    ========================= */
 export async function getWalletMe() {
-  // keep calling /api/wallet/me (server will alias for clients below)
   const { data } = await api.get("/api/wallet/me");
   return data;
 }

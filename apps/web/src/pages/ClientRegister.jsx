@@ -385,7 +385,7 @@ export default function ClientRegister() {
                 </div>
 
                 <div className="md:col-span-2">
-                  <div className="text-sm text-zinc-300 mb-1">Selfie holding the same ID *</div>
+                  <div className="text-sm text-zinc-300 mb-1">Take a selfie *</div>
                   <div className="flex gap-2">
                     <input
                       className="flex-1 bg-black border border-zinc-800 rounded-lg px-3 py-2"
