@@ -111,7 +111,8 @@ const ProSchema = new mongoose.Schema(
       },
     },
 
-    availability: { type: String, default: "Available" }, // legacy field used by UI
+    availability: { type: mongoose.Schema.Types.Mixed, default: "Available" }, // accepts string or object
+
     rating: { type: Number, default: 4.8 }, // legacy field
 
     services: { type: [ServiceItemSchema], default: [] },
