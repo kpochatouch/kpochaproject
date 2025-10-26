@@ -65,17 +65,14 @@ const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || "")
   .map((s) => s.trim().toLowerCase())
   .filter(Boolean);
 
-function isAdminUid(uid) {
-  return !!uid && ADMIN_UIDS.includes(uid);
+// ✅ small helper used by /api/me and guards
+function isAdminUidOrEmail(uid, email) {
+  return (uid && ADMIN_UIDS.includes(uid)) ||
+         (email && ADMIN_EMAILS.includes(String(email).toLowerCase()));
 }
 
 function requireAdmin(req, res, next) {
-  const uidOk = !!req.user?.uid && ADMIN_UIDS.includes(req.user.uid);
-  const emailOk =
-    !!req.user?.email &&
-    ADMIN_EMAILS.includes(String(req.user.email).toLowerCase());
-
-  if (!uidOk && !emailOk) {
+  if (!isAdminUidOrEmail(req.user?.uid, req.user?.email)) {
     return res.status(403).json({ error: "Admin only" });
   }
   next();
@@ -464,7 +461,7 @@ async function getVerifiedClientIdentity(uid) {
 /* ------------------- Current user profile summary ------------------- */
 app.get("/api/me", requireAuth, async (req, res) => {
   try {
-    const isAdmin = isAdminUid(req.user.uid);
+    const isAdmin = isAdminUidOrEmail(req.user.uid, req.user.email);
 
     // Lightweight Pro flag
     let isPro = false;
@@ -506,6 +503,17 @@ app.get("/api/me", requireAuth, async (req, res) => {
   }
 });
 
+/** Public endpoint for the web app to show read-only identity on Book page */
+app.get("/api/profile/client/me", requireAuth, async (req, res) => {
+  try {
+    if (mongoose.connection.readyState !== 1) return res.status(503).json({ error: "Database not connected" });
+    const { fullName, phone } = await getVerifiedClientIdentity(req.user.uid);
+    res.json({ uid: req.user.uid, email: req.user.email, fullName, phone });
+  } catch (e) {
+    res.status(500).json({ error: "failed" });
+  }
+});
+
 /** 🔒 Enforce verified name/phone on bookings POST */
 app.use("/api/bookings", requireAuth, async (req, _res, next) => {
   try {
@@ -539,7 +547,8 @@ app.use("/api/wallet", requireAuth, (req, res, next) => {
   if (!write) return next();
   return requirePro(req, res, next);
 });
-/** ✅ Client wallet read stub */
+
+/** ✅ Client wallet read stub (client credits/refunds) */
 app.get("/api/wallet/client/me", requireAuth, async (_req, res) => {
   res.json({ creditsKobo: 0, transactions: [] });
 });
@@ -565,18 +574,14 @@ try {
 
 /* ------------------- Admin & Pros endpoints required by your frontend ------------------- */
 
-/** ✅ Public, read-only Settings (used by web app) */
+/** ✅ Public settings (read) — used by wallet/settings UIs */
 app.get("/api/settings", async (_req, res) => {
   try {
     const s = await loadSettings();
-    res.json({
-      appName: s.appName,
-      tagline: s.tagline,
-      payouts: s.payouts,
-      bookingRules: s.bookingRules,
-      maintenance: s.maintenance,
-      updatedAt: s.updatedAt,
-    });
+    const out = s.toObject ? s.toObject() : s;
+    // sanitize secrets
+    if (out?.webhooks?.paystack) out.webhooks.paystack.secret = undefined;
+    res.json(out);
   } catch (e) {
     res.status(500).json({ error: "failed" });
   }
@@ -614,16 +619,14 @@ app.get("/api/pros/pending", requireAuth, requireAdmin, async (_req, res) => {
       .sort({ createdAt: -1 })
       .limit(500)
       .lean();
-    res.json(docs || []);
+  res.json(docs || []);
   } catch (e) {
     console.error("[pros:pending]", e?.message || e);
     res.status(500).json({ error: "failed" });
   }
 });
 
-/** Approve application → upsert Pro (Admin.jsx calls POST /api/pros/approve/:id)
- *  ✅ Sets geospatial `loc` if we can infer coordinates from the application payload.
- */
+/** Approve application → upsert Pro */
 app.post("/api/pros/approve/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
@@ -638,7 +641,6 @@ app.post("/api/pros/approve/:id", requireAuth, requireAdmin, async (req, res) =>
     const ownerUid = appDoc.uid;
     if (!ownerUid) return res.status(400).json({ error: "missing_applicant_uid" });
 
-    // Try to infer coordinates from several likely locations in the stored application payload
     const lat =
       Number(appDoc?.business?.lat ?? appDoc?.identity?.lat ?? appDoc?.lat);
     const lon =
@@ -685,7 +687,6 @@ app.post("/api/pros/approve/:id", requireAuth, requireAdmin, async (req, res) =>
 });
 
 /* ------------------- Minimal /api/pros/me (for Settings page) ------------------- */
-// GET: read current user's Pro doc (if any)
 app.get("/api/pros/me", requireAuth, async (req, res) => {
   try {
     if (mongoose.connection.readyState !== 1) return res.status(503).json({ error: "Database not connected" });
@@ -698,8 +699,7 @@ app.get("/api/pros/me", requireAuth, async (req, res) => {
   }
 });
 
-// PUT: update current user's Pro doc (only if exists; this does not create)
-// ✅ Accepts either { loc: { type:"Point", coordinates:[lon,lat] } } or plain lat/lon fields.
+// PUT current user's Pro (no create)
 app.put("/api/pros/me", requireAuth, async (req, res) => {
   try {
     if (mongoose.connection.readyState !== 1) return res.status(503).json({ error: "Database not connected" });
@@ -708,7 +708,6 @@ app.put("/api/pros/me", requireAuth, async (req, res) => {
 
     const payload = req.body || {};
 
-    // Normalize coordinates from various shapes
     let normalizedLoc = null;
     if (payload?.loc?.type === "Point" && Array.isArray(payload?.loc?.coordinates)) {
       const [lonRaw, latRaw] = payload.loc.coordinates;
@@ -725,7 +724,6 @@ app.put("/api/pros/me", requireAuth, async (req, res) => {
       }
     }
 
-    // Only allow safe fields to be updated
     const allowed = {
       name: payload.name ?? existing.name,
       email: payload.email ?? existing.email,
@@ -748,8 +746,6 @@ app.put("/api/pros/me", requireAuth, async (req, res) => {
     res.status(500).json({ error: "failed" });
   }
 });
-
-/* ------------------- Deactivation & account endpoints would go here (omitted in this file) ------------------- */
 
 /* ------------------- Dev reset ------------------- */
 app.delete("/api/dev/reset", async (_req, res) => {
@@ -959,7 +955,6 @@ app.get("/api/chatbase/userhash", requireAuth, async (req, res) => {
 });
 
 /* ------------------- Applications (Become Pro) ------------------- */
-/** Create/Update current user's application (Become Pro) */
 app.post("/api/applications", requireAuth, async (req, res) => {
   try {
     if (mongoose.connection.readyState !== 1) {
@@ -968,9 +963,7 @@ app.post("/api/applications", requireAuth, async (req, res) => {
 
     const payload = req.body || {};
 
-    // minimal top-level fields for quick filtering
     const first = payload?.identity?.firstName || "";
-    thelast: {}
     const last = payload?.identity?.lastName || "";
     const displayName =
       payload.displayName ||
@@ -985,7 +978,6 @@ app.post("/api/applications", requireAuth, async (req, res) => {
         payload?.identity?.state ||
         "").toString().toUpperCase();
 
-    // legacy "services" string for Admin list preview
     const servicesStr = Array.isArray(payload?.professional?.services)
       ? payload.professional.services.join(", ")
       : (payload.services || "");
@@ -1000,11 +992,7 @@ app.post("/api/applications", requireAuth, async (req, res) => {
       lga,
       services: servicesStr,
       status,
-
-      // store full payload for approval step
       ...payload,
-
-      // normalize agreements on server as booleans
       acceptedTerms: !!payload.acceptedTerms,
       acceptedPrivacy: !!payload.acceptedPrivacy,
       agreements: {
