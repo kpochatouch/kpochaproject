@@ -60,12 +60,24 @@ const ADMIN_UIDS = (process.env.ADMIN_UIDS || "")
   .map((s) => s.trim())
   .filter(Boolean);
 
+const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || "")
+  .split(",")
+  .map((s) => s.trim().toLowerCase())
+  .filter(Boolean);
+
 function requireAdmin(req, res, next) {
-  if (!req.user?.uid || !ADMIN_UIDS.includes(req.user.uid)) {
+  const uidOk =
+    !!req.user?.uid && ADMIN_UIDS.includes(req.user.uid);
+  const emailOk =
+    !!req.user?.email &&
+    ADMIN_EMAILS.includes(String(req.user.email).toLowerCase());
+
+  if (!uidOk && !emailOk) {
     return res.status(403).json({ error: "Admin only" });
   }
   next();
 }
+
 
 /* ------------------- Firebase Admin ------------------- */
 try {
@@ -447,6 +459,51 @@ async function getVerifiedClientIdentity(uid) {
   }
 }
 
+/* ------------------- Current user profile summary ------------------- */
+app.get("/api/me", requireAuth, async (req, res) => {
+  try {
+    const isAdmin = isAdminUid(req.user.uid);
+
+    // Lightweight Pro flag
+    let isPro = false;
+    try {
+      const p = await Pro.findOne({ ownerUid: req.user.uid }).select("_id").lean();
+      isPro = !!p;
+    } catch {}
+
+    // Pull basic identity for Settings prefill
+    let identity = {};
+    let displayName = "";
+    try {
+      const col = mongoose.connection.db.collection("profiles");
+      const doc = await col.findOne(
+        { uid: req.user.uid },
+        { projection: { displayName: 1, name: 1, fullName: 1, identity: 1 } }
+      );
+      if (doc) {
+        identity = doc.identity || {};
+        displayName =
+          doc.displayName ||
+          doc.name ||
+          doc.fullName ||
+          [doc?.identity?.firstName, doc?.identity?.lastName].filter(Boolean).join(" ").trim() ||
+          "";
+      }
+    } catch {}
+
+    res.json({
+      uid: req.user.uid,
+      email: req.user.email || "",
+      displayName,
+      identity,
+      isAdmin,
+      isPro,
+    });
+  } catch (e) {
+    res.status(500).json({ error: "failed_me" });
+  }
+});
+
 /** Public endpoint for the web app to show read-only identity on Book page */
 app.get("/api/profile/client/me", requireAuth, async (req, res) => {
   try {
@@ -531,7 +588,7 @@ app.get("/api/settings/admin", requireAuth, requireAdmin, async (_req, res) => {
 /** Settings: PUT (admin). UI calls PUT /api/settings, so we provide both */
 async function saveSettingsAndRestart(req, res) {
   try {
-    const doc = await updateSettings(req.body || {}, req.user?.email || req.user?.uid || "admin");
+    const doc = await updateSettings(req.body || {}, req.user?.uid || "admin");
     await restartSchedulers().catch((e) => console.warn("[settings] restart warn:", e?.message || e));
     res.json(doc);
   } catch (err) {

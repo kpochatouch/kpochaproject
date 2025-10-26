@@ -1,40 +1,48 @@
 // apps/web/src/App.jsx
-import { Routes, Route, Navigate, useLocation } from "react-router-dom";
-import { useEffect, useState } from "react";
+import React, {
+  Suspense,
+  lazy,
+  useEffect,
+  useMemo,
+  useState,
+  createContext,
+  useContext,
+} from "react";
+import { Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { api, setAuthToken } from "./lib/api";
 
-// 🔐 keep Firebase token -> API header in sync
+// 🔐 Keep Firebase token -> API header in sync
 import { onIdTokenChanged } from "firebase/auth";
 import { auth } from "./lib/firebase";
 
-/* ---------- Pages ---------- */
-import Home from "./pages/Home.jsx";
-import Browse from "./pages/Browse.jsx";
-import BookService from "./pages/BookService.jsx";
-import BookingDetails from "./pages/BookingDetails.jsx";
-import Wallet from "./pages/Wallet.jsx";
-import ClientWallet from "./pages/ClientWallet.jsx";
-import Profile from "./pages/Profile.jsx";
-import Login from "./pages/Login.jsx";
-import Signup from "./pages/Signup.jsx";
-import BecomePro from "./pages/BecomePro.jsx";
-import ProDashboard from "./pages/ProDashboard.jsx";
-import Admin from "./pages/Admin.jsx";
-import Settings from "./pages/Settings.jsx";             // Pro settings
-import ClientSettings from "./pages/ClientSettings.jsx"; // Client settings
-import AdminDecline from "./pages/AdminDecline.jsx";
-import Legal from "./pages/Legal.jsx";
-import ClientRegister from "./pages/ClientRegister.jsx";
-import DeactivateAccount from "./pages/DeactivateAccount.jsx";
-import ApplyThanks from "./pages/ApplyThanks.jsx";
-import PaymentConfirm from "./pages/PaymentConfirm.jsx";
-
-/* ---------- Layout ---------- */
+/* ---------- Layout & guards ---------- */
 import Navbar from "./components/Navbar.jsx";
 import Footer from "./components/Footer.jsx";
 import RequireAuth from "./components/RequireAuth.jsx";
 
-/* ---------- Chatbase loader (verified users when logged in) ---------- */
+/* ---------- Pages (lazy) ---------- */
+const Home              = lazy(() => import("./pages/Home.jsx"));
+const Browse            = lazy(() => import("./pages/Browse.jsx"));
+const BookService       = lazy(() => import("./pages/BookService.jsx"));
+const BookingDetails    = lazy(() => import("./pages/BookingDetails.jsx"));
+const Wallet            = lazy(() => import("./pages/Wallet.jsx"));
+const ClientWallet      = lazy(() => import("./pages/ClientWallet.jsx"));
+const Profile           = lazy(() => import("./pages/Profile.jsx"));
+const Login             = lazy(() => import("./pages/Login.jsx"));
+const Signup            = lazy(() => import("./pages/Signup.jsx"));
+const BecomePro         = lazy(() => import("./pages/BecomePro.jsx"));
+const ProDashboard      = lazy(() => import("./pages/ProDashboard.jsx"));
+const Admin             = lazy(() => import("./pages/Admin.jsx"));
+const Settings          = lazy(() => import("./pages/Settings.jsx"));        // Pro settings
+const ClientSettings    = lazy(() => import("./pages/ClientSettings.jsx"));  // Client settings
+const AdminDecline      = lazy(() => import("./pages/AdminDecline.jsx"));
+const Legal             = lazy(() => import("./pages/Legal.jsx"));
+const ClientRegister    = lazy(() => import("./pages/ClientRegister.jsx"));
+const DeactivateAccount = lazy(() => import("./pages/DeactivateAccount.jsx"));
+const ApplyThanks       = lazy(() => import("./pages/ApplyThanks.jsx"));
+const PaymentConfirm    = lazy(() => import("./pages/PaymentConfirm.jsx"));
+
+/* ---------- Chatbase (verified user embedding) ---------- */
 function useChatbase() {
   useEffect(() => {
     const CHATBOT_ID = import.meta.env.VITE_CHATBASE_ID;
@@ -50,7 +58,7 @@ function useChatbase() {
           cfg.userHash = r.data.userHash;
         }
       } catch {
-        // anonymous fallback
+        // anonymous fallback is fine
       }
 
       window.chatbaseConfig = cfg;
@@ -59,246 +67,311 @@ function useChatbase() {
         const s = document.createElement("script");
         s.src = "https://www.chatbase.co/embed.min.js";
         s.id = CHATBOT_ID;
-        s.domain = "www.chatbase.co";
         s.defer = true;
+        s.dataset.domain = "www.chatbase.co";
         document.body.appendChild(s);
       }
     })();
   }, []);
 }
 
-/* ---------- Role guard (admin / pro) ---------- */
-function RequireRole({ role, children }) {
-  const [ok, setOk] = useState(null);
-  const loc = useLocation();
+/* ---------- Centralized /api/me snapshot ---------- */
+const MeContext = createContext(null);
 
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const { data } = await api.get("/api/me");
-        const allowed =
-          role === "admin" ? !!data?.isAdmin :
-          role === "pro"   ? !!data?.isPro   :
-          !!data;
-        if (alive) setOk(allowed);
-      } catch {
-        if (alive) setOk(false);
-      }
-    })();
-    return () => { alive = false; };
-  }, [role]);
+function MeProvider({ children }) {
+  const [version, setVersion] = useState(0);
+  const [state, setState] = useState({ loading: true, me: null, error: null });
 
-  if (ok === null) return <div className="p-6">Loading…</div>;
-  return ok ? children : <Navigate to="/" replace state={{ from: loc }} />;
-}
-
-/* ---------- Smart Wallet ---------- */
-function WalletSmart() {
-  const [state, setState] = useState({ loading: true, isPro: false });
-
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const { data } = await api.get("/api/me");
-        if (!alive) return;
-        setState({ loading: false, isPro: !!data?.isPro });
-      } catch {
-        if (alive) setState({ loading: false, isPro: false });
-      }
-    })();
-    return () => { alive = false; };
-  }, []);
-
-  if (state.loading) return <div className="p-6">Loading…</div>;
-  return state.isPro ? <Wallet /> : <ClientWallet />;
-}
-
-/* ---------- Smart Settings (client vs pro) ---------- */
-function SettingsSmart() {
-  const [state, setState] = useState({ loading: true, isPro: false });
-
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const { data } = await api.get("/api/me");
-        if (!alive) return;
-        setState({ loading: false, isPro: !!data?.isPro });
-      } catch {
-        if (alive) setState({ loading: false, isPro: false });
-      }
-    })();
-    return () => { alive = false; };
-  }, []);
-
-  if (state.loading) return <div className="p-6">Loading…</div>;
-  return state.isPro ? <Settings /> : <ClientSettings />;
-}
-
-export default function App() {
-  useChatbase();
-
-  // 🔐 Write/refresh token → axios header + localStorage
+  // When Firebase ID token changes, sync axios + trigger refetch
   useEffect(() => {
     const unsub = onIdTokenChanged(auth, async (user) => {
       try {
-        const token = user ? await user.getIdToken() : null; // fresh token
-        setAuthToken(token); // api.js updates axios + localStorage
-      } catch {
-        setAuthToken(null);
+        const token = user ? await user.getIdToken() : null;
+        setAuthToken(token); // sets axios header + localStorage
+      } finally {
+        setVersion((v) => v + 1); // causes /api/me refetch
       }
     });
     return () => unsub();
   }, []);
 
+  // Initial token write (covers "already signed-in" on hard refresh)
+  useEffect(() => {
+    (async () => {
+      try {
+        const u = auth.currentUser;
+        const token = u ? await u.getIdToken() : null;
+        setAuthToken(token);
+      } catch {
+        setAuthToken(null);
+      }
+    })();
+  }, []);
+
+  // Fetch /api/me on version change
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      setState((s) => ({ ...s, loading: true, error: null }));
+      try {
+        const { data } = await api.get("/api/me");
+        if (!alive) return;
+        setState({ loading: false, me: data || null, error: null });
+      } catch (e) {
+        if (!alive) return;
+        setState({ loading: false, me: null, error: e });
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [version]);
+
+  const value = useMemo(() => {
+    const isPro = !!state?.me?.isPro;
+    const isAdmin = !!state?.me?.isAdmin;
+    return { ...state, isPro, isAdmin, refresh: () => setVersion((v) => v + 1) };
+  }, [state]);
+
+  return <MeContext.Provider value={value}>{children}</MeContext.Provider>;
+}
+
+function useMe() {
+  const ctx = useContext(MeContext);
+  return ctx || { loading: true, me: null, isPro: false, isAdmin: false, error: null, refresh: () => {} };
+}
+
+/* ---------- Role guard (admin / pro) ---------- */
+function RequireRole({ role, children }) {
+  const { loading, isAdmin, isPro } = useMe();
+  const loc = useLocation();
+
+  const allowed =
+    role === "admin" ? isAdmin :
+    role === "pro"   ? isPro   :
+    true;
+
+  if (loading) return <div className="p-6">Loading…</div>;
+  return allowed ? children : <Navigate to="/" replace state={{ from: loc }} />;
+}
+
+/* ---------- Smart pages ---------- */
+function WalletSmart() {
+  const { loading, isPro } = useMe();
+  if (loading) return <div className="p-6">Loading…</div>;
+  return isPro ? <Wallet /> : <ClientWallet />;
+}
+
+function SettingsSmart() {
+  const { loading, isPro } = useMe();
+  if (loading) return <div className="p-6">Loading…</div>;
+  return isPro ? <Settings /> : <ClientSettings />;
+}
+
+/* ---------- NEW: Smart “Find a professional” redirect ---------- */
+/**
+ * Logic:
+ * - Not logged in => send to /login
+ * - Logged in => GET /api/profile/client/me
+ *    - if null => push /client-register
+ *    - else    => push /browse
+ */
+function FindProSmart() {
+  const navigate = useNavigate();
+  const loc = useLocation();
+  const { loading, me } = useMe();
+
+  useEffect(() => {
+    let alive = true;
+
+    (async () => {
+      // 1) Must be logged in
+      if (!me && !loading) {
+        navigate("/login", { replace: true, state: { from: loc } });
+        return;
+      }
+      if (loading) return; // wait for /api/me snapshot
+
+      // 2) Check if client profile exists
+      try {
+        const { data } = await api.get("/api/profile/client/me");
+        if (!alive) return;
+
+        // If API returns null => no client profile yet
+        if (!data) {
+          navigate("/client-register", { replace: true });
+        } else {
+          navigate("/browse", { replace: true });
+        }
+      } catch {
+        // On any error, default to client register so the user can complete profile
+        navigate("/client-register", { replace: true });
+      }
+    })();
+
+    return () => { alive = false; };
+  }, [loading, me, navigate, loc]);
+
+  return <div className="p-6">Loading…</div>;
+}
+
+/* ---------- App ---------- */
+export default function App() {
+  useChatbase();
+
   return (
     <div className="min-h-screen flex flex-col bg-black text-white">
       <Navbar />
       <main className="flex-1">
-        <Routes>
-          {/* Public */}
-          <Route path="/" element={<Home />} />
-          <Route path="/browse" element={<Browse />} />
-          <Route path="/book/:barberId" element={<BookService />} />
+        <Suspense fallback={<div className="p-6">Loading…</div>}>
+          <MeProvider>
+            <Routes>
+              {/* Public */}
+              <Route path="/" element={<Home />} />
+              <Route path="/browse" element={<Browse />} />
+              {/* NEW smart route that your “Find a professional” button should use */}
+              <Route path="/find" element={<FindProSmart />} />
 
-          {/* Booking details require auth (server validates token too) */}
-          <Route
-            path="/bookings/:id"
-            element={
-              <RequireAuth>
-                <BookingDetails />
-              </RequireAuth>
-            }
-          />
+              <Route path="/book/:barberId" element={<BookService />} />
 
-          {/* Profile (client) */}
-          <Route
-            path="/profile"
-            element={
-              <RequireAuth>
-                <Profile />
-              </RequireAuth>
-            }
-          />
+              {/* Booking details require auth (server validates token too) */}
+              <Route
+                path="/bookings/:id"
+                element={
+                  <RequireAuth>
+                    <BookingDetails />
+                  </RequireAuth>
+                }
+              />
 
-          {/* Auth pages */}
-          <Route path="/login" element={<Login />} />
-          <Route path="/signup" element={<Signup />} />
+              {/* Profile (client) */}
+              <Route
+                path="/profile"
+                element={
+                  <RequireAuth>
+                    <Profile />
+                  </RequireAuth>
+                }
+              />
 
-          {/* Legal */}
-          <Route path="/legal" element={<Legal />} />
-          <Route path="/legal/*" element={<Legal />} />
-          <Route path="/terms" element={<Navigate to="/legal#terms" replace />} />
-          <Route path="/privacy" element={<Navigate to="/legal#privacy" replace />} />
-          <Route path="/cookies" element={<Navigate to="/legal#cookies" replace />} />
-          <Route path="/refunds" element={<Navigate to="/legal#refunds" replace />} />
+              {/* Auth pages */}
+              <Route path="/login" element={<Login />} />
+              <Route path="/signup" element={<Signup />} />
 
-          {/* Application / payments */}
-          <Route path="/apply/thanks" element={<ApplyThanks />} />
-          <Route path="/payment/confirm" element={<PaymentConfirm />} />
+              {/* Legal */}
+              <Route path="/legal" element={<Legal />} />
+              <Route path="/legal/*" element={<Legal />} />
+              <Route path="/terms" element={<Navigate to="/legal#terms" replace />} />
+              <Route path="/privacy" element={<Navigate to="/legal#privacy" replace />} />
+              <Route path="/cookies" element={<Navigate to="/legal#cookies" replace />} />
+              <Route path="/refunds" element={<Navigate to="/legal#refunds" replace />} />
 
-          {/* Wallet (smart: pro vs client) */}
-          <Route
-            path="/wallet"
-            element={
-              <RequireAuth>
-                <WalletSmart />
-              </RequireAuth>
-            }
-          />
+              {/* Application / payments */}
+              <Route path="/apply/thanks" element={<ApplyThanks />} />
+              <Route path="/payment/confirm" element={<PaymentConfirm />} />
 
-          {/* Settings (smart: pro vs client) */}
-          <Route
-            path="/settings"
-            element={
-              <RequireAuth>
-                <SettingsSmart />
-              </RequireAuth>
-            }
-          />
-          {/* Direct access variants (optional deep links) */}
-          <Route
-            path="/settings/pro"
-            element={
-              <RequireRole role="pro">
-                <Settings />
-              </RequireRole>
-            }
-          />
-          <Route
-            path="/settings/client"
-            element={
-              <RequireAuth>
-                <ClientSettings />
-              </RequireAuth>
-            }
-          />
+              {/* Wallet (smart: pro vs client) */}
+              <Route
+                path="/wallet"
+                element={
+                  <RequireAuth>
+                    <WalletSmart />
+                  </RequireAuth>
+                }
+              />
 
-          {/* Become a Pro (application) */}
-          <Route
-            path="/become"
-            element={
-              <RequireAuth>
-                <BecomePro />
-              </RequireAuth>
-            }
-          />
+              {/* Settings (smart: pro vs client) */}
+              <Route
+                path="/settings"
+                element={
+                  <RequireAuth>
+                    <SettingsSmart />
+                  </RequireAuth>
+                }
+              />
+              {/* Direct access variants (optional deep links) */}
+              <Route
+                path="/settings/pro"
+                element={
+                  <RequireRole role="pro">
+                    <Settings />
+                  </RequireRole>
+                }
+              />
+              <Route
+                path="/settings/client"
+                element={
+                  <RequireAuth>
+                    <ClientSettings />
+                  </RequireAuth>
+                }
+              />
 
-          {/* Client register wizard */}
-          <Route
-            path="/client-register"
-            element={
-              <RequireAuth>
-                <ClientRegister />
-              </RequireAuth>
-            }
-          />
-          <Route path="/register" element={<Navigate to="/client-register" replace />} />
+              {/* Become a Pro (application) */}
+              <Route
+                path="/become"
+                element={
+                  <RequireAuth>
+                    <BecomePro />
+                  </RequireAuth>
+                }
+              />
 
-          {/* Account deactivation */}
-          <Route
-            path="/deactivate"
-            element={
-              <RequireAuth>
-                <DeactivateAccount />
-              </RequireAuth>
-            }
-          />
+              {/* Client register wizard */}
+              <Route
+                path="/client-register"
+                element={
+                  <RequireAuth>
+                    <ClientRegister />
+                  </RequireAuth>
+                }
+              />
+              <Route path="/register" element={<Navigate to="/client-register" replace />} />
 
-          {/* Pro Dashboard */}
-          <Route
-            path="/pro-dashboard"
-            element={
-              <RequireRole role="pro">
-                <ProDashboard />
-              </RequireRole>
-            }
-          />
-          <Route path="/pro" element={<Navigate to="/pro-dashboard" replace />} />
+              {/* Account deactivation */}
+              <Route
+                path="/deactivate"
+                element={
+                  <RequireAuth>
+                    <DeactivateAccount />
+                  </RequireAuth>
+                }
+              />
 
-          {/* Admin (server also enforces requireAdmin) */}
-          <Route
-            path="/admin"
-            element={
-              <RequireRole role="admin">
-                <Admin />
-              </RequireRole>
-            }
-          />
-          <Route
-            path="/admin/decline/:id"
-            element={
-              <RequireRole role="admin">
-                <AdminDecline />
-              </RequireRole>
-            }
-          />
+              {/* Pro Dashboard */}
+              <Route
+                path="/pro-dashboard"
+                element={
+                  <RequireRole role="pro">
+                    <ProDashboard />
+                  </RequireRole>
+                }
+              />
+              <Route path="/pro" element={<Navigate to="/pro-dashboard" replace />} />
 
-          {/* Fallback */}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+              {/* Admin (server also enforces requireAdmin) */}
+              <Route
+                path="/admin"
+                element={
+                  <RequireRole role="admin">
+                    <Admin />
+                  </RequireRole>
+                }
+              />
+              <Route
+                path="/admin/decline/:id"
+                element={
+                  <RequireRole role="admin">
+                    <AdminDecline />
+                  </RequireRole>
+                }
+              />
+
+              {/* Fallback */}
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </MeProvider>
+        </Suspense>
       </main>
       <Footer />
     </div>

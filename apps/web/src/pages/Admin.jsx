@@ -1,567 +1,652 @@
 // apps/web/src/pages/Admin.jsx
-import { useEffect, useMemo, useRef, useState } from "react";
-import { api } from "../lib/api";
-import { Link } from "react-router-dom";
+import { useEffect, useMemo, useState, useCallback } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 
-/** ------------------------------------------------------------------------
- * Admin Dashboard
- * - System Settings (GET /api/settings/admin, PUT /api/settings)
- * - Applications (GET /api/pros/pending, POST /api/pros/approve/:id)
- * - Deactivation Requests (GET/POST admin endpoints)
- * ------------------------------------------------------------------------ */
+const API =
+  import.meta.env.VITE_API_BASE_URL ||
+  import.meta.env.VITE_API_BASE ||
+  "http://localhost:8080";
 
-export default function AdminPage() {
-  const [tab, setTab] = useState("settings");
-  const tabs = [
-    { key: "settings", label: "System Settings" },
-    { key: "apps", label: "Applications" },
-    { key: "deact", label: "Deactivation Requests" },
-  ];
-  return (
-    <div className="max-w-6xl mx-auto px-4 py-8">
-      <div className="flex items-baseline justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-semibold">Admin</h1>
-          <p className="text-zinc-400 text-sm">Manage platform config, review applications, handle deactivations.</p>
-        </div>
-        <Link to="/" className="text-sm px-3 py-1.5 rounded-lg border border-zinc-700 hover:bg-zinc-900">← Back</Link>
-      </div>
+export default function Admin() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const qs = new URLSearchParams(location.search);
+  const initialTab = qs.get("tab") === "settings" ? "settings" : "pending";
 
-      <div className="mb-4 flex gap-2">
-        {tabs.map(t => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
-            className={`px-3 py-1.5 rounded-lg border ${tab === t.key ? "border-gold text-gold" : "border-zinc-700 hover:bg-zinc-900"}`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+  const [tab, setTab] = useState(initialTab);
 
-      {tab === "settings" && <SystemSettings />}
-      {tab === "apps" && <ApplicationsPanel />}
-      {tab === "deact" && <DeactivationPanel />}
-    </div>
+  // ---------- Shared helpers ----------
+  const token = useMemo(() => localStorage.getItem("token") || "", []);
+  const authHeaders = useCallback(
+    () => (token ? { Authorization: `Bearer ${token}` } : {}),
+    [token]
   );
-}
-
-/* ===========================================================================
-   System Settings
-   ========================================================================== */
-function SystemSettings() {
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState("");
-  const [ok, setOk] = useState("");
-  const okTimer = useRef(null);
-
-  const [doc, setDoc] = useState(null);
-
-  function flashOK(msg) {
-    setOk(msg);
-    if (okTimer.current) clearTimeout(okTimer.current);
-    okTimer.current = setTimeout(() => setOk(""), 2500);
+  function switchTab(next) {
+    setTab(next);
+    const q = new URLSearchParams(location.search);
+    if (next === "settings") q.set("tab", "settings");
+    else q.delete("tab");
+    navigate({ search: q.toString() }, { replace: true });
   }
 
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      setLoading(true);
-      setErr("");
+  // ======================================================================
+  // TAB 1: Pending Applications
+  // ======================================================================
+  const [pending, setPending] = useState([]);
+  const [busyId, setBusyId] = useState(null);
+  const [listError, setListError] = useState("");
+  const [listLoading, setListLoading] = useState(true);
+  const [filter, setFilter] = useState("");
+
+  const loadPending = useCallback(async () => {
+    setListError("");
+    setListLoading(true);
+    try {
+      const res = await fetch(`${API}/api/pros/pending`, { headers: { ...authHeaders() } });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Failed to load");
+      setPending(Array.isArray(data) ? data : []);
+    } catch (e) {
+      setListError("Could not load pending applications.");
+    } finally {
+      setListLoading(false);
+    }
+  }, [authHeaders]);
+
+  const approve = useCallback(
+    async (id) => {
+      setBusyId(id);
+      setListError("");
       try {
-        const { data } = await api.get("/api/settings/admin");
-        if (!alive) return;
-        setDoc(data || {});
+        const res = await fetch(`${API}/api/pros/approve/${id}`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...authHeaders(),
+          },
+        });
+        const json = await res.json();
+        if (!res.ok || !json?.ok) throw new Error(json?.error || "Approve failed");
+        await loadPending(); // refresh
+        alert("Approved ✅");
       } catch (e) {
-        if (alive) setErr(e?.response?.data?.error || "Failed to load settings.");
+        setListError(e.message || "Approve failed");
       } finally {
-        if (alive) setLoading(false);
+        setBusyId(null);
       }
-    })();
-    return () => { alive = false; if (okTimer.current) clearTimeout(okTimer.current); };
+    },
+    [authHeaders, loadPending]
+  );
+
+  const filtered = pending.filter((p) => {
+    const hay = JSON.stringify(p).toLowerCase();
+    return hay.includes(filter.toLowerCase());
+  });
+
+  // ======================================================================
+  // TAB 2: Admin Settings (server-driven)
+  // ======================================================================
+  const [settings, setSettings] = useState(null);
+  const [sLoading, setSLoading] = useState(false);
+  const [sSaving, setSSaving] = useState(false);
+  const [sError, setSError] = useState("");
+  const [sOk, setSOk] = useState("");
+
+  // Manual release (admin tool)
+  const [mrBookingId, setMrBookingId] = useState("");
+  const [mrBusy, setMrBusy] = useState(false);
+  const [mrOk, setMrOk] = useState("");
+  const [mrError, setMrError] = useState("");
+  const [mrPayload, setMrPayload] = useState(null);
+
+  // Coerce numeric fields safely before saving
+  const sanitizeSettings = useCallback((raw) => {
+    const s = { ...(raw || {}) };
+
+    // Commission
+    s.commissionSplit = {
+      ...(s.commissionSplit || {}),
+      platform: Number.isFinite(Number(s?.commissionSplit?.platform))
+        ? Number(s.commissionSplit.platform)
+        : 25,
+      pro: Number.isFinite(Number(s?.commissionSplit?.pro))
+        ? Number(s.commissionSplit.pro)
+        : 75,
+    };
+
+    // Payouts
+    s.payouts = {
+      ...(s.payouts || {}),
+      releaseDays: Number.isFinite(Number(s?.payouts?.releaseDays))
+        ? Number(s.payouts.releaseDays)
+        : 7,
+      instantCashoutFeePercent: Number.isFinite(Number(s?.payouts?.instantCashoutFeePercent))
+        ? Number(s.payouts.instantCashoutFeePercent)
+        : 3,
+      enableAutoRelease: !!s?.payouts?.enableAutoRelease,
+      autoReleaseCron: (s?.payouts?.autoReleaseCron || "0 2 * * *").trim(),
+    };
+
+    // Withdrawals
+    s.withdrawals = {
+      ...(s.withdrawals || {}),
+      requireApproval: !!s?.withdrawals?.requireApproval,
+    };
+
+    // Maintenance
+    s.maintenance = {
+      ...(s.maintenance || {}),
+      isMaintenanceMode: !!s?.maintenance?.isMaintenanceMode,
+      message: (s?.maintenance?.message || "").toString(),
+    };
+
+    // Security
+    s.security = {
+      ...(s.security || {}),
+      allowedOrigins: Array.isArray(s?.security?.allowedOrigins)
+        ? s.security.allowedOrigins
+        : String(s?.security?.allowedOrigins || "")
+            .split(",")
+            .map((x) => x.trim())
+            .filter(Boolean),
+    };
+
+    return s;
   }, []);
 
-  function setPath(path, value) {
-    setDoc(prev => {
-      const next = { ...(prev || {}) };
-      const parts = path.split(".");
-      let cur = next;
-      for (let i = 0; i < parts.length - 1; i++) {
-        const k = parts[i];
-        cur[k] = cur[k] ?? {};
-        cur = cur[k];
-      }
-      cur[parts[parts.length - 1]] = value;
-      return next;
-    });
-  }
-
-  async function save() {
-    if (!doc) return;
-    setSaving(true);
-    setErr("");
+  const loadSettings = useCallback(async () => {
+    setSError("");
+    setSOk("");
+    setSLoading(true);
     try {
-      // Server restarts schedulers automatically after save
-      const { data } = await api.put("/api/settings", doc);
-      setDoc(data || doc);
-      flashOK("Settings saved.");
+      const res = await fetch(`${API}/api/settings/admin`, {
+        headers: { ...authHeaders() },
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || "Failed to load settings");
+      setSettings(sanitizeSettings(json));
     } catch (e) {
-      setErr(e?.response?.data?.error || "Failed to save settings.");
+      setSError(e.message || "Failed to load settings");
     } finally {
-      setSaving(false);
+      setSLoading(false);
     }
-  }
+  }, [authHeaders, sanitizeSettings]);
 
-  if (loading) return <div className="mt-4">Loading settings…</div>;
-  if (!doc) return <div className="mt-4 text-red-400">No settings document found.</div>;
+  const saveSettings = useCallback(async () => {
+    if (!settings) return;
+    setSError("");
+    setSOk("");
+    setSSaving(true);
+    try {
+      const payload = sanitizeSettings(settings);
+      const res = await fetch(`${API}/api/settings`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders(),
+        },
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || "Failed to save");
+      setSettings(sanitizeSettings(json));
+      setSOk("Settings saved. Schedulers restarted.");
+    } catch (e) {
+      setSError(e.message || "Failed to save settings");
+    } finally {
+      setSSaving(false);
+    }
+  }, [authHeaders, settings, sanitizeSettings]);
 
-  const commission = doc.commissionSplit || {};
-  const payouts = doc.payouts || {};
-  const rules = doc.bookingRules || {};
-  const maintenance = doc.maintenance || {};
-  const notifications = doc.notifications || {};
-  const security = doc.security || {};
-  const webhooks = doc.webhooks || {};
+  const manualReleaseNow = useCallback(async () => {
+    setMrBusy(true);
+    setMrOk(""); setMrError(""); setMrPayload(null);
+    try {
+      const res = await fetch(
+        `${API}/api/admin/release-booking/${encodeURIComponent(mrBookingId.trim())}`,
+        { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() } }
+      );
+      const json = await res.json();
+      setMrPayload(json);
+      if (!res.ok || !json?.ok) {
+        throw new Error(json?.error || "Release failed");
+      }
+      setMrOk(
+        json.alreadyReleased
+          ? "Already released earlier."
+          : `Released ₦${((json.releasedKobo || 0) / 100).toLocaleString()} to Available.`
+      );
+    } catch (e) {
+      setMrError(e.message || "Release failed");
+    } finally {
+      setMrBusy(false);
+    }
+  }, [authHeaders, mrBookingId]);
+
+  // ---------- lifecycle ----------
+  useEffect(() => {
+    if (tab === "pending") loadPending();
+    if (tab === "settings") loadSettings();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
 
   return (
-    <div className="space-y-6">
-      {err && <Alert tone="red">{err}</Alert>}
-      {ok && <Alert tone="green">{ok}</Alert>}
+    <div className="max-w-6xl mx-auto px-4 py-8">
+      <h1 className="text-2xl font-bold">Admin</h1>
+      <p className="text-zinc-400 mt-1">
+        Review pro applications and configure how the platform runs itself.
+      </p>
 
-      <Card title="Brand">
-        <div className="grid sm:grid-cols-2 gap-3">
-          <Input label="App Name" value={doc.appName || ""} onChange={v => setPath("appName", v)} />
-          <Input label="Tagline" value={doc.tagline || ""} onChange={v => setPath("tagline", v)} />
-        </div>
-      </Card>
+      {/* Tabs */}
+      <div className="mt-6 border-b border-zinc-800 flex gap-6">
+        <TabButton active={tab === "pending"} onClick={() => switchTab("pending")}>
+          Pending Applications
+        </TabButton>
+        <TabButton active={tab === "settings"} onClick={() => switchTab("settings")}>
+          System Settings
+        </TabButton>
+      </div>
 
-      <Card title="Commission Split">
-        <div className="grid sm:grid-cols-2 gap-3">
-          <NumberInput
-            label="Platform %"
-            value={commission.platform ?? 25}
-            onChange={v => setPath("commissionSplit.platform", clamp0(v))}
-          />
-          <NumberInput
-            label="Pro %"
-            value={commission.pro ?? 75}
-            onChange={v => setPath("commissionSplit.pro", clamp0(v))}
-          />
-        </div>
-        <p className="text-xs text-zinc-500 mt-2">
-          Tip: platform + pro should be 100. Server doesn’t enforce this — it’s your responsibility.
-        </p>
-      </Card>
+      {/* Content */}
+      <div className="mt-6">
+        {tab === "pending" ? (
+          <section className="space-y-4">
+            {/* Controls */}
+            <div className="flex items-center gap-3">
+              <input
+                placeholder="Search by name/email/phone/LGA…"
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                className="w-full md:w-96 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2"
+              />
+              <button
+                onClick={loadPending}
+                className="rounded-lg border border-zinc-700 px-4 py-2"
+                disabled={listLoading}
+              >
+                {listLoading ? "Loading…" : "Reload"}
+              </button>
+            </div>
 
-      <Card title="Payouts">
-        <div className="grid sm:grid-cols-3 gap-3">
-          <NumberInput
-            label="Release after (days)"
-            value={payouts.releaseDays ?? 7}
-            onChange={v => setPath("payouts.releaseDays", clamp0(v))}
-          />
-          <NumberInput
-            label="Instant cashout fee %"
-            value={payouts.instantCashoutFeePercent ?? 3}
-            onChange={v => setPath("payouts.instantCashoutFeePercent", clamp0(v))}
-          />
-          <Toggle
-            label="Enable auto-release"
-            checked={!!payouts.enableAutoRelease}
-            onChange={v => setPath("payouts.enableAutoRelease", v)}
-          />
-        </div>
-        <Input
-          label="Auto-release CRON"
-          value={payouts.autoReleaseCron || ""}
-          onChange={v => setPath("payouts.autoReleaseCron", v)}
-          placeholder='e.g. "0 2 * * *"'
-        />
-        <p className="text-xs text-zinc-500 mt-2">
-          Changes to CRON or toggles will restart schedulers server-side.
-        </p>
-      </Card>
+            {listError && (
+              <div className="rounded border border-red-800 bg-red-900/40 text-red-100 px-3 py-2">
+                {listError}
+              </div>
+            )}
 
-      <Card title="Booking Rules">
-        <div className="grid sm:grid-cols-3 gap-3">
-          <NumberInput
-            label="No-show strike limit"
-            value={rules.noShowStrikeLimit ?? 2}
-            onChange={v => setPath("bookingRules.noShowStrikeLimit", clamp0(v))}
-          />
-          <Toggle
-            label="Enable no-show sweep"
-            checked={!!rules.enableNoShowSweep}
-            onChange={v => setPath("bookingRules.enableNoShowSweep", v)}
-          />
-        </div>
-        <Input
-          label="No-show sweep CRON"
-          value={rules.noShowSweepCron || ""}
-          onChange={v => setPath("bookingRules.noShowSweepCron", v)}
-          placeholder='e.g. "0 3 * * *"'
-        />
-      </Card>
+            {listLoading ? (
+              <div>Loading…</div>
+            ) : !filtered.length ? (
+              <div>No pending applications.</div>
+            ) : (
+              <div className="grid gap-3">
+                {filtered.map((p) => {
+                  const id = p.clientId || p._id;
+                  const services =
+                    Array.isArray(p?.professional?.services) && p.professional.services.length
+                      ? p.professional.services.join(", ")
+                      : p.services || "—";
 
-      <Card title="Maintenance Mode">
-        <div className="grid sm:grid-cols-3 gap-3">
-          <Toggle
-            label="Enable maintenance mode"
-            checked={!!maintenance.isMaintenanceMode}
-            onChange={v => setPath("maintenance.isMaintenanceMode", v)}
-          />
-          <Input
-            label="Message"
-            value={maintenance.message || ""}
-            onChange={v => setPath("maintenance.message", v)}
-          />
-        </div>
-        <p className="text-xs text-zinc-500 mt-2">
-          While enabled, only admins and a few endpoints (health/settings/webhooks) are accessible.
-        </p>
-      </Card>
+                  const displayName =
+                    p.displayName ||
+                    [p?.identity?.firstName, p?.identity?.lastName].filter(Boolean).join(" ") ||
+                    "(none)";
 
-      <Card title="Notifications">
-        <div className="grid sm:grid-cols-3 gap-3">
-          <Toggle
-            label="Email enabled"
-            checked={!!notifications.emailEnabled}
-            onChange={v => setPath("notifications.emailEnabled", v)}
-          />
-          <Toggle
-            label="SMS enabled"
-            checked={!!notifications.smsEnabled}
-            onChange={v => setPath("notifications.smsEnabled", v)}
-          />
-        </div>
-      </Card>
+                  const lga =
+                    (p.lga || p?.identity?.city || p?.identity?.state || "(none)")?.toString();
 
-      <Card title="Security">
-        <Textarea
-          label="Allowed Origins (one per line)"
-          value={(security.allowedOrigins || []).join("\n")}
-          onChange={v => setPath("security.allowedOrigins", splitLines(v))}
-          rows={5}
-        />
-        <p className="text-xs text-zinc-500 mt-2">
-          CORS allow-list (appended to any <code>CORS_ORIGIN</code> env at boot). Vercel previews are allowed by default.
-        </p>
-      </Card>
+                  return (
+                    <div key={id} className="rounded-xl border border-zinc-800 p-4">
+                      <div className="grid md:grid-cols-2 gap-2">
+                        <Row label="Name" value={displayName} />
+                        <Row label="Email" value={p.email || "(none)"} />
+                        <Row label="Phone" value={p.phone || p?.identity?.phone || "(none)"} />
+                        <Row label="LGA" value={lga} />
+                        <Row label="Services" value={services} />
+                        <div className="text-xs text-zinc-500 break-all">
+                          <strong>clientId:</strong> {p.clientId || "(none)"} &nbsp;|&nbsp;
+                          <strong>_id:</strong> {p._id}
+                        </div>
+                      </div>
 
-      <Card title="Webhooks">
-        <Input
-          label="Paystack Secret (used for signature)"
-          value={webhooks?.paystack?.secret || ""}
-          onChange={v => setPath("webhooks.paystack.secret", v)}
-          type="password"
-          placeholder="****"
-        />
-        <p className="text-xs text-zinc-500 mt-2">
-          If empty, server falls back to <code>PAYSTACK_SECRET_KEY</code> / <code>PAYSTACK_WEBHOOK_SECRET</code>.
-        </p>
-      </Card>
+                      <div className="mt-4 flex gap-2 flex-wrap">
+                        <button
+                          onClick={() => approve(id)}
+                          disabled={busyId === id}
+                          className="px-4 py-2 rounded-lg bg-[#d4af37] text-black font-semibold disabled:opacity-60"
+                          title="Approve this application"
+                        >
+                          {busyId === id ? "Approving..." : "Approve"}
+                        </button>
 
-      <div className="flex justify-end">
-        <button
-          onClick={save}
-          disabled={saving}
-          className="px-4 py-2 rounded-lg bg-gold text-black font-semibold disabled:opacity-50"
-        >
-          {saving ? "Saving…" : "Save Settings"}
-        </button>
+                        <Link
+                          to={`/admin/decline/${id}`}
+                          className="px-4 py-2 rounded-lg border border-red-500 text-red-400"
+                          title="Decline and provide a reason"
+                        >
+                          Decline
+                        </Link>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        ) : (
+          <section className="space-y-4">
+            {/* Settings */}
+            {sError && (
+              <div className="rounded border border-red-800 bg-red-900/40 text-red-100 px-3 py-2">
+                {sError}
+              </div>
+            )}
+            {sOk && (
+              <div className="rounded border border-green-800 bg-green-900/30 text-green-100 px-3 py-2">
+                {sOk}
+              </div>
+            )}
+
+            {sLoading || !settings ? (
+              <div>Loading settings…</div>
+            ) : (
+              <div className="grid gap-6">
+                {/* Brand */}
+                <Card title="Brand">
+                  <Input
+                    label="App Name"
+                    value={settings.appName || ""}
+                    onChange={(e) => setSettings({ ...settings, appName: e.target.value })}
+                  />
+                  <Input
+                    label="Tagline"
+                    value={settings.tagline || ""}
+                    onChange={(e) => setSettings({ ...settings, tagline: e.target.value })}
+                  />
+                </Card>
+
+                {/* Commission */}
+                <Card title="Commission Split">
+                  <div className="grid md:grid-cols-2 gap-3">
+                    <Input
+                      label="Platform %"
+                      type="number"
+                      value={settings?.commissionSplit?.platform ?? 25}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          commissionSplit: {
+                            ...(settings.commissionSplit || {}),
+                            platform: Number(e.target.value),
+                          },
+                        })
+                      }
+                    />
+                    <Input
+                      label="Pro %"
+                      type="number"
+                      value={settings?.commissionSplit?.pro ?? 75}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          commissionSplit: {
+                            ...(settings.commissionSplit || {}),
+                            pro: Number(e.target.value),
+                          },
+                        })
+                      }
+                    />
+                  </div>
+                  <p className="text-xs text-zinc-500">
+                    These values are saved to the server. Payout calculations should read them from Settings.
+                  </p>
+                </Card>
+
+                {/* Payouts */}
+                <Card title="Payouts">
+                  <div className="grid md:grid-cols-2 gap-3">
+                    <Input
+                      label="Release Days (pending → available)"
+                      type="number"
+                      value={settings?.payouts?.releaseDays ?? 7}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          payouts: {
+                            ...(settings.payouts || {}),
+                            releaseDays: Number(e.target.value),
+                          },
+                        })
+                      }
+                    />
+                    <Input
+                      label="Instant Cashout Fee %"
+                      type="number"
+                      value={settings?.payouts?.instantCashoutFeePercent ?? 3}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          payouts: {
+                            ...(settings.payouts || {}),
+                            instantCashoutFeePercent: Number(e.target.value),
+                          },
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="mt-2 flex items-center gap-2">
+                    <input
+                      id="enableAutoRelease"
+                      type="checkbox"
+                      checked={!!settings?.payouts?.enableAutoRelease}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          payouts: { ...(settings.payouts || {}), enableAutoRelease: e.target.checked },
+                        })
+                      }
+                    />
+                    <label htmlFor="enableAutoRelease" className="text-sm">
+                      Enable Auto-Release (pending → available)
+                    </label>
+                  </div>
+                  <Input
+                    label="Auto-Release CRON (server time)"
+                    placeholder="0 2 * * *"
+                    value={settings?.payouts?.autoReleaseCron || "0 2 * * *"}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        payouts: { ...(settings.payouts || {}), autoReleaseCron: e.target.value },
+                      })
+                    }
+                  />
+                  <p className="text-xs text-zinc-500 mt-1">
+                    Tip: <code className="bg-zinc-900 px-1 py-0.5 rounded">0 2 * * *</code> = 02:00 daily.
+                  </p>
+                </Card>
+
+                {/* Withdrawals */}
+                <Card title="Withdrawals">
+                  <div className="flex items-center gap-2">
+                    <input
+                      id="requireApproval"
+                      type="checkbox"
+                      checked={!!settings?.withdrawals?.requireApproval}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          withdrawals: {
+                            ...(settings.withdrawals || {}),
+                            requireApproval: e.target.checked,
+                          },
+                        })
+                      }
+                    />
+                    <label htmlFor="requireApproval" className="text-sm">Require Admin Approval</label>
+                  </div>
+                </Card>
+
+                {/* Maintenance */}
+                <Card title="Maintenance">
+                  <div className="flex items-center gap-2">
+                    <input
+                      id="isMaintenanceMode"
+                      type="checkbox"
+                      checked={!!settings?.maintenance?.isMaintenanceMode}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          maintenance: {
+                            ...(settings.maintenance || {}),
+                            isMaintenanceMode: e.target.checked,
+                          },
+                        })
+                      }
+                    />
+                    <label htmlFor="isMaintenanceMode" className="text-sm">Maintenance Mode</label>
+                  </div>
+                  <Input
+                    label="Message"
+                    value={settings?.maintenance?.message || ""}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        maintenance: { ...(settings.maintenance || {}), message: e.target.value },
+                      })
+                    }
+                  />
+                </Card>
+
+                {/* Security */}
+                <Card title="Security">
+                  <label className="block text-xs text-zinc-400 mb-1">
+                    Allowed Origins (CORS) — comma separated. These merge with your .env CORS_ORIGIN.
+                  </label>
+                  <input
+                    className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2"
+                    value={(settings?.security?.allowedOrigins || []).join(", ")}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        security: {
+                          ...(settings.security || {}),
+                          allowedOrigins: e.target.value
+                            .split(",")
+                            .map((s) => s.trim())
+                            .filter(Boolean),
+                        },
+                      })
+                    }
+                    placeholder="http://localhost:5173, https://yourapp.com"
+                  />
+                </Card>
+
+                {/* Manual Release (admin tool) */}
+                <Card title="Manual Release (single booking)">
+                  <p className="text-sm text-zinc-400 mb-2">
+                    Move a booking’s pro share from <em>Pending</em> to <em>Available</em>.
+                    Use this for special cases or support.
+                  </p>
+                  {mrError && (
+                    <div className="rounded border border-red-800 bg-red-900/40 text-red-100 px-3 py-2 mb-2">
+                      {mrError}
+                    </div>
+                  )}
+                  {mrOk && (
+                    <div className="rounded border border-green-800 bg-green-900/30 text-green-100 px-3 py-2 mb-2">
+                      {mrOk}
+                    </div>
+                  )}
+                  <div className="flex gap-2 flex-col sm:flex-row">
+                    <input
+                      className="flex-1 bg-zinc-950 border border-zinc-800 rounded px-3 py-2"
+                      placeholder="Booking ID (Mongo _id)"
+                      value={mrBookingId}
+                      onChange={(e) => setMrBookingId(e.target.value)}
+                    />
+                    <button
+                      onClick={manualReleaseNow}
+                      disabled={!mrBookingId.trim() || mrBusy}
+                      className="px-4 py-2 rounded border border-zinc-700 hover:bg-zinc-900"
+                    >
+                      {mrBusy ? "Releasing…" : "Release now"}
+                    </button>
+                  </div>
+                  {mrPayload && (
+                    <pre className="mt-3 text-xs bg-zinc-950 border border-zinc-800 rounded p-3 overflow-auto">
+{JSON.stringify(mrPayload, null, 2)}
+                    </pre>
+                  )}
+                </Card>
+
+                <div className="flex gap-3">
+                  <button
+                    onClick={saveSettings}
+                    disabled={sSaving}
+                    className="px-4 py-2 rounded-lg bg-white text-black disabled:opacity-60"
+                  >
+                    {sSaving ? "Saving…" : "Save Settings"}
+                  </button>
+                  <button
+                    onClick={loadSettings}
+                    disabled={sSaving}
+                    className="px-4 py-2 rounded-lg border border-zinc-700"
+                  >
+                    Reload
+                  </button>
+                </div>
+              </div>
+            )}
+          </section>
+        )}
       </div>
     </div>
   );
 }
 
-/* ===========================================================================
-   Applications (pending)
-   ========================================================================== */
-function ApplicationsPanel() {
-  const [loading, setLoading] = useState(true);
-  const [items, setItems] = useState([]);
-  const [err, setErr] = useState("");
-  const [ok, setOk] = useState("");
-  const [viewJson, setViewJson] = useState(null);
-
-  async function load() {
-    setLoading(true);
-    setErr("");
-    try {
-      const { data } = await api.get("/api/pros/pending");
-      setItems(Array.isArray(data) ? data : []);
-    } catch (e) {
-      setErr(e?.response?.data?.error || "Failed to load pending applications.");
-    } finally {
-      setLoading(false);
-    }
-  }
-  useEffect(() => { load(); }, []);
-
-  async function approve(id) {
-    try {
-      await api.post(`/api/pros/approve/${encodeURIComponent(id)}`);
-      setOk("Approved & upserted Pro profile.");
-      await load();
-      setTimeout(() => setOk(""), 2000);
-    } catch (e) {
-      setErr(e?.response?.data?.error || "Approval failed.");
-    }
-  }
-
+/* ---------------- UI bits ---------------- */
+function TabButton({ active, children, onClick }) {
   return (
-    <div className="space-y-4">
-      {err && <Alert tone="red">{err}</Alert>}
-      {ok && <Alert tone="green">{ok}</Alert>}
+    <button
+      onClick={onClick}
+      className={`-mb-px border-b-2 px-3 py-2 text-sm ${
+        active
+          ? "border-white text-white"
+          : "border-transparent text-zinc-400 hover:text-white"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
 
-      {loading ? (
-        <div>Loading applications…</div>
-      ) : items.length === 0 ? (
-        <div className="border border-zinc-800 rounded-lg p-4 text-zinc-400">
-          No pending applications.
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {items.map(app => (
-            <div key={app._id} className="border border-zinc-800 rounded-lg p-4 bg-black/40">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <div className="font-medium">
-                    {app.displayName || app.email || "Unnamed"}{" "}
-                    <span className="text-xs text-zinc-500">({app.status})</span>
-                  </div>
-                  <div className="text-sm text-zinc-400">
-                    {app.phone ? `${app.phone} • ` : ""}{(app.lga || "").toUpperCase()}
-                    {app.services ? ` • ${app.services}` : ""}
-                  </div>
-                  <div className="text-xs text-zinc-500 mt-0.5">
-                    Submitted: {formatWhen(app.createdAt)}
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setViewJson(app)}
-                    className="px-3 py-1.5 rounded-lg border border-zinc-700 text-sm hover:bg-zinc-900"
-                  >
-                    View JSON
-                  </button>
-                  <button
-                    onClick={() => approve(app._id || app.clientId)}
-                    className="px-3 py-1.5 rounded-lg bg-emerald-600/20 border border-emerald-700 text-emerald-300 text-sm hover:bg-emerald-900/30"
-                  >
-                    Approve
-                  </button>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {viewJson && (
-        <Modal title="Application JSON" onClose={() => setViewJson(null)}>
-          <pre className="text-xs whitespace-pre-wrap break-all">
-            {JSON.stringify(viewJson, null, 2)}
-          </pre>
-        </Modal>
-      )}
+function Row({ label, value }) {
+  return (
+    <div className="text-sm">
+      <span className="text-zinc-400">{label}:</span>{" "}
+      <span className="text-zinc-200">{value || "—"}</span>
     </div>
   );
 }
 
-/* ===========================================================================
-   Deactivation Requests
-   ========================================================================== */
-function DeactivationPanel() {
-  const [loading, setLoading] = useState(true);
-  const [items, setItems] = useState([]);
-  const [err, setErr] = useState("");
-  const [ok, setOk] = useState("");
-  const [note, setNote] = useState("");
-
-  async function load() {
-    setLoading(true);
-    setErr("");
-    try {
-      const { data } = await api.get("/api/admin/deactivation-requests");
-      setItems(Array.isArray(data) ? data : []);
-    } catch (e) {
-      setErr(e?.response?.data?.error || "Failed to load deactivation requests.");
-    } finally {
-      setLoading(false);
-    }
-  }
-  useEffect(() => { load(); }, []);
-
-  async function decide(id, action) {
-    setErr("");
-    setOk("");
-    try {
-      await api.post(`/api/admin/deactivation-requests/${encodeURIComponent(id)}/decision`, {
-        action, note,
-      });
-      setOk(`Request ${action}d.`);
-      setNote("");
-      await load();
-      setTimeout(() => setOk(""), 2000);
-    } catch (e) {
-      setErr(e?.response?.data?.error || "Failed to submit decision.");
-    }
-  }
-
-  const pending = useMemo(() => items.filter(x => x.status === "pending"), [items]);
-
-  return (
-    <div className="space-y-4">
-      {err && <Alert tone="red">{err}</Alert>}
-      {ok && <Alert tone="green">{ok}</Alert>}
-
-      {loading ? (
-        <div>Loading requests…</div>
-      ) : items.length === 0 ? (
-        <div className="border border-zinc-800 rounded-lg p-4 text-zinc-400">No requests.</div>
-      ) : (
-        <>
-          <div className="text-sm text-zinc-400">
-            Pending: {pending.length} • Total: {items.length}
-          </div>
-          <div className="space-y-3">
-            {items.map(r => (
-              <div key={r._id} className="border border-zinc-800 rounded-lg p-4 bg-black/40">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <div className="font-medium">{r.email || r.uid}</div>
-                    <div className="text-sm text-zinc-400">{r.reason || "—"}</div>
-                    <div className="text-xs text-zinc-500 mt-0.5">
-                      Status: <b>{r.status}</b> • Created: {formatWhen(r.createdAt)}
-                      {r.decidedAt ? ` • Decided: ${formatWhen(r.decidedAt)} by ${r.decidedBy || "admin"}` : ""}
-                    </div>
-                  </div>
-                  {r.status === "pending" ? (
-                    <div className="flex items-center gap-2">
-                      <input
-                        className="bg-black border border-zinc-800 rounded px-2 py-1 text-sm"
-                        placeholder="Note (optional)"
-                        value={note}
-                        onChange={(e) => setNote(e.target.value)}
-                      />
-                      <button
-                        onClick={() => decide(r._id, "reject")}
-                        className="px-3 py-1.5 rounded-lg border border-amber-700 text-amber-300 text-sm hover:bg-amber-900/30"
-                      >
-                        Reject
-                      </button>
-                      <button
-                        onClick={() => decide(r._id, "approve")}
-                        className="px-3 py-1.5 rounded-lg border border-emerald-700 text-emerald-300 text-sm hover:bg-emerald-900/30"
-                      >
-                        Approve
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="text-sm text-zinc-400">No actions</div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-/* ===========================================================================
-   Small UI helpers
-   ========================================================================== */
 function Card({ title, children }) {
   return (
-    <section className="rounded-lg border border-zinc-800 p-4">
+    <section className="rounded-xl border border-zinc-800 p-4">
       <h2 className="text-lg font-semibold mb-3">{title}</h2>
-      {children}
+      <div className="space-y-3">{children}</div>
     </section>
   );
 }
-function Alert({ tone = "green", children }) {
-  const toneCls = tone === "red"
-    ? "border-red-800 bg-red-900/40 text-red-100"
-    : "border-green-800 bg-green-900/30 text-green-100";
-  return <div className={`rounded px-3 py-2 ${toneCls}`}>{children}</div>;
-}
-function Input({ label, value, onChange, type = "text", placeholder = "", ...props }) {
+
+function Input({ label, ...rest }) {
   return (
     <label className="block">
-      <div className="text-sm text-zinc-300 mb-1">{label}</div>
+      <span className="text-xs text-zinc-400">{label}</span>
       <input
-        type={type}
-        value={value ?? ""}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        {...props}
-        className="w-full bg-black border border-zinc-800 rounded-lg px-3 py-2"
+        className="mt-1 w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2"
+        {...rest}
       />
     </label>
   );
-}
-function NumberInput({ label, value, onChange, ...props }) {
-  return (
-    <Input
-      label={label}
-      value={String(value ?? "")}
-      onChange={(v) => onChange(Number(v) || 0)}
-      type="number"
-      {...props}
-    />
-  );
-}
-function Toggle({ label, checked, onChange }) {
-  return (
-    <label className="inline-flex items-center gap-2">
-      <input type="checkbox" checked={!!checked} onChange={(e) => onChange(e.target.checked)} />
-      <span className="text-sm">{label}</span>
-    </label>
-  );
-}
-function Textarea({ label, value, onChange, rows = 4, placeholder = "" }) {
-  return (
-    <label className="block">
-      <div className="text-sm text-zinc-300 mb-1">{label}</div>
-      <textarea
-        rows={rows}
-        value={value ?? ""}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        className="w-full bg-black border border-zinc-800 rounded-lg px-3 py-2"
-      />
-    </label>
-  );
-}
-function Modal({ title, onClose, children }) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/70" onClick={onClose} />
-      <div className="relative z-10 w-[min(90vw,800px)] max-h-[85vh] overflow-auto border border-zinc-800 rounded-xl bg-zinc-950 p-4">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="font-semibold">{title}</h3>
-          <button onClick={onClose} className="text-sm px-2 py-1 border border-zinc-700 rounded">Close</button>
-        </div>
-        {children}
-      </div>
-    </div>
-  );
-}
-function clamp0(n) {
-  const x = Number(n) || 0;
-  return x < 0 ? 0 : x;
-}
-function splitLines(s = "") {
-  return s
-    .split(/\r?\n/)
-    .map((x) => x.trim())
-    .filter(Boolean);
-}
-function formatWhen(iso) {
-  if (!iso) return "—";
-  try { return new Date(iso).toLocaleString(); } catch { return iso; }
 }

@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, useMemo } from "react";
+// apps/web/src/pages/Settings.jsx
+import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import NgGeoPicker from "../components/NgGeoPicker.jsx";
@@ -24,7 +25,7 @@ const SERVICE_OPTIONS = [
 export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [me, setMe] = useState(null);         // user document
-  const [appDoc, setAppDoc] = useState(null); // professional doc (optional)
+  const [appDoc, setAppDoc] = useState(null); // professional profile doc (optional)
   const [err, setErr] = useState("");
   const [ok, setOk] = useState("");
 
@@ -57,6 +58,11 @@ export default function SettingsPage() {
   const [accountNumber, setAccountNumber] = useState("");
   const [bvn, setBvn] = useState("");
 
+  // Save-state guards
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [savingPro, setSavingPro] = useState(false);
+  const [savingBank, setSavingBank] = useState(false);
+
   // UI helpers
   const [lightboxUrl, setLightboxUrl] = useState("");
   const okTimerRef = useRef(null);
@@ -65,12 +71,12 @@ export default function SettingsPage() {
   function clearMsg() {
     setErr("");
     setOk("");
-    if (okTimerRef.current) clearTimeout(okTimerRef.current);
-    if (errTimerRef.current) clearTimeout(errTimerRef.current);
+    clearTimeout(okTimerRef.current);
+    clearTimeout(errTimerRef.current);
   }
   function flashOK(msg) {
     setOk(msg);
-    if (okTimerRef.current) clearTimeout(okTimerRef.current);
+    clearTimeout(okTimerRef.current);
     okTimerRef.current = setTimeout(() => setOk(""), 2500);
   }
   const digitsOnly = (s = "") => String(s).replace(/\D/g, "");
@@ -163,25 +169,19 @@ export default function SettingsPage() {
         ]);
         if (!alive) return;
 
-        const meData = meRes.data || {};
+        const meData = meRes.data;
         const app = proRes?.data || null;
 
         setMe(meData);
         setAppDoc(app);
 
-        // hydrate General (user) fields
-        const meIdentity = meData.identity || {};
-        setDisplayName(
-          meData?.displayName ||
-          app?.displayName ||
-          meData?.email ||
-          ""
-        );
-        setPhone(meIdentity?.phone || app?.phone || app?.identity?.phone || "");
-        setAvatarUrl(meIdentity?.photoUrl || app?.identity?.photoUrl || "");
+        // hydrate General (user) fields; now uses EMAIL as a fallback for displayName
+        setDisplayName(meData?.displayName || app?.displayName || meData?.email || "");
+        setPhone(meData?.identity?.phone || app?.phone || app?.identity?.phone || "");
+        setAvatarUrl(meData?.identity?.photoUrl || app?.identity?.photoUrl || "");
 
-        const lgaUpper = (meIdentity?.city || app?.lga || app?.identity?.city || "").toString().toUpperCase();
-        const stateUpper = (meIdentity?.state || app?.identity?.state || "").toString().toUpperCase();
+        const lgaUpper = (meData?.identity?.city || app?.lga || app?.identity?.city || "").toString().toUpperCase();
+        const stateUpper = (meData?.identity?.state || app?.identity?.state || "").toString().toUpperCase();
         setLga(lgaUpper);
         setStateVal(stateUpper);
 
@@ -214,8 +214,8 @@ export default function SettingsPage() {
     })();
     return () => {
       alive = false;
-      if (okTimerRef.current) clearTimeout(okTimerRef.current);
-      if (errTimerRef.current) clearTimeout(errTimerRef.current);
+      clearTimeout(okTimerRef.current);
+      clearTimeout(errTimerRef.current);
     };
   }, []);
 
@@ -230,13 +230,14 @@ export default function SettingsPage() {
     [hasPro, services, years, hasCert, workPhotos]
   );
   const canSaveBank = useMemo(
-    () => hasPro && !!bankName && !!accountName && digitsOnly(accountNumber).length === 10 && digitsOnly(bvn).length >= 10,
+    () => hasPro && !!bankName && !!accountName && digitsOnly(accountNumber).length === 10 && digitsOnly(bvn).length === 11,
     [hasPro, bankName, accountName, accountNumber, bvn]
   );
 
   /* ---------- Helpers ---------- */
   function withProIdentifiers(base = {}) {
     if (!hasPro) return null;
+    // NOTE: we do NOT expose UID in the UI; keeping in payload is harmless and ignored by the API if not used.
     const idFields = {
       _id: appDoc?._id,
       uid: me?.uid,
@@ -255,8 +256,10 @@ export default function SettingsPage() {
   /* ---------- Save handlers ---------- */
 
   // 1) Save GENERAL PROFILE via Profile router (backend supports this)
-  async function saveProfile() {
+  const saveProfile = useCallback(async () => {
+    if (!canSaveProfile || savingProfile) return;
     clearMsg();
+    setSavingProfile(true);
     try {
       const payload = {
         displayName,
@@ -269,12 +272,10 @@ export default function SettingsPage() {
         },
       };
 
-      // Primary: Profile router
       let res;
       try {
         res = await api.put("/api/profile/me", payload);
       } catch {
-        // fallback if router path differs slightly
         res = await api.put("/api/profile", payload);
       }
 
@@ -287,13 +288,17 @@ export default function SettingsPage() {
       flashOK("Profile saved.");
     } catch (e) {
       setErr(e?.response?.data?.error || "Failed to save profile.");
+    } finally {
+      setSavingProfile(false);
     }
-  }
+  }, [canSaveProfile, savingProfile, displayName, phone, stateVal, lga, avatarUrl, me]);
 
   // 2) Save PRO DETAILS to /api/pros/me — ONLY if pro exists
-  async function saveProDetails() {
+  const saveProDetails = useCallback(async () => {
+    if (!canSavePro || savingPro) return;
     clearMsg();
     if (blockIfNoPro()) return;
+    setSavingPro(true);
     try {
       const payload = withProIdentifiers({
         ...(appDoc || {}),
@@ -320,13 +325,17 @@ export default function SettingsPage() {
       flashOK("Professional details saved.");
     } catch (e) {
       setErr(e?.response?.data?.error || "Failed to save professional details.");
+    } finally {
+      setSavingPro(false);
     }
-  }
+  }, [canSavePro, savingPro, appDoc, services, years, hasCert, certUrl, profileVisible, nationwide, workPhotos, stateList, statesCovered]);
 
   // 3) Save BANK to /api/pros/me — ONLY if pro exists
-  async function saveBank() {
+  const saveBank = useCallback(async () => {
+    if (!canSaveBank || savingBank) return;
     clearMsg();
     if (blockIfNoPro()) return;
+    setSavingBank(true);
     try {
       const payload = withProIdentifiers({
         ...(appDoc || {}),
@@ -345,8 +354,10 @@ export default function SettingsPage() {
       flashOK("Payment details saved.");
     } catch (e) {
       setErr(e?.response?.data?.error || "Failed to save payment details.");
+    } finally {
+      setSavingBank(false);
     }
-  }
+  }, [canSaveBank, savingBank, appDoc, bankName, accountName, accountNumber, bvn]);
 
   /* ---------- UI ---------- */
   return (
@@ -429,34 +440,20 @@ export default function SettingsPage() {
                 <Input label="Phone" value={phone} onChange={(e)=>setPhone(e.target.value)} required />
               </div>
 
+              <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <ReadOnly label="Email" value={me?.email || ""} />
+                {/* UID intentionally hidden from users */}
+              </div>
+
               <div className="mt-3">
                 <Label>State & LGA</Label>
                 <NgGeoPicker
                   valueState={stateVal}
-                  onChangeState={(st)=>{ /* clear LGA on state change */ setStateVal(st); setLga(""); }}
+                  onChangeState={(st)=>{ setStateVal(st); setLga(""); }}
                   valueLga={lga}
                   onChangeLga={setLga}
                   required
                   className="grid grid-cols-1 gap-3"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-end mt-4">
-                <ReadOnly label="Email" value={me?.email || ""} />
-                <ReadOnly
-                  label={
-                    <span className="inline-flex items-center gap-2">
-                      User ID
-                      <button
-                        onClick={() => { navigator.clipboard.writeText(me?.uid || ""); flashOK("User ID copied."); }}
-                        className="text-xs px-2 py-0.5 rounded border border-zinc-700"
-                        title="Copy UID"
-                      >
-                        Copy
-                      </button>
-                    </span>
-                  }
-                  value={me?.uid || ""}
                 />
               </div>
 
@@ -466,11 +463,11 @@ export default function SettingsPage() {
 
               <div className="flex justify-end mt-4">
                 <button
-                  disabled={!canSaveProfile}
+                  disabled={!canSaveProfile || savingProfile}
                   onClick={saveProfile}
                   className="px-4 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50"
                 >
-                  Save Profile
+                  {savingProfile ? "Saving…" : "Save Profile"}
                 </button>
               </div>
             </section>
@@ -489,7 +486,7 @@ export default function SettingsPage() {
               <div className="flex items-center justify-between mb-2">
                 <Label>What services do you offer?</Label>
                 <label className="text-xs flex items-center gap-2">
-                  <input type="checkbox" checked={profileVisible} onChange={(e)=>setProfileVisible(e.target.checked)} />
+                  <input type="checkbox" checked={profileVisible} onChange={(e)=>setProfileVisible(e.target.checked)} disabled={!hasPro} />
                   Profile visible in search
                 </label>
               </div>
@@ -618,11 +615,11 @@ export default function SettingsPage() {
 
               <div className="flex justify-end mt-4">
                 <button
-                  disabled={!canSavePro}
+                  disabled={!canSavePro || savingPro}
                   onClick={saveProDetails}
                   className="px-4 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50"
                 >
-                  Save Professional Details
+                  {savingPro ? "Saving…" : "Save Professional Details"}
                 </button>
               </div>
             </section>
@@ -648,13 +645,16 @@ export default function SettingsPage() {
                   disabled={!hasPro}
                 />
               </div>
+              <p className="text-xs text-zinc-500 mt-2">
+                Account number must be 10 digits. BVN must be 11 digits.
+              </p>
               <div className="flex justify-end mt-4">
                 <button
-                  disabled={!canSaveBank}
+                  disabled={!canSaveBank || savingBank}
                   onClick={saveBank}
                   className="px-4 py-2 rounded-lg bg-gold text-black font-semibold disabled:opacity-50"
                 >
-                  Save Payment Details
+                  {savingBank ? "Saving…" : "Save Payment Details"}
                 </button>
               </div>
             </section>

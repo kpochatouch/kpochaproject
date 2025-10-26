@@ -13,6 +13,7 @@ async function requireAuth(req, res, next) {
     const h = req.headers.authorization || "";
     const token = h.startsWith("Bearer ") ? h.slice(7) : null;
     if (!token) return res.status(401).json({ error: "Missing token" });
+
     const decoded = await admin.auth().verifyIdToken(token);
     req.user = { uid: decoded.uid, email: decoded.email || null };
     next();
@@ -26,25 +27,49 @@ const ADMIN_UIDS = (process.env.ADMIN_UIDS || "")
   .map((s) => s.trim())
   .filter(Boolean);
 
+const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || "")
+  .split(",")
+  .map((s) => s.trim().toLowerCase())
+  .filter(Boolean);
+
+function isAdminUser(user = {}) {
+  const byUid = !!user?.uid && ADMIN_UIDS.includes(user.uid);
+  const byEmail =
+    !!user?.email && ADMIN_EMAILS.includes(String(user.email).toLowerCase());
+  return byUid || byEmail;
+}
+
 function requireAdmin(req, res, next) {
-  if (!req.user?.uid || !ADMIN_UIDS.includes(req.user.uid)) {
+  if (!isAdminUser(req.user)) {
     return res.status(403).json({ error: "Admin only" });
   }
   next();
 }
 
 /* -------------------- Utils -------------------- */
-function maskClientProfileForClientView(p) {
+function maskClientProfileForClientView(p, { includeEmail = false } = {}) {
   if (!p) return null;
+  // clone shallow; never mutate the DB doc
   const obj = { ...p };
-  if (obj.id?.numberHash) obj.id.numberHash = "****"; // hide internal hash
+
+  // Hide technical identifiers from client views
+  delete obj.ownerUid;
+  delete obj.uid;
+
+  // Hide internal hashes if present
+  if (obj.id?.numberHash) obj.id.numberHash = "****";
+
+  // Optionally surface the authenticated user's email (not stored on the doc)
+  if (includeEmail && typeof obj.email === "undefined") {
+    // caller will merge { email: ... } after this helper
+  }
   return obj;
 }
 
 function filterProPublic(p) {
   if (!p) return null;
   return {
-    ownerUid: p.ownerUid,
+    // Do NOT expose ownerUid publicly
     proId: p.proId?.toString?.() || p.proId,
     shopAddress: p.shopAddress || "",
     shopPhone: p.shopPhone || "",
@@ -63,7 +88,9 @@ function filterProPublic(p) {
 async function handleGetClientMe(req, res) {
   try {
     const p = await ClientProfile.findOne({ ownerUid: req.user.uid }).lean();
-    return res.json(maskClientProfileForClientView(p));
+    const masked = maskClientProfileForClientView(p, { includeEmail: true }) || {};
+    // Always include current user's email in "me" response
+    return res.json({ ...masked, email: req.user.email || "" });
   } catch {
     return res.status(500).json({ error: "Failed to load profile" });
   }
@@ -73,12 +100,15 @@ async function handlePutClientMe(req, res) {
   try {
     const payload = req.body || {};
     if (payload.lga) payload.lga = String(payload.lga).toUpperCase();
+
     const updated = await ClientProfile.findOneAndUpdate(
       { ownerUid: req.user.uid },
       { $set: { ...payload, ownerUid: req.user.uid } },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     ).lean();
-    return res.json(maskClientProfileForClientView(updated));
+
+    const masked = maskClientProfileForClientView(updated, { includeEmail: true }) || {};
+    return res.json({ ...masked, email: req.user.email || "" });
   } catch {
     return res.status(500).json({ error: "Failed to save profile" });
   }
@@ -92,7 +122,7 @@ router.put("/profile/client/me", requireAuth, handlePutClientMe);
 router.get("/profile/me", requireAuth, handleGetClientMe);
 router.put("/profile/me", requireAuth, handlePutClientMe);
 
-// Admin read (full)
+// Admin read (full – includes ownerUid and everything on the doc)
 router.get("/profile/client/:uid/admin", requireAuth, requireAdmin, async (req, res) => {
   try {
     const p = await ClientProfile.findOne({ ownerUid: req.params.uid }).lean();
@@ -118,7 +148,9 @@ router.get("/profile/client/:uid/for-booking/:bookingId", requireAuth, async (re
     }
 
     const p = await ClientProfile.findOne({ ownerUid: req.params.uid }).lean();
-    return res.json(p || null);
+    // For this special case we still hide ownerUid/uid; phone/address etc. remain.
+    const masked = maskClientProfileForClientView(p) || null;
+    return res.json(masked);
   } catch {
     return res.status(500).json({ error: "Failed to load client profile for booking" });
   }
@@ -128,7 +160,7 @@ router.get("/profile/client/:uid/for-booking/:bookingId", requireAuth, async (re
    PRO PROFILE (EXTRAS)
    ============================================================ */
 
-// Public, client-visible pro profile
+// Public, client-visible pro profile (never expose ownerUid)
 router.get("/profile/pro/:proId", async (req, res) => {
   try {
     const p = await ProProfile.findOne({ proId: req.params.proId }).lean();
@@ -153,7 +185,9 @@ router.put("/profile/pro/me", requireAuth, async (req, res) => {
       { upsert: true, new: true, setDefaultsOnInsert: true }
     ).lean();
 
-    return res.json(updated);
+    // Do not expose ownerUid back to the client
+    const { ownerUid, ...safe } = updated || {};
+    return res.json(safe || null);
   } catch {
     return res.status(500).json({ error: "Failed to save pro profile" });
   }
