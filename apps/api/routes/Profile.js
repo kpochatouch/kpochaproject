@@ -1,4 +1,4 @@
-// apps/api/routes/profile.js
+// apps/api/routes/Profile.js
 import express from "express";
 import admin from "firebase-admin";
 import { ClientProfile, ProProfile } from "../models/Profile.js";
