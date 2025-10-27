@@ -1,48 +1,68 @@
-// apps/api/routes/availability.js
-import { Router } from "express";
-// If your Node is <18 or you prefer consistency with other routes, keep this import:
-import fetch from "node-fetch";
+// apps/api/routes/geo.js
+import express from "express";
+import fs from "fs";
+import path from "path";
 
-const r = Router();
+const router = express.Router();
 
-function toNum(x) {
-  const n = Number(x);
-  return Number.isFinite(n) ? n : null;
+/** Load the Nigeria states/LGAs JSON once (with robust path resolution). */
+function loadNgGeo() {
+  const candidates = [
+    path.resolve(process.cwd(), "apps", "api", "data", "ng-geo.json"),
+    path.resolve(process.cwd(), "data", "ng-geo.json"),
+    path.resolve(path.dirname(new URL(import.meta.url).pathname), "../data/ng-geo.json"),
+  ];
+  for (const p of candidates) {
+    try {
+      if (fs.existsSync(p)) {
+        return JSON.parse(fs.readFileSync(p, "utf8"));
+      }
+    } catch {}
+  }
+  return null;
 }
 
-r.post("/availability/check", async (req, res) => {
-  try {
-    const lat = toNum(req.body?.lat);
-    const lng = toNum(req.body?.lng);
-    if (lat === null || lng === null) {
-      return res.status(400).json({ ok: false, reason: "coords_required" });
-    }
+const NG = loadNgGeo();
 
-    // Build a safe internal URL (respect proxies if any)
-    const proto = (req.headers["x-forwarded-proto"] || req.protocol || "http").toString();
-    const host = req.get("host");
-    const u = new URL(`${proto}://${host}/api/barbers/nearby`);
-    u.searchParams.set("lat", String(lat));
-    u.searchParams.set("lon", String(lng)); // your nearby endpoint expects "lon"
-    u.searchParams.set("radiusKm", "25");
+/** Utility: normalize state input (accepts name or code). */
+function matchState(input) {
+  if (!NG?.states || !input) return null;
+  const s = String(input).trim();
+  const lc = s.toLowerCase();
+  return (
+    NG.states.find((x) => String(x.code || "").toLowerCase() === lc) ||
+    NG.states.find((x) => String(x.name || "").toLowerCase() === lc) ||
+    null
+  );
+}
 
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 8000);
-
-    const r2 = await fetch(u, { signal: ctrl.signal }).catch(() => null);
-    clearTimeout(timer);
-
-    // Fail-soft: if nearby is down, allow booking with a default ETA
-    if (!r2 || !r2.ok) return res.json({ ok: true, etaMins: 10 });
-
-    const j = await r2.json();
-    if (j?.count > 0) return res.json({ ok: true, etaMins: 10 });
-
-    return res.json({ ok: false, reason: "NO_PRO_AVAILABLE" });
-  } catch (_e) {
-    // Fail-soft on any unexpected error
-    return res.status(200).json({ ok: true, etaMins: 10 });
-  }
+/** Health check (optional) */
+router.get("/geo/health", (_req, res) => {
+  res.json({ ok: !!NG, states: NG?.states?.length || 0 });
 });
 
-export default r;
+/** Full payload (big). */
+router.get("/geo/ng", (_req, res) => {
+  if (!NG) return res.status(500).json({ error: "ng_geo_not_loaded" });
+  res.json(NG);
+});
+
+/** States list: [{ name, code }] */
+router.get("/geo/states", (_req, res) => {
+  if (!NG) return res.status(500).json({ error: "ng_geo_not_loaded" });
+  const states = (NG.states || [])
+    .map((s) => ({ name: s.name, code: s.code }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  res.json(states);
+});
+
+/** LGAs for a state: /geo/lgas?state=Edo  OR  /geo/lgas?state=ED */
+router.get("/geo/lgas", (req, res) => {
+  if (!NG) return res.status(500).json({ error: "ng_geo_not_loaded" });
+  const s = matchState(req.query.state);
+  if (!s) return res.status(400).json({ error: "state_not_found" });
+  const lgas = (s.lgas || []).map((n) => ({ name: n }));
+  res.json({ state: { name: s.name, code: s.code }, lgas });
+});
+
+export default router;
