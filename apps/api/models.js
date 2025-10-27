@@ -1,16 +1,17 @@
 // apps/api/models.js
 import mongoose from "mongoose";
 
-/* -------------------------------- Applications ------------------------------ */
-/** Stores the full application payload (identity/professional/bank/etc.)
- *  plus a withdraw PIN hash used by wallet flows.
+/* ------------------------------ Applications ------------------------------ */
+/** Holds full application payload (identity/professional/bank/etc.)
+ *  plus optional withdraw PIN hash used by wallet flows.
+ *  We keep strict:false so we can store whatever the web app sends.
  */
 const ApplicationSchema = new mongoose.Schema(
   {
     uid: { type: String, index: true, required: true },
     email: { type: String, index: true },
 
-    // legacy “quick apply” fields for admin lists
+    // quick fields for Admin list
     displayName: { type: String, default: "" },
     phone: { type: String, default: "" },
     lga: { type: String, default: "" },
@@ -19,33 +20,31 @@ const ApplicationSchema = new mongoose.Schema(
     // wallet withdraw PIN (hashed)
     withdrawPinHash: { type: String, default: null },
 
-    // support both old and new flows
     status: {
       type: String,
       enum: ["pending", "submitted", "approved", "rejected"],
-      default: "pending",
+      default: "submitted",
       index: true,
     },
 
-    clientId: { type: String, index: true }, // dev helper id
+    rejectedReason: { type: String, default: "" }, // optional admin note
+    clientId: { type: String, index: true },       // optional dev helper id
   },
   {
     timestamps: true,
-    // keep EVERYTHING you post from the web app (identity, professional, etc.)
-    strict: false,
+    strict: false, // keep full payload as-is
   }
 );
 
-/* ---------------------------------- Pros ----------------------------------- */
-/** Richer Pro schema, with relaxed strict mode so server can attach nested objects
- *  like identity/professional/bank/availability without being dropped by Mongoose.
- *  Includes an optional GeoJSON `loc` with 2dsphere index for nearby search.
+/* ----------------------------------- Pros ---------------------------------- */
+/** Rich Pro schema. strict:false lets us attach identity/professional/bank/etc.
+ *  Optional GeoJSON 'loc' + 2dsphere index supports /api/barbers/nearby.
  */
 const ServiceItemSchema = new mongoose.Schema(
   {
-    id: { type: String, default: "" }, // optional stable id
+    id: { type: String, default: "" },               // optional stable id for client diffing
     name: { type: String, required: true },
-    price: { type: Number, default: 0 }, // NGN
+    price: { type: Number, default: 0 },             // NGN
     visible: { type: Boolean, default: true },
     description: { type: String, default: "" },
     durationMins: { type: Number, default: 0 },
@@ -85,6 +84,13 @@ const MetricsSchema = new mongoose.Schema(
     recentDeclines: { type: Number, default: 0 },
     totalStrikes: { type: Number, default: 0 },
     lastDecisionAt: { type: Date, default: null },
+
+    // placeholders for future analytics/ranking/rewards
+    views: { type: Number, default: 0 },
+    likes: { type: Number, default: 0 },
+    shares: { type: Number, default: 0 },
+    rankScore: { type: Number, default: 0 },
+    rewardPoints: { type: Number, default: 0 },
   },
   { _id: false }
 );
@@ -94,7 +100,7 @@ const ProSchema = new mongoose.Schema(
     ownerUid: { type: String, index: true, required: true },
     name: { type: String, required: true },
 
-    // geo (UI filters by 'lga')
+    // geo filters
     lga: { type: String, index: true },
     state: { type: String, default: "" },
 
@@ -111,7 +117,8 @@ const ProSchema = new mongoose.Schema(
       },
     },
 
-    availability: { type: mongoose.Schema.Types.Mixed, default: "Available" }, // accepts string or object
+    // availability can be string ("Available") or a rich object
+    availability: { type: mongoose.Schema.Types.Mixed, default: "Available" },
 
     rating: { type: Number, default: 4.8 }, // legacy field
 
@@ -127,7 +134,7 @@ const ProSchema = new mongoose.Schema(
 
     metrics: { type: MetricsSchema, default: () => ({}) },
 
-    // NOTE: With strict:false, server can also set:
+    // With strict:false we may also store:
     // identity, professional, availability (object), bank, etc.
   },
   {
@@ -140,8 +147,7 @@ const ProSchema = new mongoose.Schema(
 ProSchema.index({ profileVisible: 1, lga: 1 });
 ProSchema.index({ "services.name": 1 });
 ProSchema.index({ "services.id": 1 });
-// Geo index for $geoNear (used by /api/barbers/nearby when available)
-ProSchema.index({ loc: "2dsphere" });
+ProSchema.index({ loc: "2dsphere" }); // used by $geoNear
 
 // Normalize LGA casing on save (keeps filters reliable)
 ProSchema.pre("save", function normalizeLga(next) {
@@ -149,7 +155,7 @@ ProSchema.pre("save", function normalizeLga(next) {
   next();
 });
 
-/* ------------------------------- Public mapper ----------------------------- */
+/* ---------------------------- Public mapper (safe) -------------------------- */
 /** SAFE mapper used by /api/barbers – hides private fields and filters services */
 export function proToBarber(doc) {
   const d = doc?.toObject ? doc.toObject() : doc;

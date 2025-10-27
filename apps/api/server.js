@@ -33,7 +33,8 @@ import postsRouter from "./routes/posts.js";
 import paymentsRouter from "./routes/payments.js";
 import uploadsRoutes from "./routes/uploads.js";
 import payoutRoutes from "./routes/payout.js";
-import adminProsRoutes from "./routes/adminPros.js"; // may export a router or a factory
+import adminProsRoutes from "./routes/adminPros.js";
+import geoRouter from "./routes/geo.js"; // << mount router; no more inlined NG geo
 
 dotenv.config();
 
@@ -41,20 +42,6 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const PORT = process.env.PORT || 8080;
-
-/* ------------------- NG GEO (local JSON) ------------------- */
-let NG_GEO = null;
-const NG_GEO_PATH = path.join(__dirname, "data", "ng-geo.json");
-try {
-  const raw = fs.readFileSync(NG_GEO_PATH, "utf8");
-  const parsed = JSON.parse(raw);
-  if (!parsed || typeof parsed !== "object") throw new Error("Bad ng-geo.json structure");
-  NG_GEO = parsed;
-  console.log("[geo] ✅ Loaded Nigeria geo data");
-} catch (e) {
-  console.warn("[geo] ⚠️ Could not load ng-geo.json:", e?.message || e);
-  NG_GEO = null;
-}
 
 /* ------------------- Admin config ------------------- */
 const ADMIN_UIDS = (process.env.ADMIN_UIDS || "")
@@ -533,20 +520,20 @@ app.use("/api/bookings", requireAuth, async (req, _res, next) => {
 /* ------------------- Routers ------------------- */
 app.use("/api", bookingsRouter);
 
-// 🔒 Pro payout write-ops guard for /api/wallet (read is open to pros/clients; writes require pro)
+// 🔒 Pro payout write-ops guard for /api/wallet
 app.use("/api/wallet", requireAuth, (req, res, next) => {
   const write =
     req.method === "POST" || req.method === "PUT" || req.method === "DELETE" || req.method === "PATCH";
   if (!write) return next();
   return requirePro(req, res, next);
 });
-app.use("/api", walletWithAuth(requireAuth, requireAdmin)); // includes client wallet + topup + verify + pro withdraw
+app.use("/api", walletWithAuth(requireAuth, requireAdmin)); // client wallet + topup + verify + pro withdraw
 
 // PIN / Profile / Posts / Payments
-app.use("/api", pinRoutes({ requireAuth, Application })); // /pin/me/*
+app.use("/api", pinRoutes({ requireAuth, Application }));
 app.use("/api", profileRouter);
 app.use("/api", postsRouter);
-app.use("/api", paymentsRouter({ requireAuth })); // /payments/*
+app.use("/api", paymentsRouter({ requireAuth }));
 
 // Uploads (Cloudinary signature)
 app.use("/api", uploadsRoutes({ requireAuth }));
@@ -554,24 +541,24 @@ app.use("/api", uploadsRoutes({ requireAuth }));
 // Payout bank details
 app.use("/api", payoutRoutes({ requireAuth, Application }));
 
-// Admin pros (decline flow) — supports either exported Router or factory
+// Admin pros (approve + decline)
 try {
   const maybe = adminProsRoutes;
-  const mounted =
-    typeof maybe === "function"
-      ? maybe({ requireAuth, requireAdmin, Application, Pro })
-      : maybe;
-  if (mounted && typeof mounted === "function") {
-    // it's a Router instance (middleware)
-    app.use("/api", mounted);
-  } else if (mounted && mounted.stack) {
-    app.use("/api", mounted);
-  } else if (typeof maybe === "function") {
-    app.use("/api", maybe({ requireAuth, requireAdmin, Application, Pro }));
-  }
+  const mounted = typeof maybe === "function" ? maybe({ requireAuth, requireAdmin, Application, Pro }) : maybe;
+  if (mounted) app.use("/api", mounted);
   console.log("[api] ✅ Admin pros routes mounted");
 } catch (e) {
   console.warn("[api] ℹ️ Admin pros routes not mounted:", e?.message || e);
+}
+
+// Geo (states + LGAs) — served by router to avoid duplication
+try {
+  if (geoRouter) {
+    app.use("/api", geoRouter);
+    console.log("[api] ✅ Geo routes mounted");
+  }
+} catch (e) {
+  console.warn("[api] ℹ️ Geo routes not mounted:", e?.message || e);
 }
 
 /* ----- Optional availability router ----- */
@@ -768,7 +755,7 @@ app.get("/api/barbers/:id", async (req, res) => {
 });
 
 /* ------------------- Barbers Nearby ------------------- */
-const GEOAPIFY_KEY = process.env.GEOAPIFY_KEY || ""; // require from env (no hardcoded fallback)
+const GEOAPIFY_KEY = process.env.GEOAPIFY_KEY || ""; // require from env
 
 async function reverseGeocode(lat, lon) {
   if (!GEOAPIFY_KEY) return null;
@@ -854,63 +841,6 @@ app.get("/api/barbers/nearby", async (req, res) => {
   }
 });
 
-/* ------------------- Nigeria Geo (static) ------------------- */
-app.get("/api/geo/ng", (_req, res) => {
-  try {
-    if (!NG_GEO) return res.status(500).json({ error: "geo_load_failed" });
-    res.json({ states: Object.keys(NG_GEO), lgas: NG_GEO });
-  } catch (e) {
-    console.error("[geo/ng] error:", e);
-    res.status(500).json({ error: "geo_load_failed" });
-  }
-});
-app.get("/api/geo/ng/states", (_req, res) => {
-  try {
-    if (!NG_GEO) return res.status(500).json({ error: "geo_load_failed" });
-    res.json(Object.keys(NG_GEO));
-  } catch (e) {
-    console.error("[geo/ng/states] error:", e);
-    res.status(500).json({ error: "geo_states_failed" });
-  }
-});
-app.get("/api/geo/ng/lgas/:state", (req, res) => {
-  try {
-    if (!NG_GEO) return res.status(500).json({ error: "geo_load_failed" });
-    const st = decodeURIComponent(req.params.state || "").trim();
-    const lgas = NG_GEO[st];
-    if (!lgas) return res.status(404).json({ error: "state_not_found" });
-    res.json(lgas);
-  } catch (e) {
-    console.error("[geo/ng/lgas/:state] error:", e);
-    res.status(500).json({ error: "geo_lgas_failed" });
-  }
-});
-
-/* ------------------- WebRTC: ICE servers ------------------- */
-app.get("/api/webrtc/ice", (_req, res) => {
-  try {
-    const stun = (process.env.ICE_STUN_URLS || process.env.VITE_STUN_URLS || "")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    const turn = (process.env.ICE_TURN_URLS || "")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    const username = process.env.ICE_TURN_USERNAME || process.env.VITE_TURN_USERNAME || "";
-    const credential = process.env.ICE_TURN_PASSWORD || process.env.VITE_TURN_PASSWORD || "";
-
-    const iceServers = [];
-    if (stun.length) iceServers.push({ urls: stun });
-    if (turn.length) iceServers.push({ urls: turn, username, credential });
-    if (!iceServers.length) iceServers.push({ urls: ["stun:stun.l.google.com:19302"] });
-
-    res.json({ iceServers });
-  } catch (e) {
-    res.status(500).json({ error: "ice_build_failed" });
-  }
-});
-
 /* ------------------- Chatbase user verification ------------------- */
 const CHATBASE_SECRET = process.env.CHATBASE_SECRET || "";
 
@@ -928,7 +858,6 @@ app.get("/api/chatbase/userhash", requireAuth, async (req, res) => {
 });
 
 /* ------------------- Applications (Become Pro) ------------------- */
-/** Create/Update current user's application (Become Pro) */
 app.post("/api/applications", requireAuth, async (req, res) => {
   try {
     if (mongoose.connection.readyState !== 1) {
