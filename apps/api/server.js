@@ -14,6 +14,7 @@ import http from "http";
 import { fileURLToPath } from "url";
 import cron from "node-cron";
 
+// Models & core routers
 import { Application, Pro, proToBarber } from "./models.js";
 import bookingsRouter from "./routes/bookings.js";
 import { Booking } from "./models/Booking.js";
@@ -25,13 +26,14 @@ import {
   releasePendingToAvailableForBooking,
 } from "./services/walletService.js";
 
-// ✅ PIN routes (set / reset / forgot)
+// Feature routers (factories)
 import pinRoutes from "./routes/pin.js";
-// ✅ Case-sensitive import (your file is Profile.js)
 import profileRouter from "./routes/Profile.js";
-// ✅ New routes
 import postsRouter from "./routes/posts.js";
 import paymentsRouter from "./routes/payments.js";
+import uploadsRoutes from "./routes/uploads.js";
+import payoutRoutes from "./routes/payout.js";
+import adminProsRoutes from "./routes/adminPros.js"; // may export a router or a factory
 
 dotenv.config();
 
@@ -72,8 +74,7 @@ function isAdminUid(uid) {
 function requireAdmin(req, res, next) {
   const uidOk = !!req.user?.uid && ADMIN_UIDS.includes(req.user.uid);
   const emailOk =
-    !!req.user?.email &&
-    ADMIN_EMAILS.includes(String(req.user.email).toLowerCase());
+    !!req.user?.email && ADMIN_EMAILS.includes(String(req.user.email).toLowerCase());
 
   if (!uidOk && !emailOk) {
     return res.status(403).json({ error: "Admin only" });
@@ -532,23 +533,46 @@ app.use("/api/bookings", requireAuth, async (req, _res, next) => {
 /* ------------------- Routers ------------------- */
 app.use("/api", bookingsRouter);
 
-/** 🔒 Pro payout write-ops guard */
+// 🔒 Pro payout write-ops guard for /api/wallet (read is open to pros/clients; writes require pro)
 app.use("/api/wallet", requireAuth, (req, res, next) => {
   const write =
     req.method === "POST" || req.method === "PUT" || req.method === "DELETE" || req.method === "PATCH";
   if (!write) return next();
   return requirePro(req, res, next);
 });
-/** ✅ Client wallet read stub */
-app.get("/api/wallet/client/me", requireAuth, async (_req, res) => {
-  res.json({ creditsKobo: 0, transactions: [] });
-});
+app.use("/api", walletWithAuth(requireAuth, requireAdmin)); // includes client wallet + topup + verify + pro withdraw
 
-app.use("/api", walletWithAuth(requireAuth, requireAdmin));
+// PIN / Profile / Posts / Payments
 app.use("/api", pinRoutes({ requireAuth, Application })); // /pin/me/*
 app.use("/api", profileRouter);
 app.use("/api", postsRouter);
-app.use("/api", paymentsRouter({ requireAuth })); // mounts /payments/*
+app.use("/api", paymentsRouter({ requireAuth })); // /payments/*
+
+// Uploads (Cloudinary signature)
+app.use("/api", uploadsRoutes({ requireAuth }));
+
+// Payout bank details
+app.use("/api", payoutRoutes({ requireAuth, Application }));
+
+// Admin pros (decline flow) — supports either exported Router or factory
+try {
+  const maybe = adminProsRoutes;
+  const mounted =
+    typeof maybe === "function"
+      ? maybe({ requireAuth, requireAdmin, Application, Pro })
+      : maybe;
+  if (mounted && typeof mounted === "function") {
+    // it's a Router instance (middleware)
+    app.use("/api", mounted);
+  } else if (mounted && mounted.stack) {
+    app.use("/api", mounted);
+  } else if (typeof maybe === "function") {
+    app.use("/api", maybe({ requireAuth, requireAdmin, Application, Pro }));
+  }
+  console.log("[api] ✅ Admin pros routes mounted");
+} catch (e) {
+  console.warn("[api] ℹ️ Admin pros routes not mounted:", e?.message || e);
+}
 
 /* ----- Optional availability router ----- */
 try {
@@ -621,9 +645,7 @@ app.get("/api/pros/pending", requireAuth, requireAdmin, async (_req, res) => {
   }
 });
 
-/** Approve application → upsert Pro (Admin.jsx calls POST /api/pros/approve/:id)
- *  ✅ Sets geospatial `loc` if we can infer coordinates from the application payload.
- */
+/** Approve application → upsert Pro */
 app.post("/api/pros/approve/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
@@ -638,7 +660,7 @@ app.post("/api/pros/approve/:id", requireAuth, requireAdmin, async (req, res) =>
     const ownerUid = appDoc.uid;
     if (!ownerUid) return res.status(400).json({ error: "missing_applicant_uid" });
 
-    // Try to infer coordinates from several likely locations in the stored application payload
+    // Try to infer coordinates from likely locations in the stored application payload
     const lat =
       Number(appDoc?.business?.lat ?? appDoc?.identity?.lat ?? appDoc?.lat);
     const lon =
@@ -684,72 +706,20 @@ app.post("/api/pros/approve/:id", requireAuth, requireAdmin, async (req, res) =>
   }
 });
 
-/* ------------------- Minimal /api/pros/me (for Settings page) ------------------- */
-// GET: read current user's Pro doc (if any)
-app.get("/api/pros/me", requireAuth, async (req, res) => {
+/** Admin: view a single application JSON (for "View JSON" button) */
+app.get("/api/applications/:id/admin", requireAuth, requireAdmin, async (req, res) => {
   try {
-    if (mongoose.connection.readyState !== 1) return res.status(503).json({ error: "Database not connected" });
-    const pro = await Pro.findOne({ ownerUid: req.user.uid }).lean();
-    if (!pro) return res.json(null);
-    res.json(pro);
+    const { id } = req.params;
+    const doc =
+      (await Application.findById(id).lean()) ||
+      (await Application.findOne({ clientId: id }).lean());
+    if (!doc) return res.status(404).json({ error: "application_not_found" });
+    res.json(doc);
   } catch (e) {
-    console.error("[pros:me:get]", e?.message || e);
+    console.error("[applications:admin:view]", e?.message || e);
     res.status(500).json({ error: "failed" });
   }
 });
-
-// PUT: update current user's Pro doc (only if exists; this does not create)
-// ✅ Accepts either { loc: { type:"Point", coordinates:[lon,lat] } } or plain lat/lon fields.
-app.put("/api/pros/me", requireAuth, async (req, res) => {
-  try {
-    if (mongoose.connection.readyState !== 1) return res.status(503).json({ error: "Database not connected" });
-    const existing = await Pro.findOne({ ownerUid: req.user.uid });
-    if (!existing) return res.status(400).json({ error: "no_pro_profile" });
-
-    const payload = req.body || {};
-
-    // Normalize coordinates from various shapes
-    let normalizedLoc = null;
-    if (payload?.loc?.type === "Point" && Array.isArray(payload?.loc?.coordinates)) {
-      const [lonRaw, latRaw] = payload.loc.coordinates;
-      const lon = Number(lonRaw);
-      const lat = Number(latRaw);
-      if (Number.isFinite(lat) && Number.isFinite(lon)) {
-        normalizedLoc = { type: "Point", coordinates: [lon, lat] };
-      }
-    } else {
-      const lat = Number(payload?.lat ?? payload?.identity?.lat ?? payload?.business?.lat);
-      const lon = Number(payload?.lon ?? payload?.identity?.lon ?? payload?.business?.lon);
-      if (Number.isFinite(lat) && Number.isFinite(lon)) {
-        normalizedLoc = { type: "Point", coordinates: [lon, lat] };
-      }
-    }
-
-    // Only allow safe fields to be updated
-    const allowed = {
-      name: payload.name ?? existing.name,
-      email: payload.email ?? existing.email,
-      phone: payload.phone ?? existing.phone,
-      lga: (payload.lga ?? existing.lga ?? "").toString().toUpperCase(),
-      identity: payload.identity ?? existing.identity,
-      professional: payload.professional ?? existing.professional,
-      availability: payload.availability ?? existing.availability,
-      bank: payload.bank ?? existing.bank,
-      status: payload.status ?? existing.status,
-      ...(normalizedLoc ? { loc: normalizedLoc } : {}),
-    };
-
-    Object.assign(existing, allowed);
-    await existing.save();
-
-    res.json({ ok: true, item: existing.toObject() });
-  } catch (e) {
-    console.error("[pros:me:put]", e?.message || e);
-    res.status(500).json({ error: "failed" });
-  }
-});
-
-/* ------------------- Deactivation & account endpoints would go here (omitted in this file) ------------------- */
 
 /* ------------------- Dev reset ------------------- */
 app.delete("/api/dev/reset", async (_req, res) => {
@@ -776,7 +746,7 @@ app.get("/api/barbers", async (req, res) => {
     if (mongoose.connection.readyState !== 1) return res.status(503).json({ error: "Database not connected" });
     const { lga } = req.query;
     const q = {};
-    if (lga) q.lga = lga.toUpperCase();
+    if (lga) q.lga = String(lga).toUpperCase();
     const docs = await Pro.find(q).lean();
     return res.json(docs.map(proToBarber));
   } catch (err) {
@@ -798,7 +768,7 @@ app.get("/api/barbers/:id", async (req, res) => {
 });
 
 /* ------------------- Barbers Nearby ------------------- */
-const GEOAPIFY_KEY = process.env.GEOAPIFY_KEY || "9258e71a50234a35b0bec3b44515b023";
+const GEOAPIFY_KEY = process.env.GEOAPIFY_KEY || ""; // require from env (no hardcoded fallback)
 
 async function reverseGeocode(lat, lon) {
   if (!GEOAPIFY_KEY) return null;
@@ -843,7 +813,6 @@ app.get("/api/barbers/nearby", async (req, res) => {
     if (mongoose.connection.readyState !== 1) return res.status(503).json({ error: "Database not connected" });
 
     const lat = Number(req.query.lat);
-    thelon: { /* label to keep diff minimal */ }
     const lon = Number(req.query.lon);
     const radiusKm = Math.max(1, Math.min(200, Number(req.query.radiusKm || 25)));
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) return res.status(400).json({ error: "lat & lon required" });
@@ -970,7 +939,6 @@ app.post("/api/applications", requireAuth, async (req, res) => {
 
     // minimal top-level fields for quick filtering
     const first = payload?.identity?.firstName || "";
-    thelast: {}
     const last = payload?.identity?.lastName || "";
     const displayName =
       payload.displayName ||
