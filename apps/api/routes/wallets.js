@@ -116,16 +116,16 @@ export function withAuth(requireAuth, requireAdmin) {
   });
 
   /**
-   * POST /api/wallet/topup/init
-   * Body: { amountKobo, callbackUrl? }
+   * GET /api/wallet/topup/init
+   * Query: amountKobo, callbackUrl?
    * - Initializes a Paystack *redirect* checkout (fallback if inline fails).
    * - Records a 'topup_init' txn with the reference (for traceability).
    * Returns: { authorization_url, reference }
    */
-  router.post("/wallet/topup/init", requireAuth, async (req, res) => {
+  router.get("/wallet/topup/init", requireAuth, async (req, res) => {
     try {
-      const { amountKobo, callbackUrl } = req.body || {};
-      const amt = koboInt(amountKobo);
+      const amt = koboInt(req.query.amountKobo);
+      const callbackUrl = req.query.callbackUrl;
       if (!isPosInt(amt)) return res.status(400).json({ error: "amount_invalid" });
 
       const PAYSTACK_SECRET_KEY = requirePaystackKey(res);
@@ -178,14 +178,14 @@ export function withAuth(requireAuth, requireAdmin) {
   });
 
   /**
-   * POST /api/wallet/topup/verify
-   * Body: { reference }
+   * GET /api/wallet/topup/verify
+   * Query: reference
    * - Verifies a Paystack reference and credits the wallet exactly once.
    * Returns: { ok: true, credited: boolean, creditsKobo }
    */
-  router.post("/wallet/topup/verify", requireAuth, async (req, res) => {
+  router.get("/wallet/topup/verify", requireAuth, async (req, res) => {
     try {
-      const { reference } = req.body || {};
+      const reference = req.query.reference;
       if (!reference) return res.status(400).json({ error: "reference_required" });
 
       const PAYSTACK_SECRET_KEY = requirePaystackKey(res);

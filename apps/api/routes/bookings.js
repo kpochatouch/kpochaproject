@@ -122,6 +122,7 @@ router.post("/bookings", requireAuth, async (req, res) => {
       clientEmail: req.user.email || "",
       proId: new mongoose.Types.ObjectId(proId),
       proOwnerUid,
+      instant: true, // ← add this line here
 
       service: svcSnap,
       amountKobo: svcSnap.priceKobo,

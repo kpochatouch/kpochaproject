@@ -1,3 +1,4 @@
+// apps/api/models/Booking.js
 import mongoose from "mongoose";
 
 /**
@@ -78,6 +79,8 @@ const BookingSchema = new mongoose.Schema(
     instant: { type: Boolean, default: false, index: true },
 
     // Region (upper-cased)
+    country: { type: String, default: "Nigeria" }, // ← added (used by /bookings/instant)
+    state:   { type: String, default: "" },        // ← added (used by /bookings/instant)
     lga: { type: String, default: "" }, // e.g., "OREDO"
     addressText: { type: String, default: "" },
     location: { type: LocationSchema, default: () => ({}) },
@@ -119,6 +122,12 @@ const BookingSchema = new mongoose.Schema(
 
     // Private client contact (visible to assigned pro after accept, and to admins)
     clientContactPrivate: { type: ClientContactPrivateSchema, default: () => ({}) },
+
+    // Metadata (idempotency, requested method)
+    meta: {                                       // ← added (used by /bookings/instant)
+      clientRequestId: { type: String, default: "" },
+      paymentMethodRequested: { type: String, default: "" },
+    },
 
     // Timestamps
     completedAt: { type: Date },

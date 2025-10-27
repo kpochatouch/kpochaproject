@@ -1,4 +1,8 @@
+// apps/api/routes/availability.js
 import { Router } from "express";
+// If your Node is <18 or you prefer consistency with other routes, keep this import:
+import fetch from "node-fetch";
+
 const r = Router();
 
 function toNum(x) {
@@ -14,25 +18,30 @@ r.post("/availability/check", async (req, res) => {
       return res.status(400).json({ ok: false, reason: "coords_required" });
     }
 
-    // Soft pass-through using your nearby endpoint (25km)
-    const u = new URL(req.protocol + "://" + req.get("host") + "/api/barbers/nearby");
+    // Build a safe internal URL (respect proxies if any)
+    const proto = (req.headers["x-forwarded-proto"] || req.protocol || "http").toString();
+    const host = req.get("host");
+    const u = new URL(`${proto}://${host}/api/barbers/nearby`);
     u.searchParams.set("lat", String(lat));
-    u.searchParams.set("lon", String(lng));
+    u.searchParams.set("lon", String(lng)); // your nearby endpoint expects "lon"
     u.searchParams.set("radiusKm", "25");
 
     const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 8000);
+    const timer = setTimeout(() => ctrl.abort(), 8000);
 
     const r2 = await fetch(u, { signal: ctrl.signal }).catch(() => null);
-    clearTimeout(t);
+    clearTimeout(timer);
 
-    if (!r2 || !r2.ok) return res.json({ ok: true, etaMins: 10 }); // fail-soft allow
+    // Fail-soft: if nearby is down, allow booking with a default ETA
+    if (!r2 || !r2.ok) return res.json({ ok: true, etaMins: 10 });
+
     const j = await r2.json();
     if (j?.count > 0) return res.json({ ok: true, etaMins: 10 });
 
     return res.json({ ok: false, reason: "NO_PRO_AVAILABLE" });
-  } catch (e) {
-    return res.status(200).json({ ok: true, etaMins: 10 }); // fail-soft
+  } catch (_e) {
+    // Fail-soft on any unexpected error
+    return res.status(200).json({ ok: true, etaMins: 10 });
   }
 });
 

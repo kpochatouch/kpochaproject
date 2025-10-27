@@ -97,7 +97,8 @@ const MetricsSchema = new mongoose.Schema(
 
 const ProSchema = new mongoose.Schema(
   {
-    ownerUid: { type: String, index: true, required: true },
+    ownerUid: { type: String, required: true, unique: true, index: true },
+
     name: { type: String, required: true },
 
     // geo filters

@@ -139,10 +139,11 @@ router.get("/profile/client/:uid/for-booking/:bookingId", requireAuth, async (re
     if (!b) return res.status(404).json({ error: "Booking not found" });
 
     const isProOwner = b.proOwnerUid && b.proOwnerUid === req.user.uid;
-    const isAccepted = b.status === "accepted";
-    if (!(isProOwner && isAccepted)) {
+    const canView = ["pending_payment", "scheduled", "accepted", "completed"].includes(b.status);
+    if (!(isProOwner && canView)) {
       return res.status(403).json({ error: "Not authorized to view client details for this booking" });
     }
+
     if (b.clientUid !== req.params.uid) {
       return res.status(400).json({ error: "Client UID does not match booking" });
     }

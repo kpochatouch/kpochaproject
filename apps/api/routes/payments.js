@@ -1,5 +1,6 @@
 // apps/api/routes/payments.js
 import express from "express";
+import fetch from "node-fetch"; // ✅ ensure fetch is available (consistent with other files)
 import { Booking } from "../models/Booking.js";
 import { creditProPendingForBooking } from "../services/walletService.js";
 
@@ -73,6 +74,9 @@ export default function paymentsRouter({ requireAuth }) {
       const { bookingId, reference } = req.body || {};
       if (!bookingId || !reference) {
         return res.status(400).json({ error: "bookingId and reference required" });
+      }
+      if (!process.env.PAYSTACK_SECRET_KEY) {
+        return res.status(500).json({ error: "paystack_secret_missing" }); // ✅ added guard
       }
 
       const r = await fetch(

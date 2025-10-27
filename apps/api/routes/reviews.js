@@ -1,7 +1,7 @@
 // apps/api/routes/reviews.js
 import express from "express";
 import mongoose from "mongoose";
-import Review from "../models/Review.js";
+import { Review } from "../models/Review.js";
 import { Pro } from "../models.js";
 
 function clamp(n, min, max) { return Math.max(min, Math.min(max, n)); }

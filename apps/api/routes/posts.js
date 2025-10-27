@@ -194,7 +194,7 @@ router.post("/posts/:id/like", requireAuth, async (req, res) => {
       { upsert: true }
     );
 
-    const stats = await PostStats.findOne({ postId: id }).lean();
+    const stats = await PostStats.findOne({ postId: new mongoose.Types.ObjectId(id) }).lean();
     const trendingScore = scoreFrom(stats);
     await PostStats.updateOne({ postId: id }, { $set: { trendingScore } });
 
@@ -222,7 +222,7 @@ router.delete("/posts/:id/like", requireAuth, async (req, res) => {
     );
 
     // clamp and rescore
-    const stats = await PostStats.findOne({ postId: id }).lean();
+    const stats = await PostStats.findOne({ postId: new mongoose.Types.ObjectId(id) }).lean();
     const likesCount = Math.max(0, Number(stats?.likesCount || 0));
     const trendingScore = scoreFrom({ ...stats, likesCount });
     await PostStats.updateOne({ postId: id }, { $set: { likesCount, trendingScore } });
@@ -250,7 +250,7 @@ router.post("/posts/:id/view", async (req, res) => {
       { upsert: true }
     );
 
-    const stats = await PostStats.findOne({ postId: id }).lean();
+    const stats = await PostStats.findOne({ postId: new mongoose.Types.ObjectId(id) }).lean();
     const trendingScore = scoreFrom(stats);
     await PostStats.updateOne({ postId: id }, { $set: { trendingScore } });
 
@@ -278,7 +278,7 @@ router.post("/posts/:id/share", requireAuth, async (req, res) => {
       { upsert: true }
     );
 
-    const stats = await PostStats.findOne({ postId: id }).lean();
+    const stats = await PostStats.findOne({ postId: new mongoose.Types.ObjectId(id) }).lean();
     const trendingScore = scoreFrom(stats);
     await PostStats.updateOne({ postId: id }, { $set: { trendingScore } });
 
@@ -306,7 +306,7 @@ router.post("/posts/:id/save", requireAuth, async (req, res) => {
       { upsert: true }
     );
 
-    const stats = await PostStats.findOne({ postId: id }).lean();
+    const stats = await PostStats.findOne({ postId: new mongoose.Types.ObjectId(id) }).lean();
     const trendingScore = scoreFrom(stats);
     await PostStats.updateOne({ postId: id }, { $set: { trendingScore } });
 
@@ -332,8 +332,7 @@ router.delete("/posts/:id/save", requireAuth, async (req, res) => {
       { postId: new mongoose.Types.ObjectId(id), savedBy: req.user.uid },
       { $pull: { savedBy: req.user.uid }, $inc: { savesCount: -1 } }
     );
-
-    const stats = await PostStats.findOne({ postId: id }).lean();
+    const stats = await PostStats.findOne({ postId: new mongoose.Types.ObjectId(id) }).lean();
     const savesCount = Math.max(0, Number(stats?.savesCount || 0));
     const trendingScore = scoreFrom({ ...stats, savesCount });
     await PostStats.updateOne({ postId: id }, { $set: { savesCount, trendingScore } });
