@@ -238,16 +238,18 @@ export async function withdrawPendingWithFee(ownerUid, amountKobo, meta = {}) {
     meta: { ...meta, feeKobo: fee, feePct },
   });
 
-  // fee (debit)
-  await WalletTx.create({
-    ownerUid,
-    type: "fee",
-    direction: "debit",
-    amountKobo: fee,
-    balancePendingKobo: w.pendingKobo,
-    balanceAvailableKobo: w.availableKobo || 0,
-    meta: { ...meta, source: "withdraw_pending", feePct },
-  });
+  // fee (debit) — only if fee > 0 to satisfy WalletTx.amountKobo min: 1
+  if (fee > 0) {
+    await WalletTx.create({
+      ownerUid,
+      type: "fee",
+      direction: "debit",
+      amountKobo: fee,
+      balancePendingKobo: w.pendingKobo,
+      balanceAvailableKobo: w.availableKobo || 0,
+      meta: { ...meta, source: "withdraw_pending", feePct },
+    });
+  }
 
   return { ok: true, withdrawnKobo: net, feeKobo: fee, feePct, wallet: w };
 }

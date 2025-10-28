@@ -78,8 +78,8 @@ export default function WalletPage() {
 
   // ----------------- Withdraw from Pending (fee) -----------------
   async function withdrawFromPending() {
-    const naira = +amtFromPending || 0;
-    if (naira <= 0) return alert("Enter a valid amount in ₦.");
+    const naira = Number(amtFromPending);
+    if (!Number.isFinite(naira) || naira <= 0) return alert("Enter a valid amount in ₦.");
     const max = (wallet?.pendingKobo || 0) / 100;
     if (naira > max) return alert(`You can withdraw at most ₦${max.toLocaleString()} from Pending.`);
     const amountKobo = Math.floor(naira * 100);
@@ -98,8 +98,8 @@ export default function WalletPage() {
 
   // ----------------- Withdraw from Available -----------------
   async function withdrawFromAvailable() {
-    const naira = +amtFromAvailable || 0;
-    if (naira <= 0) return alert("Enter a valid amount in ₦.");
+    const naira = Number(amtFromAvailable);
+    if (!Number.isFinite(naira) || naira <= 0) return alert("Enter a valid amount in ₦.");
     const max = (wallet?.availableKobo || 0) / 100;
     if (naira > max) return alert(`You can withdraw at most ₦${max.toLocaleString()} from Available.`);
     const amountKobo = Math.floor(naira * 100);
@@ -127,6 +127,14 @@ export default function WalletPage() {
           title={meHasPin ? "Reset your wallet PIN" : "Set your wallet PIN"}
         >
           {meHasPin ? "Reset PIN" : "Set PIN"}
+        </button>
+
+        <button
+          onClick={() => setForgotOpen(true)}
+          className="text-xs border border-zinc-700 hover:bg-zinc-900 rounded px-2 py-1"
+          title="Forgot your wallet PIN?"
+        >
+          Forgot PIN
         </button>
       </div>
 
@@ -257,10 +265,10 @@ export default function WalletPage() {
         email={me?.email || ""}
         onClose={() => setForgotOpen(false)}
         onSetNewPin={async (newPin) => {
-          // Requires tiny backend endpoint shown below
           await api.put("/api/pin/me/forgot", { newPin });
           setForgotOpen(false);
           setMeHasPin(true);
+          await load();
         }}
       />
     </div>
@@ -418,10 +426,13 @@ function PinPrompt({ open, error, onClose, onSubmit, onResetPin, onForgotPin }) 
   );
 }
 
-/** Forgot PIN flow using Firebase re-auth, then set a new PIN (no admin) */
+/** Forgot PIN flow with Firebase re-auth if available; otherwise skip straight to new PIN */
 function ForgotPinModal({ open, email, onClose, onSetNewPin }) {
-  const auth = getAuth();
-  const [mode, setMode] = useState("choose"); // choose | pass | new | ok
+  let auth = null;
+  try { auth = getAuth(); } catch { /* Firebase not present */ }
+
+  const hasFirebase = !!auth?.app;
+  const [mode, setMode] = useState(hasFirebase ? "choose" : "new"); // choose | pass | new | ok
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [password, setPassword] = useState("");
@@ -430,14 +441,16 @@ function ForgotPinModal({ open, email, onClose, onSetNewPin }) {
 
   useEffect(() => {
     if (!open) {
-      setMode("choose"); setBusy(false); setErr("");
+      setMode(hasFirebase ? "choose" : "new");
+      setBusy(false); setErr("");
       setPassword(""); setNewPin(""); setNewPin2("");
     }
-  }, [open]);
+  }, [open, hasFirebase]);
 
   if (!open) return null;
 
   async function verifyWithPassword() {
+    if (!hasFirebase) return setMode("new");
     try {
       setBusy(true); setErr("");
       const cred = EmailAuthProvider.credential(email, password);
@@ -450,6 +463,7 @@ function ForgotPinModal({ open, email, onClose, onSetNewPin }) {
     }
   }
   async function verifyWithGoogle() {
+    if (!hasFirebase) return setMode("new");
     try {
       setBusy(true); setErr("");
       await reauthenticateWithPopup(auth.currentUser, new GoogleAuthProvider());
@@ -537,6 +551,13 @@ function ForgotPinModal({ open, email, onClose, onSetNewPin }) {
         {mode === "new" && (
           <>
             <div className="text-lg font-semibold mb-2">Set New PIN</div>
+            {hasFirebase ? (
+              <p className="text-xs text-zinc-500 mb-2">Identity verified.</p>
+            ) : (
+              <p className="text-xs text-zinc-500 mb-2">
+                Firebase not detected — proceeding to set a new PIN. (Server still enforces auth.)
+              </p>
+            )}
             {err && <div className="text-sm text-red-300 mb-2">{err}</div>}
             <input
               type="password"
