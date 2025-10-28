@@ -1,38 +1,70 @@
 // apps/api/routes/geo.js
 import express from "express";
-import nigeriaStatesLgasPkg from "nigeria-states-lgas";
-const nigeriaStatesLgas = nigeriaStatesLgasPkg?.default || nigeriaStatesLgasPkg;
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 
 const router = express.Router();
 
-/**
- * GET /api/geo/ng
- * Returns: { country: "Nigeria", states: string[], lgas: { [state]: string[] } }
- * — Full data for future use or external integrations
+// ----- Load ng-geo.json (36 states + FCT) with a stable path (ESM-safe) -----
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// The data file lives at apps/api/data/ng-geo.json relative to this file
+const GEO_PATH = path.resolve(__dirname, "../data/ng-geo.json");
+
+// In-memory cache
+let GEO = null;
+let STATE_INDEX = null;
+
+function normalizeStateName(s) {
+  const v = String(s || "").trim().toUpperCase();
+  if (!v) return "";
+  if (v === "FCT" || v === "F.C.T" || v === "ABUJA") return "FEDERAL CAPITAL TERRITORY";
+  // Common alternate spellings can be normalized here if needed
+  return v;
+}
+
+function buildIndexFrom(geo) {
+  const idx = new Map();
+  for (const [state, lgas] of Object.entries(geo || {})) {
+    idx.set(normalizeStateName(state), Array.isArray(lgas) ? lgas.slice() : []);
+  }
+  return idx;
+}
+
+function loadGeo({ force = false } = {}) {
+  if (GEO && STATE_INDEX && !force) return;
+  const raw = fs.readFileSync(GEO_PATH, "utf8");
+  GEO = JSON.parse(raw);                // { "Abia": [ "Aba North", ... ], ... }
+  STATE_INDEX = buildIndexFrom(GEO);    // Map("ABIA" -> [...])
+}
+
+// Initial load
+loadGeo();
+
+/** GET /api/geo/ng
+ * Returns the full structure:
+ * { country: "Nigeria", states: string[], lgas: { [state]: string[] } }
  */
 router.get("/geo/ng", (_req, res) => {
   try {
-    const states = nigeriaStatesLgas.getStates(); // ["Abia", "Adamawa", ...]
-    const lgas = Object.fromEntries(
-      states.map((st) => [st, nigeriaStatesLgas.getLGAs(st) || []])
-    );
-    res.json({ country: "Nigeria", states, lgas });
+    loadGeo();
+    const states = Object.keys(GEO).sort((a, b) => a.localeCompare(b));
+    res.json({ country: "Nigeria", states, lgas: GEO });
   } catch (e) {
     console.error("[geo/ng] error:", e);
     res.status(500).json({ error: "geo_load_failed" });
   }
 });
 
-/**
- * GET /api/geo/states
- * Returns: string[] — list of all Nigerian states
- * — Compatible with old UI dropdowns expecting plain strings
+/** GET /api/geo/states
+ * Returns: string[]  (for legacy UI dropdown)
  */
 router.get("/geo/states", (_req, res) => {
   try {
-    const states = (nigeriaStatesLgas.getStates?.() || [])
-      .slice()
-      .sort((a, b) => a.localeCompare(b));
+    loadGeo();
+    const states = Object.keys(GEO).sort((a, b) => a.localeCompare(b));
     res.json(states);
   } catch (e) {
     console.error("[geo/states] error:", e);
@@ -40,27 +72,19 @@ router.get("/geo/states", (_req, res) => {
   }
 });
 
-/**
- * GET /api/geo/lgas?state=Edo
- * Returns: string[] — list of LGAs for a given state
- * — Compatible with old UI dropdowns expecting plain strings
+/** GET /api/geo/lgas?state=Edo
+ * Returns: string[] (LGAs for the given state, legacy UI shape)
  */
 router.get("/geo/lgas", (req, res) => {
   try {
-    const state = String(req.query.state || "").trim();
-    if (!state) {
-      return res.status(400).json({ error: "state_required" });
-    }
+    loadGeo();
+    const q = normalizeStateName(req.query.state);
+    if (!q) return res.status(400).json({ error: "state_required" });
 
-    const lgas = (nigeriaStatesLgas.getLGAs?.(state) || [])
-      .slice()
-      .sort((a, b) => a.localeCompare(b));
+    const lgas = STATE_INDEX.get(q) || [];
+    if (!lgas.length) return res.status(404).json({ error: "state_not_found_or_no_lgas" });
 
-    if (!lgas.length) {
-      return res.status(404).json({ error: "state_not_found_or_no_lgas" });
-    }
-
-    res.json(lgas);
+    res.json(lgas.slice().sort((a, b) => a.localeCompare(b)));
   } catch (e) {
     console.error("[geo/lgas] error:", e);
     res.status(500).json({ error: "geo_lgas_failed" });
