@@ -1,3 +1,4 @@
+// apps/web/src/pages/ClientSettings.jsx
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api";
 
@@ -19,13 +20,15 @@ export default function ClientSettings() {
     photoUrl: "",
   });
 
-  // Load me + profile + NG geo
+  // ✅ Load user data (single UID) and geo list
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
         setLoading(true);
         setError("");
+
+        // 1️⃣ Load main account + geo
         const [{ data: meData }, { data: geo }] = await Promise.all([
           api.get("/api/me"),
           api.get("/api/geo/ng"),
@@ -35,7 +38,7 @@ export default function ClientSettings() {
         setMe(meData || null);
         setStates(geo?.states || []);
 
-        // client profile (route provided by your Profile router)
+        // 2️⃣ Load client profile (if exists)
         let profile = null;
         try {
           const { data } = await api.get("/api/profile/client/me");
@@ -44,6 +47,7 @@ export default function ClientSettings() {
           profile = null;
         }
 
+        // 3️⃣ Auto-fill with priority: profile → me → fallback
         setForm((cur) => ({
           ...cur,
           displayName:
@@ -54,12 +58,11 @@ export default function ClientSettings() {
           phone: profile?.phone || meData?.phone || "",
           state: profile?.state || "",
           lga: profile?.lga || meData?.lga || "",
-          // 🔧 use 'address' (schema field), not 'houseAddress'
           address: profile?.address || "",
           photoUrl: profile?.photoUrl || meData?.photoUrl || "",
         }));
 
-        // preload LGAs if state exists
+        // 4️⃣ Preload LGAs if user already has a state
         const st = profile?.state || "";
         if (st) {
           try {
@@ -71,7 +74,7 @@ export default function ClientSettings() {
             if (alive) setLgas([]);
           }
         }
-      } catch (e) {
+      } catch {
         if (alive) setError("Failed to load your settings.");
       } finally {
         if (alive) setLoading(false);
@@ -82,6 +85,7 @@ export default function ClientSettings() {
     };
   }, []);
 
+  // ✅ Change state → reload LGAs
   async function onChangeState(nextState) {
     setForm((f) => ({ ...f, state: nextState, lga: "" }));
     if (!nextState) {
@@ -98,6 +102,7 @@ export default function ClientSettings() {
     }
   }
 
+  // ✅ Save profile (keeps same UID, upserts)
   async function onSave(e) {
     e?.preventDefault?.();
     try {
@@ -105,19 +110,17 @@ export default function ClientSettings() {
       setError("");
       setOk("");
 
-      // Persist via your profile router (client endpoint)
       await api.put("/api/profile/client/me", {
         fullName: form.displayName?.trim(),
         phone: form.phone?.trim(),
         state: form.state,
         lga: form.lga,
-        // 🔧 send 'address' (matches schema & router)
         address: form.address?.trim(),
         photoUrl: form.photoUrl || "",
       });
 
       setOk("Saved!");
-    } catch (e) {
+    } catch {
       setError("Could not save your changes. Please try again.");
     } finally {
       setSaving(false);
@@ -154,7 +157,7 @@ export default function ClientSettings() {
             </div>
           )}
 
-          {/* General */}
+          {/* GENERAL */}
           <section>
             <h2 className="text-lg font-semibold mb-3">General</h2>
             <div className="grid sm:grid-cols-2 gap-4">
@@ -229,7 +232,7 @@ export default function ClientSettings() {
             </div>
           </section>
 
-          {/* Payments (lite) */}
+          {/* PAYMENTS */}
           <section>
             <h2 className="text-lg font-semibold mb-3">Payments</h2>
             <p className="text-sm text-zinc-400">
@@ -237,7 +240,7 @@ export default function ClientSettings() {
             </p>
           </section>
 
-          {/* Advanced */}
+          {/* ADVANCED */}
           <section>
             <h2 className="text-lg font-semibold mb-3">Advanced</h2>
             <div className="flex gap-2">

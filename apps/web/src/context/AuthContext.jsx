@@ -2,7 +2,7 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { auth } from "../lib/firebase";
 import { onIdTokenChanged, signOut } from "firebase/auth";
-import { setAuthToken } from "../lib/api"; // ✅ Syncs Firebase token to axios + localStorage
+import { setAuthToken } from "../lib/api"; // ✅ Keeps Firebase token synced to axios + localStorage
 
 const AuthCtx = createContext(null);
 
@@ -11,7 +11,7 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Listen for Firebase token changes and update API headers automatically
+    // ✅ Listen for Firebase token changes and update axios headers automatically
     const unsub = onIdTokenChanged(auth, async (u) => {
       try {
         setUser(u || null);
@@ -19,20 +19,40 @@ export function AuthProvider({ children }) {
 
         if (u) {
           const token = await u.getIdToken();
-          setAuthToken(token); // ✅ replaces localStorage.setItem
+          setAuthToken(token); // ✅ Store & sync to axios
         } else {
-          setAuthToken(null); // ✅ clears headers + storage
+          setAuthToken(null); // ✅ Clear on logout or expired session
         }
       } catch {
         setAuthToken(null);
       }
     });
 
-    return () => unsub();
+    // ✅ Optional: refresh ID token every 50 minutes to keep session valid
+    const refreshLoop = setInterval(async () => {
+      const currentUser = auth.currentUser;
+      if (currentUser) {
+        try {
+          const freshToken = await currentUser.getIdToken(true);
+          setAuthToken(freshToken);
+        } catch {
+          // silently fail (network loss etc.)
+        }
+      }
+    }, 50 * 60 * 1000); // 50 minutes
+
+    return () => {
+      unsub();
+      clearInterval(refreshLoop);
+    };
   }, []);
 
   const logout = async () => {
-    await signOut(auth);
+    try {
+      await signOut(auth);
+    } catch {
+      // ignore any signout error
+    }
     setAuthToken(null);
     setUser(null);
   };

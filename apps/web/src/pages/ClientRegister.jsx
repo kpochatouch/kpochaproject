@@ -1,7 +1,7 @@
 // apps/web/src/pages/ClientRegister.jsx
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api } from "../lib/api";
+import { api, getClientProfile, updateClientProfile } from "../lib/api";
 import NgGeoPicker from "../components/NgGeoPicker.jsx";
 import PhoneOTP from "../components/PhoneOTP.jsx";
 
@@ -26,16 +26,16 @@ export default function ClientRegister() {
   const [address, setAddress] = useState("");
   const [photoUrl, setPhotoUrl] = useState("");
 
-  // KYC (optional but recommended)
+  // KYC (optional)
   const [verifyNow, setVerifyNow] = useState(false);
   const [idType, setIdType] = useState("");
   const [idUrl, setIdUrl] = useState("");
   const [selfieWithIdUrl, setSelfieWithIdUrl] = useState("");
 
-  // Agreements (two only)
+  // Agreements
   const [agreements, setAgreements] = useState({ terms: false, privacy: false });
 
-  // location helpers
+  // Location
   const [locLoading, setLocLoading] = useState(false);
   const [lat, setLat] = useState(null);
   const [lon, setLon] = useState(null);
@@ -51,14 +51,14 @@ export default function ClientRegister() {
     okTimerRef.current = setTimeout(() => setOk(""), 2200);
   }
 
-  // Load existing (if any)
+  // Prefill from server
   useEffect(() => {
     let alive = true;
     (async () => {
       setLoading(true);
       setErr("");
       try {
-        const { data } = await api.get("/api/profile/client/me").catch(() => ({ data: null }));
+        const data = await getClientProfile().catch(() => null);
         if (!alive) return;
         if (data) {
           setFullName(data.fullName || "");
@@ -72,20 +72,18 @@ export default function ClientRegister() {
           if (data.lat != null) setLat(data.lat);
           if (data.lon != null) setLon(data.lon);
 
-          // hydrate agreements if server has prior acceptance
           const acceptedTerms = !!data.acceptedTerms || !!data?.agreements?.terms;
           const acceptedPrivacy = !!data.acceptedPrivacy || !!data?.agreements?.privacy;
           if (acceptedTerms || acceptedPrivacy) {
             setAgreements({ terms: acceptedTerms, privacy: acceptedPrivacy });
           }
 
-          // Preload KYC if present
-          const k = data.kyc || {};
-          if (k?.idType || k?.idUrl || k?.selfieWithIdUrl) {
+          const kyc = data.kyc || {};
+          if (kyc?.idType || kyc?.idUrl || kyc?.selfieWithIdUrl) {
             setVerifyNow(true);
-            setIdType(k.idType || "");
-            setIdUrl(k.idUrl || "");
-            setSelfieWithIdUrl(k.selfieWithIdUrl || "");
+            setIdType(kyc.idType || "");
+            setIdUrl(kyc.idUrl || "");
+            setSelfieWithIdUrl(kyc.selfieWithIdUrl || "");
           }
         }
       } catch {
@@ -104,7 +102,6 @@ export default function ClientRegister() {
     const base = !!fullName && !!phone && (!!stateVal || !!lga) && !!address;
     const agreed = agreements.terms && agreements.privacy;
     if (!verifyNow) return base && agreed;
-    // If verifying now, require all KYC fields
     return base && agreed && !!idType && !!idUrl && !!selfieWithIdUrl;
   }, [fullName, phone, stateVal, lga, address, verifyNow, idType, idUrl, selfieWithIdUrl, agreements]);
 
@@ -120,23 +117,14 @@ export default function ClientRegister() {
         photoUrl,
         ...(lat != null && lon != null ? { lat, lon } : {}),
         ...(phoneVerifiedAt ? { phoneVerifiedAt } : {}),
-
-        // ✅ Enforce server-side visibility of agreements
         acceptedTerms: !!agreements.terms,
         acceptedPrivacy: !!agreements.privacy,
         agreements: { terms: !!agreements.terms, privacy: !!agreements.privacy },
       };
-
       if (verifyNow) {
-        payload.kyc = {
-          idType,
-          idUrl,
-          selfieWithIdUrl,
-          status: "pending",
-        };
+        payload.kyc = { idType, idUrl, selfieWithIdUrl, status: "pending" };
       }
-
-      await api.put("/api/profile/client/me", payload);
+      await updateClientProfile(payload); // PUT /api/profile/client/me (alias: /api/profile/me)
       flashOK("Saved!");
       nav("/browse", { replace: true });
     } catch (e) {
@@ -144,11 +132,9 @@ export default function ClientRegister() {
     }
   }
 
-  // --- Use my location (browser geolocation -> server reverse geocode) ---
   async function useMyLocation() {
     try {
       setLocLoading(true);
-
       const pos = await new Promise((resolve, reject) =>
         navigator.geolocation.getCurrentPosition(resolve, reject, {
           enableHighAccuracy: true,
@@ -157,10 +143,7 @@ export default function ClientRegister() {
       );
       const { latitude: theLat, longitude: theLon } = pos.coords;
 
-      const { data } = await api.get("/api/geo/rev", {
-        params: { lat: theLat, lon: theLon },
-      });
-
+      const { data } = await api.get("/api/geo/rev", { params: { lat: theLat, lon: theLon } });
       const feat = data?.features?.[0];
       const p = feat?.properties || {};
 
@@ -198,71 +181,20 @@ export default function ClientRegister() {
       });
       setNearby(data?.items || []);
       if (!data?.items?.length) flashOK("No professionals within 25km (yet).");
-    } catch (e) {
+    } catch {
       setErr("Could not search nearby professionals.");
     } finally {
       setNearbyBusy(false);
     }
   }
 
-  /* Cloudinary widget (optional) */
-  const [widgetReady, setWidgetReady] = useState(!!window.cloudinary?.createUploadWidget);
-  useEffect(() => {
-    if (widgetReady) return;
-    const id = "cld-global-all";
-    if (!document.getElementById(id)) {
-      const s = document.createElement("script");
-      s.id = id;
-      s.src = "https://widget.cloudinary.com/v2.0/global/all.js";
-      s.async = true;
-      s.defer = true;
-      s.onload = () => setWidgetReady(!!window.cloudinary?.createUploadWidget);
-      document.body.appendChild(s);
-    } else {
-      setWidgetReady(!!window.cloudinary?.createUploadWidget);
-    }
-  }, [widgetReady]);
-
-  function openUpload(setter, folder = "kpocha/clients") {
-    if (!widgetReady || !CLOUD_NAME || !UPLOAD_PRESET) {
-      alert("Upload unavailable. You can continue without a photo.");
-      return;
-    }
-    const w = window.cloudinary.createUploadWidget(
-      {
-        cloudName: CLOUD_NAME,
-        uploadPreset: UPLOAD_PRESET,
-        multiple: false,
-        maxFiles: 1,
-        folder,
-        sources: ["local", "camera"],
-        clientAllowedFormats: ["jpg", "jpeg", "png", "webp"],
-        maxImageFileSize: 5 * 1024 * 1024,
-      },
-      (err, res) => {
-        if (!err && res?.event === "success") setter(res.info.secure_url);
-      }
-    );
-    w.open();
-  }
-
   return (
     <div className="max-w-3xl mx-auto px-4 py-8">
       <h1 className="text-2xl font-semibold mb-1">Tell us about you</h1>
-      <p className="text-zinc-400 mb-4">
-        Save your details once. Future bookings will be instant — no long forms.
-      </p>
+      <p className="text-zinc-400 mb-4">Save your details once. Future bookings will be instant — no long forms.</p>
 
-      {err && (
-        <div className="mb-4 rounded border border-red-800 bg-red-900/40 text-red-100 px-3 py-2">
-          {err}
-        </div>
-      )}
-      {ok && (
-        <div className="mb-4 rounded border border-green-800 bg-green-900/30 text-green-100 px-3 py-2">
-          {ok}
-        </div>
-      )}
+      {err && <div className="mb-4 rounded border border-red-800 bg-red-900/40 text-red-100 px-3 py-2">{err}</div>}
+      {ok && <div className="mb-4 rounded border border-green-800 bg-green-900/30 text-green-100 px-3 py-2">{ok}</div>}
 
       {loading ? (
         <div>Loading…</div>
@@ -294,7 +226,7 @@ export default function ClientRegister() {
             )}
           </div>
 
-          {/* Basic */}
+          {/* Basic Info */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Input label="Full name" value={fullName} onChange={(e) => setFullName(e.target.value)} required />
             <div>
@@ -303,7 +235,7 @@ export default function ClientRegister() {
                 value={phone}
                 onChange={(e) => {
                   setPhone(e.target.value);
-                  setPhoneVerifiedAt(null); // reset when number changes
+                  setPhoneVerifiedAt(null);
                 }}
                 required
               />
@@ -407,7 +339,7 @@ export default function ClientRegister() {
             )}
           </div>
 
-          {/* Agreements (two only) */}
+          {/* Agreements */}
           <div className="rounded border border-zinc-800 p-3 space-y-2 text-sm">
             <label className="flex items-center gap-2">
               <input
@@ -415,7 +347,12 @@ export default function ClientRegister() {
                 checked={agreements.terms}
                 onChange={() => setAgreements((p) => ({ ...p, terms: !p.terms }))}
               />
-              <span>I agree to the <a href="/legal#terms" target="_blank" rel="noreferrer" className="text-gold underline">Terms &amp; Conditions</a></span>
+              <span>
+                I agree to the{" "}
+                <a href="/legal#terms" target="_blank" rel="noreferrer" className="text-gold underline">
+                  Terms &amp; Conditions
+                </a>
+              </span>
             </label>
             <label className="flex items-center gap-2">
               <input
@@ -423,11 +360,16 @@ export default function ClientRegister() {
                 checked={agreements.privacy}
                 onChange={() => setAgreements((p) => ({ ...p, privacy: !p.privacy }))}
               />
-              <span>I agree to the <a href="/legal#privacy" target="_blank" rel="noreferrer" className="text-gold underline">Privacy Policy</a></span>
+              <span>
+                I agree to the{" "}
+                <a href="/legal#privacy" target="_blank" rel="noreferrer" className="text-gold underline">
+                  Privacy Policy
+                </a>
+              </span>
             </label>
           </div>
 
-          {/* Nearby preview */}
+          {/* Nearby pros */}
           <div className="rounded border border-zinc-800 p-3">
             <div className="flex items-center justify-between gap-3">
               <div className="text-sm text-zinc-300">See Professionals near your current location</div>
@@ -445,8 +387,11 @@ export default function ClientRegister() {
             {!!nearby.length && (
               <ul className="mt-3 space-y-2">
                 {nearby.slice(0, 6).map((b) => (
-                  <li key={b.id} className="text-sm flex justify-between border border-zinc-800 rounded px-2 py-1">
-                    <span>{b.name}</span>
+                  <li
+                    key={b.id || b._id || b.proId || `${b.name}-${b.lga}-${b.distanceKm || 0}`}
+                    className="text-sm flex justify-between border border-zinc-800 rounded px-2 py-1"
+                  >
+                    <span>{b.name || b.proName || "Professional"}</span>
                     <span className="text-zinc-400">
                       {b.distanceKm != null ? `${b.distanceKm} km` : b.lga || ""}
                     </span>
@@ -472,6 +417,7 @@ export default function ClientRegister() {
   );
 }
 
+/* Small input helper */
 function Input({ label, required, ...props }) {
   return (
     <label className="block">

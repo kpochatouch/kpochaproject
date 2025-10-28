@@ -8,12 +8,11 @@ import { getAuth, onAuthStateChanged } from "firebase/auth";
 let ROOT =
   (import.meta.env.VITE_API_BASE_URL ||
    import.meta.env.VITE_API_BASE ||
-   "") // fallback added
+   "")
     .toString()
     .trim();
 
 if (!ROOT) {
-  // last-resort dev fallback
   ROOT = "http://localhost:8080";
 }
 ROOT = ROOT.replace(/\/+$/, "");
@@ -54,7 +53,7 @@ api.interceptors.request.use(async (config) => {
     }
   } catch {}
 
-  // Fallback to localStorage token (for your admin tools)
+  // Fallback to localStorage token (for admin tools)
   try {
     const token = localStorage.getItem("token");
     if (token) config.headers.Authorization = `Bearer ${token}`;
@@ -116,7 +115,7 @@ export async function listNearbyBarbers({ lat, lon, radiusKm = 25 }) {
    FEED
    ========================================= */
 export async function listPublicFeed(params = {}) {
-  const { data } = await api.get("/api/feed/public", { params });
+  const { data } = await api.get("/api/posts/public", { params }); // corrected path
   return data;
 }
 export async function createPost(payload) {
@@ -255,14 +254,17 @@ export async function submitProApplication(payload) {
   return data;
 }
 
+/* Unified Client Profile (one UID per user) */
 export async function getClientProfile() {
-  const { data } = await api.get("/api/profile/client/me");
+  const { data } = await api.get("/api/profile/me"); // unified alias
   return data;
 }
 export async function updateClientProfile(payload) {
-  const { data } = await api.put("/api/profile/client/me", payload);
+  const { data } = await api.put("/api/profile/me", payload); // unified alias
   return data;
 }
+
+/* Optional booking/admin helpers */
 export async function getClientProfileForBooking(clientUid, bookingId) {
   const { data } = await api.get(`/api/profile/client/${clientUid}/for-booking/${encodeURIComponent(bookingId)}`);
   return data;
@@ -271,10 +273,8 @@ export async function getClientProfileAdmin(clientUid) {
   const { data } = await api.get(`/api/profile/client/${clientUid}/admin`);
   return data;
 }
-export async function getProProfileMe() {
-  const { data } = await api.get("/api/profile/pro/me");
-  return data;
-}
+
+/* Pro extras */
 export async function updateProProfile(payload) {
   const { data } = await api.put("/api/profile/pro/me", payload);
   return data;
