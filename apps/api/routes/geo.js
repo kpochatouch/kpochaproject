@@ -1,92 +1,70 @@
 // apps/api/routes/geo.js
 import express from "express";
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
+import nigeriaStatesLgasPkg from "nigeria-states-lgas";
+const nigeriaStatesLgas = nigeriaStatesLgasPkg?.default || nigeriaStatesLgasPkg;
 
 const router = express.Router();
 
-/** Load file next to this router: ../data/ng-geo.json (deterministic) */
-function readRawNg() {
-  try {
-    const __filename = fileURLToPath(import.meta.url);
-    const __dirname = path.dirname(__filename);
-    const dataPath = path.resolve(__dirname, "../data/ng-geo.json");
-    return JSON.parse(fs.readFileSync(dataPath, "utf8"));
-  } catch (e) {
-    console.error("[geo] failed to read ng-geo.json:", e?.message || e);
-    return null;
-  }
-}
-
-/** Normalize into { states: [{ name, code, lgas: [] }] } even if legacy object is used */
-function normalizeNg(raw) {
-  if (!raw) return { states: [] };
-
-  // New format already: { states: [{ name, code?, lgas: [...] }, ...] }
-  if (Array.isArray(raw.states)) {
-    // Ensure every state has name, code, lgas
-    const states = raw.states.map((s) => ({
-      name: String(s.name || "").trim(),
-      code: String(s.code || "").trim() || String(s.name || "").slice(0, 2).toUpperCase(),
-      lgas: Array.isArray(s.lgas) ? s.lgas : [],
-    })).filter((s) => s.name);
-    return { states };
-  }
-
-  // Legacy format: { "Abia": [...], "Adamawa": [...] }
-  if (typeof raw === "object" && !Array.isArray(raw)) {
-    const states = Object.keys(raw).map((name) => ({
-      name,
-      code: name.slice(0, 2).toUpperCase(),
-      lgas: Array.isArray(raw[name]) ? raw[name] : [],
-    }));
-    return { states };
-  }
-
-  return { states: [] };
-}
-
-const NG = normalizeNg(readRawNg());
-
-/** Utility: find state by code or name (case-insensitive) */
-function matchState(input) {
-  if (!NG?.states?.length || !input) return null;
-  const s = String(input).trim().toLowerCase();
-  return (
-    NG.states.find((x) => String(x.code).toLowerCase() === s) ||
-    NG.states.find((x) => String(x.name).toLowerCase() === s) ||
-    null
-  );
-}
-
-/** Health check */
-router.get("/geo/health", (_req, res) => {
-  res.json({ ok: !!NG && !!NG.states?.length, states: NG.states?.length || 0 });
-});
-
-/** Full normalized payload */
+/**
+ * GET /api/geo/ng
+ * Returns: { country: "Nigeria", states: string[], lgas: { [state]: string[] } }
+ * — Full data for future use or external integrations
+ */
 router.get("/geo/ng", (_req, res) => {
-  if (!NG?.states?.length) return res.status(500).json({ error: "ng_geo_not_loaded" });
-  res.json(NG);
+  try {
+    const states = nigeriaStatesLgas.getStates(); // ["Abia", "Adamawa", ...]
+    const lgas = Object.fromEntries(
+      states.map((st) => [st, nigeriaStatesLgas.getLGAs(st) || []])
+    );
+    res.json({ country: "Nigeria", states, lgas });
+  } catch (e) {
+    console.error("[geo/ng] error:", e);
+    res.status(500).json({ error: "geo_load_failed" });
+  }
 });
 
-/** States list */
+/**
+ * GET /api/geo/states
+ * Returns: string[] — list of all Nigerian states
+ * — Compatible with old UI dropdowns expecting plain strings
+ */
 router.get("/geo/states", (_req, res) => {
-  if (!NG?.states?.length) return res.status(500).json({ error: "ng_geo_not_loaded" });
-  const states = NG.states
-    .map((s) => ({ name: s.name, code: s.code }))
-    .sort((a, b) => a.name.localeCompare(b.name));
-  res.json(states);
+  try {
+    const states = (nigeriaStatesLgas.getStates?.() || [])
+      .slice()
+      .sort((a, b) => a.localeCompare(b));
+    res.json(states);
+  } catch (e) {
+    console.error("[geo/states] error:", e);
+    res.status(500).json({ error: "geo_states_failed" });
+  }
 });
 
-/** LGAs for a given state (name or code) */
+/**
+ * GET /api/geo/lgas?state=Edo
+ * Returns: string[] — list of LGAs for a given state
+ * — Compatible with old UI dropdowns expecting plain strings
+ */
 router.get("/geo/lgas", (req, res) => {
-  if (!NG?.states?.length) return res.status(500).json({ error: "ng_geo_not_loaded" });
-  const s = matchState(req.query.state);
-  if (!s) return res.status(400).json({ error: "state_not_found" });
-  const lgas = (s.lgas || []).map((n) => ({ name: n }));
-  res.json({ state: { name: s.name, code: s.code }, lgas });
+  try {
+    const state = String(req.query.state || "").trim();
+    if (!state) {
+      return res.status(400).json({ error: "state_required" });
+    }
+
+    const lgas = (nigeriaStatesLgas.getLGAs?.(state) || [])
+      .slice()
+      .sort((a, b) => a.localeCompare(b));
+
+    if (!lgas.length) {
+      return res.status(404).json({ error: "state_not_found_or_no_lgas" });
+    }
+
+    res.json(lgas);
+  } catch (e) {
+    console.error("[geo/lgas] error:", e);
+    res.status(500).json({ error: "geo_lgas_failed" });
+  }
 });
 
 export default router;
