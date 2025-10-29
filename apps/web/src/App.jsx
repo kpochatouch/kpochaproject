@@ -41,6 +41,7 @@ const ClientRegister    = lazy(() => import("./pages/ClientRegister.jsx"));
 const DeactivateAccount = lazy(() => import("./pages/DeactivateAccount.jsx"));
 const ApplyThanks       = lazy(() => import("./pages/ApplyThanks.jsx"));
 const PaymentConfirm    = lazy(() => import("./pages/PaymentConfirm.jsx"));
+const LivenessPage      = lazy(() => import("./pages/LivenessPage.jsx"));    // ✅ NEW
 
 /* ---------- Chatbase (verified user embedding) ---------- */
 function useChatbase() {
@@ -313,6 +314,16 @@ export default function App() {
                 element={
                   <RequireAuth>
                     <BecomePro />
+                  </RequireAuth>
+                }
+              />
+
+              {/* ✅ Liveness camera page */}
+              <Route
+                path="/liveness"
+                element={
+                  <RequireAuth>
+                    <LivenessPage />
                   </RequireAuth>
                 }
               />
