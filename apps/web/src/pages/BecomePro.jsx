@@ -1,3 +1,4 @@
+// apps/web/src/pages/BecomePro.jsx
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, submitProApplication } from "../lib/api";
@@ -22,7 +23,7 @@ const SERVICE_OPTIONS = [
   "Others",
 ];
 
-/* ---------- Script loader ---------- */
+/* ---------- Utilities ---------- */
 function loadScriptOnce(src, id) {
   return new Promise((resolve, reject) => {
     if (id && document.getElementById(id)) return resolve();
@@ -35,106 +36,56 @@ function loadScriptOnce(src, id) {
     document.head.appendChild(s);
   });
 }
+function digitsOnly(s = "") {
+  return String(s).replace(/\D/g, "");
+}
 
-/* ---------- Liveness modal with randomized prompts ---------- */
+/* ---------- Liveness Modal (blink + head turns via MediaPipe FaceMesh) ---------- */
+/**
+ * Implementation notes:
+ * - Loads MediaPipe FaceMesh from CDN at runtime (no build changes).
+ * - Verifies three steps: Blink, Turn Left, Turn Right.
+ * - Uses simple geometric checks from landmarks (non-ML heuristics on ML landmarks).
+ * - On success, captures a frame to canvas and uploads it to Cloudinary unsigned preset.
+ */
 function LivenessModal({ onClose, onUploaded }) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
-  const streamRef = useRef(null);
-  const faceMeshRef = useRef(null);
-
   const [error, setError] = useState("");
-  const [landmarks, setLandmarks] = useState(null);
-
-  // ---- Randomized thresholds + wording (session-stable) ----
-  const T = useMemo(
-    () => ({
-      BLINK_MAX: 0.18 + (Math.random() * 0.04 - 0.02), // ~0.16–0.20
-      YAW_ABS: 0.06 + (Math.random() * 0.02 - 0.01),   // ~0.05–0.07
-      MOUTH_MIN: 0.32 + (Math.random() * 0.06 - 0.03), // ~0.29–0.35
-    }),
-    []
-  );
-  const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
-
-  // Steps pool (wording randomized, checks use jittered thresholds)
-  const stepsPool = useMemo(
-    () => [
-      {
-        key: "blink",
-        label: pick([
-          "Blink your eyes",
-          "Close and open your eyes",
-          "Give me a quick blink",
-          "Blink twice quickly",
-        ]),
-        check: (L) => eyeOpenRatio(L) < T.BLINK_MAX,
-      },
-      {
-        key: "left",
-        label: pick([
-          "Turn your head a little LEFT",
-          "Look slightly to your LEFT",
-          "Face a bit to the LEFT",
-        ]),
-        check: (L) => yaw(L) < -T.YAW_ABS,
-      },
-      {
-        key: "right",
-        label: pick([
-          "Turn your head a little RIGHT",
-          "Look slightly to your RIGHT",
-          "Face a bit to the RIGHT",
-        ]),
-        check: (L) => yaw(L) > T.YAW_ABS,
-      },
-      {
-        key: "open",
-        label: pick([
-          "Open your mouth",
-          "Say 'ah' (open mouth)",
-          "Open your mouth slightly",
-        ]),
-        check: (L) => mouthOpen(L) > T.MOUTH_MIN,
-      },
-    ],
-    [T]
-  );
-
-  // Shuffle + random length (75% pick 3 steps, else 4)
-  const chosen = useMemo(() => {
-    const arr = [...stepsPool];
-    for (let i = arr.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [arr[i], arr[j]] = [arr[j], arr[i]];
-    }
-    const len = Math.random() < 0.75 ? 3 : 4;
-    return arr.slice(0, len);
-  }, [stepsPool]);
-
-  const [passed, setPassed] = useState({}); // {blink:true, ...}
-  const allPassed = chosen.every((s) => passed[s.key]);
-  const currentIdx = chosen.findIndex((s) => !passed[s.key]);
-  const current = currentIdx === -1 ? null : chosen[currentIdx];
+  const [step, setStep] = useState(0);
+  const steps = [
+    { key: "blink", text: "Blink your eyes slowly" },
+    { key: "left",  text: "Turn your head a little to the LEFT" },
+    { key: "right", text: "Turn your head a little to the RIGHT" },
+  ];
+  const [ok, setOk] = useState({ blink: false, left: false, right: false });
+  const rafRef = useRef(null);
+  const faceMeshRef = useRef(null);
+  const streamRef = useRef(null);
 
   useEffect(() => {
+    let cancelled = false;
+
     (async () => {
       try {
-        await loadScriptOnce("https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js","mp-facemesh");
-        await loadScriptOnce("https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js","mp-camera");
-        await loadScriptOnce("https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js","mp-draw");
+        // 1) Load mediapipe face mesh
+        await loadScriptOnce("https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js", "mp-face-mesh");
+        await loadScriptOnce("https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js", "mp-cam-utils");
+        await loadScriptOnce("https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js", "mp-draw-utils");
 
+        // 2) Start camera
         const v = videoRef.current;
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "user", width: 640, height: 480 },
-        });
+        if (!v) return;
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: 640, height: 480 } });
         streamRef.current = stream;
         v.srcObject = stream;
         await v.play();
 
+        // 3) Setup FaceMesh
+        // global: window.faceMesh.FaceMesh
         const FaceMesh = window.faceMesh || window;
         const fm = new FaceMesh.FaceMesh({
-          locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`,
+          locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
         });
         fm.setOptions({
           maxNumFaces: 1,
@@ -144,20 +95,28 @@ function LivenessModal({ onClose, onUploaded }) {
         });
         faceMeshRef.current = fm;
 
-        fm.onResults(onResults);
-        const cam = new window.Camera(v, {
-          onFrame: async () => fm.send({ image: v }),
+        fm.onResults((results) => {
+          drawAndEvaluate(results);
+        });
+
+        const cam = new window.Camera(videoRef.current, {
+          onFrame: async () => {
+            if (!faceMeshRef.current) return;
+            await faceMeshRef.current.send({ image: videoRef.current });
+          },
           width: 640,
           height: 480,
         });
         cam.start();
       } catch (e) {
         console.error(e);
-        setError("Camera/model failed. Use the Upload button if this persists.");
+        setError("Camera or model failed to initialize. You can still upload a selfie via the Upload button.");
       }
     })();
 
     return () => {
+      // cleanup
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
       try {
         const s = streamRef.current;
         if (s) s.getTracks().forEach((t) => t.stop());
@@ -165,46 +124,89 @@ function LivenessModal({ onClose, onUploaded }) {
     };
   }, []);
 
-  function onResults(results) {
-    const video = videoRef.current;
+  function drawAndEvaluate(results) {
     const canvas = canvasRef.current;
-    if (!video || !canvas) return;
-
+    const video = videoRef.current;
+    if (!canvas || !video) return;
+    const ctx = canvas.getContext("2d");
     canvas.width = video.videoWidth || 640;
     canvas.height = video.videoHeight || 480;
-    const ctx = canvas.getContext("2d");
 
-    // Mirror like a selfie
+    // Draw video to canvas
     ctx.save();
-    ctx.scale(-1, 1);
+    ctx.scale(-1, 1);             // mirror like a selfie
     ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
     ctx.restore();
 
-    const L = results.multiFaceLandmarks?.[0];
-    setLandmarks(L || null);
-    if (!L) return;
+    const face = results.multiFaceLandmarks?.[0];
+    if (!face) return;
 
-    // Evaluate current step only (prevents accidental pass of later steps)
-    if (current && current.check(L)) {
-      setPassed((p) => (p[current.key] ? p : { ...p, [current.key]: true }));
+    // === Basic landmark helpers ===
+    // EAR-like blink measure: vertical eye opening vs horizontal span (left eye approx indices)
+    // Left eye: use 159(top) - 145(bottom), 33(inner) - 133(outer)
+    const l_top = face[159], l_bot = face[145], l_in = face[33], l_out = face[133];
+    const r_top = face[386], r_bot = face[374], r_in = face[362], r_out = face[263];
+
+    const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+    const left_open = dist(l_top, l_bot) / (dist(l_in, l_out) || 1e-6);
+    const right_open = dist(r_top, r_bot) / (dist(r_in, r_out) || 1e-6);
+    const bothOpen = (left_open + right_open) / 2;
+
+    // Head yaw approx by comparing nose to eyes’ center
+    const nose = face[1]; // tip of the nose
+    const leftCheek = face[234];
+    const rightCheek = face[454];
+    const faceWidth = dist(leftCheek, rightCheek) || 1e-6;
+    const yaw = (nose.x - ((leftCheek.x + rightCheek.x) / 2)) / faceWidth; // negative = turn left, positive = right
+
+    // Step logic:
+    // Blink: detect a rapid "closed" moment (threshold)
+    // Turns: require sustained yaw beyond thresholds briefly
+    const next = { ...ok };
+
+    // Blink detection (simple): below threshold => blinked
+    if (!ok.blink && bothOpen < 0.18) {
+      next.blink = true;
     }
 
-    // HUD
-    ctx.fillStyle = "rgba(0,0,0,0.5)";
-    ctx.fillRect(0, 0, canvas.width, 34);
-    ctx.fillStyle = "#fff";
-    ctx.font = "14px system-ui, sans-serif";
+    // Turn left: yaw negative beyond ~ -0.06
+    if (!ok.left && yaw < -0.06) {
+      next.left = true;
+    }
 
-    const msg = allPassed
-      ? "Liveness checks passed ✓"
-      : `${currentIdx + 1}/${chosen.length}: ${current?.label || ""}`;
-    ctx.fillText(msg, 10, 20);
+    // Turn right: yaw positive beyond ~ +0.06
+    if (!ok.right && yaw > 0.06) {
+      next.right = true;
+    }
+
+    if (next.blink !== ok.blink || next.left !== ok.left || next.right !== ok.right) {
+      setOk(next);
+      // advance step index to first unmet
+      const idx =
+        !next.blink ? 0 :
+        !next.left  ? 1 :
+        !next.right ? 2 : 3;
+      setStep(idx);
+    }
+
+    // Optional overlay text
+    ctx.fillStyle = "rgba(0,0,0,0.5)";
+    ctx.fillRect(0, 0, canvas.width, 28);
+    ctx.fillStyle = "#fff";
+    ctx.font = "14px sans-serif";
+    const msg =
+      step === 0 ? "Blink your eyes slowly" :
+      step === 1 ? "Turn your head a little LEFT" :
+      step === 2 ? "Turn your head a little RIGHT" :
+      "Liveness checks passed ✓";
+    ctx.fillText(msg, 10, 18);
   }
 
   async function captureAndUpload() {
-    if (!allPassed) return;
     try {
       const canvas = canvasRef.current;
+      if (!canvas) return;
+      // Take current frame from canvas (already mirrored & drawn)
       const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
       const url = `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`;
       const form = new FormData();
@@ -215,7 +217,7 @@ function LivenessModal({ onClose, onUploaded }) {
       const r = await fetch(url, { method: "POST", body: form });
       if (!r.ok) throw new Error("Upload failed");
       const j = await r.json();
-      if (!j?.secure_url) throw new Error("No URL in upload response");
+      if (!j?.secure_url) throw new Error("Upload response missing URL");
       onUploaded?.(j.secure_url);
       onClose?.();
     } catch (e) {
@@ -223,6 +225,8 @@ function LivenessModal({ onClose, onUploaded }) {
       setError(e?.message || "Failed to upload selfie. Try again or use the Upload button.");
     }
   }
+
+  const allPassed = ok.blink && ok.left && ok.right;
 
   return (
     <div className="fixed inset-0 bg-black/80 z-50 grid place-items-center p-4">
@@ -234,64 +238,36 @@ function LivenessModal({ onClose, onUploaded }) {
 
         <div className="p-4 space-y-3">
           {error && <div className="text-sm text-red-400">{error}</div>}
-
           <div className="rounded-lg overflow-hidden border border-zinc-800">
             <video ref={videoRef} autoPlay playsInline muted style={{ display: "none" }} />
             <canvas ref={canvasRef} className="w-full h-auto block" />
           </div>
 
-          <div className="text-sm grid grid-cols-2 gap-2">
-            {chosen.map((s, i) => (
-              <div key={s.key}>
-                {i + 1}. {s.label}: {passed[s.key] ? "✅" : "⏳"}
-              </div>
-            ))}
-          </div>
+          <ul className="text-sm space-y-1">
+            <li>• Blink: {ok.blink ? "✅" : "⏳"}</li>
+            <li>• Turn Left: {ok.left ? "✅" : "⏳"}</li>
+            <li>• Turn Right: {ok.right ? "✅" : "⏳"}</li>
+          </ul>
 
           <div className="flex items-center gap-2 pt-2">
             <button
               className="px-3 py-2 rounded-lg border border-zinc-700 text-sm disabled:opacity-50"
               onClick={captureAndUpload}
               disabled={!allPassed || !CLOUD_NAME || !UPLOAD_PRESET}
-              title={allPassed ? "Capture & upload selfie" : "Finish prompts to continue"}
+              title={!allPassed ? "Complete instructions first" : "Capture & upload"}
             >
-              {allPassed ? "Capture & Upload Selfie" : "Complete prompts to continue"}
+              {allPassed ? "Capture & Upload Selfie" : "Complete steps to continue"}
             </button>
-            {(!CLOUD_NAME || !UPLOAD_PRESET) && (
+            {!CLOUD_NAME || !UPLOAD_PRESET ? (
               <div className="text-xs text-amber-400">
-                Set VITE_CLOUDINARY_CLOUD_NAME and VITE_CLOUDINARY_UPLOAD_PRESET.
+                Missing Cloudinary env. Set VITE_CLOUDINARY_CLOUD_NAME and VITE_CLOUDINARY_UPLOAD_PRESET.
               </div>
-            )}
+            ) : null}
           </div>
         </div>
       </div>
     </div>
   );
-}
-
-/* ---- Face utilities (MediaPipe landmark indices) ---- */
-function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
-function eyeOpenRatio(L) {
-  // Left: 159(top),145(bot), 33(inner),133(outer)
-  // Right: 386,374,362,263
-  const lTop=L[159], lBot=L[145], lIn=L[33], lOut=L[133];
-  const rTop=L[386], rBot=L[374], rIn=L[362], rOut=L[263];
-  const left = dist(lTop,lBot) / Math.max(dist(lIn,lOut), 1e-6);
-  const right = dist(rTop,rBot) / Math.max(dist(rIn,rOut), 1e-6);
-  return (left + right) / 2;
-}
-function eyeClosed(L){ return eyeOpenRatio(L) < 0.18; }
-function yaw(L) {
-  // nose 1, cheeks 234/454
-  const nose=L[1], lc=L[234], rc=L[454];
-  const w = Math.max(dist(lc, rc), 1e-6);
-  return (nose.x - ((lc.x + rc.x)/2)) / w; // -left, +right
-}
-function mouthOpen(L) {
-  // vertical / horizontal ratio; 13/14 are inner lips midpoints, 61/291 corners
-  const up=L[13], low=L[14], lc=L[61], rc=L[291];
-  const v = dist(up, low), h = Math.max(dist(lc, rc), 1e-6);
-  return v / h; // > ~0.32 indicates open mouth
 }
 
 export default function BecomePro() {
@@ -313,6 +289,7 @@ export default function BecomePro() {
     lga: "",
     originState: "",
     photoUrl: "",
+    // ⬇️ will optionally hold GPS too for redundancy
     lat: "",
     lon: "",
   });
@@ -334,6 +311,7 @@ export default function BecomePro() {
     shopAddress: "",
     shopPhotoOutside: "",
     shopPhotoInside: "",
+    // ⬇️ GPS for shop / work location (preferred source on server)
     lat: "",
     lon: "",
   });
@@ -360,7 +338,7 @@ export default function BecomePro() {
   const [verification, setVerification] = useState({
     idType: "",
     idUrl: "",
-    selfieWithIdUrl: "",
+    selfieWithIdUrl: "",   // keep key for server compatibility (now plain selfie)
   });
 
   const [bank, setBank] = useState({
@@ -379,9 +357,12 @@ export default function BecomePro() {
   });
 
   // ✅ Only two checkboxes now
-  const [agreements, setAgreements] = useState({ terms: false, privacy: false });
+  const [agreements, setAgreements] = useState({
+    terms: false,
+    privacy: false,
+  });
 
-  // Prefill email from /api/me
+  // Prefill email from /api/me (one UID flow intact)
   useEffect(() => {
     (async () => {
       try {
@@ -391,7 +372,7 @@ export default function BecomePro() {
     })();
   }, []);
 
-  // ---------- Cloudinary widget
+  // ---------- Cloudinary widget (optional uploads)
   const [widgetReady, setWidgetReady] = useState(!!window.cloudinary?.createUploadWidget);
   useEffect(() => {
     if (widgetReady) return;
@@ -484,15 +465,13 @@ export default function BecomePro() {
     professional.services.length > 0 &&
     verification.idType &&
     verification.idUrl &&
-    verification.selfieWithIdUrl &&
+    verification.selfieWithIdUrl &&    // now from liveness OR manual upload
     bank.bankName &&
     bank.accountName &&
     bank.accountNumber &&
     bank.bvn &&
     agreements.terms &&
     agreements.privacy;
-
-  function digitsOnly(s = "") { return String(s).replace(/\D/g, ""); }
 
   /* -------- GPS: Use my location -------- */
   async function useMyLocation() {
@@ -512,9 +491,11 @@ export default function BecomePro() {
         const lat = Number(pos.coords.latitude.toFixed(6));
         const lon = Number(pos.coords.longitude.toFixed(6));
 
+        // Save GPS both in business and identity (redundant on purpose)
         setBusiness((b) => ({ ...b, lat, lon }));
         setIdentity((i) => ({ ...i, lat, lon }));
 
+        // Try to reverse geocode to suggest state/LGA/address
         try {
           const { data } = await api.get(`/api/geo/rev?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`);
           const props = data?.features?.[0]?.properties || {};
@@ -532,7 +513,9 @@ export default function BecomePro() {
             ...prev,
             shopAddress: prev.shopAddress || formatted || prev.shopAddress,
           }));
-        } catch {}
+        } catch (e) {
+          // reverse geocode is best-effort
+        }
       });
     } catch (err) {
       setMsg(err?.message || "Failed to get your location.");
@@ -551,22 +534,39 @@ export default function BecomePro() {
 
       const payload = {
         ...(topLat && topLon ? { lat: topLat, lon: topLon } : {}),
-        identity: { ...identity, ...(topLat && topLon ? { lat: topLat, lon: topLon } : {}) },
+        identity: {
+          ...identity,
+          ...(topLat && topLon ? { lat: topLat, lon: topLon } : {}),
+        },
         professional,
-        business: { ...business, ...(topLat && topLon ? { lat: topLat, lon: topLon } : {}) },
-        availability: { ...availability, statesCovered: professional.nationwide ? stateList : availability.statesCovered },
+        business: {
+          ...business,
+          ...(topLat && topLon ? { lat: topLat, lon: topLon } : {}),
+        },
+        availability: {
+          ...availability,
+          statesCovered: professional.nationwide ? stateList : availability.statesCovered,
+        },
         pricing,
-        verification: { ...verification, ...(phoneVerifiedAt ? { phoneVerifiedAt } : {}) },
-        bank: { ...bank, accountNumber: digitsOnly(bank.accountNumber).slice(0, 10), bvn: digitsOnly(bank.bvn).slice(0, 11) },
+        verification: {
+          ...verification,
+          ...(phoneVerifiedAt ? { phoneVerifiedAt } : {}),
+        },
+        bank: {
+          ...bank,
+          accountNumber: digitsOnly(bank.accountNumber).slice(0, 10),
+          bvn: digitsOnly(bank.bvn).slice(0, 11),
+        },
         portfolio,
         ...(phoneVerifiedAt ? { phoneVerifiedAt } : {}),
         status: "submitted",
+
+        // server-side agreements visibility
         acceptedTerms: !!agreements.terms,
         acceptedPrivacy: !!agreements.privacy,
         agreements: { terms: !!agreements.terms, privacy: !!agreements.privacy },
       };
 
-      // First-time apply: POST /api/applications
       await submitProApplication(payload);
       nav("/apply/thanks");
     } catch (err) {
@@ -613,7 +613,9 @@ export default function BecomePro() {
                 onChange={(e)=>{ setIdentity({...identity, phone: e.target.value}); setPhoneVerifiedAt(null); }}
                 required
               />
-              <PhoneOTP phone={identity.phone} disabled={!identity.phone} onVerified={(iso)=>setPhoneVerifiedAt(iso)} />
+              {import.meta.env.VITE_ENABLE_PHONE_OTP !== "false" && (
+                <PhoneOTP phone={identity.phone} disabled={!identity.phone} onVerified={(iso)=>setPhoneVerifiedAt(iso)} />
+              )}
               {phoneVerifiedAt && <div className="text-xs text-emerald-300 mt-1">Verified</div>}
             </div>
             <Input label="WhatsApp (optional)" value={identity.whatsapp} onChange={(e)=>setIdentity({...identity, whatsapp: e.target.value})} />
@@ -759,7 +761,7 @@ export default function BecomePro() {
                   }}
                 />
                 <UploadButton
-                  title={widgetReady ? "Upload" : "Upload (loading…)"}
+                  title={widgetReady ? "Upload" : "Upload (loading…)"} 
                   onUploaded={(url)=>{
                     const arr=[...professional.workPhotos]; arr[idx]=url;
                     setProfessional({...professional, workPhotos: arr});
@@ -834,7 +836,7 @@ export default function BecomePro() {
             </div>
           )}
 
-          {/* GPS helpers */}
+          {/* ⬇️ GPS helpers */}
           <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
             <Input
               label="Latitude (optional)"
@@ -932,7 +934,7 @@ export default function BecomePro() {
               </div>
             </div>
             <div>
-              <Label>Selfie holding ID</Label>
+              <Label>Take a selfie *</Label>
               <div className="flex gap-2 flex-wrap">
                 <input
                   className="flex-1 bg-black border border-zinc-800 rounded-lg px-3 py-2"
@@ -943,20 +945,20 @@ export default function BecomePro() {
                 <UploadButton
                   title={widgetReady ? "Upload" : "Upload (loading…)"}
                   onUploaded={(url)=>setVerification({...verification, selfieWithIdUrl: url})}
-                  widgetFactory={widgetFactory}
+                  widgetFactory={(cb)=>widgetFactory(cb)}
                   disabled={!widgetReady}
                 />
                 <button
                   type="button"
                   className="px-3 py-2 rounded-lg border border-emerald-700 text-sm hover:bg-emerald-900/30"
                   onClick={()=>setShowLive(true)}
-                  title="Open liveness camera (randomized prompts)"
+                  title="Open liveness camera"
                 >
-                  Liveness Selfie (Random)
+                  Liveness Selfie
                 </button>
               </div>
               <p className="text-xs text-zinc-500 mt-1">
-                Complete the randomized prompts, then we’ll capture and upload a selfie automatically.
+                We’ll verify blink + head turns, then capture and upload a selfie automatically.
               </p>
             </div>
           </div>
@@ -1027,7 +1029,6 @@ export default function BecomePro() {
         <LivenessModal
           onClose={()=>setShowLive(false)}
           onUploaded={(url)=>{
-            // write to the same key your payload already uses
             setVerification((v)=>({ ...v, selfieWithIdUrl: url }));
             setShowLive(false);
           }}
