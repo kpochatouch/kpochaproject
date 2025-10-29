@@ -1,21 +1,22 @@
+// apps/web/src/components/PhoneOTP.jsx
+// Global OTP feature flag (env-driven). When false, this component is inert.
+const ENABLE_OTP = (import.meta.env.VITE_ENABLE_PHONE_OTP ?? "false") !== "false";
+
+export default function PhoneOTP(props) {
+  if (!ENABLE_OTP) return null;
+  return <PhoneOTPImpl {...props} />;
+}
+
+/* --- Real implementation only runs if ENABLE_OTP is true --- */
 import { useEffect, useRef, useState } from "react";
 import {
   getAuth,
   RecaptchaVerifier,
   signInWithPhoneNumber,
-  linkWithCredential,
-  PhoneAuthProvider,
 } from "firebase/auth";
-import { app } from "../lib/firebase"; // your existing Firebase init
+import { app } from "../lib/firebase";
 
-/**
- * Reusable phone OTP component.
- * Props:
- *  - phone: string (E.164 or local; we only pass to Firebase as-is)
- *  - onVerified: (dateISO) => void   // called once verification succeeds
- *  - disabled: boolean
- */
-export default function PhoneOTP({ phone, onVerified, disabled = false }) {
+function PhoneOTPImpl({ phone, onVerified, disabled = false }) {
   const auth = getAuth(app);
   const recaptchaDivId = useRef(`recaptcha-${Math.random().toString(36).slice(2)}`);
   const [sending, setSending] = useState(false);
@@ -23,29 +24,19 @@ export default function PhoneOTP({ phone, onVerified, disabled = false }) {
   const [code, setCode] = useState("");
   const [msg, setMsg] = useState("");
 
-  // setup invisible reCAPTCHA once
   useEffect(() => {
     if (!auth || !recaptchaDivId.current) return;
     if (window.__otpRecaptchaSetup) return;
     try {
-      window.__otpRecaptchaSetup = new RecaptchaVerifier(auth, recaptchaDivId.current, {
-        size: "invisible",
-      });
+      window.__otpRecaptchaSetup = new RecaptchaVerifier(auth, recaptchaDivId.current, { size: "invisible" });
     } catch {}
-    // no cleanup — reused across page
   }, [auth]);
 
   async function sendCode() {
     try {
       setMsg("");
-      if (!phone) {
-        setMsg("Enter phone number first.");
-        return;
-      }
+      if (!phone) { setMsg("Enter phone number first."); return; }
       setSending(true);
-
-      // If user signed in by email, we link phone to their account;
-      // otherwise we can just signInWithPhoneNumber (either works).
       const verifier = window.__otpRecaptchaSetup;
       const result = await signInWithPhoneNumber(auth, phone, verifier);
       setConfirm(result);
@@ -63,10 +54,7 @@ export default function PhoneOTP({ phone, onVerified, disabled = false }) {
       setMsg("");
       if (!confirm || !code) return;
       await confirm.confirm(code);
-
-      // success — mark verified
-      const when = new Date().toISOString();
-      onVerified?.(when);
+      onVerified?.(new Date().toISOString());
       setMsg("Phone verified ✅");
     } catch (e) {
       setMsg(e?.message || "Invalid code.");
@@ -105,8 +93,6 @@ export default function PhoneOTP({ phone, onVerified, disabled = false }) {
           </div>
         )}
       </div>
-
-      {/* Invisible reCAPTCHA anchor */}
       <div id={recaptchaDivId.current} />
     </div>
   );
