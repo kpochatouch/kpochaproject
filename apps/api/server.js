@@ -35,6 +35,7 @@ import uploadsRoutes from "./routes/uploads.js";
 import payoutRoutes from "./routes/payout.js";
 import adminProsRoutes from "./routes/adminPros.js";
 import geoRouter from "./routes/geo.js"; // << mount router; no more inlined NG geo
+import riskRoutes from "./routes/risk.js"; // ← NEW
 
 dotenv.config();
 
@@ -540,6 +541,9 @@ app.use("/api", uploadsRoutes({ requireAuth }));
 
 // Payout bank details
 app.use("/api", payoutRoutes({ requireAuth, Application }));
+
+// 🔐 Risk / Liveness logging (no external deps)
+app.use("/api", riskRoutes({ requireAuth, requireAdmin, Application })); // ← NEW
 
 // Admin pros (approve + decline)
 try {

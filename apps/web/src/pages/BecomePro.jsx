@@ -9,7 +9,7 @@ import PhoneOTP from "../components/PhoneOTP.jsx";
 const CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || "";
 const UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET || "";
 
-/* ---------- Services ---------- */
+/* ---------- Services (pickable) ---------- */
 const SERVICE_OPTIONS = [
   "Barbering",
   "Hair Styling (female)",
@@ -22,6 +22,19 @@ const SERVICE_OPTIONS = [
   "Skincare / Facial",
   "Others",
 ];
+
+// Any item here will demand a price box when selected
+const PRICEABLE = new Set([
+  "Barbering",
+  "Hair Styling (female)",
+  "Wig installation",
+  "Dreadlock / Locs",
+  "Pedicure",
+  "Manicure",
+  "Nails (extensions/maintenance)",
+  "Makeup",
+  "Skincare / Facial",
+]);
 
 /* ---------- Utilities ---------- */
 function loadScriptOnce(src, id) {
@@ -39,53 +52,38 @@ function loadScriptOnce(src, id) {
 function digitsOnly(s = "") {
   return String(s).replace(/\D/g, "");
 }
+const notEmpty = (v) => (typeof v === "string" ? v.trim() !== "" : v != null);
 
 /* ---------- Liveness Modal (blink + head turns via MediaPipe FaceMesh) ---------- */
-/**
- * Implementation notes:
- * - Loads MediaPipe FaceMesh from CDN at runtime (no build changes).
- * - Verifies three steps: Blink, Turn Left, Turn Right.
- * - Uses simple geometric checks from landmarks (non-ML heuristics on ML landmarks).
- * - On success, captures a frame to canvas and uploads it to Cloudinary unsigned preset.
- */
 function LivenessModal({ onClose, onUploaded }) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const [error, setError] = useState("");
   const [step, setStep] = useState(0);
-  const steps = [
-    { key: "blink", text: "Blink your eyes slowly" },
-    { key: "left",  text: "Turn your head a little to the LEFT" },
-    { key: "right", text: "Turn your head a little to the RIGHT" },
-  ];
   const [ok, setOk] = useState({ blink: false, left: false, right: false });
   const rafRef = useRef(null);
   const faceMeshRef = useRef(null);
   const streamRef = useRef(null);
 
   useEffect(() => {
-    let cancelled = false;
-
     (async () => {
       try {
-        // 1) Load mediapipe face mesh
         await loadScriptOnce("https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js", "mp-face-mesh");
         await loadScriptOnce("https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js", "mp-cam-utils");
         await loadScriptOnce("https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js", "mp-draw-utils");
 
-        // 2) Start camera
         const v = videoRef.current;
         if (!v) return;
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: 640, height: 480 } });
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "user", width: 640, height: 480 },
+        });
         streamRef.current = stream;
         v.srcObject = stream;
         await v.play();
 
-        // 3) Setup FaceMesh
-        // global: window.faceMesh.FaceMesh
         const FaceMesh = window.faceMesh || window;
         const fm = new FaceMesh.FaceMesh({
-          locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+          locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`,
         });
         fm.setOptions({
           maxNumFaces: 1,
@@ -95,9 +93,7 @@ function LivenessModal({ onClose, onUploaded }) {
         });
         faceMeshRef.current = fm;
 
-        fm.onResults((results) => {
-          drawAndEvaluate(results);
-        });
+        fm.onResults((results) => drawAndEvaluate(results));
 
         const cam = new window.Camera(videoRef.current, {
           onFrame: async () => {
@@ -110,12 +106,11 @@ function LivenessModal({ onClose, onUploaded }) {
         cam.start();
       } catch (e) {
         console.error(e);
-        setError("Camera or model failed to initialize. You can still upload a selfie via the Upload button.");
+        setError("Camera or model failed to initialize.");
       }
     })();
 
     return () => {
-      // cleanup
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       try {
         const s = streamRef.current;
@@ -132,64 +127,43 @@ function LivenessModal({ onClose, onUploaded }) {
     canvas.width = video.videoWidth || 640;
     canvas.height = video.videoHeight || 480;
 
-    // Draw video to canvas
+    // Draw video mirrored
     ctx.save();
-    ctx.scale(-1, 1);             // mirror like a selfie
+    ctx.scale(-1, 1);
     ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
     ctx.restore();
 
     const face = results.multiFaceLandmarks?.[0];
     if (!face) return;
 
-    // === Basic landmark helpers ===
-    // EAR-like blink measure: vertical eye opening vs horizontal span (left eye approx indices)
-    // Left eye: use 159(top) - 145(bottom), 33(inner) - 133(outer)
+    const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+
+    // Blink
     const l_top = face[159], l_bot = face[145], l_in = face[33], l_out = face[133];
     const r_top = face[386], r_bot = face[374], r_in = face[362], r_out = face[263];
-
-    const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
     const left_open = dist(l_top, l_bot) / (dist(l_in, l_out) || 1e-6);
     const right_open = dist(r_top, r_bot) / (dist(r_in, r_out) || 1e-6);
     const bothOpen = (left_open + right_open) / 2;
 
-    // Head yaw approx by comparing nose to eyes’ center
-    const nose = face[1]; // tip of the nose
+    // Yaw (turns)
+    const nose = face[1];
     const leftCheek = face[234];
     const rightCheek = face[454];
     const faceWidth = dist(leftCheek, rightCheek) || 1e-6;
-    const yaw = (nose.x - ((leftCheek.x + rightCheek.x) / 2)) / faceWidth; // negative = turn left, positive = right
+    const yaw = (nose.x - ((leftCheek.x + rightCheek.x) / 2)) / faceWidth; // <0 left, >0 right
 
-    // Step logic:
-    // Blink: detect a rapid "closed" moment (threshold)
-    // Turns: require sustained yaw beyond thresholds briefly
     const next = { ...ok };
-
-    // Blink detection (simple): below threshold => blinked
-    if (!ok.blink && bothOpen < 0.18) {
-      next.blink = true;
-    }
-
-    // Turn left: yaw negative beyond ~ -0.06
-    if (!ok.left && yaw < -0.06) {
-      next.left = true;
-    }
-
-    // Turn right: yaw positive beyond ~ +0.06
-    if (!ok.right && yaw > 0.06) {
-      next.right = true;
-    }
+    if (!ok.blink && bothOpen < 0.18) next.blink = true;
+    if (!ok.left && yaw < -0.06) next.left = true;
+    if (!ok.right && yaw > 0.06) next.right = true;
 
     if (next.blink !== ok.blink || next.left !== ok.left || next.right !== ok.right) {
       setOk(next);
-      // advance step index to first unmet
-      const idx =
-        !next.blink ? 0 :
-        !next.left  ? 1 :
-        !next.right ? 2 : 3;
+      const idx = !next.blink ? 0 : !next.left ? 1 : !next.right ? 2 : 3;
       setStep(idx);
     }
 
-    // Optional overlay text
+    // Overlay instruction
     ctx.fillStyle = "rgba(0,0,0,0.5)";
     ctx.fillRect(0, 0, canvas.width, 28);
     ctx.fillStyle = "#fff";
@@ -204,9 +178,13 @@ function LivenessModal({ onClose, onUploaded }) {
 
   async function captureAndUpload() {
     try {
+      if (!CLOUD_NAME || !UPLOAD_PRESET) {
+        setError("Cloud upload not configured.");
+        return;
+      }
       const canvas = canvasRef.current;
       if (!canvas) return;
-      // Take current frame from canvas (already mirrored & drawn)
+
       const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
       const url = `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`;
       const form = new FormData();
@@ -218,11 +196,13 @@ function LivenessModal({ onClose, onUploaded }) {
       if (!r.ok) throw new Error("Upload failed");
       const j = await r.json();
       if (!j?.secure_url) throw new Error("Upload response missing URL");
-      onUploaded?.(j.secure_url);
+
+      const metrics = { blink: ok.blink, turnLeft: ok.left, turnRight: ok.right, ts: new Date().toISOString() };
+      onUploaded?.({ url: j.secure_url, metrics });
       onClose?.();
     } catch (e) {
       console.error(e);
-      setError(e?.message || "Failed to upload selfie. Try again or use the Upload button.");
+      setError(e?.message || "Failed to upload selfie.");
     }
   }
 
@@ -237,7 +217,16 @@ function LivenessModal({ onClose, onUploaded }) {
         </div>
 
         <div className="p-4 space-y-3">
-          {error && <div className="text-sm text-red-400">{error}</div>}
+          {/* We keep this hidden button purely to avoid dead-ends if needed in future */}
+          <button
+            onClick={captureAndUpload}
+            disabled={!allPassed || !CLOUD_NAME || !UPLOAD_PRESET}
+            className="px-3 py-2 rounded-lg border border-zinc-700 text-sm disabled:opacity-50"
+            title={!allPassed ? "Complete instructions first" : "Capture & upload"}
+          >
+            {allPassed ? "Capture & Upload Selfie" : "Complete steps to continue"}
+          </button>
+
           <div className="rounded-lg overflow-hidden border border-zinc-800">
             <video ref={videoRef} autoPlay playsInline muted style={{ display: "none" }} />
             <canvas ref={canvasRef} className="w-full h-auto block" />
@@ -248,32 +237,29 @@ function LivenessModal({ onClose, onUploaded }) {
             <li>• Turn Left: {ok.left ? "✅" : "⏳"}</li>
             <li>• Turn Right: {ok.right ? "✅" : "⏳"}</li>
           </ul>
-
-          <div className="flex items-center gap-2 pt-2">
-            <button
-              className="px-3 py-2 rounded-lg border border-zinc-700 text-sm disabled:opacity-50"
-              onClick={captureAndUpload}
-              disabled={!allPassed || !CLOUD_NAME || !UPLOAD_PRESET}
-              title={!allPassed ? "Complete instructions first" : "Capture & upload"}
-            >
-              {allPassed ? "Capture & Upload Selfie" : "Complete steps to continue"}
-            </button>
-            {!CLOUD_NAME || !UPLOAD_PRESET ? (
-              <div className="text-xs text-amber-400">
-                Missing Cloudinary env. Set VITE_CLOUDINARY_CLOUD_NAME and VITE_CLOUDINARY_UPLOAD_PRESET.
-              </div>
-            ) : null}
-          </div>
         </div>
       </div>
     </div>
   );
 }
 
+/* ======================= BecomePro Page ======================= */
 export default function BecomePro() {
   const nav = useNavigate();
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
+
+  // Hidden dev fallback: press Ctrl+Alt+U to show a manual selfie URL box
+  const [devManualSelfie, setDevManualSelfie] = useState(false);
+  useEffect(() => {
+    function onKey(e) {
+      if (e.ctrlKey && e.altKey && (e.key === "u" || e.key === "U")) {
+        setDevManualSelfie((v) => !v);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // --------- Sections state ---------
   const [identity, setIdentity] = useState({
@@ -289,7 +275,6 @@ export default function BecomePro() {
     lga: "",
     originState: "",
     photoUrl: "",
-    // ⬇️ will optionally hold GPS too for redundancy
     lat: "",
     lon: "",
   });
@@ -311,7 +296,6 @@ export default function BecomePro() {
     shopAddress: "",
     shopPhotoOutside: "",
     shopPhotoInside: "",
-    // ⬇️ GPS for shop / work location (preferred source on server)
     lat: "",
     lon: "",
   });
@@ -326,19 +310,26 @@ export default function BecomePro() {
     statesCovered: [],
   });
 
+  // Pricing now has dynamic maps keyed by service + custom rows for "Others"
   const [pricing, setPricing] = useState({
+    // legacy named fields kept for backward compatibility
     menCut: "",
     womenCut: "",
     locs: "",
     manicure: "",
     pedicure: "",
     otherServices: "",
+
+    byService: {},           // { [serviceName]: "1500" }
+    custom: [{ name: "", amount: "" }], // used when "Others" selected
   });
 
   const [verification, setVerification] = useState({
     idType: "",
     idUrl: "",
-    selfieWithIdUrl: "",   // keep key for server compatibility (now plain selfie)
+    selfieWithIdUrl: "",      // set by liveness or dev manual
+    livenessVideoUrl: "",
+    livenessMetrics: {},
   });
 
   const [bank, setBank] = useState({
@@ -356,13 +347,9 @@ export default function BecomePro() {
     testimonials: "",
   });
 
-  // ✅ Only two checkboxes now
-  const [agreements, setAgreements] = useState({
-    terms: false,
-    privacy: false,
-  });
+  const [agreements, setAgreements] = useState({ terms: false, privacy: false });
 
-  // Prefill email from /api/me (one UID flow intact)
+  // Prefill email from /api/me
   useEffect(() => {
     (async () => {
       try {
@@ -372,7 +359,7 @@ export default function BecomePro() {
     })();
   }, []);
 
-  // ---------- Cloudinary widget (optional uploads)
+  // ---------- Cloudinary widget (used for non-liveness uploads only)
   const [widgetReady, setWidgetReady] = useState(!!window.cloudinary?.createUploadWidget);
   useEffect(() => {
     if (widgetReady) return;
@@ -391,8 +378,6 @@ export default function BecomePro() {
         clearInterval(poll);
       }
     }, 200);
-    const timeout = setTimeout(() => clearInterval(poll), 10000);
-    return () => { clearInterval(poll); clearTimeout(timeout); };
   }, [widgetReady]);
 
   const widgetFactory = useMemo(() => {
@@ -425,7 +410,15 @@ export default function BecomePro() {
   const toggleService = (name) =>
     setProfessional((p) => {
       const has = p.services.includes(name);
-      return { ...p, services: has ? p.services.filter(s => s!==name) : [...p.services, name] };
+      const next = has ? p.services.filter((s) => s !== name) : [...p.services, name];
+      // keep pricing map in sync
+      setPricing((pr) => {
+        const by = { ...pr.byService };
+        if (!has && PRICEABLE.has(name) && !by[name]) by[name] = "";
+        if (has && by[name] !== undefined) delete by[name];
+        return { ...pr, byService: by };
+      });
+      return { ...p, services: next };
     });
 
   const toggleDay = (key) =>
@@ -452,7 +445,26 @@ export default function BecomePro() {
   }, []);
   const stateList = useMemo(() => (allStates || []).slice().sort(), [allStates]);
 
-  // ✅ canSubmit includes only required fields and terms/privacy
+  // ----- Price validation
+  const priceMisses = useMemo(() => {
+    const misses = [];
+    for (const svc of professional.services) {
+      if (!PRICEABLE.has(svc)) continue;
+      if (!notEmpty(pricing.byService[svc])) misses.push(svc);
+    }
+    // If "Others" picked, require at least one full custom row
+    if (professional.services.includes("Others")) {
+      const complete = pricing.custom.filter(r => notEmpty(r.name) && notEmpty(r.amount));
+      const partial = pricing.custom.some(r =>
+        (notEmpty(r.name) && !notEmpty(r.amount)) || (!notEmpty(r.name) && notEmpty(r.amount))
+      );
+      if (complete.length === 0) misses.push("Others (add at least one service & price)");
+      if (partial) misses.push("Others (finish all custom rows)");
+    }
+    return misses;
+  }, [professional.services, pricing]);
+
+  // ✅ Submit gate (adds pricing + liveness)
   const canSubmit =
     identity.firstName &&
     identity.lastName &&
@@ -465,13 +477,39 @@ export default function BecomePro() {
     professional.services.length > 0 &&
     verification.idType &&
     verification.idUrl &&
-    verification.selfieWithIdUrl &&    // now from liveness OR manual upload
+    verification.selfieWithIdUrl &&
     bank.bankName &&
     bank.accountName &&
     bank.accountNumber &&
     bank.bvn &&
     agreements.terms &&
-    agreements.privacy;
+    agreements.privacy &&
+    priceMisses.length === 0;
+
+  // Your requested helper (extended with prices)
+  function missingReasons() {
+    const m = [];
+    if (!identity.firstName) m.push("First name");
+    if (!identity.lastName) m.push("Last name");
+    if (!identity.gender) m.push("Gender");
+    if (!identity.dob) m.push("Date of birth");
+    if (!identity.phone) m.push("Phone");
+    if (!identity.state) m.push("State");
+    if (!professional.nationwide && !identity.lga) m.push("LGA (or select Nationwide)");
+    if (!identity.photoUrl) m.push("Profile photo");
+    if (!professional.services.length) m.push("At least one service");
+    if (!verification.idType) m.push("ID type");
+    if (!verification.idUrl) m.push("Government ID image");
+    if (!verification.selfieWithIdUrl) m.push("Liveness selfie");
+    if (!bank.bankName) m.push("Bank name");
+    if (!bank.accountName) m.push("Account name");
+    if (!bank.accountNumber) m.push("Account number");
+    if (!bank.bvn) m.push("BVN");
+    if (!agreements.terms) m.push("Accept Terms");
+    if (!agreements.privacy) m.push("Accept Privacy Policy");
+    for (const miss of priceMisses) m.push(`Price for ${miss}`);
+    return m;
+  }
 
   /* -------- GPS: Use my location -------- */
   async function useMyLocation() {
@@ -491,11 +529,9 @@ export default function BecomePro() {
         const lat = Number(pos.coords.latitude.toFixed(6));
         const lon = Number(pos.coords.longitude.toFixed(6));
 
-        // Save GPS both in business and identity (redundant on purpose)
         setBusiness((b) => ({ ...b, lat, lon }));
         setIdentity((i) => ({ ...i, lat, lon }));
 
-        // Try to reverse geocode to suggest state/LGA/address
         try {
           const { data } = await api.get(`/api/geo/rev?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`);
           const props = data?.features?.[0]?.properties || {};
@@ -513,9 +549,7 @@ export default function BecomePro() {
             ...prev,
             shopAddress: prev.shopAddress || formatted || prev.shopAddress,
           }));
-        } catch (e) {
-          // reverse geocode is best-effort
-        }
+        } catch {}
       });
     } catch (err) {
       setMsg(err?.message || "Failed to get your location.");
@@ -524,13 +558,27 @@ export default function BecomePro() {
 
   async function submit(e) {
     e.preventDefault();
-    if (!canSubmit) return;
+    if (!canSubmit) {
+      const reasons = missingReasons();
+      setMsg(`Please complete: ${reasons.join(", ")}`);
+      return;
+    }
 
     setBusy(true);
     setMsg("");
     try {
       const topLat = business.lat || identity.lat || "";
       const topLon = business.lon || identity.lon || "";
+
+      // Best-effort: keep old fields mapped for compatibility
+      const legacy = {
+        menCut: pricing.byService["Barbering"] ?? pricing.menCut,
+        womenCut: pricing.byService["Hair Styling (female)"] ?? pricing.womenCut,
+        locs: pricing.byService["Dreadlock / Locs"] ?? pricing.locs,
+        manicure: pricing.byService["Manicure"] ?? pricing.manicure,
+        pedicure: pricing.byService["Pedicure"] ?? pricing.pedicure,
+        otherServices: pricing.otherServices,
+      };
 
       const payload = {
         ...(topLat && topLon ? { lat: topLat, lon: topLon } : {}),
@@ -547,10 +595,19 @@ export default function BecomePro() {
           ...availability,
           statesCovered: professional.nationwide ? stateList : availability.statesCovered,
         },
-        pricing,
+        pricing: {
+          ...legacy,
+          byService: pricing.byService,
+          custom: pricing.custom.filter(r => notEmpty(r.name) && notEmpty(r.amount)),
+        },
         verification: {
           ...verification,
           ...(phoneVerifiedAt ? { phoneVerifiedAt } : {}),
+          liveness: {
+            selfieUrl: verification.selfieWithIdUrl,
+            videoUrl: verification.livenessVideoUrl || "",
+            metrics: verification.livenessMetrics || {},
+          },
         },
         bank: {
           ...bank,
@@ -560,8 +617,6 @@ export default function BecomePro() {
         portfolio,
         ...(phoneVerifiedAt ? { phoneVerifiedAt } : {}),
         status: "submitted",
-
-        // server-side agreements visibility
         acceptedTerms: !!agreements.terms,
         acceptedPrivacy: !!agreements.privacy,
         agreements: { terms: !!agreements.terms, privacy: !!agreements.privacy },
@@ -761,7 +816,7 @@ export default function BecomePro() {
                   }}
                 />
                 <UploadButton
-                  title={widgetReady ? "Upload" : "Upload (loading…)"} 
+                  title={widgetReady ? "Upload" : "Upload (loading…)"}
                   onUploaded={(url)=>{
                     const arr=[...professional.workPhotos]; arr[idx]=url;
                     setProfessional({...professional, workPhotos: arr});
@@ -836,7 +891,7 @@ export default function BecomePro() {
             </div>
           )}
 
-          {/* ⬇️ GPS helpers */}
+          {/* GPS helpers */}
           <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
             <Input
               label="Latitude (optional)"
@@ -889,23 +944,96 @@ export default function BecomePro() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
             <Select label="Home service?" value={availability.homeService} onChange={(e)=>setAvailability({...availability, homeService:e.target.value})} options={["no","yes"]} />
             {availability.homeService === "yes" && (
-              <Input label="Home service starting price (₦)" value={availability.homeServicePrice} onChange={(e)=>setAvailability({...availability, homeServicePrice: e.target.value})}/>
+              <Input label="Home service starting price (₦)" value={pricing.byService["Home service"] || availability.homeServicePrice}
+                     onChange={(e)=>{
+                       setAvailability({...availability, homeServicePrice: e.target.value});
+                     }}/>
             )}
           </div>
         </Section>
 
-        {/* SECTION 5: Pricing (optional) */}
-        <Section title="Pricing (optional)" id="pricing">
+        {/* SECTION 5: Pricing (required per selected service) */}
+        <Section title="Pricing" id="pricing">
+          {/* Auto rows for each selected, priceable service */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <Input label="Men’s Cut (₦)" value={pricing.menCut} onChange={(e)=>setPricing({...pricing, menCut: e.target.value})}/>
-            <Input label="Women’s Cut (₦)" value={pricing.womenCut} onChange={(e)=>setPricing({...pricing, womenCut: e.target.value})}/>
-            <Input label="Dreadlock (₦)" value={pricing.locs} onChange={(e)=>setPricing({...pricing, locs: e.target.value})}/>
-            <Input label="Manicure (₦)" value={pricing.manicure} onChange={(e)=>setPricing({...pricing, manicure: e.target.value})}/>
-            <Input label="Pedicure (₦)" value={pricing.pedicure} onChange={(e)=>setPricing({...pricing, pedicure: e.target.value})}/>
+            {professional.services.filter(s => PRICEABLE.has(s)).map((svc) => (
+              <label key={svc} className="block">
+                <Label>{svc} (₦)</Label>
+                <input
+                  className="w-full bg-black border border-zinc-800 rounded-lg px-3 py-2"
+                  placeholder="₦0"
+                  inputMode="numeric"
+                  value={pricing.byService[svc] ?? ""}
+                  onChange={(e)=>{
+                    const amount = digitsOnly(e.target.value);
+                    setPricing((p)=>({ ...p, byService: { ...p.byService, [svc]: amount } }));
+                    // also mirror legacy fields where applicable
+                    if (svc === "Barbering") setPricing((p)=>({ ...p, menCut: amount }));
+                    if (svc === "Hair Styling (female)") setPricing((p)=>({ ...p, womenCut: amount }));
+                    if (svc === "Dreadlock / Locs") setPricing((p)=>({ ...p, locs: amount }));
+                    if (svc === "Manicure") setPricing((p)=>({ ...p, manicure: amount }));
+                    if (svc === "Pedicure") setPricing((p)=>({ ...p, pedicure: amount }));
+                  }}
+                />
+              </label>
+            ))}
           </div>
+
+          {/* Custom rows for "Others" */}
+          {professional.services.includes("Others") && (
+            <div className="mt-4">
+              <Label>Other Services</Label>
+              {pricing.custom.map((row, idx) => (
+                <div key={idx} className="grid grid-cols-1 md:grid-cols-5 gap-2 mb-2">
+                  <input
+                    className="md:col-span-3 bg-black border border-zinc-800 rounded-lg px-3 py-2"
+                    placeholder="Service name (e.g., Bridal up-do)"
+                    value={row.name}
+                    onChange={(e)=>{
+                      const next = [...pricing.custom];
+                      next[idx] = { ...next[idx], name: e.target.value };
+                      setPricing((p)=>({ ...p, custom: next }));
+                    }}
+                  />
+                  <input
+                    className="md:col-span-2 bg-black border border-zinc-800 rounded-lg px-3 py-2"
+                    placeholder="₦0"
+                    inputMode="numeric"
+                    value={row.amount}
+                    onChange={(e)=>{
+                      const next = [...pricing.custom];
+                      next[idx] = { ...next[idx], amount: digitsOnly(e.target.value) };
+                      setPricing((p)=>({ ...p, custom: next }));
+                    }}
+                  />
+                  {idx > 0 && (
+                    <button
+                      type="button"
+                      className="text-sm text-red-400"
+                      onClick={()=>{
+                        setPricing((p)=>({ ...p, custom: p.custom.filter((_,i)=>i!==idx) }));
+                      }}
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+              ))}
+
+              <button
+                type="button"
+                className="text-sm text-gold underline"
+                onClick={()=> setPricing((p)=>({ ...p, custom: [...p.custom, { name:"", amount:"" }] }))}
+              >
+                + Add another service
+              </button>
+            </div>
+          )}
+
+          {/* Free-text notes (kept) */}
           <textarea
             className="w-full mt-3 bg-black border border-zinc-800 rounded-lg px-3 py-2"
-            placeholder="Other services & prices"
+            placeholder="Notes (optional) — e.g., bundle conditions, timing, exceptions"
             value={pricing.otherServices}
             onChange={(e)=>setPricing({...pricing, otherServices: e.target.value})}
           />
@@ -933,29 +1061,35 @@ export default function BecomePro() {
                 />
               </div>
             </div>
+
+            {/* LIVENESS default (no visible manual field) */}
             <div>
-              <Label>Take a selfie *</Label>
-              <div className="flex gap-2 flex-wrap">
-                <input
-                  className="flex-1 bg-black border border-zinc-800 rounded-lg px-3 py-2"
-                  placeholder="Selfie Image URL"
-                  value={verification.selfieWithIdUrl}
-                  onChange={(e)=>setVerification({...verification, selfieWithIdUrl: e.target.value})}
-                />
-                <UploadButton
-                  title={widgetReady ? "Upload" : "Upload (loading…)"}
-                  onUploaded={(url)=>setVerification({...verification, selfieWithIdUrl: url})}
-                  widgetFactory={(cb)=>widgetFactory(cb)}
-                  disabled={!widgetReady}
-                />
+              <Label>Take a selfie (Liveness) *</Label>
+              <div className="flex gap-2 flex-wrap items-center">
                 <button
                   type="button"
                   className="px-3 py-2 rounded-lg border border-emerald-700 text-sm hover:bg-emerald-900/30"
                   onClick={()=>setShowLive(true)}
                   title="Open liveness camera"
                 >
-                  Liveness Selfie
+                  Open Liveness Camera
                 </button>
+                {verification.selfieWithIdUrl ? (
+                  <span className="text-xs text-emerald-400">Captured ✓</span>
+                ) : (
+                  <span className="text-xs text-zinc-500">Required</span>
+                )}
+
+                {/* Hidden dev fallback toggle: Ctrl+Alt+U */}
+                {devManualSelfie && (
+                  <input
+                    className="bg-black border border-zinc-800 rounded-lg px-3 py-2"
+                    placeholder="(dev) Manual selfie URL"
+                    value={verification.selfieWithIdUrl}
+                    onChange={(e)=>setVerification({...verification, selfieWithIdUrl: e.target.value})}
+                    title="Temporary fallback — for testing only"
+                  />
+                )}
               </div>
               <p className="text-xs text-zinc-500 mt-1">
                 We’ll verify blink + head turns, then capture and upload a selfie automatically.
@@ -1000,7 +1134,7 @@ export default function BecomePro() {
           />
         </Section>
 
-        {/* SECTION 9: Agreements (only two) */}
+        {/* SECTION 9: Agreements */}
         <Section title="User Agreements" id="agreements">
           <div className="space-y-2 text-sm">
             <Check
@@ -1028,8 +1162,8 @@ export default function BecomePro() {
       {showLive && (
         <LivenessModal
           onClose={()=>setShowLive(false)}
-          onUploaded={(url)=>{
-            setVerification((v)=>({ ...v, selfieWithIdUrl: url }));
+          onUploaded={({ url, metrics })=>{
+            setVerification((v)=>({ ...v, selfieWithIdUrl: url, livenessMetrics: metrics }));
             setShowLive(false);
           }}
         />
