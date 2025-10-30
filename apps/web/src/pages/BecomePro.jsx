@@ -340,9 +340,11 @@ export default function BecomePro() {
     }
 
     // Verification required
-    if (!verification.idType) m.push("ID type");
-    if (!verification.idUrl) m.push("Government ID image");
-    if (!verification.selfieWithIdUrl) m.push("Liveness selfie");
+if (!verification.idType) m.push("ID type");
+if (!verification.idUrl) m.push("Government ID image");
+// Liveness selfie is OPTIONAL for now — camera not reliable
+// if (!verification.selfieWithIdUrl) m.push("Liveness selfie");
+
 
     // Bank required
     if (!bank.bankName) m.push("Bank name");
@@ -712,7 +714,7 @@ export default function BecomePro() {
           />
 
           <div className="mt-3">
-            <Label>Liveness (Selfie) *</Label>
+            <Label>Liveness (Selfie) (optional)</Label>
             <div className="flex items-center gap-2 flex-wrap">
               <button
                 type="button"
@@ -724,10 +726,11 @@ export default function BecomePro() {
               </button>
 
               {verification.selfieWithIdUrl ? (
-                <span className="text-xs text-emerald-400">Captured ✓</span>
+              <span className="text-xs text-emerald-400">Captured ✓</span>
               ) : (
-                <span className="text-xs text-zinc-500">Required</span>
+              <span className="text-xs text-zinc-500">Optional — you can submit without it</span>
               )}
+
 
               {/* Hidden fallback (revealed only when needed) */}
               {!verification.selfieWithIdUrl && (
