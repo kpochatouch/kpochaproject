@@ -170,13 +170,6 @@ function SettingsSmart() {
 }
 
 /* ---------- NEW: Smart “Find a professional” redirect ---------- */
-/**
- * Logic:
- * - Not logged in => send to /login
- * - Logged in => GET /api/profile/client/me
- *    - if null => push /client-register
- *    - else    => push /browse
- */
 function FindProSmart() {
   const navigate = useNavigate();
   const loc = useLocation();
@@ -191,22 +184,20 @@ function FindProSmart() {
         navigate("/login", { replace: true, state: { from: loc } });
         return;
       }
-      if (loading) return; // wait for /api/me snapshot
+      if (loading) return;
 
       // 2) Check if client profile exists
       try {
         const { data } = await api.get("/api/profile/client/me");
         if (!alive) return;
 
-        // If API returns null => no client profile yet
         if (!data) {
-          navigate("/client-register", { replace: true });
+          navigate("/client/register", { replace: true });
         } else {
           navigate("/browse", { replace: true });
         }
       } catch {
-        // On any error, default to client register so the user can complete profile
-        navigate("/client-register", { replace: true });
+        navigate("/client/register", { replace: true });
       }
     })();
 
@@ -230,12 +221,11 @@ export default function App() {
               {/* Public */}
               <Route path="/" element={<Home />} />
               <Route path="/browse" element={<Browse />} />
-              {/* NEW smart route that your “Find a professional” button should use */}
               <Route path="/find" element={<FindProSmart />} />
 
               <Route path="/book/:barberId" element={<BookService />} />
 
-              {/* Booking details require auth (server validates token too) */}
+              {/* Booking details require auth */}
               <Route
                 path="/bookings/:id"
                 element={
@@ -245,7 +235,7 @@ export default function App() {
                 }
               />
 
-              {/* Profile (client) */}
+              {/* Profile */}
               <Route
                 path="/profile"
                 element={
@@ -271,7 +261,7 @@ export default function App() {
               <Route path="/apply/thanks" element={<ApplyThanks />} />
               <Route path="/payment/confirm" element={<PaymentConfirm />} />
 
-              {/* Wallet (smart: pro vs client) */}
+              {/* Wallet */}
               <Route
                 path="/wallet"
                 element={
@@ -281,7 +271,7 @@ export default function App() {
                 }
               />
 
-              {/* Settings (smart: pro vs client) */}
+              {/* Settings */}
               <Route
                 path="/settings"
                 element={
@@ -290,7 +280,6 @@ export default function App() {
                   </RequireAuth>
                 }
               />
-              {/* Direct access variants (optional deep links) */}
               <Route
                 path="/settings/pro"
                 element={
@@ -308,7 +297,7 @@ export default function App() {
                 }
               />
 
-              {/* Become a Pro (application) */}
+              {/* Become a Pro */}
               <Route
                 path="/become"
                 element={
@@ -318,7 +307,7 @@ export default function App() {
                 }
               />
 
-              {/* ✅ Liveness camera page */}
+              {/* ✅ Liveness camera */}
               <Route
                 path="/liveness"
                 element={
@@ -328,16 +317,17 @@ export default function App() {
                 }
               />
 
-              {/* Client register wizard */}
+              {/* ✅ Client register canonical route */}
               <Route
-                path="/client-register"
+                path="/client/register"
                 element={
                   <RequireAuth>
                     <ClientRegister />
                   </RequireAuth>
                 }
               />
-              <Route path="/register" element={<Navigate to="/client-register" replace />} />
+              <Route path="/register" element={<Navigate to="/client/register" replace />} />
+              <Route path="/client-register" element={<Navigate to="/client/register" replace />} />
 
               {/* Account deactivation */}
               <Route
@@ -360,7 +350,7 @@ export default function App() {
               />
               <Route path="/pro" element={<Navigate to="/pro-dashboard" replace />} />
 
-              {/* Admin (server also enforces requireAdmin) */}
+              {/* Admin */}
               <Route
                 path="/admin"
                 element={

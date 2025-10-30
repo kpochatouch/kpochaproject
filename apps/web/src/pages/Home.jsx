@@ -41,10 +41,11 @@ export default function Home() {
     })();
   }, [me?.uid]);
 
+  // ✅ unified logic — always lead to /client/register first for new/guest users
   const onFindProClick = () => {
-    if (!me?.uid) return navigate("/signup");   // guest → sign up
-    if (!hasClientProfile) return navigate("/register"); // signed in, no profile → create
-    return navigate("/browse");                 // ready → browse
+    if (!me?.uid) return navigate("/client/register"); // guest → client register
+    if (!hasClientProfile) return navigate("/client/register"); // signed in but no profile
+    return navigate("/browse"); // already has profile → browse pros
   };
 
   return (
@@ -76,19 +77,19 @@ export default function Home() {
             />
           </div>
 
-          {/* 🔹 Your heading (the missing part) */}
+          {/* 🔹 Heading */}
           <h1 className="text-4xl sm:text-6xl font-bold tracking-tight mb-4">
             Kpocha Touch <span className="text-gold">Unisex Salon</span>
           </h1>
 
           <p className="text-zinc-300 max-w-2xl mx-auto mb-10 leading-relaxed">
-            Connecting you to top barbers and stylists across <span className="text-gold">Nigeria</span>.<br />
+            Connecting you to top barbers and stylists across{" "}
+            <span className="text-gold">Nigeria</span>.<br />
             Book home or in-salon services in minutes.
           </p>
 
           {/* CTAs */}
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-            {/* ✅ Smart CTA */}
             <button
               type="button"
               onClick={onFindProClick}
@@ -97,7 +98,6 @@ export default function Home() {
               Find a Professional
             </button>
 
-            {/* Secondary CTA */}
             <Link
               to="/become"
               className="rounded-xl border border-zinc-600 px-6 py-3 text-white font-semibold hover:bg-zinc-900 transition duration-300"
@@ -116,7 +116,7 @@ export default function Home() {
         </motion.div>
       </section>
 
-      {/* GOLD BRAND STRIPE */}
+      {/* GOLD STRIPE */}
       <section className="bg-gold text-black">
         <div className="max-w-6xl mx-auto px-4 py-8 text-center">
           <motion.p {...fadeUp} className="text-lg sm:text-xl font-semibold tracking-wide">
@@ -131,7 +131,7 @@ export default function Home() {
           Who We Are
         </motion.h2>
         <motion.p {...fadeUp} className="text-zinc-300 text-center max-w-3xl mx-auto">
-          Kpocha Touch Unisex Salon is a booking platform that connects clients to{" "}
+          Kpocha Touch Unisex Salon connects clients to{" "}
           <span className="text-gold">verified</span> barbers and stylists across Nigeria.
           Discover trusted pros, book instantly, pay securely, and enjoy premium service at home or in-salon.
         </motion.p>
@@ -143,10 +143,10 @@ export default function Home() {
           <motion.div {...fadeUp} className="rounded-2xl border border-zinc-800 bg-zinc-950/40 p-6">
             <h3 className="text-xl font-semibold mb-3">Why Clients Use Kpocha</h3>
             <ul className="space-y-3 text-zinc-300">
-              <li className="flex items-start gap-3"><span className="text-emerald-400">✔</span>Verified, top-rated professionals across Nigeria</li>
-              <li className="flex items-start gap-3"><span className="text-emerald-400">✔</span>Book in minutes — clear pricing and availability</li>
-              <li className="flex items-start gap-3"><span className="text-emerald-400">✔</span>Secure Paystack payments and instant confirmations</li>
-              <li className="flex items-start gap-3"><span className="text-emerald-400">✔</span>Home service or in-salon — your choice</li>
+              <li><span className="text-emerald-400">✔</span> Verified, top-rated professionals</li>
+              <li><span className="text-emerald-400">✔</span> Book in minutes — clear pricing</li>
+              <li><span className="text-emerald-400">✔</span> Secure Paystack payments</li>
+              <li><span className="text-emerald-400">✔</span> Home or in-salon — your choice</li>
             </ul>
             <div className="mt-6">
               <button
@@ -162,10 +162,10 @@ export default function Home() {
           <motion.div {...fadeUp} className="rounded-2xl border border-zinc-800 bg-zinc-950/40 p-6">
             <h3 className="text-xl font-semibold mb-3">Why Professionals Join</h3>
             <ul className="space-y-3 text-zinc-300">
-              <li className="flex items-start gap-3"><span className="text-emerald-400">✔</span>Get discovered by new clients in your city</li>
-              <li className="flex items-start gap-3"><span className="text-emerald-400">✔</span>Easy scheduling, bookings, and payouts</li>
-              <li className="flex items-start gap-3"><span className="text-emerald-400">✔</span>Transparent commission with on-time settlements</li>
-              <li className="flex items-start gap-3"><span className="text-emerald-400">✔</span>Build your brand with reviews and a clean profile</li>
+              <li><span className="text-emerald-400">✔</span> Get discovered by new clients</li>
+              <li><span className="text-emerald-400">✔</span> Easy scheduling and payouts</li>
+              <li><span className="text-emerald-400">✔</span> Transparent commissions</li>
+              <li><span className="text-emerald-400">✔</span> Build your brand with reviews</li>
             </ul>
             <div className="mt-6">
               <Link
@@ -176,30 +176,6 @@ export default function Home() {
               </Link>
             </div>
           </motion.div>
-        </div>
-      </section>
-
-      {/* SHOWCASE BAND */}
-      <section className="relative">
-        <div
-          className="relative max-w-6xl mx-auto my-12 rounded-2xl overflow-hidden border border-zinc-800"
-          style={{
-            backgroundImage:
-              "url('https://res.cloudinary.com/dupex2y3k/image/upload/v1760305198/kpocha-background-2_hsmavd.jpg')",
-            backgroundSize: "cover",
-            backgroundPosition: "center",
-          }}
-        >
-          <div className="absolute inset-0 bg-black/60" />
-          <div className="relative px-6 py-16 text-center">
-            <motion.h3 {...fadeUp} className="text-2xl sm:text-3xl font-bold mb-2">
-              Built for Nigeria.
-            </motion.h3>
-            <motion.p {...fadeUp} className="text-zinc-300 max-w-2xl mx-auto">
-              From Lagos to Kano, Port Harcourt to Abuja — trusted grooming, verified professionals,
-              and smooth bookings that just work.
-            </motion.p>
-          </div>
         </div>
       </section>
 

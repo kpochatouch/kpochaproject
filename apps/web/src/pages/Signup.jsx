@@ -1,3 +1,4 @@
+// apps/web/src/pages/Signup.jsx
 import { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import {
@@ -23,7 +24,6 @@ export default function Signup() {
 
   useEffect(() => {
     if (user) nav("/browse");
-    // prefill from cache if present
     try {
       const cached = JSON.parse(localStorage.getItem("profileDraft") || "{}");
       if (cached.name) setName(cached.name);
@@ -34,12 +34,7 @@ export default function Signup() {
 
   function cacheDraft(next) {
     try {
-      const current = {
-        name,
-        phone,
-        email,
-        ...next,
-      };
+      const current = { name, phone, email, ...next };
       localStorage.setItem("profileDraft", JSON.stringify(current));
     } catch {}
   }
@@ -49,7 +44,6 @@ export default function Signup() {
     setErr("");
     setOk("");
 
-    // light client-side checks
     if (!email.trim()) return setErr("Email is required.");
     if (password.length < 6) return setErr("Password must be at least 6 characters.");
     if (password !== confirm) return setErr("Passwords do not match.");
@@ -58,23 +52,15 @@ export default function Signup() {
     try {
       const cred = await createUserWithEmailAndPassword(auth, email.trim(), password);
 
-      // Set display name if provided
       if (name.trim()) {
         await updateProfile(cred.user, { displayName: name.trim() });
       }
 
-      // Send non-blocking verification email
-      try {
-        await sendEmailVerification(cred.user);
-        setOk("Verification email sent. You can continue and verify later.");
-      } catch {
-        /* non-blocking */
-      }
-
-      // Cache lightweight profile so later forms can prefill
+      // ✅ Force email verification before login
+      await sendEmailVerification(cred.user);
+      setOk("Verification email sent! Please verify your email before logging in.");
       cacheDraft({});
-
-      nav("/browse"); // keep flow simple
+      await auth.signOut(); // logout immediately until verified
     } catch (e) {
       setErr(e?.message || "Sign up failed");
     } finally {
@@ -141,6 +127,11 @@ export default function Signup() {
       <p className="text-sm text-zinc-400 mt-4">
         Already have an account?{" "}
         <Link to="/login" className="text-[#d4af37] underline">Sign in</Link>
+      </p>
+
+      <p className="text-sm text-zinc-400 mt-2">
+        Want to book a stylist or barber?{" "}
+        <a href="/client/register" className="text-[#d4af37] underline">Register as client</a>
       </p>
     </div>
   );

@@ -11,9 +11,9 @@ const firebaseConfig = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID,
 };
 
-// export app so PhoneOTP.jsx can import it
+// ✅ Export app so components like PhoneOTP or Liveness can import it
 export const app = initializeApp(firebaseConfig);
 
-// auth + provider (unchanged)
+// ✅ Auth + Google provider (used for normal and Google login)
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();

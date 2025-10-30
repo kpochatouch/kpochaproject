@@ -1,3 +1,4 @@
+// apps/web/src/pages/Login.jsx
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate, Link, useLocation } from "react-router-dom";
 import {
@@ -25,15 +26,12 @@ export default function Login() {
   const loc = useLocation();
   const qs = useMemo(() => new URLSearchParams(loc.search), [loc.search]);
 
-  // persist session in local storage for SPA
   useEffect(() => {
     setPersistence(auth, browserLocalPersistence).catch(() => {});
-    // clear google last state (avoids "popup_closed_by_user" loops)
     try { sessionStorage.removeItem("g_state"); } catch {}
     try { localStorage.removeItem("g_state"); } catch {}
   }, []);
 
-  // if already signed in, go where they intended
   useEffect(() => {
     if (!user) return;
     const next = qs.get("next") || "/browse";
@@ -42,12 +40,9 @@ export default function Login() {
 
   async function afterSignInRedirect() {
     try {
-      // ensure ID token is available to axios interceptor
       const tok = await auth.currentUser.getIdToken(true);
       setAuthToken(tok);
-    } catch {
-      // fail-soft — interceptor may still pick it up from AuthContext if you store there
-    }
+    } catch {}
     const next = qs.get("next") || "/browse";
     nav(next, { replace: true });
   }
@@ -58,7 +53,16 @@ export default function Login() {
     setOk("");
     setBusy(true);
     try {
-      await signInWithEmailAndPassword(auth, email.trim(), password);
+      const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
+
+      // ✅ block if email not verified
+      if (!cred.user.emailVerified) {
+        setErr("Please verify your email before signing in. Check your inbox for the link.");
+        await auth.signOut();
+        setBusy(false);
+        return;
+      }
+
       await afterSignInRedirect();
     } catch (e) {
       setErr(e?.message || "Sign in failed");
@@ -72,7 +76,13 @@ export default function Login() {
     setBusy(true);
     try {
       googleProvider.setCustomParameters({ prompt: "select_account" });
-      await signInWithPopup(auth, googleProvider);
+      const cred = await signInWithPopup(auth, googleProvider);
+      if (!cred.user.emailVerified) {
+        setErr("Please verify your email with Google before continuing.");
+        await auth.signOut();
+        setBusy(false);
+        return;
+      }
       await afterSignInRedirect();
     } catch (e) {
       setErr(e?.message || "Google sign in failed");
@@ -159,7 +169,6 @@ export default function Login() {
         <Link to="/signup" className="text-[#d4af37] underline">Create one</Link>
       </p>
 
-      {/* Simple inline reset panel (no extra page) */}
       {resetting && (
         <div className="mt-6 rounded-lg border border-zinc-800 p-3 bg-zinc-950">
           <p className="text-sm text-zinc-300 mb-2">
