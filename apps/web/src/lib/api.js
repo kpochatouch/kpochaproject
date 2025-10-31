@@ -7,8 +7,8 @@ import { getAuth, onAuthStateChanged } from "firebase/auth";
    ========================================= */
 let ROOT =
   (import.meta.env.VITE_API_BASE_URL ||
-   import.meta.env.VITE_API_BASE ||
-   "")
+    import.meta.env.VITE_API_BASE ||
+    "")
     .toString()
     .trim();
 
@@ -75,6 +75,16 @@ export async function getMe() {
   return data;
 }
 
+/* simple boolean checker — useful for guards */
+export async function isAuthenticated() {
+  try {
+    await getMe();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /* =========================================
    NIGERIA GEO
    ========================================= */
@@ -87,7 +97,9 @@ export async function getNgStates() {
   return data;
 }
 export async function getNgLgas(stateName) {
-  const { data } = await api.get(`/api/geo/ng/lgas/${encodeURIComponent(stateName)}`);
+  const { data } = await api.get(
+    `/api/geo/ng/lgas/${encodeURIComponent(stateName)}`
+  );
   return data;
 }
 export async function reverseGeocode({ lat, lon }) {
@@ -107,7 +119,9 @@ export async function getBarber(id) {
   return data;
 }
 export async function listNearbyBarbers({ lat, lon, radiusKm = 25 }) {
-  const { data } = await api.get(`/api/barbers/nearby`, { params: { lat, lon, radiusKm } });
+  const { data } = await api.get(`/api/barbers/nearby`, {
+    params: { lat, lon, radiusKm },
+  });
   return data;
 }
 
@@ -127,11 +141,18 @@ export async function createPost(payload) {
    PAYMENTS (Paystack)
    ========================================= */
 export async function verifyPayment({ bookingId, reference }) {
-  const { data } = await api.post("/api/payments/verify", { bookingId, reference });
+  const { data } = await api.post("/api/payments/verify", {
+    bookingId,
+    reference,
+  });
   return data;
 }
 export async function initPayment({ bookingId, amountKobo, email }) {
-  const { data } = await api.post("/api/payments/init", { bookingId, amountKobo, email });
+  const { data } = await api.post("/api/payments/init", {
+    bookingId,
+    amountKobo,
+    email,
+  });
   return data;
 }
 
@@ -147,7 +168,9 @@ export async function createInstantBooking(payload) {
   return data;
 }
 export async function setBookingReference(bookingId, paystackReference) {
-  const { data } = await api.put(`/api/bookings/${bookingId}/reference`, { paystackReference });
+  const { data } = await api.put(`/api/bookings/${bookingId}/reference`, {
+    paystackReference,
+  });
   return data.ok === true;
 }
 export async function getMyBookings() {
@@ -199,11 +222,17 @@ export async function verifyWalletTopup(reference) {
   return data;
 }
 export async function withdrawPendingToAvailable({ amountKobo, pin }) {
-  const { data } = await api.post("/api/wallet/withdraw-pending", { amountKobo, pin });
+  const { data } = await api.post("/api/wallet/withdraw-pending", {
+    amountKobo,
+    pin,
+  });
   return data;
 }
 export async function withdrawToBank({ amountKobo, pin }) {
-  const { data } = await api.post("/api/wallet/withdraw", { amountKobo, pin });
+  const { data } = await api.post("/api/wallet/withdraw", {
+    amountKobo,
+    pin,
+  });
   return data;
 }
 export const getMyWallet = getWalletMe;
@@ -226,7 +255,10 @@ export async function setWithdrawPin(pin) {
   return data;
 }
 export async function resetWithdrawPin(currentPin, newPin) {
-  const { data } = await api.put("/api/pin/me/reset", { currentPin, newPin });
+  const { data } = await api.put("/api/pin/me/reset", {
+    currentPin,
+    newPin,
+  });
   return data;
 }
 
@@ -266,11 +298,17 @@ export async function updateClientProfile(payload) {
 
 /* Optional booking/admin helpers */
 export async function getClientProfileForBooking(clientUid, bookingId) {
-  const { data } = await api.get(`/api/profile/client/${clientUid}/for-booking/${encodeURIComponent(bookingId)}`);
+  const { data } = await api.get(
+    `/api/profile/client/${clientUid}/for-booking/${encodeURIComponent(
+      bookingId
+    )}`
+  );
   return data;
 }
 export async function getClientProfileAdmin(clientUid) {
-  const { data } = await api.get(`/api/profile/client/${clientUid}/admin`);
+  const { data } = await api.get(
+    `/api/profile/client/${clientUid}/admin`
+  );
   return data;
 }
 
@@ -286,4 +324,54 @@ export async function getPublicProProfile(proId) {
 export async function getProProfileAdmin(proId) {
   const { data } = await api.get(`/api/profile/pro/${proId}/admin`);
   return data;
+}
+
+/* =========================================
+   >>> EXTRA FOR CONSISTENT "FIND" LOGIC <<<
+   This is what Home, BookService, even Navbar can call
+   so they all make the SAME decision.
+   ========================================= */
+
+/** safe client-profile fetch: returns null if 404/401 */
+export async function getClientProfileMeSafe() {
+  try {
+    const { data } = await api.get("/api/profile/me");
+    return data || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * One unified read of auth + client profile.
+ * Returns:
+ *  {
+ *    authed: boolean,
+ *    me: {...} | null,
+ *    hasClientProfile: boolean
+ *  }
+ */
+export async function getAuthStateForClient() {
+  // 1) check if user is logged in
+  let me = null;
+  try {
+    me = await getMe();
+  } catch {
+    return {
+      authed: false,
+      me: null,
+      hasClientProfile: false,
+    };
+  }
+
+  // 2) try to load client profile
+  const prof = await getClientProfileMeSafe();
+  const hasClientProfile =
+    !!prof && (prof.uid || prof.clientId || prof.fullName);
+
+  return {
+    authed: true,
+    me,
+    hasClientProfile: !!hasClientProfile,
+  };
 }
