@@ -16,6 +16,9 @@ export default function Home() {
   const [me, setMe] = useState(null);
   const [hasClientProfile, setHasClientProfile] = useState(false);
 
+  // for arrow
+  const [atBottom, setAtBottom] = useState(false);
+
   // ✅ Only call /api/me if we already have a token
   useEffect(() => {
     const token =
@@ -58,14 +61,40 @@ export default function Home() {
     return navigate("/browse");
   };
 
+  // ✅ arrow scroll listeners
+  useEffect(() => {
+    function onScroll() {
+      const nearBottom =
+        window.innerHeight + window.scrollY >=
+        document.body.offsetHeight - 200;
+      setAtBottom(nearBottom);
+    }
+    window.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  function handleArrowClick() {
+    if (atBottom) {
+      // back to top
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } else {
+      // scroll to bottom
+      window.scrollTo({
+        top: document.body.scrollHeight,
+        behavior: "smooth",
+      });
+    }
+  }
+
   return (
     <div className="bg-black text-white overflow-x-hidden">
       {/* HERO */}
       <section
         className={`
           relative gradient-hero
-          mt-[60px]          /* sit below sticky navbar */
-          min-h-[85vh]       /* not full 100vh so ticker + gold show */
+          pt-[60px]          /* <- was mt-[60px], this removes the black gap */
+          min-h-[85vh]
           flex items-center justify-center
           text-center text-white
           overflow-hidden
@@ -127,7 +156,7 @@ export default function Home() {
           </div>
         </motion.div>
 
-        {/* ✅ ticker */}
+        {/* ✅ ticker — LEAVE as-is */}
         <motion.div
           className="absolute bottom-0 left-0 w-full py-3 bg-black/40 border-t border-emerald-800 text-emerald-300 text-sm tracking-wide overflow-hidden"
           animate={{ x: ["100%", "-100%"] }}
@@ -140,7 +169,7 @@ export default function Home() {
         </motion.div>
       </section>
 
-      {/* GOLD STRIPE (should now be slightly visible after hero) */}
+      {/* GOLD STRIPE */}
       <section className="bg-gold text-black">
         <div className="max-w-6xl mx-auto px-4 py-8 text-center">
           <motion.p
@@ -153,7 +182,7 @@ export default function Home() {
         </div>
       </section>
 
-      {/* (rest stays same) */}
+      {/* WHO WE ARE */}
       <section className="max-w-6xl mx-auto px-4 py-16">
         <motion.h2
           {...fadeUp}
@@ -166,12 +195,13 @@ export default function Home() {
           className="text-zinc-300 text-center max-w-3xl mx-auto"
         >
           Kpocha Touch Unisex Salon connects clients to{" "}
-          <span className="text-gold">verified</span> barbers and stylists
-          across Nigeria. Discover trusted pros, book instantly, pay securely,
-          and enjoy premium service at home or in-salon.
+            <span className="text-gold">verified</span> barbers and stylists
+            across Nigeria. Discover trusted pros, book instantly, pay securely,
+            and enjoy premium service at home or in-salon.
         </motion.p>
       </section>
 
+      {/* TWO CARDS */}
       <section className="max-w-6xl mx-auto px-4 pb-4">
         <div className="grid md:grid-cols-2 gap-8">
           <motion.div
@@ -247,6 +277,7 @@ export default function Home() {
         </div>
       </section>
 
+      {/* HOW IT WORKS */}
       <section className="max-w-6xl mx-auto px-4 py-16">
         <motion.h3
           {...fadeUp}
@@ -281,6 +312,7 @@ export default function Home() {
         </div>
       </section>
 
+      {/* CTA FOOTER */}
       <section className="text-center px-4 py-16 bg-gradient-to-b from-zinc-950 via-black to-zinc-950 border-t border-emerald-900/30">
         <motion.h4 {...fadeUp} className="text-2xl font-bold mb-4">
           Ready to Experience Premium Grooming?
@@ -307,6 +339,43 @@ export default function Home() {
           </Link>
         </motion.div>
       </section>
+
+      {/* ⬇️ / ⬆️ floating arrow */}
+      <button
+        onClick={handleArrowClick}
+        className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 rounded-full bg-black/70 border border-gold w-11 h-11 flex items-center justify-center hover:bg-black/90 transition"
+        aria-label={atBottom ? "Back to top" : "Scroll to bottom"}
+      >
+        {atBottom ? (
+          // up arrow
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            className="h-5 w-5 text-gold"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            fill="none"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M5 15l7-7 7 7" />
+          </svg>
+        ) : (
+          // down arrow
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            className="h-5 w-5 text-gold"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            fill="none"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M19 9l-7 7-7-7" />
+          </svg>
+        )}
+      </button>
     </div>
   );
 }
