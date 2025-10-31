@@ -21,7 +21,6 @@ export default function Home() {
     const token =
       (typeof window !== "undefined" && localStorage.getItem("token")) || null;
     if (!token) {
-      // guest, don't hit protected endpoint
       setMe(null);
       return;
     }
@@ -52,17 +51,27 @@ export default function Home() {
     })();
   }, [me?.uid]);
 
-  // ✅ unified logic — always lead to /client/register first for new/guest users
+  // ✅ unified logic
   const onFindProClick = () => {
-    if (!me?.uid) return navigate("/client/register"); // guest → client register
-    if (!hasClientProfile) return navigate("/client/register"); // signed in but no profile
-    return navigate("/browse"); // already has profile → browse pros
+    if (!me?.uid) return navigate("/client/register");
+    if (!hasClientProfile) return navigate("/client/register");
+    return navigate("/browse");
   };
 
   return (
     <div className="bg-black text-white overflow-x-hidden">
       {/* HERO */}
-      <section className="relative gradient-hero min-h-screen flex items-center justify-center text-center text-white overflow-hidden pt-28 pb-20">
+      <section
+        className={`
+          relative gradient-hero
+          mt-[60px]          /* sit below sticky navbar */
+          min-h-[85vh]       /* not full 100vh so ticker + gold show */
+          flex items-center justify-center
+          text-center text-white
+          overflow-hidden
+          pb-20
+        `}
+      >
         <video
           className="absolute inset-0 w-full h-full object-cover opacity-30"
           src="https://res.cloudinary.com/dupex2y3k/video/upload/v1760305198/kpocha-background-1_s2s9k9.mp4"
@@ -118,7 +127,7 @@ export default function Home() {
           </div>
         </motion.div>
 
-        {/* ✅ ticker kept but constrained */}
+        {/* ✅ ticker */}
         <motion.div
           className="absolute bottom-0 left-0 w-full py-3 bg-black/40 border-t border-emerald-800 text-emerald-300 text-sm tracking-wide overflow-hidden"
           animate={{ x: ["100%", "-100%"] }}
@@ -131,7 +140,7 @@ export default function Home() {
         </motion.div>
       </section>
 
-      {/* GOLD STRIPE */}
+      {/* GOLD STRIPE (should now be slightly visible after hero) */}
       <section className="bg-gold text-black">
         <div className="max-w-6xl mx-auto px-4 py-8 text-center">
           <motion.p
@@ -144,7 +153,7 @@ export default function Home() {
         </div>
       </section>
 
-      {/* WHO WE ARE */}
+      {/* (rest stays same) */}
       <section className="max-w-6xl mx-auto px-4 py-16">
         <motion.h2
           {...fadeUp}
@@ -163,7 +172,6 @@ export default function Home() {
         </motion.p>
       </section>
 
-      {/* WHY CLIENTS / WHY PROS */}
       <section className="max-w-6xl mx-auto px-4 pb-4">
         <div className="grid md:grid-cols-2 gap-8">
           <motion.div
@@ -239,7 +247,6 @@ export default function Home() {
         </div>
       </section>
 
-      {/* HOW IT WORKS */}
       <section className="max-w-6xl mx-auto px-4 py-16">
         <motion.h3
           {...fadeUp}
@@ -274,12 +281,8 @@ export default function Home() {
         </div>
       </section>
 
-      {/* CTA */}
       <section className="text-center px-4 py-16 bg-gradient-to-b from-zinc-950 via-black to-zinc-950 border-t border-emerald-900/30">
-        <motion.h4
-          {...fadeUp}
-          className="text-2xl font-bold mb-4"
-        >
+        <motion.h4 {...fadeUp} className="text-2xl font-bold mb-4">
           Ready to Experience Premium Grooming?
         </motion.h4>
         <motion.div

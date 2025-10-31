@@ -7,14 +7,13 @@ import { api } from "../lib/api";
 export default function Navbar() {
   const [me, setMe] = useState(null);
   const [token, setToken] = useState(() => localStorage.getItem("token") || null);
-  const [open, setOpen] = useState(false); // ✅ mobile menu
+  const [open, setOpen] = useState(false);
 
-  // Keep token state in sync with Firebase (no forced refresh)
   useEffect(() => {
     const auth = getAuth();
     const unsub = onIdTokenChanged(auth, async (user) => {
       if (user) {
-        const t = await user.getIdToken(); // don't force refresh
+        const t = await user.getIdToken();
         localStorage.setItem("token", t);
         setToken(t);
       } else {
@@ -25,7 +24,6 @@ export default function Navbar() {
     return () => unsub();
   }, []);
 
-  // Load /api/me when token changes
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -46,13 +44,9 @@ export default function Navbar() {
     try {
       const auth = getAuth();
       await signOut(auth);
-    } catch (e) {
-      console.error("Firebase sign-out error:", e);
-    }
-    try {
-      localStorage.removeItem("token");
     } catch {}
     try {
+      localStorage.removeItem("token");
       sessionStorage.clear();
       sessionStorage.removeItem("g_state");
       localStorage.removeItem("g_state");
@@ -67,39 +61,33 @@ export default function Navbar() {
     isActive ? "text-gold font-medium" : "hover:text-gold";
 
   return (
-    <header className="border-b border-zinc-800 sticky top-0 z-40 bg-black/70 backdrop-blur">
-      <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
-        {/* Brand */}
+    <header className="border-b border-zinc-800 sticky top-0 z-40 bg-black/70 backdrop-blur h-[60px]">
+      <div className="max-w-6xl mx-auto px-4 h-full flex items-center justify-between gap-3">
         <Link to="/" className="flex items-center gap-2">
           <img src="/logo.svg" alt="Kpocha Touch" className="h-6 w-auto" />
-          {/* ✅ show on mobile too (short) */}
           <span className="text-gold font-semibold text-sm sm:text-base">
             Kpocha Touch
           </span>
         </Link>
 
-        {/* Desktop nav */}
+        {/* desktop */}
         <nav className="hidden md:flex items-center gap-4">
           <NavLink to="/browse" className={navLinkClass}>
             Browse
           </NavLink>
-
           {token && (
             <NavLink to="/wallet" className={navLinkClass}>
               Wallet
             </NavLink>
           )}
-
           <NavLink to="/profile" className={navLinkClass}>
             Profile
           </NavLink>
-
           {token && (
             <NavLink to="/settings" className={navLinkClass}>
               Settings
             </NavLink>
           )}
-
           {!isPro && token && (
             <NavLink to="/become" className={navLinkClass}>
               Become a Pro
@@ -115,7 +103,6 @@ export default function Navbar() {
               Admin
             </NavLink>
           )}
-
           {token ? (
             <button
               onClick={handleSignOut}
@@ -133,14 +120,12 @@ export default function Navbar() {
           )}
         </nav>
 
-        {/* Mobile hamburger */}
+        {/* mobile btn */}
         <button
           onClick={() => setOpen((o) => !o)}
           className="md:hidden inline-flex items-center justify-center rounded-lg border border-zinc-700 p-2 text-zinc-200"
-          aria-label="Toggle menu"
         >
           {open ? (
-            // X icon
             <svg
               className="h-5 w-5"
               viewBox="0 0 24 24"
@@ -154,7 +139,6 @@ export default function Navbar() {
               <path d="M6 6l12 12" />
             </svg>
           ) : (
-            // Hamburger
             <svg
               className="h-5 w-5"
               viewBox="0 0 24 24"
@@ -172,48 +156,27 @@ export default function Navbar() {
         </button>
       </div>
 
-      {/* Mobile menu panel */}
       {open && (
         <div className="md:hidden border-t border-zinc-800 bg-black/95 backdrop-blur">
           <div className="max-w-6xl mx-auto px-4 py-3 flex flex-col gap-2">
-            <NavLink
-              to="/browse"
-              onClick={() => setOpen(false)}
-              className={navLinkClass}
-            >
+            <NavLink to="/browse" onClick={() => setOpen(false)} className={navLinkClass}>
               Browse
             </NavLink>
             {token && (
-              <NavLink
-                to="/wallet"
-                onClick={() => setOpen(false)}
-                className={navLinkClass}
-              >
+              <NavLink to="/wallet" onClick={() => setOpen(false)} className={navLinkClass}>
                 Wallet
               </NavLink>
             )}
-            <NavLink
-              to="/profile"
-              onClick={() => setOpen(false)}
-              className={navLinkClass}
-            >
+            <NavLink to="/profile" onClick={() => setOpen(false)} className={navLinkClass}>
               Profile
             </NavLink>
             {token && (
-              <NavLink
-                to="/settings"
-                onClick={() => setOpen(false)}
-                className={navLinkClass}
-              >
+              <NavLink to="/settings" onClick={() => setOpen(false)} className={navLinkClass}>
                 Settings
               </NavLink>
             )}
             {!isPro && token && (
-              <NavLink
-                to="/become"
-                onClick={() => setOpen(false)}
-                className={navLinkClass}
-              >
+              <NavLink to="/become" onClick={() => setOpen(false)} className={navLinkClass}>
                 Become a Pro
               </NavLink>
             )}
@@ -227,15 +190,10 @@ export default function Navbar() {
               </NavLink>
             )}
             {isAdmin && (
-              <NavLink
-                to="/admin"
-                onClick={() => setOpen(false)}
-                className={navLinkClass}
-              >
+              <NavLink to="/admin" onClick={() => setOpen(false)} className={navLinkClass}>
                 Admin
               </NavLink>
             )}
-
             {token ? (
               <button
                 onClick={handleSignOut}
