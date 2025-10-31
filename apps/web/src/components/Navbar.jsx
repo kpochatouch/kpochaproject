@@ -7,6 +7,7 @@ import { api } from "../lib/api";
 export default function Navbar() {
   const [me, setMe] = useState(null);
   const [token, setToken] = useState(() => localStorage.getItem("token") || null);
+  const [open, setOpen] = useState(false); // ✅ mobile menu
 
   // Keep token state in sync with Firebase (no forced refresh)
   useEffect(() => {
@@ -36,7 +37,9 @@ export default function Navbar() {
         if (alive) setMe(null);
       }
     })();
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
   }, [token]);
 
   async function handleSignOut() {
@@ -46,61 +49,212 @@ export default function Navbar() {
     } catch (e) {
       console.error("Firebase sign-out error:", e);
     }
-    try { localStorage.removeItem("token"); } catch {}
-    try { sessionStorage.clear(); } catch {}
-    try { sessionStorage.removeItem("g_state"); } catch {}
-    try { localStorage.removeItem("g_state"); } catch {}
+    try {
+      localStorage.removeItem("token");
+    } catch {}
+    try {
+      sessionStorage.clear();
+      sessionStorage.removeItem("g_state");
+      localStorage.removeItem("g_state");
+    } catch {}
     window.location.assign("/login?signedout=1");
   }
 
   const isAdmin = !!me?.isAdmin;
-  const isPro   = !!me?.isPro;
+  const isPro = !!me?.isPro;
+
+  const navLinkClass = ({ isActive }) =>
+    isActive ? "text-gold font-medium" : "hover:text-gold";
 
   return (
     <header className="border-b border-zinc-800 sticky top-0 z-40 bg-black/70 backdrop-blur">
-      <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+      <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
+        {/* Brand */}
         <Link to="/" className="flex items-center gap-2">
           <img src="/logo.svg" alt="Kpocha Touch" className="h-6 w-auto" />
-          <span className="text-gold font-semibold hidden sm:inline">
-            Connecting You To Top Barbers and Stylists
+          {/* ✅ show on mobile too (short) */}
+          <span className="text-gold font-semibold text-sm sm:text-base">
+            Kpocha Touch
           </span>
         </Link>
 
-        <nav className="flex items-center gap-4">
-          <NavLink to="/browse" className={({isActive})=> isActive ? "text-gold font-medium" : "hover:text-gold"}>Browse</NavLink>
+        {/* Desktop nav */}
+        <nav className="hidden md:flex items-center gap-4">
+          <NavLink to="/browse" className={navLinkClass}>
+            Browse
+          </NavLink>
 
-          {/* Show Wallet only when signed in.
-             It will route to pro wallet or client credits (smart route in App). */}
           {token && (
-            <NavLink to="/wallet" className={({isActive})=> isActive ? "text-gold font-medium" : "hover:text-gold"}>
+            <NavLink to="/wallet" className={navLinkClass}>
               Wallet
             </NavLink>
           )}
 
-          <NavLink to="/profile" className={({isActive})=> isActive ? "text-gold font-medium" : "hover:text-gold"}>Profile</NavLink>
+          <NavLink to="/profile" className={navLinkClass}>
+            Profile
+          </NavLink>
 
-          {/* ✅ Settings: show only when signed in (smart route picks client/pro) */}
           {token && (
-            <NavLink to="/settings" className={({isActive})=> isActive ? "text-gold font-medium" : "hover:text-gold"}>Settings</NavLink>
+            <NavLink to="/settings" className={navLinkClass}>
+              Settings
+            </NavLink>
           )}
 
           {!isPro && token && (
-            <NavLink to="/become" className={({isActive})=> isActive ? "text-gold font-medium" : "hover:text-gold"}>Become a Pro</NavLink>
+            <NavLink to="/become" className={navLinkClass}>
+              Become a Pro
+            </NavLink>
           )}
           {isPro && token && (
-            <NavLink to="/pro-dashboard" className={({isActive})=> isActive ? "text-gold font-medium" : "hover:text-gold"}>Pro Dashboard</NavLink>
+            <NavLink to="/pro-dashboard" className={navLinkClass}>
+              Pro Dashboard
+            </NavLink>
           )}
           {isAdmin && (
-            <NavLink to="/admin" className={({isActive})=> isActive ? "text-gold font-medium border-b-2 border-gold" : "hover:text-gold"}>Admin</NavLink>
+            <NavLink to="/admin" className={navLinkClass}>
+              Admin
+            </NavLink>
           )}
 
           {token ? (
-            <button onClick={handleSignOut} className="rounded-lg border border-gold px-3 py-1 hover:bg-gold hover:text-black">Sign Out</button>
+            <button
+              onClick={handleSignOut}
+              className="rounded-lg border border-gold px-3 py-1 hover:bg-gold hover:text-black"
+            >
+              Sign Out
+            </button>
           ) : (
-            <NavLink to="/login" className="rounded-lg border border-gold px-3 py-1 hover:bg-gold hover:text-black">Sign In</NavLink>
+            <NavLink
+              to="/login"
+              className="rounded-lg border border-gold px-3 py-1 hover:bg-gold hover:text-black"
+            >
+              Sign In
+            </NavLink>
           )}
         </nav>
+
+        {/* Mobile hamburger */}
+        <button
+          onClick={() => setOpen((o) => !o)}
+          className="md:hidden inline-flex items-center justify-center rounded-lg border border-zinc-700 p-2 text-zinc-200"
+          aria-label="Toggle menu"
+        >
+          {open ? (
+            // X icon
+            <svg
+              className="h-5 w-5"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              fill="none"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M6 18L18 6" />
+              <path d="M6 6l12 12" />
+            </svg>
+          ) : (
+            // Hamburger
+            <svg
+              className="h-5 w-5"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              fill="none"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M4 6h16" />
+              <path d="M4 12h16" />
+              <path d="M4 18h16" />
+            </svg>
+          )}
+        </button>
       </div>
+
+      {/* Mobile menu panel */}
+      {open && (
+        <div className="md:hidden border-t border-zinc-800 bg-black/95 backdrop-blur">
+          <div className="max-w-6xl mx-auto px-4 py-3 flex flex-col gap-2">
+            <NavLink
+              to="/browse"
+              onClick={() => setOpen(false)}
+              className={navLinkClass}
+            >
+              Browse
+            </NavLink>
+            {token && (
+              <NavLink
+                to="/wallet"
+                onClick={() => setOpen(false)}
+                className={navLinkClass}
+              >
+                Wallet
+              </NavLink>
+            )}
+            <NavLink
+              to="/profile"
+              onClick={() => setOpen(false)}
+              className={navLinkClass}
+            >
+              Profile
+            </NavLink>
+            {token && (
+              <NavLink
+                to="/settings"
+                onClick={() => setOpen(false)}
+                className={navLinkClass}
+              >
+                Settings
+              </NavLink>
+            )}
+            {!isPro && token && (
+              <NavLink
+                to="/become"
+                onClick={() => setOpen(false)}
+                className={navLinkClass}
+              >
+                Become a Pro
+              </NavLink>
+            )}
+            {isPro && token && (
+              <NavLink
+                to="/pro-dashboard"
+                onClick={() => setOpen(false)}
+                className={navLinkClass}
+              >
+                Pro Dashboard
+              </NavLink>
+            )}
+            {isAdmin && (
+              <NavLink
+                to="/admin"
+                onClick={() => setOpen(false)}
+                className={navLinkClass}
+              >
+                Admin
+              </NavLink>
+            )}
+
+            {token ? (
+              <button
+                onClick={handleSignOut}
+                className="mt-2 rounded-lg border border-gold px-3 py-1 hover:bg-gold hover:text-black text-left"
+              >
+                Sign Out
+              </button>
+            ) : (
+              <NavLink
+                to="/login"
+                onClick={() => setOpen(false)}
+                className="mt-2 rounded-lg border border-gold px-3 py-1 hover:bg-gold hover:text-black text-left"
+              >
+                Sign In
+              </NavLink>
+            )}
+          </div>
+        </div>
+      )}
     </header>
   );
 }
