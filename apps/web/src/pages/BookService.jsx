@@ -1,14 +1,18 @@
-// Book page that respects Browse context (service/state/LGA)
-// Only asks for Address + Payment; passes country/state/lga/coords to API.
+// apps/web/src/pages/BookService.jsx
+// Ultra-simple booking → pay → done.
+// Assumes: user is logged in, client register done, service + price came from Browse.
 
-import { useParams, useNavigate, useSearchParams, Link, useLocation } from "react-router-dom";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useParams, useLocation, useNavigate, Link } from "react-router-dom";
+import { useEffect, useState, useRef } from "react";
 import { api } from "../lib/api";
 
-function usePaystackScript() {
+function usePaystackReady() {
   const [ready, setReady] = useState(!!window.PaystackPop);
   useEffect(() => {
-    if (window.PaystackPop) { setReady(true); return; }
+    if (window.PaystackPop) {
+      setReady(true);
+      return;
+    }
     const id = "paystack-inline-sdk";
     if (document.getElementById(id)) return;
     const s = document.createElement("script");
@@ -16,7 +20,6 @@ function usePaystackScript() {
     s.src = "https://js.paystack.co/v1/inline.js";
     s.async = true;
     s.onload = () => setReady(!!window.PaystackPop);
-    s.onerror = () => setReady(false);
     document.body.appendChild(s);
   }, []);
   return ready;
@@ -24,460 +27,266 @@ function usePaystackScript() {
 
 export default function BookService() {
   const { barberId } = useParams();
-  const [search] = useSearchParams();
+  const nav = useNavigate();
   const location = useLocation();
-  const navigate = useNavigate();
+  const paystackReady = usePaystackReady();
+
+  // carried from Browse / BarberCard
+  const carry = location.state || {};
+  const carriedService = carry.serviceName || "";
+  const carriedAmount = typeof carry.amountNaira !== "undefined" ? carry.amountNaira : "";
+  const carriedState = (carry.state || "").toString().toUpperCase();
+  const carriedLga = (carry.lga || "").toString().toUpperCase();
 
   const [barber, setBarber] = useState(null);
   const [me, setMe] = useState(null);
-  const [clientProfile, setClientProfile] = useState(null);
+  const [client, setClient] = useState(null);
 
-  // carry-forward region & service
-  const carry = location.state || {};
-  const [region, setRegion] = useState({
-    country: carry.country || "Nigeria",
-    state: (carry.state || "").toUpperCase(),
-    lga: (carry.lga || "").toUpperCase(),
-  });
-  const lockRegion = !!(carry.state || carry.lga);
-
-  // service/price
-  const [serviceName, setServiceName] = useState(carry.serviceName || "");
-  const [amountNaira, setAmountNaira] = useState(
-    typeof carry.amountNaira !== "undefined" ? carry.amountNaira : ""
-  );
-  const lockService = !!(carry.serviceName || search.get("service"));
-
-  // address (auto from GPS; editable)
-  const [addressText, setAddressText] = useState("");
-
-  // payment
-  const [paymentMethod, setPaymentMethod] = useState("wallet"); // wallet | card
-
-  // GPS
+  const [address, setAddress] = useState("");
   const [coords, setCoords] = useState(null);
-  const [detecting, setDetecting] = useState(false);
-  const [gpsSuggestion, setGpsSuggestion] = useState(null); // {state, lga}
 
-  // ui
-  const [loading, setLoading] = useState(false);
-  const [errorMsg, setErrorMsg] = useState("");
-  const [softMsg, setSoftMsg] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+
   const okTimer = useRef();
 
-  const digitsOnly = (s = "") => String(s).replace(/\D/g, "");
-  function clearMsg(){ setErrorMsg(""); setSoftMsg(""); clearTimeout(okTimer.current); }
-
-  // load paystack script (for inline)
-  const paystackReady = usePaystackScript();
-
-  // read-only name/phone
-  const clientName  = clientProfile?.fullName || me?.displayName || me?.email || "";
-  const clientPhone = clientProfile?.phone || me?.identity?.phone || "";
-
-  // load barber + me + profile
+  // load pro + me + client-profile
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
-        clearMsg();
-        const [barbRes, meRes] = await Promise.all([
-          api.get("/api/barbers/" + barberId),
+        const [proRes, meRes] = await Promise.all([
+          api.get(`/api/barbers/${barberId}`),
           api.get("/api/me"),
         ]);
         if (!alive) return;
-        setBarber(barbRes?.data || null);
-        setMe(meRes?.data || null);
+        setBarber(proRes.data || null);
+        setMe(meRes.data || null);
 
+        // client profile (so we can prefill address)
         try {
-          const prof = await api.get("/api/profile/client/me");
-          if (alive) setClientProfile(prof?.data || null);
-        } catch {}
-
-        // prefill service/amount if not set by carry/context
-        if (!serviceName) {
-          const qsService = search.get("service");
-          if (qsService) {
-            setServiceName(qsService);
-          } else {
-            const list = Array.isArray(barbRes?.data?.services) ? barbRes.data.services : [];
-            const first = list.length
-              ? (typeof list[0] === "string" ? { name: list[0] } : list[0])
-              : { name: "Haircut", price: 5000 };
-            setServiceName(first.name);
-            if (typeof first.price !== "undefined" && amountNaira === "") {
-              setAmountNaira(first.price);
-            }
+          const { data } = await api.get("/api/profile/client/me");
+          if (alive) {
+            setClient(data || null);
+            // prefill address
+            setAddress(data?.address || "");
           }
+        } catch {
+          // no client profile, let it pass — but booking might fail
         }
 
-        // best-effort address from GPS
-        tryGeo(true).catch(()=>{});
+        // best-effort GPS → to help the pro
+        if ("geolocation" in navigator) {
+          navigator.geolocation.getCurrentPosition(
+            (pos) => {
+              if (!alive) return;
+              const { latitude: lat, longitude: lon } = pos.coords || {};
+              setCoords({ lat, lon });
+            },
+            () => {},
+            { enableHighAccuracy: true, timeout: 10000 }
+          );
+        }
       } catch (e) {
-        console.error(e);
-        setErrorMsg("Could not load booking form.");
+        setErr("Could not load booking.");
       }
     })();
-    return () => { alive = false; clearTimeout(okTimer.current); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => {
+      alive = false;
+      clearTimeout(okTimer.current);
+    };
   }, [barberId]);
 
-  // service options
-  const serviceOptions = useMemo(() => {
-    const list = Array.isArray(barber?.services) ? barber.services : [];
-    return list.length ? list : [{ name: "Haircut", price: 5000 }];
-  }, [barber]);
-
-  // keep amount synced with selected service (read-only)
-  useEffect(() => {
-    if (amountNaira !== "" && carry.amountNaira !== undefined) return; // honored from carry
-    const list = serviceOptions.map(s => (typeof s === "string" ? { name: s } : s));
-    const found = list.find((s) => s.name === serviceName);
-    if (found && typeof found.price !== "undefined") setAmountNaira(found.price);
-  }, [serviceOptions, serviceName, carry.amountNaira, amountNaira]);
-
-  function formattedAddressFromGeo(p = {}) {
-    const parts = [
-      p.address_line1,
-      p.address_line2,
-      [p.street, p.housenumber].filter(Boolean).join(" "),
-      p.district || p.suburb,
-      p.city || p.county,
-      p.state,
-      p.country,
-    ].filter(Boolean);
-    return Array.from(new Set(parts)).join(", ");
-  }
-
-  async function tryGeo(auto = false) {
-    if (!("geolocation" in navigator)) {
-      if (!auto) setErrorMsg("Geolocation not supported on this device/browser.");
-      return;
-    }
-    return new Promise((resolve) => {
-      setDetecting(true);
-      navigator.geolocation.getCurrentPosition(
-        async (pos) => {
-          const { latitude: lat, longitude: lng } = pos.coords || {};
-          setCoords({ lat, lng });
-          try {
-            const { data } = await api.get("/api/geo/rev", { params: { lat, lon: lng } });
-            const p = data?.features?.[0]?.properties || {};
-            const pretty = formattedAddressFromGeo(p);
-            if (pretty && !addressText.trim()) setAddressText(pretty);
-
-            // GPS → region suggestion if different
-            const s = (p.state || p.region || "").toString().toUpperCase();
-            const l = (p.county || p.city || p.district || p.suburb || "").toString().toUpperCase();
-            if ((!lockRegion) && (s || l)) {
-              const suggest = { state: s || region.state, lga: l || region.lga };
-              if (suggest.state !== region.state || suggest.lga !== region.lga) {
-                setGpsSuggestion(suggest);
-              }
-            }
-          } catch {}
-          setDetecting(false);
-          resolve();
-        },
-        (err) => {
-          console.warn("[geo] getCurrentPosition error:", err?.message || err);
-          if (!auto) setErrorMsg("We couldn't get your location. Please allow location access and try again.");
-          setDetecting(false);
-          resolve();
-        },
-        { enableHighAccuracy: true, timeout: 10000 }
-      );
-    });
-  }
-
-  async function checkNearbyAvailability() {
-    try {
-      setSoftMsg("");
-      if (!coords?.lat || !coords?.lng) return true;
-      const { data } = await api.get(
-        `/api/barbers/nearby?lat=${encodeURIComponent(coords.lat)}&lon=${encodeURIComponent(coords.lng)}&radiusKm=25`
-      );
-      if (data?.count > 0) return true;
-      setSoftMsg("No professional is free in your area right now. We’ll notify you as soon as someone accepts.");
-      return false;
-    } catch {
-      return true; // fail-soft
-    }
-  }
+  const serviceName = carriedService || "Selected service";
+  const amountNaira =
+    carriedAmount !== "" ? Number(carriedAmount) : Number(barber?.services?.[0]?.price || 0);
 
   async function startPaystackInline(booking) {
     if (!window.PaystackPop || typeof window.PaystackPop.setup !== "function") {
-      throw new Error("paystack_inline_missing");
+      throw new Error("paystack_not_ready");
     }
-    let email = me?.email || "customer@example.com";
+    const email = me?.email || "customer@example.com";
     return new Promise((resolve, reject) => {
       const handler = window.PaystackPop.setup({
         key: String(import.meta.env.VITE_PAYSTACK_PUBLIC_KEY || ""),
         email,
-        amount: Number(booking.amountKobo), // kobo
+        amount: Number(booking.amountKobo),
         ref: "BOOKING-" + booking._id,
         metadata: {
           custom_fields: [
             { display_name: "Service", variable_name: "service", value: serviceName },
-            { display_name: "Pro ID", variable_name: "proId", value: barberId },
-            { display_name: "Client Phone", variable_name: "clientPhone", value: digitsOnly(clientPhone) },
-            { display_name: "Address", variable_name: "address", value: addressText.trim() },
-            coords ? { display_name: "GPS", variable_name: "gps", value: `${coords.lat},${coords.lng}` } : null,
+            { display_name: "Address", variable_name: "address", value: address.trim() },
+            coords
+              ? {
+                  display_name: "GPS",
+                  variable_name: "gps",
+                  value: `${coords.lat},${coords.lon}`,
+                }
+              : null,
           ].filter(Boolean),
         },
-        callback: async (response) => {
+        callback: async (res) => {
           try {
-            const verify = await api.post("/api/payments/verify", {
+            await api.post("/api/payments/verify", {
               bookingId: booking._id,
-              reference: response.reference,
+              reference: res.reference,
             });
-            if (verify?.data?.ok) {
-              navigate(`/bookings/${booking._id}`);
-              resolve();
-            } else {
-              reject(new Error("verify_failed:" + (verify?.data?.status || "unknown")));
-            }
+            nav(`/bookings/${booking._id}`, { replace: true });
+            resolve();
           } catch (e) {
             reject(e);
           }
         },
-        onClose: () => reject(new Error("payment_cancelled")),
+        onClose: () => reject(new Error("pay_cancelled")),
       });
       handler.openIframe();
     });
   }
 
   async function startPaystackRedirect(booking) {
-    const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/payments/init`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${localStorage.getItem("token") || ""}`,
-      },
-      body: JSON.stringify({
-        bookingId: booking._id,
-        amountKobo: booking.amountKobo,
-        email: me?.email || "customer@example.com",
-      }),
-    });
-
-    const data = await res.json();
-    if (!res.ok || !data?.authorization_url) throw new Error("Payment initialization failed.");
-
-    sessionStorage.setItem("pay_ref", JSON.stringify({
+    // fallback if inline fails
+    const { data } = await api.post("/api/payments/init", {
       bookingId: booking._id,
-      reference: data.reference
-    }));
-
+      amountKobo: booking.amountKobo,
+      email: me?.email || "customer@example.com",
+    });
+    if (!data?.authorization_url) throw new Error("paystack_init_failed");
     window.location.href = data.authorization_url;
   }
 
-  async function instantCheckout() {
-    setErrorMsg(""); setSoftMsg("");
-
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate(`/login?next=/book/${barberId}`);
+  async function handleBook() {
+    setErr("");
+    if (!me) {
+      nav(`/login?next=/book/${barberId}`);
       return;
     }
-    if (!clientName || !clientPhone) {
-      setErrorMsg("Your verified name/phone are missing. Update them in Settings.");
+    if (!client?.fullName || !client?.phone) {
+      setErr("Update your client profile (name + phone + address) before booking.");
       return;
     }
-    if (!serviceName) return setErrorMsg("Select a service.");
-    if (!amountNaira || Number(amountNaira) <= 0) return setErrorMsg("Invalid amount.");
-    if (!addressText.trim()) return setErrorMsg("Please add an address/landmark.");
-
-    const ok = await checkNearbyAvailability();
-    if (!ok) return;
+    if (!serviceName) {
+      setErr("No service selected.");
+      return;
+    }
+    if (!amountNaira || Number(amountNaira) <= 0) {
+      setErr("Invalid price for this service.");
+      return;
+    }
+    if (!address.trim()) {
+      setErr("Please confirm or edit your address/landmark.");
+      return;
+    }
 
     const payload = {
       proId: barberId,
       serviceName,
       amountKobo: Math.round(Number(amountNaira) * 100),
-      addressText: addressText.trim(),
-      client: { name: clientName, phone: digitsOnly(clientPhone) },
+      addressText: address.trim(),
+      client: {
+        name: client.fullName,
+        phone: client.phone,
+      },
+      country: "Nigeria",
+      state: carriedState || client.state || "",
+      lga: carriedLga || client.lga || "",
       coords,
-      country: region.country,
-      state: region.state,
-      lga: region.lga,
-      paymentMethod,
       instant: true,
+      paymentMethod: "card",
     };
 
     try {
-      setLoading(true);
+      setBusy(true);
       const { data } = await api.post("/api/bookings/instant", payload);
-
       const booking = data?.booking || data;
-      if (!booking?._id) throw new Error("Booking init failed.");
+      if (!booking?._id) throw new Error("booking_init_failed");
 
-      if (paymentMethod === "wallet") {
-        if (data?.ok === false) {
-          setErrorMsg(data?.message || "Wallet payment failed.");
-        } else {
-          navigate(`/bookings/${booking._id}`);
-        }
-        setLoading(false);
-        return;
-      }
-
+      // go to paystack
       try {
-        if (!paystackReady) throw new Error("inline_not_ready");
-        await startPaystackInline(booking);
-      } catch (e) {
-        try {
+        if (paystackReady) {
+          await startPaystackInline(booking);
+        } else {
           await startPaystackRedirect(booking);
-        } catch {
-          setErrorMsg("Paystack checkout couldn’t start. Please refresh and try again.");
         }
-      } finally {
-        setLoading(false);
+      } catch (e) {
+        console.error(e);
+        setErr("Payment could not start. Open the booking detail to pay again.");
+        nav(`/bookings/${booking._id}`);
       }
-    } catch (err) {
-      console.error(err);
-      setErrorMsg(
-        err?.response?.data?.error ||
-        err?.response?.data?.message ||
-        err?.message ||
-        "Booking failed."
+    } catch (e) {
+      setErr(
+        e?.response?.data?.error ||
+          e?.response?.data?.message ||
+          "Booking failed. Please try again."
       );
-      setLoading(false);
+    } finally {
+      setBusy(false);
     }
-  }
-
-  if (!barber) {
-    return <div className="max-w-3xl mx-auto px-4 py-10">Loading…</div>;
   }
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-10">
-      <h2 className="text-2xl font-semibold mb-2">Instant Book {barber.name}</h2>
-      <p className="text-zinc-300 mb-6">
-        {barber.lga} • Availability: {barber.availability || "Unknown"}
+      <h1 className="text-2xl font-semibold mb-2">Confirm &amp; Pay</h1>
+      <p className="text-zinc-400 mb-6">
+        You&apos;re booking{" "}
+        <span className="text-gold font-medium">{barber?.name || "Professional"}</span>
       </p>
 
-      {(!clientName || !clientPhone) && (
-        <div className="mb-4 rounded border border-amber-700 bg-amber-900/30 text-amber-100 px-3 py-2">
-          We couldn’t find a verified name/phone for your account. Update them in{" "}
-          <Link to="/settings" className="underline">Settings</Link> to continue.
+      {err && (
+        <div className="mb-4 rounded border border-red-800 bg-red-900/30 text-red-100 px-3 py-2">
+          {err}
         </div>
       )}
 
-      {softMsg && <p className="text-amber-400 mb-4">{softMsg}</p>}
-      {errorMsg && <p className="text-red-400 mb-4 font-semibold">{errorMsg}</p>}
-
-      {/* Service + price (locked if carried) */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
-        <label className="block">
+      {/* service summary */}
+      <div className="mb-4 rounded-xl border border-zinc-800 bg-black/40 p-4 space-y-2">
+        <div className="flex items-center justify-between">
           <span className="text-sm text-zinc-400">Service</span>
-          <select
-            className="mt-1 w-full bg-black border border-zinc-800 rounded-lg px-3 py-2"
-            value={serviceName}
-            onChange={(e) => setServiceName(e.target.value)}
-            disabled={lockService}
-          >
-            {serviceOptions.map((s, i) => {
-              const item = typeof s === "string" ? { name: s } : s;
-              return (
-                <option key={item.name || i} value={item.name}>
-                  {item.name} {item.price ? `— ₦${Number(item.price).toLocaleString()}` : ""}
-                </option>
-              );
-            })}
-          </select>
-        </label>
-
-        <label className="block">
-          <span className="text-sm text-zinc-400">Amount (₦)</span>
-          <input
-            type="number"
-            min="0"
-            className="mt-1 w-full bg-black border border-zinc-800 rounded-lg px-3 py-2 opacity-70"
-            value={amountNaira}
-            readOnly
-            disabled
-            title="Price set by selected service"
-          />
-        </label>
-      </div>
-
-      {/* Region summary (locked if carried) + GPS suggestion */}
-      <div className="mb-4 p-4 rounded-xl border border-zinc-800">
-        <p className="text-sm text-zinc-400 mb-1">Area</p>
-        <p>{region.country} • {region.state || "—"} • {region.lga || "—"}</p>
-        {!!gpsSuggestion && !lockRegion && (
-          <button
-            className="mt-2 text-xs px-2 py-1 border border-zinc-700 rounded"
-            onClick={() => { setRegion(r => ({ ...r, ...gpsSuggestion })); setGpsSuggestion(null); }}
-          >
-            Use detected area: {gpsSuggestion.state} / {gpsSuggestion.lga}
-          </button>
-        )}
-      </div>
-
-      {/* Address + GPS detect */}
-      <div className="grid grid-cols-1 gap-3 mb-4">
-        <label className="block">
-          <span className="text-sm text-zinc-400">Address / Landmark</span>
-          <input
-            className="mt-1 w-full bg-black border border-zinc-800 rounded-lg px-3 py-2"
-            value={addressText}
-            onChange={(e) => setAddressText(e.target.value)}
-            placeholder="Street, estate, landmark…"
-          />
-        </label>
-
-        <button
-          type="button"
-          onClick={() => tryGeo(false)}
-          className="justify-self-start text-xs px-3 py-1 rounded-lg border border-zinc-700"
-        >
-          {detecting ? "Detecting…" : coords ? "Re-detect GPS" : "Detect GPS"}
-        </button>
-        {coords ? (
-          <p className="text-xs text-zinc-500">GPS: {coords.lat?.toFixed(5)}, {coords.lng?.toFixed(5)}</p>
-        ) : null}
-      </div>
-
-      {/* Payment */}
-      <div className="mb-4 p-4 rounded-xl border border-zinc-800">
-        <p className="text-sm text-zinc-400 mb-2">Payment Method</p>
-        <div className="flex items-center gap-4">
-          <label className="flex items-center gap-2">
-            <input
-              type="radio"
-              name="pay"
-              value="wallet"
-              checked={paymentMethod === "wallet"}
-              onChange={() => setPaymentMethod("wallet")}
-            />
-            <span>Wallet</span>
-          </label>
+          <span className="font-medium">{serviceName}</span>
         </div>
-        <div className="flex items-center gap-4 mt-2">
-          <label className="flex items-center gap-2">
-            <input
-              type="radio"
-              name="pay"
-              value="card"
-              checked={paymentMethod === "card"}
-              onChange={() => setPaymentMethod("card")}
-            />
-            <span>Saved Card / Card</span>
-          </label>
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-zinc-400">Amount</span>
+          <span className="font-semibold text-gold">
+            ₦{Number(amountNaira || 0).toLocaleString()}
+          </span>
         </div>
-        <p className="text-xs text-zinc-500 mt-2">Total: ₦{Number(amountNaira || 0).toLocaleString()}</p>
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-zinc-400">Area</span>
+          <span>
+            {carriedState || client?.state || "—"} • {carriedLga || client?.lga || "—"}
+          </span>
+        </div>
       </div>
+
+      {/* address (only editable part) */}
+      <label className="block mb-6">
+        <div className="text-sm text-zinc-300 mb-1">Address / Landmark (edit for this booking)</div>
+        <input
+          value={address}
+          onChange={(e) => setAddress(e.target.value)}
+          className="w-full bg-black border border-zinc-800 rounded-lg px-3 py-2"
+          placeholder="Street, estate, hotel, event centre…"
+        />
+      </label>
 
       <button
-        type="button"
-        onClick={instantCheckout}
-        disabled={loading}
-        className="rounded-lg bg-gold text-black px-4 py-2 font-semibold disabled:opacity-50"
+        onClick={handleBook}
+        disabled={busy}
+        className="w-full sm:w-auto px-6 py-3 rounded-lg bg-gold text-black font-semibold disabled:opacity-50"
       >
-        {loading ? "Processing…" : "Book Now"}
+        {busy ? "Processing…" : "Pay & Book now"}
       </button>
+
+      <p className="text-xs text-zinc-500 mt-4">
+        By booking you agree to our{" "}
+        <Link to="/legal#terms" className="text-gold underline">
+          Terms
+        </Link>{" "}
+        and{" "}
+        <Link to="/legal#privacy" className="text-gold underline">
+          Privacy Policy
+        </Link>
+        .
+      </p>
     </div>
   );
 }

@@ -1,15 +1,61 @@
 // apps/web/src/pages/ClientRegister.jsx
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { api, getClientProfile, updateClientProfile } from "../lib/api";
 import NgGeoPicker from "../components/NgGeoPicker.jsx";
 import PhoneOTP from "../components/PhoneOTP.jsx";
 
-/* Optional image upload (uses same Cloudinary env as Settings) */
+/* ===== Cloudinary upload helper (REAL, not fake) =====
+   Works with:
+   VITE_CLOUDINARY_CLOUD_NAME
+   VITE_CLOUDINARY_UPLOAD_PRESET
+   If they are empty, it will just prompt for a URL.
+*/
 const CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || "";
 const UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET || "";
 
-/** Client registration/profile with OTP + optional KYC + agreements (Terms/Privacy only). */
+async function openUploadReal(onDone, folder = "kpocha/clients") {
+  // if env is not set, just let user paste a URL
+  if (!CLOUD_NAME || !UPLOAD_PRESET) {
+    const url = window.prompt("Paste image URL");
+    if (url) onDone(url);
+    return;
+  }
+
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "image/*";
+
+  input.onchange = async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+
+    const form = new FormData();
+    form.append("file", file);
+    form.append("upload_preset", UPLOAD_PRESET);
+    if (folder) form.append("folder", folder);
+
+    try {
+      const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/upload`, {
+        method: "POST",
+        body: form,
+      });
+      const data = await res.json();
+      if (data.secure_url) {
+        onDone(data.secure_url);
+      } else {
+        alert("Upload failed.");
+      }
+    } catch (e) {
+      console.error(e);
+      alert("Could not upload image.");
+    }
+  };
+
+  input.click();
+}
+
+/** Client registration/profile with OTP + optional KYC + agreements. */
 export default function ClientRegister() {
   const nav = useNavigate();
 
@@ -17,6 +63,7 @@ export default function ClientRegister() {
   const [err, setErr] = useState("");
   const [ok, setOk] = useState("");
 
+  // core fields
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
   const [phoneVerifiedAt, setPhoneVerifiedAt] = useState(null);
@@ -26,21 +73,21 @@ export default function ClientRegister() {
   const [address, setAddress] = useState("");
   const [photoUrl, setPhotoUrl] = useState("");
 
-  // KYC (optional)
+  // optional KYC
   const [verifyNow, setVerifyNow] = useState(false);
   const [idType, setIdType] = useState("");
   const [idUrl, setIdUrl] = useState("");
   const [selfieWithIdUrl, setSelfieWithIdUrl] = useState("");
 
-  // Agreements
+  // agreements
   const [agreements, setAgreements] = useState({ terms: false, privacy: false });
 
-  // Location
+  // location
   const [locLoading, setLocLoading] = useState(false);
   const [lat, setLat] = useState(null);
   const [lon, setLon] = useState(null);
 
-  // Nearby preview
+  // nearby
   const [nearbyBusy, setNearbyBusy] = useState(false);
   const [nearby, setNearby] = useState([]);
 
@@ -51,15 +98,17 @@ export default function ClientRegister() {
     okTimerRef.current = setTimeout(() => setOk(""), 2200);
   }
 
-  // Prefill from server
+  // ===== Prefill from server =====
   useEffect(() => {
     let alive = true;
     (async () => {
       setLoading(true);
       setErr("");
       try {
+        // unified alias on your backend
         const data = await getClientProfile().catch(() => null);
         if (!alive) return;
+
         if (data) {
           setFullName(data.fullName || "");
           setPhone(data.phone || "");
@@ -72,12 +121,14 @@ export default function ClientRegister() {
           if (data.lat != null) setLat(data.lat);
           if (data.lon != null) setLon(data.lon);
 
+          // agreements (old + new)
           const acceptedTerms = !!data.acceptedTerms || !!data?.agreements?.terms;
           const acceptedPrivacy = !!data.acceptedPrivacy || !!data?.agreements?.privacy;
           if (acceptedTerms || acceptedPrivacy) {
             setAgreements({ terms: acceptedTerms, privacy: acceptedPrivacy });
           }
 
+          // existing KYC → auto-open
           const kyc = data.kyc || {};
           if (kyc?.idType || kyc?.idUrl || kyc?.selfieWithIdUrl) {
             setVerifyNow(true);
@@ -98,13 +149,16 @@ export default function ClientRegister() {
     };
   }, []);
 
+  // ===== Can save? =====
   const canSave = useMemo(() => {
     const base = !!fullName && !!phone && (!!stateVal || !!lga) && !!address;
     const agreed = agreements.terms && agreements.privacy;
     if (!verifyNow) return base && agreed;
+    // if user requested verification now → insist on all 3 KYC fields
     return base && agreed && !!idType && !!idUrl && !!selfieWithIdUrl;
   }, [fullName, phone, stateVal, lga, address, verifyNow, idType, idUrl, selfieWithIdUrl, agreements]);
 
+  // ===== Save to backend =====
   async function save() {
     try {
       setErr("");
@@ -124,7 +178,7 @@ export default function ClientRegister() {
       if (verifyNow) {
         payload.kyc = { idType, idUrl, selfieWithIdUrl, status: "pending" };
       }
-      await updateClientProfile(payload); // PUT /api/profile/client/me (alias: /api/profile/me)
+      await updateClientProfile(payload); // PUT /api/profile/me (unified)
       flashOK("Saved!");
       nav("/browse", { replace: true });
     } catch (e) {
@@ -132,6 +186,7 @@ export default function ClientRegister() {
     }
   }
 
+  // ===== Use my location =====
   async function useMyLocation() {
     try {
       setLocLoading(true);
@@ -161,14 +216,15 @@ export default function ClientRegister() {
     } catch (e) {
       alert(
         e?.message?.includes("Only secure origins")
-          ? "Location requires HTTPS. Use your ngrok URL on phone, or localhost on your laptop."
-          : "Could not get your location. Please allow location permission."
+          ? "Location requires HTTPS. Use your ngrok URL on phone, or localhost on laptop."
+          : "Could not get your location. Please allow location."
       );
     } finally {
       setLocLoading(false);
     }
   }
 
+  // ===== Nearby pros (just preview) =====
   async function loadNearby() {
     if (lat == null || lon == null) {
       alert("Click ‘Use my location’ first so we can find professionals near you.");
@@ -191,10 +247,20 @@ export default function ClientRegister() {
   return (
     <div className="max-w-3xl mx-auto px-4 py-8">
       <h1 className="text-2xl font-semibold mb-1">Tell us about you</h1>
-      <p className="text-zinc-400 mb-4">Save your details once. Future bookings will be instant — no long forms.</p>
+      <p className="text-zinc-400 mb-4">
+        Save your details once. Future bookings will be instant — no long forms.
+      </p>
 
-      {err && <div className="mb-4 rounded border border-red-800 bg-red-900/40 text-red-100 px-3 py-2">{err}</div>}
-      {ok && <div className="mb-4 rounded border border-green-800 bg-green-900/30 text-green-100 px-3 py-2">{ok}</div>}
+      {err && (
+        <div className="mb-4 rounded border border-red-800 bg-red-900/40 text-red-100 px-3 py-2">
+          {err}
+        </div>
+      )}
+      {ok && (
+        <div className="mb-4 rounded border border-green-800 bg-green-900/30 text-green-100 px-3 py-2">
+          {ok}
+        </div>
+      )}
 
       {loading ? (
         <div>Loading…</div>
@@ -206,7 +272,7 @@ export default function ClientRegister() {
               type="button"
               className="relative w-16 h-16 rounded-full border border-zinc-800 overflow-hidden"
               title="Upload photo"
-              onClick={() => openUpload(setPhotoUrl, "kpocha/clients")}
+              onClick={() => openUploadReal(setPhotoUrl, "kpocha/clients")}
             >
               {photoUrl ? (
                 <img src={photoUrl} alt="Avatar" className="w-full h-full object-cover" />
@@ -245,7 +311,9 @@ export default function ClientRegister() {
 
           {/* Location */}
           <div>
-            <label className="block text-sm text-zinc-300 mb-1">State &amp; LGA</label>
+            <label className="block text-sm text-zinc-300 mb-1">
+              State &amp; LGA
+            </label>
             <NgGeoPicker
               valueState={stateVal}
               onChangeState={setStateVal}
@@ -268,12 +336,21 @@ export default function ClientRegister() {
             </div>
           </div>
 
-          <Input label="Address / Landmark" value={address} onChange={(e) => setAddress(e.target.value)} required />
+          <Input
+            label="Address / Landmark"
+            value={address}
+            onChange={(e) => setAddress(e.target.value)}
+            required
+          />
 
           {/* KYC */}
           <div className="rounded border border-zinc-800 p-3">
             <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={verifyNow} onChange={(e) => setVerifyNow(e.target.checked)} />
+              <input
+                type="checkbox"
+                checked={verifyNow}
+                onChange={(e) => setVerifyNow(e.target.checked)}
+              />
               Verify my identity now (recommended)
             </label>
 
@@ -288,11 +365,13 @@ export default function ClientRegister() {
                     required
                   >
                     <option value="">Select…</option>
-                    {["National ID", "Voter’s Card", "Driver’s License", "International Passport"].map((o) => (
-                      <option key={o} value={o}>
-                        {o}
-                      </option>
-                    ))}
+                    {["National ID", "Voter’s Card", "Driver’s License", "International Passport"].map(
+                      (o) => (
+                        <option key={o} value={o}>
+                          {o}
+                        </option>
+                      )
+                    )}
                   </select>
                 </label>
 
@@ -309,7 +388,7 @@ export default function ClientRegister() {
                     <button
                       type="button"
                       className="px-3 py-2 rounded-lg border border-zinc-700 text-sm hover:bg-zinc-900"
-                      onClick={() => openUpload(setIdUrl, "kpocha/client-kyc")}
+                      onClick={() => openUploadReal(setIdUrl, "kpocha/client-kyc")}
                     >
                       Upload
                     </button>
@@ -329,7 +408,7 @@ export default function ClientRegister() {
                     <button
                       type="button"
                       className="px-3 py-2 rounded-lg border border-zinc-700 text-sm hover:bg-zinc-900"
-                      onClick={() => openUpload(setSelfieWithIdUrl, "kpocha/client-kyc")}
+                      onClick={() => openUploadReal(setSelfieWithIdUrl, "kpocha/client-kyc")}
                     >
                       Upload
                     </button>
@@ -349,9 +428,9 @@ export default function ClientRegister() {
               />
               <span>
                 I agree to the{" "}
-                <a href="/legal#terms" target="_blank" rel="noreferrer" className="text-gold underline">
+                <Link to="/legal#terms" className="text-gold underline" target="_blank" rel="noreferrer">
                   Terms &amp; Conditions
-                </a>
+                </Link>
               </span>
             </label>
             <label className="flex items-center gap-2">
@@ -362,9 +441,9 @@ export default function ClientRegister() {
               />
               <span>
                 I agree to the{" "}
-                <a href="/legal#privacy" target="_blank" rel="noreferrer" className="text-gold underline">
+                <Link to="/legal#privacy" className="text-gold underline" target="_blank" rel="noreferrer">
                   Privacy Policy
-                </a>
+                </Link>
               </span>
             </label>
           </div>
@@ -372,7 +451,9 @@ export default function ClientRegister() {
           {/* Nearby pros */}
           <div className="rounded border border-zinc-800 p-3">
             <div className="flex items-center justify-between gap-3">
-              <div className="text-sm text-zinc-300">See Professionals near your current location</div>
+              <div className="text-sm text-zinc-300">
+                See Professionals near your current location
+              </div>
               <button
                 type="button"
                 onClick={loadNearby}
@@ -425,7 +506,10 @@ function Input({ label, required, ...props }) {
         {label}
         {required ? " *" : ""}
       </div>
-      <input {...props} className="w-full bg-black border border-zinc-800 rounded-lg px-3 py-2" />
+      <input
+        {...props}
+        className="w-full bg-black border border-zinc-800 rounded-lg px-3 py-2"
+      />
     </label>
   );
 }
