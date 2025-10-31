@@ -3,61 +3,72 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { api, getClientProfile, updateClientProfile } from "../lib/api";
 import NgGeoPicker from "../components/NgGeoPicker.jsx";
-import PhoneOTP from "../components/PhoneOTP.jsx";
 
-/* ===== Cloudinary upload helper (REAL, not fake) =====
-   Works with:
-   VITE_CLOUDINARY_CLOUD_NAME
-   VITE_CLOUDINARY_UPLOAD_PRESET
-   If they are empty, it will just prompt for a URL.
-*/
+// same env as BecomePro
 const CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || "";
 const UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET || "";
 
-async function openUploadReal(onDone, folder = "kpocha/clients") {
-  // if env is not set, just let user paste a URL
-  if (!CLOUD_NAME || !UPLOAD_PRESET) {
-    const url = window.prompt("Paste image URL");
-    if (url) onDone(url);
-    return;
-  }
+/* ---------- Cloudinary widget (same pattern as BecomePro) ---------- */
+function useCloudinaryWidget() {
+  const [ready, setReady] = useState(!!window.cloudinary?.createUploadWidget);
 
-  const input = document.createElement("input");
-  input.type = "file";
-  input.accept = "image/*";
-
-  input.onchange = async () => {
-    const file = input.files?.[0];
-    if (!file) return;
-
-    const form = new FormData();
-    form.append("file", file);
-    form.append("upload_preset", UPLOAD_PRESET);
-    if (folder) form.append("folder", folder);
-
-    try {
-      const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/upload`, {
-        method: "POST",
-        body: form,
-      });
-      const data = await res.json();
-      if (data.secure_url) {
-        onDone(data.secure_url);
-      } else {
-        alert("Upload failed.");
+  useEffect(() => {
+    if (ready) return;
+    if (!document.querySelector('script[data-cld="1"]')) {
+      const s = document.createElement("script");
+      s.src = "https://widget.cloudinary.com/v2.0/global/all.js";
+      s.async = true;
+      s.defer = true;
+      s.setAttribute("data-cld", "1");
+      s.onload = () => setReady(!!window.cloudinary?.createUploadWidget);
+      document.body.appendChild(s);
+    }
+    const t = setInterval(() => {
+      if (window.cloudinary?.createUploadWidget) {
+        setReady(true);
+        clearInterval(t);
       }
-    } catch (e) {
-      console.error(e);
-      alert("Could not upload image.");
+    }, 200);
+    const stopAfter = setTimeout(() => clearInterval(t), 10000);
+    return () => {
+      clearInterval(t);
+      clearTimeout(stopAfter);
+    };
+  }, [ready]);
+
+  const factory = (onSuccess, folder = "kpocha/clients") => {
+    if (!ready || !CLOUD_NAME || !UPLOAD_PRESET) return null;
+    try {
+      return window.cloudinary.createUploadWidget(
+        {
+          cloudName: CLOUD_NAME,
+          uploadPreset: UPLOAD_PRESET,
+          multiple: false,
+          maxFiles: 1,
+          clientAllowedFormats: ["jpg", "jpeg", "png", "webp"],
+          maxImageFileSize: 5 * 1024 * 1024,
+          sources: ["local", "camera", "url"],
+          showPoweredBy: false,
+          folder,
+        },
+        (err, res) => {
+          if (!err && res && res.event === "success") {
+            onSuccess(res.info.secure_url);
+          }
+        }
+      );
+    } catch {
+      return null;
     }
   };
 
-  input.click();
+  return { ready, factory };
 }
 
-/** Client registration/profile with OTP + optional KYC + agreements. */
+/* ======================= Client Register Page ======================= */
 export default function ClientRegister() {
   const nav = useNavigate();
+  const { ready: widgetReady, factory: widgetFactory } = useCloudinaryWidget();
 
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
@@ -66,7 +77,6 @@ export default function ClientRegister() {
   // core fields
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
-  const [phoneVerifiedAt, setPhoneVerifiedAt] = useState(null);
 
   const [stateVal, setStateVal] = useState("");
   const [lga, setLga] = useState("");
@@ -98,21 +108,19 @@ export default function ClientRegister() {
     okTimerRef.current = setTimeout(() => setOk(""), 2200);
   }
 
-  // ===== Prefill from server =====
+  // ===== Prefill =====
   useEffect(() => {
     let alive = true;
     (async () => {
       setLoading(true);
       setErr("");
       try {
-        // unified alias on your backend
         const data = await getClientProfile().catch(() => null);
         if (!alive) return;
 
         if (data) {
           setFullName(data.fullName || "");
           setPhone(data.phone || "");
-          if (data.phoneVerifiedAt) setPhoneVerifiedAt(data.phoneVerifiedAt);
 
           setStateVal(data.state || "");
           setLga((data.lga || "").toString().toUpperCase());
@@ -121,14 +129,12 @@ export default function ClientRegister() {
           if (data.lat != null) setLat(data.lat);
           if (data.lon != null) setLon(data.lon);
 
-          // agreements (old + new)
           const acceptedTerms = !!data.acceptedTerms || !!data?.agreements?.terms;
           const acceptedPrivacy = !!data.acceptedPrivacy || !!data?.agreements?.privacy;
           if (acceptedTerms || acceptedPrivacy) {
             setAgreements({ terms: acceptedTerms, privacy: acceptedPrivacy });
           }
 
-          // existing KYC → auto-open
           const kyc = data.kyc || {};
           if (kyc?.idType || kyc?.idUrl || kyc?.selfieWithIdUrl) {
             setVerifyNow(true);
@@ -154,11 +160,10 @@ export default function ClientRegister() {
     const base = !!fullName && !!phone && (!!stateVal || !!lga) && !!address;
     const agreed = agreements.terms && agreements.privacy;
     if (!verifyNow) return base && agreed;
-    // if user requested verification now → insist on all 3 KYC fields
     return base && agreed && !!idType && !!idUrl && !!selfieWithIdUrl;
   }, [fullName, phone, stateVal, lga, address, verifyNow, idType, idUrl, selfieWithIdUrl, agreements]);
 
-  // ===== Save to backend =====
+  // ===== Save =====
   async function save() {
     try {
       setErr("");
@@ -170,7 +175,6 @@ export default function ClientRegister() {
         address,
         photoUrl,
         ...(lat != null && lon != null ? { lat, lon } : {}),
-        ...(phoneVerifiedAt ? { phoneVerifiedAt } : {}),
         acceptedTerms: !!agreements.terms,
         acceptedPrivacy: !!agreements.privacy,
         agreements: { terms: !!agreements.terms, privacy: !!agreements.privacy },
@@ -178,7 +182,7 @@ export default function ClientRegister() {
       if (verifyNow) {
         payload.kyc = { idType, idUrl, selfieWithIdUrl, status: "pending" };
       }
-      await updateClientProfile(payload); // PUT /api/profile/me (unified)
+      await updateClientProfile(payload);
       flashOK("Saved!");
       nav("/browse", { replace: true });
     } catch (e) {
@@ -224,7 +228,7 @@ export default function ClientRegister() {
     }
   }
 
-  // ===== Nearby pros (just preview) =====
+  // ===== Nearby =====
   async function loadNearby() {
     if (lat == null || lon == null) {
       alert("Click ‘Use my location’ first so we can find professionals near you.");
@@ -246,10 +250,8 @@ export default function ClientRegister() {
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-8">
-      <h1 className="text-2xl font-semibold mb-1">Tell us about you</h1>
-      <p className="text-zinc-400 mb-4">
-        Save your details once. Future bookings will be instant — no long forms.
-      </p>
+      {/* match BecomePro header style */}
+      <h1 className="text-2xl font-semibold mb-6 text-yellow-400">Client Profile</h1>
 
       {err && (
         <div className="mb-4 rounded border border-red-800 bg-red-900/40 text-red-100 px-3 py-2">
@@ -257,63 +259,77 @@ export default function ClientRegister() {
         </div>
       )}
       {ok && (
-        <div className="mb-4 rounded border border-green-800 bg-green-900/30 text-green-100 px-3 py-2">
+        <div className="mb-4 rounded border border-emerald-700 bg-emerald-900/30 text-emerald-100 px-3 py-2">
           {ok}
         </div>
       )}
 
       {loading ? (
-        <div>Loading…</div>
+        <div className="text-zinc-200">Loading…</div>
       ) : (
         <div className="space-y-6">
           {/* Avatar */}
-          <div className="flex items-center gap-4">
-            <button
-              type="button"
-              className="relative w-16 h-16 rounded-full border border-zinc-800 overflow-hidden"
-              title="Upload photo"
-              onClick={() => openUploadReal(setPhotoUrl, "kpocha/clients")}
-            >
-              {photoUrl ? (
-                <img src={photoUrl} alt="Avatar" className="w-full h-full object-cover" />
-              ) : (
-                <div className="w-full h-full bg-zinc-900 flex items-center justify-center text-zinc-500 text-xs">
-                  Add Photo
-                </div>
+          <Section title="Photo">
+            <div className="flex items-center gap-4">
+              <div className="relative w-16 h-16 rounded-full border border-yellow-500/60 overflow-hidden bg-zinc-900">
+                {photoUrl ? (
+                  <img src={photoUrl} alt="Avatar" className="w-full h-full object-cover" />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-[10px] text-zinc-500">
+                    No Photo
+                  </div>
+                )}
+              </div>
+              <div className="flex gap-2 flex-wrap">
+                <input
+                  className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm text-zinc-200"
+                  placeholder="Photo URL"
+                  value={photoUrl}
+                  onChange={(e) => setPhotoUrl(e.target.value)}
+                />
+                <UploadButton
+                  title={widgetReady ? "Upload" : "Upload (loading…)"}
+                  onUploaded={(url) => setPhotoUrl(url)}
+                  widgetFactory={widgetFactory}
+                  disabled={!widgetReady || !CLOUD_NAME || !UPLOAD_PRESET}
+                  folder="kpocha/clients"
+                />
+                {photoUrl && (
+                  <button
+                    type="button"
+                    onClick={() => setPhotoUrl("")}
+                    className="px-3 py-1.5 rounded-lg border border-red-500/60 text-red-200 text-sm hover:bg-red-500/10"
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+              {(!CLOUD_NAME || !UPLOAD_PRESET) && (
+                <p className="text-xs text-zinc-500">Upload widget not configured — use URL.</p>
               )}
-            </button>
-            {photoUrl && (
-              <button
-                className="text-xs text-red-300 border border-red-800 rounded px-2 py-1"
-                onClick={() => setPhotoUrl("")}
-              >
-                Remove
-              </button>
-            )}
-          </div>
+            </div>
+          </Section>
 
           {/* Basic Info */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Input label="Full name" value={fullName} onChange={(e) => setFullName(e.target.value)} required />
-            <div>
+          <Section title="Basic Information">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <Input
-                label={`Phone${phoneVerifiedAt ? " (verified)" : ""}`}
-                value={phone}
-                onChange={(e) => {
-                  setPhone(e.target.value);
-                  setPhoneVerifiedAt(null);
-                }}
-                required
+                label="Full name *"
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
               />
-              <PhoneOTP phone={phone} disabled={!phone} onVerified={(iso) => setPhoneVerifiedAt(iso)} />
+              <Input
+                label="Phone *"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="e.g. 080..."
+              />
             </div>
-          </div>
+          </Section>
 
           {/* Location */}
-          <div>
-            <label className="block text-sm text-zinc-300 mb-1">
-              State &amp; LGA
-            </label>
+          <Section title="Location">
+            <label className="block text-sm text-yellow-300 mb-1">State &amp; LGA</label>
             <NgGeoPicker
               valueState={stateVal}
               onChangeState={setStateVal}
@@ -323,29 +339,34 @@ export default function ClientRegister() {
               className="grid grid-cols-1 gap-3"
             />
 
-            <div className="mt-2 flex items-center gap-3">
-              <button
-                type="button"
-                onClick={useMyLocation}
-                disabled={locLoading}
-                className="text-sm px-3 py-1.5 rounded border border-emerald-600 text-emerald-300 hover:bg-emerald-900/30 disabled:opacity-60"
-              >
-                {locLoading ? "Detecting…" : "Use my location"}
-              </button>
-              <span className="text-xs text-zinc-500">Fills State, LGA and Address automatically.</span>
+            <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
+              <Input
+                label="Address / Landmark *"
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+              />
+              <Input
+                label="Latitude (optional)"
+                value={lat ?? ""}
+                onChange={(e) => setLat(e.target.value)}
+                placeholder="6.5244"
+              />
+              <div className="flex items-end">
+                <button
+                  type="button"
+                  onClick={useMyLocation}
+                  disabled={locLoading}
+                  className="w-full px-3 py-2 rounded-lg border border-yellow-500 text-yellow-300 text-sm hover:bg-yellow-500/10 disabled:opacity-60"
+                >
+                  {locLoading ? "Detecting…" : "Use my location"}
+                </button>
+              </div>
             </div>
-          </div>
-
-          <Input
-            label="Address / Landmark"
-            value={address}
-            onChange={(e) => setAddress(e.target.value)}
-            required
-          />
+          </Section>
 
           {/* KYC */}
-          <div className="rounded border border-zinc-800 p-3">
-            <label className="flex items-center gap-2 text-sm">
+          <Section title="Optional Verification (KYC)">
+            <label className="flex items-center gap-2 text-sm text-yellow-200 mb-3">
               <input
                 type="checkbox"
                 checked={verifyNow}
@@ -355,14 +376,13 @@ export default function ClientRegister() {
             </label>
 
             {verifyNow && (
-              <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
-                <label className="block">
-                  <div className="text-sm text-zinc-300 mb-1">ID Type *</div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <Label>ID Type *</Label>
                   <select
-                    className="w-full bg-black border border-zinc-800 rounded-lg px-3 py-2"
+                    className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-200"
                     value={idType}
                     onChange={(e) => setIdType(e.target.value)}
-                    required
                   >
                     <option value="">Select…</option>
                     {["National ID", "Voter’s Card", "Driver’s License", "International Passport"].map(
@@ -373,93 +393,71 @@ export default function ClientRegister() {
                       )
                     )}
                   </select>
-                </label>
-
-                <div>
-                  <div className="text-sm text-zinc-300 mb-1">Government ID image *</div>
-                  <div className="flex gap-2">
-                    <input
-                      className="flex-1 bg-black border border-zinc-800 rounded-lg px-3 py-2"
-                      placeholder="ID Image URL"
-                      value={idUrl}
-                      onChange={(e) => setIdUrl(e.target.value)}
-                      required
-                    />
-                    <button
-                      type="button"
-                      className="px-3 py-2 rounded-lg border border-zinc-700 text-sm hover:bg-zinc-900"
-                      onClick={() => openUploadReal(setIdUrl, "kpocha/client-kyc")}
-                    >
-                      Upload
-                    </button>
-                  </div>
                 </div>
 
-                <div className="md:col-span-2">
-                  <div className="text-sm text-zinc-300 mb-1">Take a selfie *</div>
-                  <div className="flex gap-2">
-                    <input
-                      className="flex-1 bg-black border border-zinc-800 rounded-lg px-3 py-2"
-                      placeholder="Selfie Image URL"
-                      value={selfieWithIdUrl}
-                      onChange={(e) => setSelfieWithIdUrl(e.target.value)}
-                      required
-                    />
-                    <button
-                      type="button"
-                      className="px-3 py-2 rounded-lg border border-zinc-700 text-sm hover:bg-zinc-900"
-                      onClick={() => openUploadReal(setSelfieWithIdUrl, "kpocha/client-kyc")}
-                    >
-                      Upload
-                    </button>
-                  </div>
-                </div>
+                <UploadRow
+                  label="Government ID image *"
+                  value={idUrl}
+                  onChange={setIdUrl}
+                  widgetFactory={widgetFactory}
+                  widgetReady={widgetReady}
+                  folder="kpocha/client-kyc"
+                />
+
+                <UploadRow
+                  label="Selfie with ID *"
+                  value={selfieWithIdUrl}
+                  onChange={setSelfieWithIdUrl}
+                  widgetFactory={widgetFactory}
+                  widgetReady={widgetReady}
+                  folder="kpocha/client-kyc"
+                  className="md:col-span-2"
+                />
               </div>
             )}
-          </div>
+          </Section>
 
           {/* Agreements */}
-          <div className="rounded border border-zinc-800 p-3 space-y-2 text-sm">
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={agreements.terms}
-                onChange={() => setAgreements((p) => ({ ...p, terms: !p.terms }))}
-              />
-              <span>
-                I agree to the{" "}
-                <Link to="/legal#terms" className="text-gold underline" target="_blank" rel="noreferrer">
-                  Terms &amp; Conditions
-                </Link>
-              </span>
-            </label>
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={agreements.privacy}
-                onChange={() => setAgreements((p) => ({ ...p, privacy: !p.privacy }))}
-              />
-              <span>
-                I agree to the{" "}
-                <Link to="/legal#privacy" className="text-gold underline" target="_blank" rel="noreferrer">
-                  Privacy Policy
-                </Link>
-              </span>
-            </label>
-          </div>
+          <Section title="Agreements">
+            <div className="space-y-2 text-sm text-yellow-200">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={agreements.terms}
+                  onChange={() => setAgreements((p) => ({ ...p, terms: !p.terms }))}
+                />
+                <span>
+                  I agree to the{" "}
+                  <Link to="/legal#terms" target="_blank" rel="noreferrer" className="underline">
+                    Terms &amp; Conditions
+                  </Link>
+                </span>
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={agreements.privacy}
+                  onChange={() => setAgreements((p) => ({ ...p, privacy: !p.privacy }))}
+                />
+                <span>
+                  I agree to the{" "}
+                  <Link to="/legal#privacy" target="_blank" rel="noreferrer" className="underline">
+                    Privacy Policy
+                  </Link>
+                </span>
+              </label>
+            </div>
+          </Section>
 
-          {/* Nearby pros */}
-          <div className="rounded border border-zinc-800 p-3">
+          {/* Nearby */}
+          <Section title="Professionals near you">
             <div className="flex items-center justify-between gap-3">
-              <div className="text-sm text-zinc-300">
-                See Professionals near your current location
-              </div>
+              <p className="text-sm text-zinc-200">Find stylists/barbers within 25km.</p>
               <button
                 type="button"
                 onClick={loadNearby}
                 disabled={nearbyBusy}
-                className="text-sm px-3 py-1.5 rounded border border-gold text-gold hover:bg-yellow-900/20 disabled:opacity-60"
-                title="Uses /api/barbers/nearby"
+                className="text-sm px-3 py-1.5 rounded-lg border border-yellow-500 text-yellow-300 hover:bg-yellow-500/10 disabled:opacity-60"
               >
                 {nearbyBusy ? "Finding…" : "See nearby"}
               </button>
@@ -470,7 +468,7 @@ export default function ClientRegister() {
                 {nearby.slice(0, 6).map((b) => (
                   <li
                     key={b.id || b._id || b.proId || `${b.name}-${b.lga}-${b.distanceKm || 0}`}
-                    className="text-sm flex justify-between border border-zinc-800 rounded px-2 py-1"
+                    className="flex justify-between items-center border border-zinc-800 rounded px-2 py-1 text-sm"
                   >
                     <span>{b.name || b.proName || "Professional"}</span>
                     <span className="text-zinc-400">
@@ -480,36 +478,101 @@ export default function ClientRegister() {
                 ))}
               </ul>
             )}
-          </div>
+          </Section>
 
           {/* Save */}
-          <div className="flex justify-end">
-            <button
-              disabled={!canSave}
-              onClick={save}
-              className="px-4 py-2 rounded-lg bg-gold text-black font-semibold disabled:opacity-50"
-            >
-              Save &amp; Continue
-            </button>
-          </div>
+          <button
+            disabled={!canSave}
+            onClick={save}
+            className="w-full bg-yellow-400 text-black font-semibold rounded-lg py-2 disabled:opacity-60"
+          >
+            Save &amp; Continue
+          </button>
         </div>
       )}
     </div>
   );
 }
 
-/* Small input helper */
-function Input({ label, required, ...props }) {
+/* ---------- Small UI (copied style from BecomePro) ---------- */
+function Section({ title, children }) {
+  return (
+    <section className="rounded-lg border border-yellow-500/40 p-4 bg-black">
+      <h3 className="font-semibold mb-3 text-yellow-400">{title}</h3>
+      {children}
+    </section>
+  );
+}
+
+function Label({ children }) {
+  return <div className="text-sm text-yellow-300 mb-1">{children}</div>;
+}
+
+function Input({ label, ...props }) {
   return (
     <label className="block">
-      <div className="text-sm text-zinc-300 mb-1">
-        {label}
-        {required ? " *" : ""}
-      </div>
+      <Label>{label}</Label>
       <input
         {...props}
-        className="w-full bg-black border border-zinc-800 rounded-lg px-3 py-2"
+        className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-200"
       />
     </label>
+  );
+}
+
+function UploadButton({ title = "Upload", onUploaded, widgetFactory, disabled, folder }) {
+  function open() {
+    const widget = widgetFactory?.(onUploaded, folder);
+    if (!widget) {
+      alert("Upload unavailable. Enter a URL manually.");
+      return;
+    }
+    widget.open();
+  }
+  return (
+    <button
+      type="button"
+      onClick={open}
+      disabled={disabled}
+      className="px-3 py-1.5 rounded-lg border border-yellow-500 text-yellow-300 text-sm hover:bg-yellow-500/10 disabled:opacity-50"
+    >
+      {title}
+    </button>
+  );
+}
+
+function UploadRow({
+  label,
+  value,
+  onChange,
+  widgetFactory,
+  widgetReady,
+  folder,
+  className = "",
+}) {
+  return (
+    <div className={className}>
+      <Label>{label}</Label>
+      <div className="flex gap-2">
+        <input
+          className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-200"
+          placeholder="Paste image URL"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+        />
+        <UploadButton
+          title={widgetReady ? "Upload" : "Upload (loading…)"}
+          onUploaded={(url) => onChange(url)}
+          widgetFactory={widgetFactory}
+          disabled={!widgetReady || !CLOUD_NAME || !UPLOAD_PRESET}
+          folder={folder}
+        />
+      </div>
+      {(!CLOUD_NAME || !UPLOAD_PRESET) && (
+        <p className="text-xs text-zinc-500 mt-1">
+          Upload widget not configured — the URL field is the fallback.
+        </p>
+      )}
+    </div>
   );
 }
