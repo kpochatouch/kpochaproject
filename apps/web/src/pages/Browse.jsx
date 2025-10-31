@@ -6,13 +6,12 @@ import BarberCard from "../components/BarberCard";
 import ServicePicker from "../components/ServicePicker";
 import ProDrawer from "../components/ProDrawer";
 import FeedCard from "../components/FeedCard";
-import ErrorBoundary from "../components/ErrorBoundary"; // ✅ wrap page
+import ErrorBoundary from "../components/ErrorBoundary";
 
-/** Pro-only composer (simple: text + media URL) */
 function FeedComposer({ lga, onPosted }) {
   const [text, setText] = useState("");
   const [mediaUrl, setMediaUrl] = useState("");
-  const [mediaType, setMediaType] = useState("image"); // image | video
+  const [mediaType, setMediaType] = useState("image");
   const [posting, setPosting] = useState(false);
   const [msg, setMsg] = useState("");
 
@@ -35,7 +34,7 @@ function FeedComposer({ lga, onPosted }) {
       setText("");
       setMediaUrl("");
       setMsg("Posted!");
-      onPosted?.(); // refresh feed after posting
+      onPosted?.();
     } catch (e) {
       setMsg(e?.response?.data?.error || "Post failed.");
     } finally {
@@ -86,38 +85,38 @@ function FeedComposer({ lga, onPosted }) {
 
 export default function Browse() {
   const navigate = useNavigate();
-  const [tab, setTab] = useState("pros"); // "pros" | "feed"
+  const [tab, setTab] = useState("pros");
 
-  // pros directory
   const [pros, setPros] = useState([]);
   const [loadingPros, setLoadingPros] = useState(true);
   const [errPros, setErrPros] = useState("");
 
-  // filters
   const [q, setQ] = useState("");
   const [service, setService] = useState("");
   const [stateName, setStateName] = useState("");
   const [lga, setLga] = useState("");
 
-  // geo
   const [states, setStates] = useState([]);
   const [lgasByState, setLgasByState] = useState({});
 
-  // me
   const [me, setMe] = useState(null);
   const isPro = !!me?.isPro;
 
-  // drawer
   const [openPro, setOpenPro] = useState(null);
 
-  // feed
   const [feed, setFeed] = useState([]);
   const [loadingFeed, setLoadingFeed] = useState(true);
   const [errFeed, setErrFeed] = useState("");
 
-  // load me
+  // ✅ load me ONLY if we actually have a token
   useEffect(() => {
     let on = true;
+    const token = localStorage.getItem("authToken") || localStorage.getItem("token");
+    if (!token) {
+      // guest → just set null and DON'T call /api/me (avoid 401 → global logout)
+      setMe(null);
+      return;
+    }
     (async () => {
       try {
         const { data } = await api.get("/api/me");
@@ -177,7 +176,6 @@ export default function Browse() {
     };
   }, [lga]);
 
-  // client filtering/ranking
   function svcArray(p) {
     const raw = p?.services;
     if (Array.isArray(raw))
@@ -229,7 +227,6 @@ export default function Browse() {
     setLga("");
   }
 
-  // feed load (optionally scoped by LGA)
   const fetchFeed = useCallback(async () => {
     try {
       setLoadingFeed(true);
@@ -246,16 +243,11 @@ export default function Browse() {
   }, [lga]);
 
   useEffect(() => {
-    let on = true;
     (async () => {
       await fetchFeed();
     })();
-    return () => {
-      on = false;
-    };
   }, [fetchFeed, tab]);
 
-  // go to book with carry-forward context
   function goBook(pro, chosenService) {
     const svcName = chosenService || service || null;
 
@@ -264,7 +256,7 @@ export default function Browse() {
       : [];
     const svcPrice = svcName ? svcList.find((s) => s.name === svcName)?.price : undefined;
 
-    const proId = pro?.id || pro?._id; // ✅ support both shapes
+    const proId = pro?.id || pro?._id;
     if (!proId) return;
 
     navigate(`/book/${proId}?service=${encodeURIComponent(svcName || "")}`, {
@@ -282,7 +274,7 @@ export default function Browse() {
   return (
     <ErrorBoundary>
       <div className="max-w-6xl mx-auto px-4 py-10">
-        {/* Header + tabs */}
+        {/* header + tabs */}
         <div className="mb-6 flex items-center justify-between gap-3 flex-wrap">
           <h1 className="text-2xl font-semibold">Discover</h1>
           <div className="inline-flex rounded-xl border border-zinc-800 overflow-hidden">
@@ -305,7 +297,7 @@ export default function Browse() {
           </div>
         </div>
 
-        {/* Filters */}
+        {/* filters */}
         <div className="flex flex-wrap items-center gap-2 mb-6">
           <input
             value={q}
@@ -315,7 +307,12 @@ export default function Browse() {
           />
 
           <div className="w-56">
-            <ServicePicker value={service} onChange={setService} placeholder="All services" allowCustom={false} />
+            <ServicePicker
+              value={service}
+              onChange={setService}
+              placeholder="All services"
+              allowCustom={false}
+            />
           </div>
 
           <select
@@ -348,16 +345,21 @@ export default function Browse() {
             ))}
           </select>
 
-          <button onClick={clearFilters} className="rounded-lg border border-zinc-700 px-3 py-2 text-sm">
+          <button
+            onClick={clearFilters}
+            className="rounded-lg border border-zinc-700 px-3 py-2 text-sm"
+          >
             Clear
           </button>
         </div>
 
-        {/* Content */}
+        {/* content */}
         {tab === "pros" ? (
           <>
             {errPros && (
-              <div className="mb-4 rounded border border-red-800 bg-red-900/30 text-red-100 px-3 py-2">{errPros}</div>
+              <div className="mb-4 rounded border border-red-800 bg-red-900/30 text-red-100 px-3 py-2">
+                {errPros}
+              </div>
             )}
 
             {loadingPros ? (
@@ -382,7 +384,9 @@ export default function Browse() {
             {isPro && <FeedComposer lga={lga} onPosted={fetchFeed} />}
 
             {errFeed && (
-              <div className="mb-4 rounded border border-red-800 bg-red-900/30 text-red-100 px-3 py-2">{errFeed}</div>
+              <div className="mb-4 rounded border border-red-800 bg-red-900/30 text-red-100 px-3 py-2">
+                {errFeed}
+              </div>
             )}
 
             {loadingFeed ? (
@@ -402,12 +406,11 @@ export default function Browse() {
           </>
         )}
 
-        {/* Drawer */}
         <ProDrawer
           open={!!openPro}
           pro={openPro}
           onClose={() => setOpenPro(null)}
-          onBook={(svc) => (openPro ? goBook(openPro, svc) : null)} // ✅ fixed
+          onBook={(svc) => (openPro ? goBook(openPro, svc) : null)}
         />
       </div>
     </ErrorBoundary>
