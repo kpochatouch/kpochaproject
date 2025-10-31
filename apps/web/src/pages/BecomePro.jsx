@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { api, getClientProfile, updateClientProfile } from "../lib/api";
 import NgGeoPicker from "../components/NgGeoPicker.jsx";
+import PhoneOTP from "../components/PhoneOTP.jsx";
 
 // same env as BecomePro
 const CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || "";
@@ -77,6 +78,7 @@ export default function ClientRegister() {
   // core fields
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
+  const [phoneVerifiedAt, setPhoneVerifiedAt] = useState(null);
 
   const [stateVal, setStateVal] = useState("");
   const [lga, setLga] = useState("");
@@ -121,6 +123,7 @@ export default function ClientRegister() {
         if (data) {
           setFullName(data.fullName || "");
           setPhone(data.phone || "");
+          if (data.phoneVerifiedAt) setPhoneVerifiedAt(data.phoneVerifiedAt);
 
           setStateVal(data.state || "");
           setLga((data.lga || "").toString().toUpperCase());
@@ -175,6 +178,7 @@ export default function ClientRegister() {
         address,
         photoUrl,
         ...(lat != null && lon != null ? { lat, lon } : {}),
+        ...(phoneVerifiedAt ? { phoneVerifiedAt } : {}),
         acceptedTerms: !!agreements.terms,
         acceptedPrivacy: !!agreements.privacy,
         agreements: { terms: !!agreements.terms, privacy: !!agreements.privacy },
@@ -268,7 +272,7 @@ export default function ClientRegister() {
         <div className="text-zinc-200">Loading…</div>
       ) : (
         <div className="space-y-6">
-          {/* Avatar */}
+          {/* Avatar (like BecomePro UploadRow but as circle) */}
           <Section title="Photo">
             <div className="flex items-center gap-4">
               <div className="relative w-16 h-16 rounded-full border border-yellow-500/60 overflow-hidden bg-zinc-900">
@@ -318,12 +322,17 @@ export default function ClientRegister() {
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
               />
-              <Input
-                label="Phone *"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="e.g. 080..."
-              />
+              <div>
+                <Input
+                  label={`Phone${phoneVerifiedAt ? " (verified)" : ""} *`}
+                  value={phone}
+                  onChange={(e) => {
+                    setPhone(e.target.value);
+                    setPhoneVerifiedAt(null);
+                  }}
+                />
+                <PhoneOTP phone={phone} disabled={!phone} onVerified={(iso) => setPhoneVerifiedAt(iso)} />
+              </div>
             </div>
           </Section>
 
