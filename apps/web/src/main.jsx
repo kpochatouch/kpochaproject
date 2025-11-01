@@ -6,10 +6,20 @@ import App from "./App.jsx";
 import "./styles/global.css";
 import { AuthProvider } from "./context/AuthContext.jsx";
 
-// ✅ Keep Firebase ID token in sync with localStorage for API calls
-// (Prevents sign-out → instant sign-in loops and stale tokens)
+// 🔐 Firebase token sync (your existing code)
 import { getAuth, onIdTokenChanged } from "firebase/auth";
 
+// 🟡 AWS (added)
+// We configure AWS Amplify with the values you put in
+// VITE_AWS_REGION and VITE_AWS_COGNITO_IDENTITY_POOL_ID
+import { Amplify } from "aws-amplify";
+import awsconfig from "./aws-exports.js";
+
+// configure AWS first
+Amplify.configure(awsconfig);
+
+// ✅ Keep Firebase ID token in sync with localStorage for API calls
+// (Prevents sign-out → instant sign-in loops and stale tokens)
 function installAuthTokenSync() {
   const auth = getAuth();
   onIdTokenChanged(auth, async (user) => {
