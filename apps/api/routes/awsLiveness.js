@@ -1,6 +1,6 @@
 // apps/api/routes/awsLiveness.js
 // Minimal AWS Rekognition Face Liveness bridge
-// Mount in server.js like:
+// Mount in server.js like you already did:
 //   import awsLivenessRoutes from "./routes/awsLiveness.js";
 //   app.use("/api", awsLivenessRoutes({ requireAuth }));
 
@@ -14,10 +14,11 @@ import {
 export default function awsLivenessRoutes({ requireAuth }) {
   const router = express.Router();
 
+  const region = process.env.AWS_REGION || "us-east-1";
+
   // build client once
   const client = new RekognitionClient({
-    region: process.env.AWS_REGION || "us-east-1",
-    // if you run on Render with IAM-style envs, this is enough
+    region,
     credentials: process.env.AWS_ACCESS_KEY_ID
       ? {
           accessKeyId: process.env.AWS_ACCESS_KEY_ID,
@@ -26,20 +27,25 @@ export default function awsLivenessRoutes({ requireAuth }) {
       : undefined,
   });
 
+  // quick ping so you can test from browser
+  router.get("/aws/liveness/ping", (req, res) => {
+    return res.json({
+      ok: true,
+      region,
+      hasKey: !!process.env.AWS_ACCESS_KEY_ID,
+    });
+  });
+
   /**
    * 1. CREATE SESSION
    * POST /api/aws/liveness/session
-   * body: { reason?: string }
-   * returns: { ok: true, sessionId }
    */
   router.post("/aws/liveness/session", requireAuth, async (req, res) => {
     try {
       const reason = req.body?.reason || "onboarding";
 
       const cmd = new CreateFaceLivenessSessionCommand({
-        // AWS needs a client token; we just make one
         ClientRequestToken: `kpocha-${req.user.uid}-${Date.now()}`,
-        // You can also add: KmsKeyId, Settings, etc.
       });
 
       const out = await client.send(cmd);
@@ -47,14 +53,24 @@ export default function awsLivenessRoutes({ requireAuth }) {
       return res.json({
         ok: true,
         sessionId: out.SessionId,
+        region,
         reason,
       });
     } catch (err) {
-      console.error("[aws-liveness] create failed:", err);
+      // 👇 make the error super obvious
+      console.error("[aws-liveness] create failed:", {
+        name: err.name,
+        message: err.message,
+        $metadata: err.$metadata,
+      });
+
       return res.status(500).json({
         ok: false,
-        error: err.name || "CreateFailed",
+        where: "create",
+        name: err.name,
         message: err.message,
+        // this helps you see if it was AccessDenied, UnrecognizedClient, SignatureDoesNotMatch...
+        details: err.$metadata || null,
       });
     }
   });
@@ -62,7 +78,6 @@ export default function awsLivenessRoutes({ requireAuth }) {
   /**
    * 2. GET RESULTS
    * GET /api/aws/liveness/session/:id
-   * returns AWS raw result so frontend can decide
    */
   router.get("/aws/liveness/session/:id", requireAuth, async (req, res) => {
     try {
@@ -72,21 +87,23 @@ export default function awsLivenessRoutes({ requireAuth }) {
       });
       const out = await client.send(cmd);
 
-      // out.Status: "SUCCEEDED" | "IN_PROGRESS" | "FAILED"
-      // out.Confidence: number (0..100)
-      // out.DetectionResponse?
-
       return res.json({
         ok: true,
         sessionId,
         aws: out,
       });
     } catch (err) {
-      console.error("[aws-liveness] get result failed:", err);
+      console.error("[aws-liveness] get result failed:", {
+        name: err.name,
+        message: err.message,
+        $metadata: err.$metadata,
+      });
       return res.status(500).json({
         ok: false,
-        error: err.name || "GetFailed",
+        where: "get-result",
+        name: err.name,
         message: err.message,
+        details: err.$metadata || null,
       });
     }
   });
