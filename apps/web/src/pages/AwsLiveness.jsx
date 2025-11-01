@@ -3,13 +3,12 @@ import React, { useEffect, useState } from "react";
 import { FaceLivenessDetector } from "@aws-amplify/ui-react-liveness";
 import { ThemeProvider } from "@aws-amplify/ui-react";
 import { Amplify } from "aws-amplify";
-import awsconfig from "../aws-exports.js";
+import awsconfig from "../lib/aws-exports.js"; // ✅ fixed path
 import { api } from "../lib/api";
 import { useNavigate } from "react-router-dom";
 
-// 1) make sure Amplify knows about your region + identity pool
+// ✅ Configure Amplify once
 Amplify.configure({
-  ...awsconfig,
   Auth: {
     identityPoolId: awsconfig.aws_cognito_identity_pool_id,
     region: awsconfig.aws_project_region,
@@ -23,7 +22,7 @@ export default function AwsLiveness() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
 
-  // 2) ask your backend to create an AWS liveness session
+  // ✅ Request backend to start AWS Rekognition liveness session
   useEffect(() => {
     (async () => {
       try {
@@ -31,20 +30,19 @@ export default function AwsLiveness() {
           reason: "onboarding",
         });
         setSessionId(data.sessionId);
-        setLoading(false);
       } catch (e) {
         console.error(e);
         setErr("Cannot start AWS liveness right now.");
+      } finally {
         setLoading(false);
       }
     })();
   }, []);
 
-  // 3) when AWS finishes, ask backend for the result, then close
+  // ✅ Handle AWS analysis completion
   async function handleDone() {
     try {
       const { data } = await api.get(`/api/aws/liveness/session/${sessionId}`);
-      // data.aws.Confidence is usually 0–100
       const confidence = data?.aws?.Confidence ?? 0;
       if (confidence >= 80) {
         alert("Liveness passed ✅");
@@ -55,10 +53,11 @@ export default function AwsLiveness() {
       console.error(e);
       alert("Could not read liveness result.");
     } finally {
-      nav(-1); // go back to previous page
+      nav(-1);
     }
   }
 
+  // ✅ Handle camera or AWS SDK errors
   function handleError(e) {
     console.error(e);
     alert("AWS liveness errored. Try again.");
@@ -68,9 +67,7 @@ export default function AwsLiveness() {
   return (
     <div className="min-h-screen bg-black text-white flex items-center justify-center p-4">
       <div className="w-full max-w-xl">
-        <h1 className="text-xl font-semibold mb-4">
-          AWS Face Liveness
-        </h1>
+        <h1 className="text-xl font-semibold mb-4">AWS Face Liveness</h1>
 
         {loading ? (
           <div>Starting camera…</div>
