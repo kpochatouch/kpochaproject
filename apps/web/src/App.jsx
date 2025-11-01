@@ -8,10 +8,16 @@ import React, {
   createContext,
   useContext,
 } from "react";
-import { Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
+import {
+  Routes,
+  Route,
+  Navigate,
+  useLocation,
+  useNavigate,
+} from "react-router-dom";
 import { api, setAuthToken } from "./lib/api";
 
-// 🔐 Keep Firebase token -> API header in sync
+// 🔐 Firebase → API header sync
 import { onIdTokenChanged } from "firebase/auth";
 import { auth } from "./lib/firebase";
 
@@ -21,27 +27,28 @@ import Footer from "./components/Footer.jsx";
 import RequireAuth from "./components/RequireAuth.jsx";
 
 /* ---------- Pages (lazy) ---------- */
-const Home              = lazy(() => import("./pages/Home.jsx"));
-const Browse            = lazy(() => import("./pages/Browse.jsx"));
-const BookService       = lazy(() => import("./pages/BookService.jsx"));
-const BookingDetails    = lazy(() => import("./pages/BookingDetails.jsx"));
-const Wallet            = lazy(() => import("./pages/Wallet.jsx"));
-const ClientWallet      = lazy(() => import("./pages/ClientWallet.jsx"));
-const Profile           = lazy(() => import("./pages/Profile.jsx"));
-const Login             = lazy(() => import("./pages/Login.jsx"));
-const Signup            = lazy(() => import("./pages/Signup.jsx"));
-const BecomePro         = lazy(() => import("./pages/BecomePro.jsx"));
-const ProDashboard      = lazy(() => import("./pages/ProDashboard.jsx"));
-const Admin             = lazy(() => import("./pages/Admin.jsx"));
-const Settings          = lazy(() => import("./pages/Settings.jsx"));        // Pro settings
-const ClientSettings    = lazy(() => import("./pages/ClientSettings.jsx"));  // Client settings
-const AdminDecline      = lazy(() => import("./pages/AdminDecline.jsx"));
-const Legal             = lazy(() => import("./pages/Legal.jsx"));
-const ClientRegister    = lazy(() => import("./pages/ClientRegister.jsx"));
+const Home = lazy(() => import("./pages/Home.jsx"));
+const Browse = lazy(() => import("./pages/Browse.jsx"));
+const BookService = lazy(() => import("./pages/BookService.jsx"));
+const BookingDetails = lazy(() => import("./pages/BookingDetails.jsx"));
+const Wallet = lazy(() => import("./pages/Wallet.jsx"));
+const ClientWallet = lazy(() => import("./pages/ClientWallet.jsx"));
+const Profile = lazy(() => import("./pages/Profile.jsx"));
+const Login = lazy(() => import("./pages/Login.jsx"));
+const Signup = lazy(() => import("./pages/Signup.jsx"));
+const BecomePro = lazy(() => import("./pages/BecomePro.jsx"));
+const ProDashboard = lazy(() => import("./pages/ProDashboard.jsx"));
+const Admin = lazy(() => import("./pages/Admin.jsx"));
+const Settings = lazy(() => import("./pages/Settings.jsx")); // pro settings
+const ClientSettings = lazy(() => import("./pages/ClientSettings.jsx")); // client settings
+const AdminDecline = lazy(() => import("./pages/AdminDecline.jsx"));
+const Legal = lazy(() => import("./pages/Legal.jsx"));
+const ClientRegister = lazy(() => import("./pages/ClientRegister.jsx"));
 const DeactivateAccount = lazy(() => import("./pages/DeactivateAccount.jsx"));
-const ApplyThanks       = lazy(() => import("./pages/ApplyThanks.jsx"));
-const PaymentConfirm    = lazy(() => import("./pages/PaymentConfirm.jsx"));
-const LivenessPage      = lazy(() => import("./pages/LivenessPage.jsx"));    // ✅ NEW
+const ApplyThanks = lazy(() => import("./pages/ApplyThanks.jsx"));
+const PaymentConfirm = lazy(() => import("./pages/PaymentConfirm.jsx"));
+const LivenessPage = lazy(() => import("./pages/LivenessPage.jsx")); // MediaPipe version ✅
+const AwsLiveness = lazy(() => import("./pages/AwsLiveness.jsx")); // AWS version ✅
 
 /* ---------- Chatbase (verified user embedding) ---------- */
 function useChatbase() {
@@ -59,7 +66,7 @@ function useChatbase() {
           cfg.userHash = r.data.userHash;
         }
       } catch {
-        // anonymous fallback is fine
+        // anonymous is fine
       }
 
       window.chatbaseConfig = cfg;
@@ -76,27 +83,31 @@ function useChatbase() {
   }, []);
 }
 
-/* ---------- Centralized /api/me snapshot ---------- */
+/* ---------- /api/me central store ---------- */
 const MeContext = createContext(null);
 
 function MeProvider({ children }) {
   const [version, setVersion] = useState(0);
-  const [state, setState] = useState({ loading: true, me: null, error: null });
+  const [state, setState] = useState({
+    loading: true,
+    me: null,
+    error: null,
+  });
 
-  // When Firebase ID token changes, sync axios + trigger refetch
+  // when Firebase token changes, update axios and refetch /api/me
   useEffect(() => {
     const unsub = onIdTokenChanged(auth, async (user) => {
       try {
         const token = user ? await user.getIdToken() : null;
-        setAuthToken(token); // sets axios header + localStorage
+        setAuthToken(token);
       } finally {
-        setVersion((v) => v + 1); // causes /api/me refetch
+        setVersion((v) => v + 1);
       }
     });
     return () => unsub();
   }, []);
 
-  // Initial token write (covers "already signed-in" on hard refresh)
+  // initial write (page refresh)
   useEffect(() => {
     (async () => {
       try {
@@ -109,7 +120,7 @@ function MeProvider({ children }) {
     })();
   }, []);
 
-  // Fetch /api/me on version change
+  // fetch /api/me whenever version changes
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -131,7 +142,12 @@ function MeProvider({ children }) {
   const value = useMemo(() => {
     const isPro = !!state?.me?.isPro;
     const isAdmin = !!state?.me?.isAdmin;
-    return { ...state, isPro, isAdmin, refresh: () => setVersion((v) => v + 1) };
+    return {
+      ...state,
+      isPro,
+      isAdmin,
+      refresh: () => setVersion((v) => v + 1),
+    };
   }, [state]);
 
   return <MeContext.Provider value={value}>{children}</MeContext.Provider>;
@@ -139,7 +155,16 @@ function MeProvider({ children }) {
 
 function useMe() {
   const ctx = useContext(MeContext);
-  return ctx || { loading: true, me: null, isPro: false, isAdmin: false, error: null, refresh: () => {} };
+  return (
+    ctx || {
+      loading: true,
+      me: null,
+      isPro: false,
+      isAdmin: false,
+      error: null,
+      refresh: () => {},
+    }
+  );
 }
 
 /* ---------- Role guard (admin / pro) ---------- */
@@ -148,12 +173,14 @@ function RequireRole({ role, children }) {
   const loc = useLocation();
 
   const allowed =
-    role === "admin" ? isAdmin :
-    role === "pro"   ? isPro   :
-    true;
+    role === "admin" ? isAdmin : role === "pro" ? isPro : true;
 
   if (loading) return <div className="p-6">Loading…</div>;
-  return allowed ? children : <Navigate to="/" replace state={{ from: loc }} />;
+  return allowed ? (
+    children
+  ) : (
+    <Navigate to="/" replace state={{ from: loc }} />
+  );
 }
 
 /* ---------- Smart pages ---------- */
@@ -169,7 +196,7 @@ function SettingsSmart() {
   return isPro ? <Settings /> : <ClientSettings />;
 }
 
-/* ---------- NEW: Smart “Find a professional” redirect ---------- */
+/* ---------- Smart “Find a pro” ---------- */
 function FindProSmart() {
   const navigate = useNavigate();
   const loc = useLocation();
@@ -179,18 +206,15 @@ function FindProSmart() {
     let alive = true;
 
     (async () => {
-      // 1) Must be logged in
       if (!me && !loading) {
         navigate("/login", { replace: true, state: { from: loc } });
         return;
       }
       if (loading) return;
 
-      // 2) Check if client profile exists
       try {
         const { data } = await api.get("/api/profile/client/me");
         if (!alive) return;
-
         if (!data) {
           navigate("/client/register", { replace: true });
         } else {
@@ -201,7 +225,9 @@ function FindProSmart() {
       }
     })();
 
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
   }, [loading, me, navigate, loc]);
 
   return <div className="p-6">Loading…</div>;
@@ -245,17 +271,29 @@ export default function App() {
                 }
               />
 
-              {/* Auth pages */}
+              {/* Auth */}
               <Route path="/login" element={<Login />} />
               <Route path="/signup" element={<Signup />} />
 
               {/* Legal */}
               <Route path="/legal" element={<Legal />} />
               <Route path="/legal/*" element={<Legal />} />
-              <Route path="/terms" element={<Navigate to="/legal#terms" replace />} />
-              <Route path="/privacy" element={<Navigate to="/legal#privacy" replace />} />
-              <Route path="/cookies" element={<Navigate to="/legal#cookies" replace />} />
-              <Route path="/refunds" element={<Navigate to="/legal#refunds" replace />} />
+              <Route
+                path="/terms"
+                element={<Navigate to="/legal#terms" replace />}
+              />
+              <Route
+                path="/privacy"
+                element={<Navigate to="/legal#privacy" replace />}
+              />
+              <Route
+                path="/cookies"
+                element={<Navigate to="/legal#cookies" replace />}
+              />
+              <Route
+                path="/refunds"
+                element={<Navigate to="/legal#refunds" replace />}
+              />
 
               {/* Application / payments */}
               <Route path="/apply/thanks" element={<ApplyThanks />} />
@@ -307,7 +345,7 @@ export default function App() {
                 }
               />
 
-              {/* ✅ Liveness camera */}
+              {/* ✅ OLD / MEDIAPIPE LIVENESS (keep as fallback) */}
               <Route
                 path="/liveness"
                 element={
@@ -317,7 +355,17 @@ export default function App() {
                 }
               />
 
-              {/* ✅ Client register canonical route */}
+              {/* ✅ NEW / AWS LIVENESS */}
+              <Route
+                path="/aws-liveness"
+                element={
+                  <RequireAuth>
+                    <AwsLiveness />
+                  </RequireAuth>
+                }
+              />
+
+              {/* ✅ client register canonical */}
               <Route
                 path="/client/register"
                 element={
@@ -326,8 +374,14 @@ export default function App() {
                   </RequireAuth>
                 }
               />
-              <Route path="/register" element={<Navigate to="/client/register" replace />} />
-              <Route path="/client-register" element={<Navigate to="/client/register" replace />} />
+              <Route
+                path="/register"
+                element={<Navigate to="/client/register" replace />}
+              />
+              <Route
+                path="/client-register"
+                element={<Navigate to="/client/register" replace />}
+              />
 
               {/* Account deactivation */}
               <Route
@@ -339,7 +393,7 @@ export default function App() {
                 }
               />
 
-              {/* Pro Dashboard */}
+              {/* Pro dashboard */}
               <Route
                 path="/pro-dashboard"
                 element={
@@ -348,7 +402,10 @@ export default function App() {
                   </RequireRole>
                 }
               />
-              <Route path="/pro" element={<Navigate to="/pro-dashboard" replace />} />
+              <Route
+                path="/pro"
+                element={<Navigate to="/pro-dashboard" replace />}
+              />
 
               {/* Admin */}
               <Route

@@ -36,6 +36,8 @@ import payoutRoutes from "./routes/payout.js";
 import adminProsRoutes from "./routes/adminPros.js";
 import geoRouter from "./routes/geo.js"; // << mount router; no more inlined NG geo
 import riskRoutes from "./routes/risk.js"; // ← NEW
+import awsLivenessRoutes from "./routes/awsLiveness.js";
+
 
 dotenv.config();
 
@@ -544,6 +546,8 @@ app.use("/api", payoutRoutes({ requireAuth, Application }));
 
 // 🔐 Risk / Liveness logging (no external deps)
 app.use("/api", riskRoutes({ requireAuth, requireAdmin, Application })); // ← NEW
+
+app.use("/api", awsLivenessRoutes({ requireAuth }));
 
 // Admin pros (approve + decline)
 try {
