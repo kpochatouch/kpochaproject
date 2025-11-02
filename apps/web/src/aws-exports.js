@@ -4,9 +4,9 @@ const identityPoolId =
   import.meta.env.VITE_AWS_COGNITO_IDENTITY_POOL_ID || "";
 
 if (!identityPoolId) {
-  // This will show in browser console if Vercel env is missing
+  // 👇 This message appears only in the developer console
   console.warn(
-    "[AWS] VITE_AWS_COGNITO_IDENTITY_POOL_ID is missing. Liveness will fail."
+    "[Kpocha] Face verification service is not configured. Please set VITE_AWS_COGNITO_IDENTITY_POOL_ID in your environment."
   );
 }
 

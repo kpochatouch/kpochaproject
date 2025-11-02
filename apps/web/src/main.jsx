@@ -9,14 +9,29 @@ import { AuthProvider } from "./context/AuthContext.jsx";
 // 🔐 Firebase token sync (your existing code)
 import { getAuth, onIdTokenChanged } from "firebase/auth";
 
-// 🟡 AWS (added)
-// We configure AWS Amplify with the values you put in
-// VITE_AWS_REGION and VITE_AWS_COGNITO_IDENTITY_POOL_ID
+// 🟡 AWS (added earlier)
 import { Amplify } from "aws-amplify";
 import awsconfig from "./aws-exports.js";
 
-// configure AWS first
-Amplify.configure(awsconfig);
+// ✅ configure AWS safely (so missing envs won't break the app)
+if (typeof window !== "undefined") {
+  // avoid double-config on HMR
+  if (!window.__KPOCHA_AWS_CONFIGURED__) {
+    try {
+      // only configure if we actually have an identity pool or region
+      if (
+        awsconfig &&
+        (awsconfig.aws_cognito_identity_pool_id || awsconfig.aws_project_region)
+      ) {
+        Amplify.configure(awsconfig);
+      }
+    } catch (e) {
+      // don't crash UI if AWS is not ready — liveness page will handle it
+      console.warn("[kpocha] AWS Amplify config skipped:", e?.message);
+    }
+    window.__KPOCHA_AWS_CONFIGURED__ = true;
+  }
+}
 
 // ✅ Keep Firebase ID token in sync with localStorage for API calls
 // (Prevents sign-out → instant sign-in loops and stale tokens)

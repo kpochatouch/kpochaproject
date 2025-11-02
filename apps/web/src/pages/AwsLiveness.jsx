@@ -3,10 +3,28 @@ import React, { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { FaceLivenessDetector } from "@aws-amplify/ui-react-liveness";
 import { api } from "../lib/api";
-import {
-  ensureAwsConfigured,
-  getAwsLivenessConfig,
-} from "../lib/awsLivenessClient";
+import { ensureAwsConfigured, getAwsLivenessConfig } from "../lib/awsLivenessClient";
+
+// our own CSS to strip vendor look
+import "../styles/aws-liveness.css";
+
+const DISPLAY_TEXT = {
+  headingText: "Face verification",
+  subheadingText: "Fit your face inside the oval and follow the line.",
+  photosensitivityWarningHeadingText: "",
+  photosensitivityWarningText: "",
+  photosensitivityWarningInfoText: "",
+  instructionsHeaderText: "",
+  instructionsDescriptionText: "",
+  instructionListText: [],
+  challengeInProgressText: "Keep steady…",
+  challengeCompleteText: "Done",
+  challengeFailedErrorText: "Do it exactly as shown.",
+  retryChallengeButtonText: "Try again",
+  exitButtonText: "Close",
+  recordingIndicatorText: "",
+  livenessCheckText: "Verifying…",
+};
 
 export default function AwsLiveness() {
   const nav = useNavigate();
@@ -14,105 +32,102 @@ export default function AwsLiveness() {
   const back = params.get("back") || "/become";
 
   const [sessionId, setSessionId] = useState("");
-  const [{ region }, setCfg] = useState({ region: "" });
-  const [loading, setLoading] = useState(true);
+  const [region, setRegion] = useState("");
+  const [ready, setReady] = useState(false);
   const [err, setErr] = useState("");
 
-  // 1) configure Amplify + 2) ask backend to create session
+  // 1. init + ask backend for session
   useEffect(() => {
     (async () => {
       try {
-        // make sure Amplify knows about your identity pool
         ensureAwsConfigured();
         const cfg = getAwsLivenessConfig();
-        setCfg({ region: cfg.region });
+        setRegion(cfg.region);
 
-        // call your backend: POST /api/aws-liveness/session
         const { data } = await api.post("/api/aws-liveness/session", {});
         if (!data?.ok || !data.sessionId) {
-          throw new Error(data?.error || "Failed to create AWS liveness session");
+          throw new Error("Cannot start face verification.");
         }
 
         setSessionId(data.sessionId);
-        setLoading(false);
+        setReady(true);
       } catch (e) {
-        console.error("[AwsLiveness] start failed:", e);
-        setErr(e?.message || "Could not start AWS liveness.");
-        setLoading(false);
+        console.error("[FaceCheck] init failed:", e);
+        setErr(e?.message || "Cannot start face verification.");
       }
     })();
   }, []);
 
-  // when AWS is done
+  // 2. when done
   const handleComplete = (result) => {
+    const payload = {
+      ok: true,
+      ts: Date.now(),
+      sessionId,
+      source: "face-check",
+      confidence: result?.confidence ?? null,
+    };
     try {
-      // result has a confidence score etc. (see AWS docs) :contentReference[oaicite:1]{index=1}
-      localStorage.setItem(
-        "kpocha:livenessMetrics",
-        JSON.stringify({
-          ok: true,
-          ts: Date.now(),
-          sessionId,
-          source: "aws",
-          score: result?.confidence ?? null,
-        })
-      );
+      // new name (clean)
+      localStorage.setItem("kpocha:faceCheck", JSON.stringify(payload));
+      // backward-compatible name (old form still reading this)
+      localStorage.setItem("kpocha:livenessMetrics", JSON.stringify(payload));
     } catch (_) {}
     nav(back);
   };
 
-  const handleError = (e) => {
-    console.error("[AwsLiveness] detector error:", e);
-    setErr(e?.message || "Liveness failed. Please try again.");
+  const handleError = () => {
+    setErr("Face verification did not complete. Please try again.");
   };
 
-  if (loading) {
+  // error view
+  if (err) {
     return (
-      <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center">
-        <h1 className="text-xl font-semibold mb-2">AWS Liveness</h1>
-        <p className="text-sm text-zinc-300 mb-2">
-          Preparing your liveness session…
-        </p>
-        <button
-          onClick={() => nav(back)}
-          className="mt-6 px-4 py-2 rounded bg-yellow-400 text-black text-sm"
-        >
-          Back
-        </button>
+      <div className="kt-face-shell">
+        <div className="kt-face-card">
+          <h1 className="kt-face-title">Face verification</h1>
+          <p className="kt-face-error">{err}</p>
+          <button onClick={() => nav(back)} className="kt-face-btn">
+            Close
+          </button>
+        </div>
       </div>
     );
   }
 
-  if (err) {
+  // loading view
+  if (!ready) {
     return (
-      <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center">
-        <h1 className="text-xl font-semibold mb-2">AWS Liveness</h1>
-        <p className="text-sm text-red-400 mb-4">{err}</p>
-        <button
-          onClick={() => nav(back)}
-          className="mt-6 px-4 py-2 rounded bg-yellow-400 text-black text-sm"
-        >
-          Back
-        </button>
+      <div className="kt-face-shell">
+        <div className="kt-face-card">
+          <h1 className="kt-face-title">Face verification</h1>
+          <p className="kt-face-text">Opening camera…</p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center p-4">
-      <h1 className="text-xl font-semibold mb-4">AWS Liveness</h1>
-      <div className="w-full max-w-md">
+    <div className="kt-face-shell">
+      {/* short instruction bar */}
+      <div className="kt-face-hint">
+        For best result: remove cap/headtie, face the light, hold phone steady.
+      </div>
+
+      {/* single-layer detector */}
+      <div className="kt-face-frame">
         <FaceLivenessDetector
           sessionId={sessionId}
           region={region}
+          disableInstructionScreen
           onAnalysisComplete={handleComplete}
           onError={handleError}
+          displayText={DISPLAY_TEXT}
         />
       </div>
-      <button
-        onClick={() => nav(back)}
-        className="mt-6 px-4 py-2 rounded bg-yellow-400 text-black text-sm"
-      >
+
+      {/* fixed close */}
+      <button onClick={() => nav(back)} className="kt-face-close">
         Cancel
       </button>
     </div>

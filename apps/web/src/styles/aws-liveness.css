@@ -1,0 +1,110 @@
+/* apps/web/src/styles/aws-liveness.css */
+
+/* full dark page */
+.kt-face-shell {
+  min-height: 100vh;
+  background: #000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.25rem;
+  position: relative;
+  padding: 1rem;
+}
+
+/* small instruction at top */
+.kt-face-hint {
+  background: rgba(255, 213, 79, 0.08);
+  border: 1px solid rgba(255, 213, 79, 0.25);
+  color: #ffe9a6;
+  padding: 0.5rem 0.85rem;
+  border-radius: 9999px;
+  font-size: 0.7rem;
+  text-align: center;
+}
+
+/* container of the camera */
+.kt-face-frame {
+  width: min(420px, 100%);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+/* hide Amplify outer panels / headers / footers */
+[class*="amplify-liveness-header"],
+[class*="amplify-liveness-footer"],
+[class*="amplify-liveness-instructions"],
+[class*="amplify-liveness-alert"],
+[class*="amplify-liveness-photosensitivity"],
+[class*="amplify-liveness-hint"],
+[class*="amplify-liveness-start"],
+[class*="amplify-liveness-instruction-screen"] {
+  display: none !important;
+}
+
+/* make the camera area look like ONE layer */
+[class*="amplify-liveness-container"],
+[class*="amplify-liveness-detector"] {
+  background: transparent !important;
+  box-shadow: none !important;
+  border: none !important;
+}
+
+/* force oval viewport */
+[class*="amplify-liveness-video"] {
+  width: min(360px, 90vw) !important;
+  aspect-ratio: 3/4;
+  border-radius: 9999px !important;
+  overflow: hidden !important;
+  background: #000 !important;
+  margin: 0 auto !important;
+}
+
+/* cancel button */
+.kt-face-close {
+  position: fixed;
+  bottom: 1.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(255, 213, 79, 0.95);
+  color: #000;
+  border: none;
+  border-radius: 9999px;
+  padding: 0.4rem 1.1rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+/* error card */
+.kt-face-card {
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 213, 79, 0.25);
+  border-radius: 1rem;
+  padding: 1.25rem 1.4rem;
+  text-align: center;
+  max-width: 360px;
+}
+.kt-face-title {
+  color: #ffe9a6;
+  margin-bottom: 0.5rem;
+}
+.kt-face-text {
+  color: #e1e1e1;
+  font-size: 0.8rem;
+}
+.kt-face-error {
+  color: #ff9e9e;
+  font-size: 0.8rem;
+  margin-bottom: 1rem;
+}
+.kt-face-btn {
+  background: rgba(255, 213, 79, 0.95);
+  color: #000;
+  border: none;
+  border-radius: 9999px;
+  padding: 0.4rem 1.1rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+}

@@ -1,5 +1,5 @@
 // apps/web/src/pages/BecomePro.jsx
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, submitProApplication } from "../lib/api";
 import NgGeoPicker from "../components/NgGeoPicker.jsx";
@@ -152,9 +152,9 @@ export default function BecomePro() {
   const [verification, setVerification] = useState({
     idType: "",
     idUrl: "",
-    selfieWithIdUrl: "", // required (from /liveness OR manual fallback)
-    livenessVideoUrl: "", // OPTIONAL RESERVED (empty; ignored by validation)
-    livenessMetrics: {}, // set by liveness
+    selfieWithIdUrl: "", // will be set by our face verification page
+    faceVerificationVideoUrl: "", // OPTIONAL RESERVED (empty; ignored by validation)
+    livenessMetrics: {}, // we can still store AWS metrics here — name doesn’t show in UI
   });
   const [showManualSelfie, setShowManualSelfie] = useState(false); // hidden fallback toggle
 
@@ -253,13 +253,13 @@ export default function BecomePro() {
     }
   }
 
-  /* ---------- Liveness integration (page-based) ----------
-   * LivenessPage.jsx should set:
+  /* ---------- Face verification integration (page-based) ----------
+   * AwsLiveness.jsx will set:
    *  localStorage['kpocha:selfieUrl'] = <url>
-   *  localStorage['kpocha:livenessMetrics'] = JSON.stringify({blink, turnLeft, turnRight, ts})
+   *  localStorage['kpocha:livenessMetrics'] = JSON.stringify({score, ts, ...})
    *  localStorage['kpocha:livenessVideoUrl'] = "" (reserved; optional)
    */
-  function checkLivenessStorage() {
+  function checkVerificationStorage() {
     try {
       const url = localStorage.getItem("kpocha:selfieUrl") || "";
       const metricsRaw = localStorage.getItem("kpocha:livenessMetrics");
@@ -269,7 +269,7 @@ export default function BecomePro() {
           ...v,
           selfieWithIdUrl: url || v.selfieWithIdUrl,
           livenessMetrics: metricsRaw ? JSON.parse(metricsRaw) : v.livenessMetrics || {},
-          livenessVideoUrl: videoUrl || v.livenessVideoUrl || "",
+          faceVerificationVideoUrl: videoUrl || v.faceVerificationVideoUrl || "",
         }));
         // Clear so we don’t reuse stale values later
         localStorage.removeItem("kpocha:selfieUrl");
@@ -279,9 +279,9 @@ export default function BecomePro() {
     } catch {}
   }
   useEffect(() => {
-    const onFocus = () => checkLivenessStorage();
+    const onFocus = () => checkVerificationStorage();
     const onVisibility = () => {
-      if (document.visibilityState === "visible") checkLivenessStorage();
+      if (document.visibilityState === "visible") checkVerificationStorage();
     };
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onVisibility);
@@ -307,7 +307,6 @@ export default function BecomePro() {
     });
   }
   function onPickService(i, value, meta) {
-    // meta = { id, name, price? }
     const isOther = value === "other";
     updateRow(i, {
       id: isOther ? "other" : meta?.id || value || "",
@@ -356,11 +355,10 @@ export default function BecomePro() {
       seen.add(key);
     }
 
-    // Verification required
+    // Verification required (ID only for now)
     if (!verification.idType) m.push("ID type");
     if (!verification.idUrl) m.push("Government ID image");
-    // Liveness selfie is OPTIONAL for now — camera not reliable
-    // if (!verification.selfieWithIdUrl) m.push("Liveness selfie");
+    // Face verification is OPTIONAL for now — camera flow is separate
 
     // Bank required
     if (!bank.bankName) m.push("Bank name");
@@ -384,7 +382,6 @@ export default function BecomePro() {
     servicesDetailed,
     verification.idType,
     verification.idUrl,
-    verification.selfieWithIdUrl,
     bank.bankName,
     bank.accountName,
     bank.accountNumber,
@@ -432,7 +429,6 @@ export default function BecomePro() {
         },
         professional: {
           ...professional,
-          // maintain legacy "services" as unique names (from rows)
           services: Array.from(new Set(normalizedRows.map((r) => r.name))),
         },
         business: {
@@ -443,15 +439,11 @@ export default function BecomePro() {
           ...availability,
           statesCovered: professional.nationwide ? stateList : availability.statesCovered,
         },
-        // NEW canonical list
         servicesDetailed: normalizedRows,
-
         verification: {
           ...verification,
-          // keep the optional reserved video field present but empty by default
-          livenessVideoUrl: verification.livenessVideoUrl || "",
+          faceVerificationVideoUrl: verification.faceVerificationVideoUrl || "",
         },
-
         bank: {
           ...bank,
           accountNumber: digitsOnly(bank.accountNumber).slice(0, 10),
@@ -849,33 +841,23 @@ export default function BecomePro() {
           />
 
           <div className="mt-3">
-            <Label>Liveness (Selfie) (optional)</Label>
+            <Label>Face verification (optional)</Label>
             <div className="flex items-center gap-2 flex-wrap">
-              {/* Existing MediaPipe camera */}
-              <button
-                type="button"
-                className="px-3 py-2 rounded-lg border border-yellow-500 text-yellow-300 text-sm hover:bg-yellow-500/10"
-                onClick={() => nav("/liveness")}
-                title="Open active camera page"
-              >
-                Open Liveness Camera
-              </button>
-
-              {/* ✅ AWS camera (test only, not required) */}
+              {/* ✅ Our official face verification (AWS under the hood) */}
               <button
                 type="button"
                 className="px-3 py-2 rounded-lg border border-emerald-500 text-emerald-200 text-sm hover:bg-emerald-500/10"
                 onClick={() => nav("/aws-liveness?back=/become")}
-                title="Test AWS liveness and return to form"
+                title="Start face verification and return to this form"
               >
-                Test AWS Liveness
+                Start Face verification
               </button>
 
               {verification.selfieWithIdUrl ? (
                 <span className="text-xs text-emerald-400">Captured ✓</span>
               ) : (
                 <span className="text-xs text-zinc-500">
-                  Optional — you can submit without it
+                  You can also upload a clear selfie manually.
                 </span>
               )}
 
@@ -902,7 +884,7 @@ export default function BecomePro() {
                   }
                 />
                 <p className="text-[11px] text-zinc-500 mt-1">
-                  Use this only if the camera or upload fails. Liveness remains required.
+                  Use this only if camera or upload fails.
                 </p>
               </div>
             )}
@@ -911,10 +893,10 @@ export default function BecomePro() {
           {/* Optional reserved: keep the field present but not validated */}
           <div className="mt-2 hidden">
             <Input
-              label="(Optional reserved) Liveness Video URL"
-              value={verification.livenessVideoUrl}
+              label="(Optional) Face verification video URL"
+              value={verification.faceVerificationVideoUrl}
               onChange={(e) =>
-                setVerification({ ...verification, livenessVideoUrl: e.target.value })
+                setVerification({ ...verification, faceVerificationVideoUrl: e.target.value })
               }
               placeholder="(future support)"
             />
