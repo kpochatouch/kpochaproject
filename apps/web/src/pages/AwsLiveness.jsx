@@ -8,173 +8,110 @@ import {
   getAwsLivenessConfig,
 } from "../lib/awsLivenessClient";
 
-// 👇 we are NOT importing the custom CSS here anymore
-// import "../styles/";
-
-// short, friendly text – your words, not AWS long warning
-const DISPLAY_TEXT = {
-  headingText: "Face verification",
-  subheadingText: "Keep your face inside the oval and follow the line.",
-  photosensitivityWarningHeadingText: "",
-  photosensitivityWarningText: "",
-  photosensitivityWarningInfoText: "",
-  instructionsHeaderText: "",
-  instructionsDescriptionText: "",
-  instructionListText: [],
-  challengeInProgressText: "Hold still…",
-  challengeCompleteText: "Done",
-  challengeFailedErrorText: "Repeat the movement as shown.",
-  retryChallengeButtonText: "Try again",
-  exitButtonText: "Close",
-  recordingIndicatorText: "",
-  livenessCheckText: "Verifying…",
-};
-
 export default function AwsLiveness() {
   const nav = useNavigate();
   const [params] = useSearchParams();
   const back = params.get("back") || "/become";
 
   const [sessionId, setSessionId] = useState("");
-  const [region, setRegion] = useState("");
-  const [ready, setReady] = useState(false);
+  const [{ region }, setCfg] = useState({ region: "" });
+  const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
 
-  // 1. configure + create session
+  // 1) configure Amplify + 2) ask backend to create session
   useEffect(() => {
     (async () => {
       try {
+        // make sure Amplify knows about your identity pool
         ensureAwsConfigured();
         const cfg = getAwsLivenessConfig();
-        setRegion(cfg.region);
+        setCfg({ region: cfg.region });
 
+        // call your backend: POST /api/aws-liveness/session
         const { data } = await api.post("/api/aws-liveness/session", {});
         if (!data?.ok || !data.sessionId) {
-          throw new Error("Could not start face verification.");
+          throw new Error(data?.error || "Failed to create AWS liveness session");
         }
 
         setSessionId(data.sessionId);
-        setReady(true);
+        setLoading(false);
       } catch (e) {
-        console.error("[AwsLiveness] init failed:", e);
-        setErr(e?.message || "Could not start face verification.");
+        console.error("[AwsLiveness] start failed:", e);
+        setErr(e?.message || "Could not start AWS liveness.");
+        setLoading(false);
       }
     })();
   }, []);
 
-  // 2. success → drop into localStorage and go back
+  // when AWS is done
   const handleComplete = (result) => {
-    const payload = {
-      ok: true,
-      ts: Date.now(),
-      sessionId,
-      source: "aws", // 👈 clean name
-      score: result?.confidence ?? null,
-    };
     try {
-      // old name (your form already reads this)
-      localStorage.setItem("kpocha:livenessMetrics", JSON.stringify(payload));
-      // new name if you want
-      localStorage.setItem("kpocha:faceCheck", JSON.stringify(payload));
+      // result has a confidence score etc. (see AWS docs) :contentReference[oaicite:1]{index=1}
+      localStorage.setItem(
+        "kpocha:livenessMetrics",
+        JSON.stringify({
+          ok: true,
+          ts: Date.now(),
+          sessionId,
+          source: "aws",
+          score: result?.confidence ?? null,
+        })
+      );
     } catch (_) {}
     nav(back);
   };
 
-  // 3. error → show message
   const handleError = (e) => {
-    console.error("[AwsLiveness] error:", e);
-    setErr("Face verification did not complete. Please try again.");
+    console.error("[AwsLiveness] detector error:", e);
+    setErr(e?.message || "Liveness failed. Please try again.");
   };
 
-  // error shell
-  if (err) {
+  if (loading) {
     return (
-      <div
-        style={{
-          minHeight: "100vh",
-          display: "flex",
-          flexDirection: "column",
-          justifyContent: "center",
-          alignItems: "center",
-          gap: "1rem",
-          background: "#f3f4f6",
-        }}
-      >
-        <h1 style={{ fontSize: "1.1rem", fontWeight: 600 }}>
-          Face verification
-        </h1>
-        <p style={{ color: "#b91c1c" }}>{err}</p>
+      <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center">
+        <h1 className="text-xl font-semibold mb-2">AWS Liveness</h1>
+        <p className="text-sm text-zinc-300 mb-2">
+          Preparing your liveness session…
+        </p>
         <button
           onClick={() => nav(back)}
-          style={{
-            background: "#f59e0b",
-            color: "#000",
-            padding: "0.5rem 1.2rem",
-            borderRadius: "0.5rem",
-          }}
+          className="mt-6 px-4 py-2 rounded bg-yellow-400 text-black text-sm"
         >
-          Close
+          Back
         </button>
       </div>
     );
   }
 
-  // loading shell
-  if (!ready) {
+  if (err) {
     return (
-      <div
-        style={{
-          minHeight: "100vh",
-          display: "flex",
-          flexDirection: "column",
-          justifyContent: "center",
-          alignItems: "center",
-          gap: "0.6rem",
-          background: "#f3f4f6",
-        }}
-      >
-        <h1 style={{ fontSize: "1.1rem", fontWeight: 600 }}>
-          Face verification
-        </h1>
-        <p>Opening camera…</p>
+      <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center">
+        <h1 className="text-xl font-semibold mb-2">AWS Liveness</h1>
+        <p className="text-sm text-red-400 mb-4">{err}</p>
+        <button
+          onClick={() => nav(back)}
+          className="mt-6 px-4 py-2 rounded bg-yellow-400 text-black text-sm"
+        >
+          Back
+        </button>
       </div>
     );
   }
 
-  // ✅ real camera – this is the AWS demo look (white, standing oval)
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        display: "flex",
-        flexDirection: "column",
-        gap: "1.5rem",
-        alignItems: "center",
-        justifyContent: "center",
-        background: "#f3f4f6",
-        padding: "1.5rem 1rem",
-      }}
-    >
-      <div style={{ width: "100%", maxWidth: "560px" }}>
+    <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center p-4">
+      <h1 className="text-xl font-semibold mb-4">AWS Liveness</h1>
+      <div className="w-full max-w-md">
         <FaceLivenessDetector
           sessionId={sessionId}
           region={region}
-          disableInstructionScreen
-          displayText={DISPLAY_TEXT}
           onAnalysisComplete={handleComplete}
           onError={handleError}
         />
       </div>
-
       <button
         onClick={() => nav(back)}
-        style={{
-          background: "#f59e0b",
-          color: "#000",
-          padding: "0.5rem 1.2rem",
-          borderRadius: "9999px",
-          fontWeight: 500,
-        }}
+        className="mt-6 px-4 py-2 rounded bg-yellow-400 text-black text-sm"
       >
         Cancel
       </button>
