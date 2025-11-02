@@ -2,6 +2,11 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { FaceLivenessDetector } from "@aws-amplify/ui-react-liveness";
+
+// 👉 load AWS UI styles so the overlay looks right
+import "@aws-amplify/ui-react/styles.css";
+import "@aws-amplify/ui-react-liveness/styles.css";
+
 import { api } from "../lib/api";
 import {
   ensureAwsConfigured,
@@ -18,7 +23,6 @@ export default function AwsLiveness() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
 
-  // 1) configure Amplify + 2) ask backend to create session
   useEffect(() => {
     (async () => {
       try {
@@ -45,7 +49,6 @@ export default function AwsLiveness() {
     })();
   }, []);
 
-  // when AWS is done
   const handleComplete = (result) => {
     try {
       localStorage.setItem(
@@ -103,9 +106,9 @@ export default function AwsLiveness() {
     <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center p-4">
       <h1 className="text-xl font-semibold mb-4">AWS Liveness</h1>
 
-      {/* 👇 IMPORTANT: no max-w-md, give AWS free width, and add hook class */}
-      <div className="w-full">
-        <div className="aws-liveness mx-auto">
+      {/* give AWS enough width, keep centered */}
+      <div className="w-full max-w-2xl mx-auto">
+        <div className="aws-liveness">
           <FaceLivenessDetector
             sessionId={sessionId}
             region={region}

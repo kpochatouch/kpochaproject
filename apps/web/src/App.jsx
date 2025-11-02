@@ -236,11 +236,16 @@ function FindProSmart() {
 /* ---------- App ---------- */
 export default function App() {
   useChatbase();
+  const location = useLocation();
+
+  // 👇 hide chrome only on AWS liveness route
+  const hideChrome = location.pathname.startsWith("/aws-liveness");
 
   return (
     <div className="min-h-screen flex flex-col bg-black text-white">
-      <Navbar />
-      <main className="flex-1">
+      {!hideChrome && <Navbar />}
+
+      <main className={hideChrome ? "flex-1 bg-black" : "flex-1"}>
         <Suspense fallback={<div className="p-6">Loading…</div>}>
           <MeProvider>
             <Routes>
@@ -431,7 +436,8 @@ export default function App() {
           </MeProvider>
         </Suspense>
       </main>
-      <Footer />
+
+      {!hideChrome && <Footer />}
     </div>
   );
 }
