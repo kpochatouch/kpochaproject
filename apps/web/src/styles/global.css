@@ -7,3 +7,9 @@
               radial-gradient(800px 400px at 80% 0%, rgba(212,175,55,0.08), transparent 60%),
               #000;
 }
+
+/* keep AWS liveness overlay on top of its own video */
+.aws-liveness-shell video,
+.aws-liveness-shell canvas {
+  max-width: none !important;
+}
