@@ -30,7 +30,9 @@ export default function AwsLiveness() {
         // call your backend: POST /api/aws-liveness/session
         const { data } = await api.post("/api/aws-liveness/session", {});
         if (!data?.ok || !data.sessionId) {
-          throw new Error(data?.error || "Failed to create AWS liveness session");
+          throw new Error(
+            data?.error || "Failed to create AWS liveness session"
+          );
         }
 
         setSessionId(data.sessionId);
@@ -46,7 +48,6 @@ export default function AwsLiveness() {
   // when AWS is done
   const handleComplete = (result) => {
     try {
-      // result has a confidence score etc. (see AWS docs) :contentReference[oaicite:1]{index=1}
       localStorage.setItem(
         "kpocha:livenessMetrics",
         JSON.stringify({
@@ -101,14 +102,19 @@ export default function AwsLiveness() {
   return (
     <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center p-4">
       <h1 className="text-xl font-semibold mb-4">AWS Liveness</h1>
-      <div className="w-full max-w-md">
-        <FaceLivenessDetector
-          sessionId={sessionId}
-          region={region}
-          onAnalysisComplete={handleComplete}
-          onError={handleError}
-        />
+
+      {/* 👇 IMPORTANT: no max-w-md, give AWS free width, and add hook class */}
+      <div className="w-full">
+        <div className="aws-liveness mx-auto">
+          <FaceLivenessDetector
+            sessionId={sessionId}
+            region={region}
+            onAnalysisComplete={handleComplete}
+            onError={handleError}
+          />
+        </div>
       </div>
+
       <button
         onClick={() => nav(back)}
         className="mt-6 px-4 py-2 rounded bg-yellow-400 text-black text-sm"

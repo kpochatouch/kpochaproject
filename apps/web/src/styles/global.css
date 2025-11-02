@@ -8,8 +8,8 @@
               #000;
 }
 
-/* keep AWS liveness overlay on top of its own video */
-.aws-liveness-shell video,
-.aws-liveness-shell canvas {
+/* let AWS liveness control its own video/canvas sizing */
+.aws-liveness video,
+.aws-liveness canvas {
   max-width: none !important;
 }
