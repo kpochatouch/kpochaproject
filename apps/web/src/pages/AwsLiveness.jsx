@@ -22,15 +22,15 @@ export default function AwsLiveness() {
   useEffect(() => {
     (async () => {
       try {
+        // make sure Amplify knows about your identity pool
         ensureAwsConfigured();
         const cfg = getAwsLivenessConfig();
         setCfg({ region: cfg.region });
 
+        // call your backend: POST /api/aws-liveness/session
         const { data } = await api.post("/api/aws-liveness/session", {});
         if (!data?.ok || !data.sessionId) {
-          throw new Error(
-            data?.error || "Failed to create AWS liveness session"
-          );
+          throw new Error(data?.error || "Failed to create AWS liveness session");
         }
 
         setSessionId(data.sessionId);
@@ -43,8 +43,10 @@ export default function AwsLiveness() {
     })();
   }, []);
 
+  // when AWS is done
   const handleComplete = (result) => {
     try {
+      // result has a confidence score etc. (see AWS docs) :contentReference[oaicite:1]{index=1}
       localStorage.setItem(
         "kpocha:livenessMetrics",
         JSON.stringify({
@@ -64,10 +66,9 @@ export default function AwsLiveness() {
     setErr(e?.message || "Liveness failed. Please try again.");
   };
 
-  // loading screen – cover whole app so navbar/footer don't show
   if (loading) {
     return (
-      <div className="fixed inset-0 bg-black text-white flex flex-col items-center justify-center z-[999]">
+      <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center">
         <h1 className="text-xl font-semibold mb-2">AWS Liveness</h1>
         <p className="text-sm text-zinc-300 mb-2">
           Preparing your liveness session…
@@ -82,10 +83,9 @@ export default function AwsLiveness() {
     );
   }
 
-  // error screen – same thing, full cover
   if (err) {
     return (
-      <div className="fixed inset-0 bg-black text-white flex flex-col items-center justify-center z-[999]">
+      <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center">
         <h1 className="text-xl font-semibold mb-2">AWS Liveness</h1>
         <p className="text-sm text-red-400 mb-4">{err}</p>
         <button
@@ -98,10 +98,10 @@ export default function AwsLiveness() {
     );
   }
 
-  // ✅ success state – let AWS take the space
   return (
-    <div className="fixed inset-0 bg-black text-white z-[999] flex flex-col">
-      <div className="flex-1 aws-liveness-shell">
+    <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center p-4">
+      <h1 className="text-xl font-semibold mb-4">AWS Liveness</h1>
+      <div className="w-full max-w-md">
         <FaceLivenessDetector
           sessionId={sessionId}
           region={region}
@@ -109,14 +109,12 @@ export default function AwsLiveness() {
           onError={handleError}
         />
       </div>
-      <div className="p-3 bg-black/60 flex justify-center">
-        <button
-          onClick={() => nav(back)}
-          className="px-4 py-2 rounded bg-yellow-400 text-black text-sm"
-        >
-          Cancel
-        </button>
-      </div>
+      <button
+        onClick={() => nav(back)}
+        className="mt-6 px-4 py-2 rounded bg-yellow-400 text-black text-sm"
+      >
+        Cancel
+      </button>
     </div>
   );
 }
