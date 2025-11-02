@@ -1,14 +1,14 @@
+// apps/web/src/lib/api.js
 import axios from "axios";
 import { getAuth, onAuthStateChanged } from "firebase/auth";
 
 /* =========================================
    BASE URL (normalize, no trailing slash, no /api suffix)
-   - Supports either VITE_API_BASE_URL or VITE_API_BASE
    ========================================= */
 let ROOT =
   (import.meta.env.VITE_API_BASE_URL ||
-   import.meta.env.VITE_API_BASE ||
-   "")
+    import.meta.env.VITE_API_BASE ||
+    "")
     .toString()
     .trim();
 
@@ -21,7 +21,10 @@ if (/\/api$/i.test(ROOT)) ROOT = ROOT.replace(/\/api$/i, "");
 // Points to server root. Your paths below already start with "/api/...".
 export const api = axios.create({
   baseURL: ROOT,
-  headers: { "Content-Type": "application/json", Accept: "application/json" },
+  headers: {
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  },
 });
 
 /* =========================================
@@ -67,6 +70,18 @@ export function setAuthToken(token) {
   else localStorage.setItem("token", token);
 }
 
+/* small helper to drop empties */
+function stripEmpty(obj = {}) {
+  const out = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v === "" || v === null || typeof v === "undefined") continue;
+    // also drop NaN
+    if (typeof v === "number" && Number.isNaN(v)) continue;
+    out[k] = v;
+  }
+  return out;
+}
+
 /* =========================================
    BASIC / COMMON
    ========================================= */
@@ -87,11 +102,15 @@ export async function getNgStates() {
   return data;
 }
 export async function getNgLgas(stateName) {
-  const { data } = await api.get(`/api/geo/ng/lgas/${encodeURIComponent(stateName)}`);
+  const { data } = await api.get(
+    `/api/geo/ng/lgas/${encodeURIComponent(stateName)}`
+  );
   return data;
 }
 export async function reverseGeocode({ lat, lon }) {
-  const { data } = await api.get("/api/geo/rev", { params: { lat, lon } });
+  const { data } = await api.get("/api/geo/rev", {
+    params: { lat, lon },
+  });
   return data;
 }
 
@@ -107,7 +126,9 @@ export async function getBarber(id) {
   return data;
 }
 export async function listNearbyBarbers({ lat, lon, radiusKm = 25 }) {
-  const { data } = await api.get(`/api/barbers/nearby`, { params: { lat, lon, radiusKm } });
+  const { data } = await api.get(`/api/barbers/nearby`, {
+    params: { lat, lon, radiusKm },
+  });
   return data;
 }
 
@@ -115,7 +136,7 @@ export async function listNearbyBarbers({ lat, lon, radiusKm = 25 }) {
    FEED
    ========================================= */
 export async function listPublicFeed(params = {}) {
-  const { data } = await api.get("/api/posts/public", { params }); // corrected path
+  const { data } = await api.get("/api/posts/public", { params });
   return data;
 }
 export async function createPost(payload) {
@@ -127,11 +148,18 @@ export async function createPost(payload) {
    PAYMENTS (Paystack)
    ========================================= */
 export async function verifyPayment({ bookingId, reference }) {
-  const { data } = await api.post("/api/payments/verify", { bookingId, reference });
+  const { data } = await api.post("/api/payments/verify", {
+    bookingId,
+    reference,
+  });
   return data;
 }
 export async function initPayment({ bookingId, amountKobo, email }) {
-  const { data } = await api.post("/api/payments/init", { bookingId, amountKobo, email });
+  const { data } = await api.post("/api/payments/init", {
+    bookingId,
+    amountKobo,
+    email,
+  });
   return data;
 }
 
@@ -147,7 +175,10 @@ export async function createInstantBooking(payload) {
   return data;
 }
 export async function setBookingReference(bookingId, paystackReference) {
-  const { data } = await api.put(`/api/bookings/${bookingId}/reference`, { paystackReference });
+  const { data } = await api.put(
+    `/api/bookings/${bookingId}/reference`,
+    { paystackReference }
+  );
   return data.ok === true;
 }
 export async function getMyBookings() {
@@ -175,7 +206,10 @@ export async function acceptBooking(id) {
   return data.booking;
 }
 export async function declineBooking(id, payload = {}) {
-  const { data } = await api.put(`/api/bookings/${id}/decline`, payload);
+  const { data } = await api.put(
+    `/api/bookings/${id}/decline`,
+    payload
+  );
   return data.booking;
 }
 export async function completeBooking(id) {
@@ -191,19 +225,29 @@ export async function getWalletMe() {
   return data;
 }
 export async function initWalletTopup(amountKobo) {
-  const { data } = await api.post("/api/wallet/topup/init", { amountKobo });
+  const { data } = await api.post("/api/wallet/topup/init", {
+    amountKobo,
+  });
   return data;
 }
 export async function verifyWalletTopup(reference) {
-  const { data } = await api.post("/api/wallet/topup/verify", { reference });
+  const { data } = await api.post("/api/wallet/topup/verify", {
+    reference,
+  });
   return data;
 }
 export async function withdrawPendingToAvailable({ amountKobo, pin }) {
-  const { data } = await api.post("/api/wallet/withdraw-pending", { amountKobo, pin });
+  const { data } = await api.post("/api/wallet/withdraw-pending", {
+    amountKobo,
+    pin,
+  });
   return data;
 }
 export async function withdrawToBank({ amountKobo, pin }) {
-  const { data } = await api.post("/api/wallet/withdraw", { amountKobo, pin });
+  const { data } = await api.post("/api/wallet/withdraw", {
+    amountKobo,
+    pin,
+  });
   return data;
 }
 export const getMyWallet = getWalletMe;
@@ -226,7 +270,10 @@ export async function setWithdrawPin(pin) {
   return data;
 }
 export async function resetWithdrawPin(currentPin, newPin) {
-  const { data } = await api.put("/api/pin/me/reset", { currentPin, newPin });
+  const { data } = await api.put("/api/pin/me/reset", {
+    currentPin,
+    newPin,
+  });
   return data;
 }
 
@@ -260,17 +307,25 @@ export async function getClientProfile() {
   return data;
 }
 export async function updateClientProfile(payload) {
-  const { data } = await api.put("/api/profile/me", payload); // unified alias
+  // 🔴 strip empties so backend doesn't reject
+  const clean = stripEmpty(payload);
+  const { data } = await api.put("/api/profile/me", clean);
   return data;
 }
 
 /* Optional booking/admin helpers */
 export async function getClientProfileForBooking(clientUid, bookingId) {
-  const { data } = await api.get(`/api/profile/client/${clientUid}/for-booking/${encodeURIComponent(bookingId)}`);
+  const { data } = await api.get(
+    `/api/profile/client/${clientUid}/for-booking/${encodeURIComponent(
+      bookingId
+    )}`
+  );
   return data;
 }
 export async function getClientProfileAdmin(clientUid) {
-  const { data } = await api.get(`/api/profile/client/${clientUid}/admin`);
+  const { data } = await api.get(
+    `/api/profile/client/${clientUid}/admin`
+  );
   return data;
 }
 

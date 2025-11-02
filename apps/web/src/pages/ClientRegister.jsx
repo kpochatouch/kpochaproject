@@ -90,7 +90,10 @@ export default function ClientRegister() {
   const [selfieWithIdUrl, setSelfieWithIdUrl] = useState("");
 
   // agreements
-  const [agreements, setAgreements] = useState({ terms: false, privacy: false });
+  const [agreements, setAgreements] = useState({
+    terms: false,
+    privacy: false,
+  });
 
   // location
   const [locLoading, setLocLoading] = useState(false);
@@ -121,18 +124,23 @@ export default function ClientRegister() {
         if (data) {
           setFullName(data.fullName || "");
           setPhone(data.phone || "");
-
           setStateVal(data.state || "");
           setLga((data.lga || "").toString().toUpperCase());
           setAddress(data.address || "");
           setPhotoUrl(data.photoUrl || "");
+
           if (data.lat != null) setLat(data.lat);
           if (data.lon != null) setLon(data.lon);
 
-          const acceptedTerms = !!data.acceptedTerms || !!data?.agreements?.terms;
-          const acceptedPrivacy = !!data.acceptedPrivacy || !!data?.agreements?.privacy;
+          const acceptedTerms =
+            !!data.acceptedTerms || !!data?.agreements?.terms;
+          const acceptedPrivacy =
+            !!data.acceptedPrivacy || !!data?.agreements?.privacy;
           if (acceptedTerms || acceptedPrivacy) {
-            setAgreements({ terms: acceptedTerms, privacy: acceptedPrivacy });
+            setAgreements({
+              terms: acceptedTerms,
+              privacy: acceptedPrivacy,
+            });
           }
 
           const kyc = data.kyc || {};
@@ -157,36 +165,80 @@ export default function ClientRegister() {
 
   // ===== Can save? =====
   const canSave = useMemo(() => {
-    const base = !!fullName && !!phone && (!!stateVal || !!lga) && !!address;
+    const base =
+      !!fullName && !!phone && (!!stateVal || !!lga) && !!address;
     const agreed = agreements.terms && agreements.privacy;
     if (!verifyNow) return base && agreed;
-    return base && agreed && !!idType && !!idUrl && !!selfieWithIdUrl;
-  }, [fullName, phone, stateVal, lga, address, verifyNow, idType, idUrl, selfieWithIdUrl, agreements]);
+    return (
+      base &&
+      agreed &&
+      !!idType &&
+      !!idUrl &&
+      !!selfieWithIdUrl
+    );
+  }, [
+    fullName,
+    phone,
+    stateVal,
+    lga,
+    address,
+    verifyNow,
+    idType,
+    idUrl,
+    selfieWithIdUrl,
+    agreements,
+  ]);
 
   // ===== Save =====
   async function save() {
     try {
       setErr("");
+
+      // sanitize lat/lon — don't send empty strings
+      const latClean =
+        lat === "" || lat === null ? null : Number(lat);
+      const lonClean =
+        lon === "" || lon === null ? null : Number(lon);
+
       const payload = {
-        fullName,
-        phone,
-        state: stateVal,
-        lga: (lga || stateVal || "").toString().toUpperCase(),
-        address,
-        photoUrl,
-        ...(lat != null && lon != null ? { lat, lon } : {}),
+        fullName: fullName?.trim(),
+        phone: phone?.trim(),
+        state: stateVal?.trim(),
+        lga: (lga || stateVal || "").toString().toUpperCase().trim(),
+        address: address?.trim(),
+        photoUrl: photoUrl?.trim(),
         acceptedTerms: !!agreements.terms,
         acceptedPrivacy: !!agreements.privacy,
-        agreements: { terms: !!agreements.terms, privacy: !!agreements.privacy },
+        agreements: {
+          terms: !!agreements.terms,
+          privacy: !!agreements.privacy,
+        },
       };
-      if (verifyNow) {
-        payload.kyc = { idType, idUrl, selfieWithIdUrl, status: "pending" };
+
+      if (
+        latClean != null &&
+        !Number.isNaN(latClean) &&
+        lonClean != null &&
+        !Number.isNaN(lonClean)
+      ) {
+        payload.lat = latClean;
+        payload.lon = lonClean;
       }
+
+      if (verifyNow) {
+        payload.kyc = {
+          idType,
+          idUrl,
+          selfieWithIdUrl,
+          status: "pending",
+        };
+      }
+
       await updateClientProfile(payload);
       flashOK("Saved!");
       nav("/browse", { replace: true });
     } catch (e) {
-      setErr(e?.response?.data?.error || "Failed to save.");
+      setErr(e?.response?.data?.error || "Failed to save profile.");
     }
   }
 
@@ -202,13 +254,27 @@ export default function ClientRegister() {
       );
       const { latitude: theLat, longitude: theLon } = pos.coords;
 
-      const { data } = await api.get("/api/geo/rev", { params: { lat: theLat, lon: theLon } });
+      const { data } = await api.get("/api/geo/rev", {
+        params: { lat: theLat, lon: theLon },
+      });
       const feat = data?.features?.[0];
       const p = feat?.properties || {};
 
-      const detectedState = (p.state || p.region || "").toString().toUpperCase();
-      const detectedLga = (p.county || p.city || p.district || p.suburb || "").toString().toUpperCase();
-      const detectedAddress = [p.address_line1, p.address_line2].filter(Boolean).join(", ");
+      const detectedState = (p.state || p.region || "")
+        .toString()
+        .toUpperCase();
+      const detectedLga = (
+        p.county ||
+        p.city ||
+        p.district ||
+        p.suburb ||
+        ""
+      )
+        .toString()
+        .toUpperCase();
+      const detectedAddress = [p.address_line1, p.address_line2]
+        .filter(Boolean)
+        .join(", ");
 
       setStateVal((s) => detectedState || s);
       setLga((l) => detectedLga || l);
@@ -231,7 +297,9 @@ export default function ClientRegister() {
   // ===== Nearby =====
   async function loadNearby() {
     if (lat == null || lon == null) {
-      alert("Click ‘Use my location’ first so we can find professionals near you.");
+      alert(
+        "Click ‘Use my location’ first so we can find professionals near you."
+      );
       return;
     }
     try {
@@ -240,7 +308,8 @@ export default function ClientRegister() {
         params: { lat, lon, radiusKm: 25 },
       });
       setNearby(data?.items || []);
-      if (!data?.items?.length) flashOK("No professionals within 25km (yet).");
+      if (!data?.items?.length)
+        flashOK("No professionals within 25km (yet).");
     } catch {
       setErr("Could not search nearby professionals.");
     } finally {
@@ -250,8 +319,9 @@ export default function ClientRegister() {
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-8">
-      {/* match BecomePro header style */}
-      <h1 className="text-2xl font-semibold mb-6 text-yellow-400">Client Profile</h1>
+      <h1 className="text-2xl font-semibold mb-6 text-yellow-400">
+        Client Profile
+      </h1>
 
       {err && (
         <div className="mb-4 rounded border border-red-800 bg-red-900/40 text-red-100 px-3 py-2">
@@ -268,12 +338,16 @@ export default function ClientRegister() {
         <div className="text-zinc-200">Loading…</div>
       ) : (
         <div className="space-y-6">
-          {/* Avatar */}
+          {/* Photo */}
           <Section title="Photo">
-            <div className="flex items-center gap-4">
+            <div className="flex flex-wrap items-center gap-4">
               <div className="relative w-16 h-16 rounded-full border border-yellow-500/60 overflow-hidden bg-zinc-900">
                 {photoUrl ? (
-                  <img src={photoUrl} alt="Avatar" className="w-full h-full object-cover" />
+                  <img
+                    src={photoUrl}
+                    alt="Avatar"
+                    className="w-full h-full object-cover"
+                  />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center text-[10px] text-zinc-500">
                     No Photo
@@ -304,8 +378,22 @@ export default function ClientRegister() {
                   </button>
                 )}
               </div>
+
+              {/* 👇 this is what you asked for */}
+              <button
+                type="button"
+                onClick={() =>
+                  nav("/aws-liveness?back=/client/register")
+                }
+                className="px-3 py-1.5 rounded-lg border border-yellow-500/80 text-yellow-200 text-sm hover:bg-yellow-500/10"
+              >
+                Start Face Verification
+              </button>
+
               {(!CLOUD_NAME || !UPLOAD_PRESET) && (
-                <p className="text-xs text-zinc-500">Upload widget not configured — use URL.</p>
+                <p className="text-xs text-zinc-500">
+                  Upload widget not configured — use URL.
+                </p>
               )}
             </div>
           </Section>
@@ -329,7 +417,9 @@ export default function ClientRegister() {
 
           {/* Location */}
           <Section title="Location">
-            <label className="block text-sm text-yellow-300 mb-1">State &amp; LGA</label>
+            <label className="block text-sm text-yellow-300 mb-1">
+              State &amp; LGA
+            </label>
             <NgGeoPicker
               valueState={stateVal}
               onChangeState={setStateVal}
@@ -385,13 +475,16 @@ export default function ClientRegister() {
                     onChange={(e) => setIdType(e.target.value)}
                   >
                     <option value="">Select…</option>
-                    {["National ID", "Voter’s Card", "Driver’s License", "International Passport"].map(
-                      (o) => (
-                        <option key={o} value={o}>
-                          {o}
-                        </option>
-                      )
-                    )}
+                    {[
+                      "National ID",
+                      "Voter’s Card",
+                      "Driver’s License",
+                      "International Passport",
+                    ].map((o) => (
+                      <option key={o} value={o}>
+                        {o}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
@@ -424,11 +517,18 @@ export default function ClientRegister() {
                 <input
                   type="checkbox"
                   checked={agreements.terms}
-                  onChange={() => setAgreements((p) => ({ ...p, terms: !p.terms }))}
+                  onChange={() =>
+                    setAgreements((p) => ({ ...p, terms: !p.terms }))
+                  }
                 />
                 <span>
                   I agree to the{" "}
-                  <Link to="/legal#terms" target="_blank" rel="noreferrer" className="underline">
+                  <Link
+                    to="/legal#terms"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="underline"
+                  >
                     Terms &amp; Conditions
                   </Link>
                 </span>
@@ -437,11 +537,18 @@ export default function ClientRegister() {
                 <input
                   type="checkbox"
                   checked={agreements.privacy}
-                  onChange={() => setAgreements((p) => ({ ...p, privacy: !p.privacy }))}
+                  onChange={() =>
+                    setAgreements((p) => ({ ...p, privacy: !p.privacy }))
+                  }
                 />
                 <span>
                   I agree to the{" "}
-                  <Link to="/legal#privacy" target="_blank" rel="noreferrer" className="underline">
+                  <Link
+                    to="/legal#privacy"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="underline"
+                  >
                     Privacy Policy
                   </Link>
                 </span>
@@ -452,7 +559,9 @@ export default function ClientRegister() {
           {/* Nearby */}
           <Section title="Professionals near you">
             <div className="flex items-center justify-between gap-3">
-              <p className="text-sm text-zinc-200">Find stylists/barbers within 25km.</p>
+              <p className="text-sm text-zinc-200">
+                Find stylists/barbers within 25km.
+              </p>
               <button
                 type="button"
                 onClick={loadNearby}
@@ -467,12 +576,19 @@ export default function ClientRegister() {
               <ul className="mt-3 space-y-2">
                 {nearby.slice(0, 6).map((b) => (
                   <li
-                    key={b.id || b._id || b.proId || `${b.name}-${b.lga}-${b.distanceKm || 0}`}
+                    key={
+                      b.id ||
+                      b._id ||
+                      b.proId ||
+                      `${b.name}-${b.lga}-${b.distanceKm || 0}`
+                    }
                     className="flex justify-between items-center border border-zinc-800 rounded px-2 py-1 text-sm"
                   >
                     <span>{b.name || b.proName || "Professional"}</span>
                     <span className="text-zinc-400">
-                      {b.distanceKm != null ? `${b.distanceKm} km` : b.lga || ""}
+                      {b.distanceKm != null
+                        ? `${b.distanceKm} km`
+                        : b.lga || ""}
                     </span>
                   </li>
                 ))}
@@ -520,7 +636,13 @@ function Input({ label, ...props }) {
   );
 }
 
-function UploadButton({ title = "Upload", onUploaded, widgetFactory, disabled, folder }) {
+function UploadButton({
+  title = "Upload",
+  onUploaded,
+  widgetFactory,
+  disabled,
+  folder,
+}) {
   function open() {
     const widget = widgetFactory?.(onUploaded, folder);
     if (!widget) {
