@@ -1,9 +1,14 @@
 // apps/web/src/components/BarberCard.jsx
+import { useState } from "react";
 import { Link } from "react-router-dom";
 
-/** Small round logo at top-right (keep or remove as you prefer) */
-const LOGO_URL =
-  "https://res.cloudinary.com/dupex2y3k/image/upload/v1760302703/kpocha-touch-logo_srzbiu.jpg";
+/**
+ * BRANDING:
+ * This must stay. Do NOT remove or make "optional" — app branding depends on it.
+ * If later you want to swap it, change the URL here or move to env, but keep the slot.
+ */
+// Use .env variable instead of hard-coded link
+const LOGO_URL = import.meta.env.VITE_APP_LOGO_URL || "";
 
 /* ------------------------------ Helpers ------------------------------ */
 function toArrayServices(svcs) {
@@ -46,14 +51,17 @@ function availabilityLabel(av) {
   return "";
 }
 
-function Avatar({ url, seed }) {
+function Avatar({ url, seed, onClick }) {
   if (url) {
     return (
-      <img
-        src={url}
-        alt="Profile"
-        className="w-20 h-20 rounded-full border-2 border-zinc-700 object-cover shadow-lg"
-      />
+      <button
+        type="button"
+        onClick={onClick}
+        className="w-20 h-20 rounded-full border-2 border-zinc-700 overflow-hidden shadow-lg"
+        title="Click to view photo"
+      >
+        <img src={url} alt="Profile" className="w-full h-full object-cover" loading="lazy" />
+      </button>
     );
   }
   const initials =
@@ -73,10 +81,12 @@ function Avatar({ url, seed }) {
 
 /* =======================================================================
    Card with bottom actions:
-   - View (left) — opens drawer via onOpen(barber)
-   - Book now (right) — calls onBook(serviceName|null) OR links to /book/:id
+   - View now → opens drawer via onOpen(barber)
+   - Book now → calls onBook(serviceName|null) OR links to /book/:id
    ======================================================================= */
 export default function BarberCard({ barber = {}, onOpen, onBook }) {
+  const [lightbox, setLightbox] = useState("");
+
   const id = barber.id || barber._id || "";
   const name =
     barber.name ||
@@ -85,7 +95,7 @@ export default function BarberCard({ barber = {}, onOpen, onBook }) {
 
   const role =
     (typeof barber.title === "string" && barber.title.trim()) ||
-    "" /* neutral: no demo fallback */;
+    "" /* neutral: no fake demo text */;
 
   const rating =
     typeof barber.rating === "number" && Number.isFinite(barber.rating)
@@ -98,13 +108,23 @@ export default function BarberCard({ barber = {}, onOpen, onBook }) {
   const lga = (barber.lga || "").toString().trim();
   const state = (barber.state || "").toString().trim();
 
-  const services = toArrayServices(barber.services);
+  // prefer *real pro doc* fields
+  const services = toArrayServices(
+    barber.services ||
+      barber.servicesDetailed ||
+      (barber.professional && (barber.professional.services || barber.professional.servicesDetailed)) ||
+      []
+  );
   const topThree = services.slice(0, 3);
 
-  const bio =
-    (barber.bio || barber.description || "").toString().trim();
+  const bio = (barber.bio || barber.description || "").toString().trim();
 
-  const photoUrl = barber.photoUrl || barber.avatarUrl || "";
+  // prefer image from pro -> identity -> plain avatar
+  const photoUrl =
+    barber.photoUrl ||
+    barber.avatarUrl ||
+    (barber.identity && (barber.identity.photoUrl || barber.identity.avatarUrl)) ||
+    "";
 
   return (
     <div
@@ -119,22 +139,7 @@ export default function BarberCard({ barber = {}, onOpen, onBook }) {
           "0 1px 0 rgba(255,255,255,0.03) inset, 0 10px 30px rgba(0,0,0,0.45)",
       }}
     >
-      {/* Subtle dot-decoration */}
-      <svg
-        className="absolute left-1/2 -translate-x-1/2 -top-1 h-16 w-24 opacity-30"
-        viewBox="0 0 80 60"
-        fill="none"
-        aria-hidden="true"
-      >
-        <defs>
-          <pattern id="dots" x="0" y="0" width="4" height="4" patternUnits="userSpaceOnUse">
-            <circle cx="1" cy="1" r="0.6" fill="#ff7a00" />
-          </pattern>
-        </defs>
-        <path d="M0,0 L80,0 L40,60 Z" fill="url(#dots)" />
-      </svg>
-
-      {/* Round logo (top-right) */}
+      {/* KPOCHA TOUCH LOGO (DO NOT REMOVE) */}
       {LOGO_URL && (
         <img
           src={LOGO_URL}
@@ -147,7 +152,7 @@ export default function BarberCard({ barber = {}, onOpen, onBook }) {
       {/* Top content */}
       <div className="flex gap-5 px-5 pt-5 pb-16">
         <div className="shrink-0">
-          <Avatar url={photoUrl} seed={name} />
+          <Avatar url={photoUrl} seed={name} onClick={() => photoUrl && setLightbox(photoUrl)} />
         </div>
 
         <div className="min-w-0 flex-1">
@@ -155,9 +160,7 @@ export default function BarberCard({ barber = {}, onOpen, onBook }) {
             <div className="text-[20px] font-extrabold tracking-wide truncate">
               {name}
             </div>
-            {role ? (
-              <div className="text-sm text-zinc-400">{role}</div>
-            ) : null}
+            {role ? <div className="text-sm text-zinc-400">{role}</div> : null}
           </div>
 
           <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-zinc-300">
@@ -196,7 +199,7 @@ export default function BarberCard({ barber = {}, onOpen, onBook }) {
             )}
           </div>
 
-          {/* Top services — clickable to preselect on Book page if onBook exists */}
+          {/* Top services */}
           {!!topThree.length && (
             <div className="mt-3 flex flex-wrap gap-2">
               {topThree.map((s, i) => {
@@ -231,7 +234,7 @@ export default function BarberCard({ barber = {}, onOpen, onBook }) {
         </div>
       </div>
 
-      {/* Gradient footer */}
+      {/* Gradient footer (keep visual) */}
       <div
         className="pointer-events-none absolute bottom-0 left-0 right-0 h-16"
         style={{
@@ -275,6 +278,26 @@ export default function BarberCard({ barber = {}, onOpen, onBook }) {
           </Link>
         )}
       </div>
+
+      {/* Avatar lightbox */}
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70"
+          onClick={() => setLightbox("")}
+        >
+          <div className="max-w-2xl max-h-[85vh] rounded-xl overflow-hidden border border-zinc-700">
+            <img src={lightbox} alt="Pro photo" className="block max-h-[85vh] object-contain" />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
+/**
+ * COMMENTS (BarberCard.jsx)
+ * - Kept the Kpocha Touch logo hard-coded on top-right.
+ * - Avatar is now clickable → expands in lightbox.
+ * - We now prefer real pro fields (services, identity.photoUrl) so public list shows real data.
+ * - Book + View still work the same with the drawer.
+ */

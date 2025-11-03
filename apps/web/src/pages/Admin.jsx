@@ -21,6 +21,7 @@ export default function Admin() {
     () => (token ? { Authorization: `Bearer ${token}` } : {}),
     [token]
   );
+
   function switchTab(next) {
     setTab(next);
     const q = new URLSearchParams(location.search);
@@ -42,7 +43,9 @@ export default function Admin() {
     setListError("");
     setListLoading(true);
     try {
-      const res = await fetch(`${API}/api/pros/pending`, { headers: { ...authHeaders() } });
+      const res = await fetch(`${API}/api/pros/pending`, {
+        headers: { ...authHeaders() },
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Failed to load");
       setPending(Array.isArray(data) ? data : []);
@@ -57,7 +60,12 @@ export default function Admin() {
     async (id) => {
       setBusyId(id);
       setListError("");
+
+      // grab the application we are about to approve, so we can extract the real uid
+      const app = pending.find((p) => (p.clientId || p._id) === id);
+
       try {
+        // 1) approve
         const res = await fetch(`${API}/api/pros/approve/${id}`, {
           method: "POST",
           headers: {
@@ -66,8 +74,39 @@ export default function Admin() {
           },
         });
         const json = await res.json();
-        if (!res.ok || !json?.ok) throw new Error(json?.error || "Approve failed");
-        await loadPending(); // refresh
+        if (!res.ok || !json?.ok)
+          throw new Error(json?.error || "Approve failed");
+
+        // 2) pick owner uid from:
+        //    - approve response (preferred)
+        //    - or the pending app we just approved
+        const ownerUid =
+          json?.ownerUid ||
+          json?.uid ||
+          json?.clientId ||
+          app?.clientId ||
+          app?.uid ||
+          app?.ownerUid ||
+          app?.userUid;
+
+        // 3) force profile -> pro re-sync right now
+        if (ownerUid) {
+          await fetch(
+            `${API}/api/pros/resync/${encodeURIComponent(ownerUid)}`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                ...authHeaders(),
+              },
+            }
+          ).catch(() => {
+            // ignore resync errors; approval must still succeed
+          });
+        }
+
+        // 4) refresh list
+        await loadPending();
         alert("Approved ✅");
       } catch (e) {
         setListError(e.message || "Approve failed");
@@ -75,7 +114,7 @@ export default function Admin() {
         setBusyId(null);
       }
     },
-    [authHeaders, loadPending]
+    [authHeaders, loadPending, pending]
   );
 
   const filtered = pending.filter((p) => {
@@ -120,7 +159,9 @@ export default function Admin() {
       releaseDays: Number.isFinite(Number(s?.payouts?.releaseDays))
         ? Number(s.payouts.releaseDays)
         : 7,
-      instantCashoutFeePercent: Number.isFinite(Number(s?.payouts?.instantCashoutFeePercent))
+      instantCashoutFeePercent: Number.isFinite(
+        Number(s?.payouts?.instantCashoutFeePercent)
+      )
         ? Number(s.payouts.instantCashoutFeePercent)
         : 3,
       enableAutoRelease: !!s?.payouts?.enableAutoRelease,
@@ -200,11 +241,21 @@ export default function Admin() {
 
   const manualReleaseNow = useCallback(async () => {
     setMrBusy(true);
-    setMrOk(""); setMrError(""); setMrPayload(null);
+    setMrOk("");
+    setMrError("");
+    setMrPayload(null);
     try {
       const res = await fetch(
-        `${API}/api/admin/release-booking/${encodeURIComponent(mrBookingId.trim())}`,
-        { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() } }
+        `${API}/api/admin/release-booking/${encodeURIComponent(
+          mrBookingId.trim()
+        )}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...authHeaders(),
+          },
+        }
       );
       const json = await res.json();
       setMrPayload(json);
@@ -214,7 +265,9 @@ export default function Admin() {
       setMrOk(
         json.alreadyReleased
           ? "Already released earlier."
-          : `Released ₦${((json.releasedKobo || 0) / 100).toLocaleString()} to Available.`
+          : `Released ₦${(
+              (json.releasedKobo || 0) / 100
+            ).toLocaleString()} to Available.`
       );
     } catch (e) {
       setMrError(e.message || "Release failed");
@@ -283,24 +336,33 @@ export default function Admin() {
                 {filtered.map((p) => {
                   const id = p.clientId || p._id;
                   const services =
-                    Array.isArray(p?.professional?.services) && p.professional.services.length
+                    Array.isArray(p?.professional?.services) &&
+                    p.professional.services.length
                       ? p.professional.services.join(", ")
                       : p.services || "—";
 
                   const displayName =
                     p.displayName ||
-                    [p?.identity?.firstName, p?.identity?.lastName].filter(Boolean).join(" ") ||
+                    [p?.identity?.firstName, p?.identity?.lastName]
+                      .filter(Boolean)
+                      .join(" ") ||
                     "(none)";
 
                   const lga =
-                    (p.lga || p?.identity?.city || p?.identity?.state || "(none)")?.toString();
+                    (p.lga ||
+                      p?.identity?.city ||
+                      p?.identity?.state ||
+                      "(none)")?.toString();
 
                   return (
                     <div key={id} className="rounded-xl border border-zinc-800 p-4">
                       <div className="grid md:grid-cols-2 gap-2">
                         <Row label="Name" value={displayName} />
                         <Row label="Email" value={p.email || "(none)"} />
-                        <Row label="Phone" value={p.phone || p?.identity?.phone || "(none)"} />
+                        <Row
+                          label="Phone"
+                          value={p.phone || p?.identity?.phone || "(none)"}
+                        />
                         <Row label="LGA" value={lga} />
                         <Row label="Services" value={services} />
                         <div className="text-xs text-zinc-500 break-all">
@@ -356,12 +418,16 @@ export default function Admin() {
                   <Input
                     label="App Name"
                     value={settings.appName || ""}
-                    onChange={(e) => setSettings({ ...settings, appName: e.target.value })}
+                    onChange={(e) =>
+                      setSettings({ ...settings, appName: e.target.value })
+                    }
                   />
                   <Input
                     label="Tagline"
                     value={settings.tagline || ""}
-                    onChange={(e) => setSettings({ ...settings, tagline: e.target.value })}
+                    onChange={(e) =>
+                      setSettings({ ...settings, tagline: e.target.value })
+                    }
                   />
                 </Card>
 
@@ -398,7 +464,8 @@ export default function Admin() {
                     />
                   </div>
                   <p className="text-xs text-zinc-500">
-                    These values are saved to the server. Payout calculations should read them from Settings.
+                    These values are saved to the server. Payout calculations should read
+                    them from Settings.
                   </p>
                 </Card>
 
@@ -442,7 +509,10 @@ export default function Admin() {
                       onChange={(e) =>
                         setSettings({
                           ...settings,
-                          payouts: { ...(settings.payouts || {}), enableAutoRelease: e.target.checked },
+                          payouts: {
+                            ...(settings.payouts || {}),
+                            enableAutoRelease: e.target.checked,
+                          },
                         })
                       }
                     />
@@ -457,12 +527,17 @@ export default function Admin() {
                     onChange={(e) =>
                       setSettings({
                         ...settings,
-                        payouts: { ...(settings.payouts || {}), autoReleaseCron: e.target.value },
+                        payouts: {
+                          ...(settings.payouts || {}),
+                          autoReleaseCron: e.target.value,
+                        },
                       })
                     }
                   />
                   <p className="text-xs text-zinc-500 mt-1">
-                    Tip: <code className="bg-zinc-900 px-1 py-0.5 rounded">0 2 * * *</code> = 02:00 daily.
+                    Tip:{" "}
+                    <code className="bg-zinc-900 px-1 py-0.5 rounded">0 2 * * *</code> = 02:00
+                    daily.
                   </p>
                 </Card>
 
@@ -483,7 +558,9 @@ export default function Admin() {
                         })
                       }
                     />
-                    <label htmlFor="requireApproval" className="text-sm">Require Admin Approval</label>
+                    <label htmlFor="requireApproval" className="text-sm">
+                      Require Admin Approval
+                    </label>
                   </div>
                 </Card>
 
@@ -504,7 +581,9 @@ export default function Admin() {
                         })
                       }
                     />
-                    <label htmlFor="isMaintenanceMode" className="text-sm">Maintenance Mode</label>
+                    <label htmlFor="isMaintenanceMode" className="text-sm">
+                      Maintenance Mode
+                    </label>
                   </div>
                   <Input
                     label="Message"
@@ -512,7 +591,10 @@ export default function Admin() {
                     onChange={(e) =>
                       setSettings({
                         ...settings,
-                        maintenance: { ...(settings.maintenance || {}), message: e.target.value },
+                        maintenance: {
+                          ...(settings.maintenance || {}),
+                          message: e.target.value,
+                        },
                       })
                     }
                   />
@@ -521,7 +603,8 @@ export default function Admin() {
                 {/* Security */}
                 <Card title="Security">
                   <label className="block text-xs text-zinc-400 mb-1">
-                    Allowed Origins (CORS) — comma separated. These merge with your .env CORS_ORIGIN.
+                    Allowed Origins (CORS) — comma separated. These merge with your .env
+                    CORS_ORIGIN.
                   </label>
                   <input
                     className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2"
@@ -545,8 +628,8 @@ export default function Admin() {
                 {/* Manual Release (admin tool) */}
                 <Card title="Manual Release (single booking)">
                   <p className="text-sm text-zinc-400 mb-2">
-                    Move a booking’s pro share from <em>Pending</em> to <em>Available</em>.
-                    Use this for special cases or support.
+                    Move a booking’s pro share from <em>Pending</em> to <em>Available</em>. Use
+                    this for special cases or support.
                   </p>
                   {mrError && (
                     <div className="rounded border border-red-800 bg-red-900/40 text-red-100 px-3 py-2 mb-2">

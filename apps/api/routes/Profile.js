@@ -4,10 +4,11 @@ import admin from "firebase-admin";
 import { ClientProfile, ProProfile } from "../models/Profile.js";
 import { Booking } from "../models/Booking.js";
 import { Pro } from "../models.js";
+import mongoose from "mongoose";
 
 const router = express.Router();
 
-/* --------- Auth & Admin helpers (local, like bookings.js) --------- */
+/* --------- Auth & Admin helpers --------- */
 async function requireAuth(req, res, next) {
   try {
     const h = req.headers.authorization || "";
@@ -49,27 +50,16 @@ function requireAdmin(req, res, next) {
 /* -------------------- Utils -------------------- */
 function maskClientProfileForClientView(p, { includeEmail = false } = {}) {
   if (!p) return null;
-  // clone shallow; never mutate the DB doc
   const obj = { ...p };
-
-  // Hide technical identifiers from client views
   delete obj.ownerUid;
   delete obj.uid;
-
-  // Hide internal hashes if present
   if (obj.id?.numberHash) obj.id.numberHash = "****";
-
-  // Optionally surface the authenticated user's email (not stored on the doc)
-  if (includeEmail && typeof obj.email === "undefined") {
-    // caller will merge { email: ... } after this helper
-  }
   return obj;
 }
 
 function filterProPublic(p) {
   if (!p) return null;
   return {
-    // Do NOT expose ownerUid publicly
     proId: p.proId?.toString?.() || p.proId,
     shopAddress: p.shopAddress || "",
     shopPhone: p.shopPhone || "",
@@ -84,12 +74,10 @@ function filterProPublic(p) {
    CLIENT PROFILE
    ============================================================ */
 
-// Handlers so we can mount both the canonical and alias paths cleanly
 async function handleGetClientMe(req, res) {
   try {
     const p = await ClientProfile.findOne({ ownerUid: req.user.uid }).lean();
     const masked = maskClientProfileForClientView(p, { includeEmail: true }) || {};
-    // Always include current user's email in "me" response
     return res.json({ ...masked, email: req.user.email || "" });
   } catch {
     return res.status(500).json({ error: "Failed to load profile" });
@@ -101,15 +89,81 @@ async function handlePutClientMe(req, res) {
     const payload = req.body || {};
     if (payload.lga) payload.lga = String(payload.lga).toUpperCase();
 
+    // 1) save / upsert client profile
     const updated = await ClientProfile.findOneAndUpdate(
       { ownerUid: req.user.uid },
       { $set: { ...payload, ownerUid: req.user.uid } },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     ).lean();
 
+    // 2) 🔁 mirror to Pro if this user is already a Pro
+    //    (this is the "pro uses client profile" rule)
+    try {
+      const pro = await Pro.findOne({ ownerUid: req.user.uid }).lean();
+      if (pro) {
+        // pull the freshest profile directly from the "profiles" collection
+        const col = mongoose.connection.db.collection("profiles");
+        const fresh = await col.findOne({ ownerUid: req.user.uid });
+
+        // if for any reason we cannot read the fresh profile, stop here
+        if (!fresh) {
+          console.warn(
+            "[profile->pro sync] no fresh profile found for",
+            req.user.uid
+          );
+        } else {
+          const name =
+            fresh.fullName ||
+            fresh.displayName ||
+            fresh.name ||
+            [
+              fresh?.identity?.firstName,
+              fresh?.identity?.lastName,
+            ]
+              .filter(Boolean)
+              .join(" ")
+              .trim() ||
+            "";
+
+          const phone =
+            fresh.phone ||
+            fresh?.identity?.phone ||
+            "";
+
+          const lga = (
+            fresh.lga ||
+            fresh.state ||
+            fresh?.identity?.lga ||
+            fresh?.identity?.state ||
+            ""
+          )
+            .toString()
+            .toUpperCase();
+
+          const mirror = {};
+          if (name) mirror.name = name;
+          if (phone) mirror.phone = phone;
+          if (lga) mirror.lga = lga;
+
+          // merge identity but don't destroy existing pro.identity
+          mirror.identity = {
+            ...(pro.identity || {}),
+            ...(fresh.identity || {}),
+          };
+
+          await Pro.updateOne(
+            { ownerUid: req.user.uid },
+            { $set: mirror }
+          );
+        }
+      }
+    } catch (e) {
+      console.warn("[profile->pro sync] skipped:", e?.message || e);
+    }
+
     const masked = maskClientProfileForClientView(updated, { includeEmail: true }) || {};
     return res.json({ ...masked, email: req.user.email || "" });
-  } catch {
+  } catch (e) {
     return res.status(500).json({ error: "Failed to save profile" });
   }
 }
@@ -118,50 +172,62 @@ async function handlePutClientMe(req, res) {
 router.get("/profile/client/me", requireAuth, handleGetClientMe);
 router.put("/profile/client/me", requireAuth, handlePutClientMe);
 
-// 🔁 Aliases so frontend calls to /api/profile/me work
+// Aliases
 router.get("/profile/me", requireAuth, handleGetClientMe);
 router.put("/profile/me", requireAuth, handlePutClientMe);
 
-// Admin read (full – includes ownerUid and everything on the doc)
-router.get("/profile/client/:uid/admin", requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const p = await ClientProfile.findOne({ ownerUid: req.params.uid }).lean();
-    return res.json(p || null);
-  } catch {
-    return res.status(500).json({ error: "Failed to load client profile" });
-  }
-});
-
-// Pro can view client details after an accepted booking
-router.get("/profile/client/:uid/for-booking/:bookingId", requireAuth, async (req, res) => {
-  try {
-    const b = await Booking.findById(req.params.bookingId).lean();
-    if (!b) return res.status(404).json({ error: "Booking not found" });
-
-    const isProOwner = b.proOwnerUid && b.proOwnerUid === req.user.uid;
-    const canView = ["pending_payment", "scheduled", "accepted", "completed"].includes(b.status);
-    if (!(isProOwner && canView)) {
-      return res.status(403).json({ error: "Not authorized to view client details for this booking" });
+// Admin read
+router.get(
+  "/profile/client/:uid/admin",
+  requireAuth,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const p = await ClientProfile.findOne({ ownerUid: req.params.uid }).lean();
+      return res.json(p || null);
+    } catch {
+      return res.status(500).json({ error: "Failed to load client profile" });
     }
-
-    if (b.clientUid !== req.params.uid) {
-      return res.status(400).json({ error: "Client UID does not match booking" });
-    }
-
-    const p = await ClientProfile.findOne({ ownerUid: req.params.uid }).lean();
-    // For this special case we still hide ownerUid/uid; phone/address etc. remain.
-    const masked = maskClientProfileForClientView(p) || null;
-    return res.json(masked);
-  } catch {
-    return res.status(500).json({ error: "Failed to load client profile for booking" });
   }
-});
+);
+
+// Pro can view client for a booking
+router.get(
+  "/profile/client/:uid/for-booking/:bookingId",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const b = await Booking.findById(req.params.bookingId).lean();
+      if (!b) return res.status(404).json({ error: "Booking not found" });
+
+      const isProOwner = b.proOwnerUid && b.proOwnerUid === req.user.uid;
+      const canView = ["pending_payment", "scheduled", "accepted", "completed"].includes(
+        b.status
+      );
+      if (!(isProOwner && canView)) {
+        return res
+          .status(403)
+          .json({ error: "Not authorized to view client details for this booking" });
+      }
+
+      if (b.clientUid !== req.params.uid) {
+        return res.status(400).json({ error: "Client UID does not match booking" });
+      }
+
+      const p = await ClientProfile.findOne({ ownerUid: req.params.uid }).lean();
+      const masked = maskClientProfileForClientView(p) || null;
+      return res.json(masked);
+    } catch {
+      return res
+        .status(500)
+        .json({ error: "Failed to load client profile for booking" });
+    }
+  }
+);
 
 /* ============================================================
    PRO PROFILE (EXTRAS)
    ============================================================ */
-
-// Public, client-visible pro profile (never expose ownerUid)
 router.get("/profile/pro/:proId", async (req, res) => {
   try {
     const p = await ProProfile.findOne({ proId: req.params.proId }).lean();
@@ -172,11 +238,11 @@ router.get("/profile/pro/:proId", async (req, res) => {
   }
 });
 
-// Pro upserts their own extras
 router.put("/profile/pro/me", requireAuth, async (req, res) => {
   try {
     const pro = await Pro.findOne({ ownerUid: req.user.uid }).lean();
-    if (!pro) return res.status(403).json({ error: "You are not an approved professional" });
+    if (!pro)
+      return res.status(403).json({ error: "You are not an approved professional" });
 
     const payload = req.body || {};
     const toSet = { ...payload, ownerUid: req.user.uid, proId: pro._id };
@@ -186,7 +252,6 @@ router.put("/profile/pro/me", requireAuth, async (req, res) => {
       { upsert: true, new: true, setDefaultsOnInsert: true }
     ).lean();
 
-    // Do not expose ownerUid back to the client
     const { ownerUid, ...safe } = updated || {};
     return res.json(safe || null);
   } catch {
@@ -194,14 +259,18 @@ router.put("/profile/pro/me", requireAuth, async (req, res) => {
   }
 });
 
-// Admin full view of pro extras
-router.get("/profile/pro/:proId/admin", requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const p = await ProProfile.findOne({ proId: req.params.proId }).lean();
-    return res.json(p || null);
-  } catch {
-    return res.status(500).json({ error: "Failed to load pro profile" });
+router.get(
+  "/profile/pro/:proId/admin",
+  requireAuth,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const p = await ProProfile.findOne({ proId: req.params.proId }).lean();
+      return res.json(p || null);
+    } catch {
+      return res.status(500).json({ error: "Failed to load pro profile" });
+    }
   }
-});
+);
 
 export default router;

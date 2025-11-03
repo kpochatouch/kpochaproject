@@ -14,13 +14,11 @@ function digitsOnly(s = "") {
   return String(s).replace(/\D/g, "");
 }
 function parseMoney(input = "") {
-  // Accept "15,000" or "15000" or "" -> "0"
   const cleaned = String(input).replace(/,/g, "").trim();
   if (!cleaned) return "0";
   return cleaned;
 }
 function formatMoneyForInput(s = "") {
-  // display with commas while typing; keep empty as-is
   const cleaned = String(s).replace(/,/g, "");
   if (cleaned === "") return "";
   const [whole, frac] = cleaned.split(".");
@@ -93,6 +91,11 @@ export default function BecomePro() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
 
+  // we keep these so we know what user already has
+  const [me, setMe] = useState(null);
+  const [clientProfile, setClientProfile] = useState(null);
+  const [existingPro, setExistingPro] = useState(null);
+
   // ===== Identity
   const [identity, setIdentity] = useState({
     firstName: "",
@@ -100,12 +103,12 @@ export default function BecomePro() {
     lastName: "",
     gender: "",
     dob: "",
-    phone: "", // OPTIONAL (OTP disabled in env)
+    phone: "",
     whatsapp: "",
     email: "",
     state: "",
     lga: "",
-    photoUrl: "", // OPTIONAL (upload + URL fallback)
+    photoUrl: "",
     lat: "",
     lon: "",
   });
@@ -120,8 +123,7 @@ export default function BecomePro() {
     nationwide: false,
   });
 
-  // ===== Services & pricing (dynamic rows)
-  // Each row: { id, name, price, promoPrice, otherText }
+  // ===== Services & pricing
   const [servicesDetailed, setServicesDetailed] = useState([
     { id: "", name: "", price: "", promoPrice: "", otherText: "" },
   ]);
@@ -152,11 +154,11 @@ export default function BecomePro() {
   const [verification, setVerification] = useState({
     idType: "",
     idUrl: "",
-    selfieWithIdUrl: "", // will be set by our face verification page
-    faceVerificationVideoUrl: "", // OPTIONAL RESERVED (empty; ignored by validation)
-    livenessMetrics: {}, // we can still store AWS metrics here — name doesn’t show in UI
+    selfieWithIdUrl: "",
+    faceVerificationVideoUrl: "",
+    livenessMetrics: {},
   });
-  const [showManualSelfie, setShowManualSelfie] = useState(false); // hidden fallback toggle
+  const [showManualSelfie, setShowManualSelfie] = useState(false);
 
   // ===== Bank
   const [bank, setBank] = useState({
@@ -177,31 +179,118 @@ export default function BecomePro() {
 
   const [agreements, setAgreements] = useState({ terms: false, privacy: false });
 
-  // Prefill email
-  useEffect(() => {
-    (async () => {
-      try {
-        const { data } = await api.get("/api/me");
-        setIdentity((p) => ({ ...p, email: data?.email || p.email }));
-      } catch {}
-    })();
-  }, []);
-
   // ===== Pull Nigeria states for picker + nationwide logic
   const [allStates, setAllStates] = useState([]);
+
+  // ✅ Load me + client + (maybe) existing pro + geo, and PREFILL
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
-        const { data } = await api.get("/api/geo/ng");
+        const [meRes, clientRes, proRes, geoRes] = await Promise.all([
+          api.get("/api/me"),
+          api.get("/api/profile/me").catch(() => null),
+          api.get("/api/pros/me").catch(() => null),
+          api.get("/api/geo/ng"),
+        ]);
+
         if (!alive) return;
-        setAllStates(Array.isArray(data?.states) ? data.states : []);
-      } catch {}
+
+        const meData = meRes?.data || null;
+        const clientData = clientRes?.data || null;
+        const proData = proRes?.data || null;
+        const states = Array.isArray(geoRes?.data?.states) ? geoRes.data.states : [];
+
+        setMe(meData);
+        setClientProfile(clientData);
+        setExistingPro(proData);
+        setAllStates(states);
+
+        // PRIORITY for identity: client → pro → me
+        const baseEmail =
+          clientData?.email ||
+          clientData?.identity?.email ||
+          proData?.identity?.email ||
+          meData?.email ||
+          "";
+        const basePhone =
+          clientData?.phone ||
+          clientData?.identity?.phone ||
+          proData?.phone ||
+          proData?.identity?.phone ||
+          meData?.identity?.phone ||
+          "";
+        const baseState =
+          clientData?.state ||
+          clientData?.identity?.state ||
+          proData?.identity?.state ||
+          meData?.identity?.state ||
+          "";
+        const baseLga =
+          clientData?.lga ||
+          clientData?.identity?.city ||
+          proData?.identity?.city ||
+          meData?.identity?.city ||
+          "";
+        const basePhoto =
+          clientData?.photoUrl ||
+          clientData?.identity?.photoUrl ||
+          proData?.identity?.photoUrl ||
+          meData?.identity?.photoUrl ||
+          "";
+
+        // Try to split client full name
+        let firstName = "";
+        let lastName = "";
+        let middleName = "";
+        const clientName =
+          clientData?.fullName ||
+          clientData?.displayName ||
+          proData?.displayName ||
+          meData?.displayName ||
+          "";
+        if (clientName) {
+          const parts = clientName.trim().split(/\s+/);
+          if (parts.length === 1) {
+            firstName = parts[0];
+          } else if (parts.length === 2) {
+            [firstName, lastName] = parts;
+          } else if (parts.length > 2) {
+            firstName = parts[0];
+            lastName = parts[parts.length - 1];
+            middleName = parts.slice(1, -1).join(" ");
+          }
+        }
+
+        setIdentity((prev) => ({
+          ...prev,
+          firstName: prev.firstName || firstName,
+          middleName: prev.middleName || middleName,
+          lastName: prev.lastName || lastName,
+          email: prev.email || baseEmail,
+          phone: prev.phone || basePhone,
+          state: prev.state || baseState,
+          lga: prev.lga || baseLga,
+          photoUrl: prev.photoUrl || basePhoto,
+        }));
+
+        // If user is already pro and has availability states, keep it
+        if (proData?.availability?.statesCovered?.length) {
+          setAvailability((p) => ({
+            ...p,
+            statesCovered: proData.availability.statesCovered,
+          }));
+        }
+      } catch {
+        // ignore — page can still be filled manually
+      }
     })();
+
     return () => {
       alive = false;
     };
   }, []);
+
   const stateList = useMemo(() => (allStates || []).slice().sort(), [allStates]);
 
   /* -------- GPS: Use my location -------- */
@@ -253,12 +342,7 @@ export default function BecomePro() {
     }
   }
 
-  /* ---------- Face verification integration (page-based) ----------
-   * AwsLiveness.jsx will set:
-   *  localStorage['kpocha:selfieUrl'] = <url>
-   *  localStorage['kpocha:livenessMetrics'] = JSON.stringify({score, ts, ...})
-   *  localStorage['kpocha:livenessVideoUrl'] = "" (reserved; optional)
-   */
+  /* ---------- Face verification storage ---------- */
   function checkVerificationStorage() {
     try {
       const url = localStorage.getItem("kpocha:selfieUrl") || "";
@@ -271,7 +355,6 @@ export default function BecomePro() {
           livenessMetrics: metricsRaw ? JSON.parse(metricsRaw) : v.livenessMetrics || {},
           faceVerificationVideoUrl: videoUrl || v.faceVerificationVideoUrl || "",
         }));
-        // Clear so we don’t reuse stale values later
         localStorage.removeItem("kpocha:selfieUrl");
         localStorage.removeItem("kpocha:livenessMetrics");
         localStorage.removeItem("kpocha:livenessVideoUrl");
@@ -296,7 +379,6 @@ export default function BecomePro() {
     setServicesDetailed((rows) => {
       const next = rows.slice();
       next[i] = { ...next[i], ...patch };
-      // keep pretty commas while typing
       if (patch?.price !== undefined) {
         next[i].price = formatMoneyForInput(next[i].price);
       }
@@ -330,7 +412,6 @@ export default function BecomePro() {
   const missing = useMemo(() => {
     const m = [];
 
-    // Identity required
     if (!identity.firstName) m.push("First name");
     if (!identity.lastName) m.push("Last name");
     if (!identity.gender) m.push("Gender");
@@ -338,13 +419,11 @@ export default function BecomePro() {
     if (!identity.state) m.push("State");
     if (!professional.nationwide && !identity.lga) m.push("LGA (or select Nationwide)");
 
-    // At least one valid service row
     const resolvedRows = servicesDetailed
       .map((r) => ({ ...r, resolvedName: (r.name || "").trim() }))
       .filter((r) => r.resolvedName);
     if (resolvedRows.length === 0) m.push("At least one service");
 
-    // No duplicate service names
     const seen = new Set();
     for (const r of resolvedRows) {
       const key = normName(r.resolvedName);
@@ -355,18 +434,14 @@ export default function BecomePro() {
       seen.add(key);
     }
 
-    // Verification required (ID only for now)
     if (!verification.idType) m.push("ID type");
     if (!verification.idUrl) m.push("Government ID image");
-    // Face verification is OPTIONAL for now — camera flow is separate
 
-    // Bank required
     if (!bank.bankName) m.push("Bank name");
     if (!bank.accountName) m.push("Account name");
     if (!bank.accountNumber) m.push("Account number");
     if (!bank.bvn) m.push("BVN");
 
-    // Agreements
     if (!agreements.terms) m.push("Accept Terms");
     if (!agreements.privacy) m.push("Accept Privacy Policy");
 
@@ -405,7 +480,6 @@ export default function BecomePro() {
       const topLat = business.lat || identity.lat || "";
       const topLon = business.lon || identity.lon || "";
 
-      // normalize services: default blank price to "0", strip commas
       const normalizedRows = servicesDetailed
         .map((r) => {
           const name = (r.name || "").trim();
@@ -426,6 +500,11 @@ export default function BecomePro() {
         identity: {
           ...identity,
           ...(topLat && topLon ? { lat: topLat, lon: topLon } : {}),
+          // 👇 make sure backend can map this to client later
+          email: identity.email || me?.email || "",
+          phone: identity.phone || clientProfile?.phone || me?.identity?.phone || "",
+          state: identity.state,
+          city: identity.lga,
         },
         professional: {
           ...professional,
@@ -478,7 +557,6 @@ export default function BecomePro() {
       </h2>
       {msg && <div className="mb-4 text-sm text-red-400">{msg}</div>}
 
-      {/* Live missing reasons */}
       {missing.length > 0 && (
         <div className="mb-4 border border-yellow-500/50 rounded-lg p-3 bg-black text-yellow-300">
           <div className="text-sm font-semibold mb-1">Missing:</div>
@@ -625,7 +703,7 @@ export default function BecomePro() {
           </div>
         </Section>
 
-        {/* SECTION: Services & Pricing (optional prices) */}
+        {/* SECTION: Services & Pricing */}
         <Section title="Services & Pricing">
           <p className="text-xs text-zinc-400 mb-2">
             Add at least one service. Price and Promo Price are optional; leaving price blank
@@ -646,7 +724,6 @@ export default function BecomePro() {
                         includeOther={true}
                         otherText={row.otherText}
                         onOtherText={(txt) => onOtherText(i, txt)}
-                        className=""
                       />
                       {isOther && (
                         <p className="text-xs text-zinc-500 mt-1">
@@ -750,7 +827,7 @@ export default function BecomePro() {
           )}
         </Section>
 
-        {/* SECTION: Availability */}
+        {/* SECTION: Work Availability */}
         <Section title="Work Availability">
           <Label>Working Days</Label>
           <div className="grid grid-cols-4 sm:grid-cols-7 gap-2 text-sm text-yellow-300">
@@ -843,7 +920,6 @@ export default function BecomePro() {
           <div className="mt-3">
             <Label>Face verification (optional)</Label>
             <div className="flex items-center gap-2 flex-wrap">
-              {/* ✅ Our official face verification (AWS under the hood) */}
               <button
                 type="button"
                 className="px-3 py-2 rounded-lg border border-emerald-500 text-emerald-200 text-sm hover:bg-emerald-500/10"
@@ -861,7 +937,6 @@ export default function BecomePro() {
                 </span>
               )}
 
-              {/* Hidden fallback (revealed only when needed) */}
               {!verification.selfieWithIdUrl && (
                 <button
                   type="button"
@@ -890,7 +965,6 @@ export default function BecomePro() {
             )}
           </div>
 
-          {/* Optional reserved: keep the field present but not validated */}
           <div className="mt-2 hidden">
             <Input
               label="(Optional) Face verification video URL"
@@ -1016,7 +1090,7 @@ export default function BecomePro() {
   );
 }
 
-/* ---------- Small UI bits (black/yellow/grey) ---------- */
+/* ---------- Small UI bits ---------- */
 function Section({ title, children }) {
   return (
     <section className="rounded-lg border border-yellow-500/40 p-4 bg-black">
@@ -1047,7 +1121,7 @@ function Select({ label, options = [], ...props }) {
         {...props}
         className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-200"
       >
-        <option value="">{/* keep blank to force explicit choice when required */}</option>
+        <option value=""></option>
         {options.map((o) => (
           <option key={o} value={o}>
             {o}

@@ -90,6 +90,39 @@ export async function getMe() {
   return data;
 }
 
+/**
+ * Pro self – we are adding this now so we can bundle me+client+pro
+ */
+export async function getProMe() {
+  try {
+    const { data } = await api.get("/api/pros/me");
+    return data;
+  } catch (e) {
+    // not a pro yet → return null instead of throwing
+    return null;
+  }
+}
+
+/**
+ * Unified bundle:
+ * - /api/me → firebase uid + email
+ * - /api/profile/me → client profile (SOURCE OF TRUTH)
+ * - /api/pros/me → pro doc (if exists)
+ */
+export async function loadMeBundle() {
+  const [meRes, clientRes, proRes] = await Promise.allSettled([
+    getMe(),
+    getClientProfile(),
+    getProMe(),
+  ]);
+
+  const me = meRes.status === "fulfilled" ? meRes.value : null;
+  const client = clientRes.status === "fulfilled" ? clientRes.value : null;
+  const pro = proRes.status === "fulfilled" ? proRes.value : null;
+
+  return { me, client, pro };
+}
+
 /* =========================================
    NIGERIA GEO
    ========================================= */
@@ -313,6 +346,9 @@ export async function updateClientProfile(payload) {
   return data;
 }
 
+// alias for the new flow name I used in Settings.jsx
+export const saveClientProfile = updateClientProfile;
+
 /* Optional booking/admin helpers */
 export async function getClientProfileForBooking(clientUid, bookingId) {
   const { data } = await api.get(
@@ -329,7 +365,7 @@ export async function getClientProfileAdmin(clientUid) {
   return data;
 }
 
-/* Pro extras */
+/* Pro extras (gallery, bio, whatsapp, shop – NOT name/phone/lga) */
 export async function updateProProfile(payload) {
   const { data } = await api.put("/api/profile/pro/me", payload);
   return data;

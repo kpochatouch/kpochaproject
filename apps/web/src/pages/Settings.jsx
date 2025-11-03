@@ -1,5 +1,11 @@
 // apps/web/src/pages/Settings.jsx
-import { useEffect, useRef, useState, useMemo, useCallback } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  useMemo,
+  useCallback,
+} from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import NgGeoPicker from "../components/NgGeoPicker.jsx";
@@ -24,8 +30,12 @@ const SERVICE_OPTIONS = [
 
 export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
-  const [me, setMe] = useState(null);         // user document
-  const [appDoc, setAppDoc] = useState(null); // professional profile doc (optional)
+
+  // MAIN docs
+  const [me, setMe] = useState(null);          // /api/me
+  const [client, setClient] = useState(null);  // /api/profile/me (may be null)
+  const [appDoc, setAppDoc] = useState(null);  // /api/pros/me (may be null)
+
   const [err, setErr] = useState("");
   const [ok, setOk] = useState("");
 
@@ -90,17 +100,28 @@ export default function SettingsPage() {
         const { data } = await api.get("/api/geo/ng");
         if (!alive) return;
         setAllStates(Array.isArray(data?.states) ? data.states : []);
-      } catch {}
+      } catch {
+        /* ignore */
+      }
     })();
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
   }, []);
-  const stateList = useMemo(() => (allStates || []).slice().sort(), [allStates]);
+  const stateList = useMemo(
+    () => (allStates || []).slice().sort(),
+    [allStates]
+  );
 
   function toggleStateCovered(st) {
-    setStatesCovered((p) => (p.includes(st) ? p.filter(x => x !== st) : [...p, st]));
+    setStatesCovered((p) =>
+      p.includes(st) ? p.filter((x) => x !== st) : [...p, st]
+    );
   }
   function toggleService(name) {
-    setServices((p) => (p.includes(name) ? p.filter(s => s !== name) : [...p, name]));
+    setServices((p) =>
+      p.includes(name) ? p.filter((s) => s !== name) : [...p, name]
+    );
   }
 
   /* ---------- Cloudinary widget ---------- */
@@ -117,7 +138,8 @@ export default function SettingsPage() {
       s.async = true;
       s.defer = true;
       s.setAttribute("data-cld", "1");
-      s.onload = () => setWidgetReady(!!window.cloudinary?.createUploadWidget);
+      s.onload = () =>
+        setWidgetReady(!!window.cloudinary?.createUploadWidget);
       document.body.appendChild(s);
     }
     const poll = setInterval(() => {
@@ -127,7 +149,10 @@ export default function SettingsPage() {
       }
     }, 200);
     const timeout = setTimeout(() => clearInterval(poll), 10000);
-    return () => { clearInterval(poll); clearTimeout(timeout); };
+    return () => {
+      clearInterval(poll);
+      clearTimeout(timeout);
+    };
   }, [widgetReady]);
 
   const widgetFactory = useMemo(() => {
@@ -140,14 +165,16 @@ export default function SettingsPage() {
             uploadPreset: UPLOAD_PRESET, // unsigned
             multiple: false,
             maxFiles: 1,
-            clientAllowedFormats: ["jpg","jpeg","png","webp"],
+            clientAllowedFormats: ["jpg", "jpeg", "png", "webp"],
             maxImageFileSize: 5 * 1024 * 1024,
             sources: ["local", "camera", "url"],
             showPoweredBy: false,
             folder: "kpocha/pro-apps",
           },
           (err, res) => {
-            if (!err && res && res.event === "success") onSuccess(res.info.secure_url);
+            if (!err && res && res.event === "success") {
+              onSuccess(res.info.secure_url);
+            }
           }
         );
       } catch {
@@ -156,56 +183,126 @@ export default function SettingsPage() {
     };
   }, [widgetReady]);
 
-  /* ---------- Load me (user) + appDoc (pro) ---------- */
+  /* ---------- Load me (user) + client + pro ---------- */
   useEffect(() => {
     let alive = true;
     (async () => {
       clearMsg();
       setLoading(true);
       try {
-        const [meRes, proRes] = await Promise.all([
+        const [meRes, clientRes, proRes] = await Promise.all([
           api.get("/api/me"),
-          api.get("/api/pros/me").catch(() => ({ data: null })),
+          api.get("/api/profile/me").catch(() => null),
+          api.get("/api/pros/me").catch(() => null),
         ]);
         if (!alive) return;
 
-        const meData = meRes.data;
-        const app = proRes?.data || null;
+        const meData = meRes?.data || null;
+        const clientData = clientRes?.data || null;
+        const proData = proRes?.data || null;
 
         setMe(meData);
-        setAppDoc(app);
+        setClient(clientData);
+        setAppDoc(proData);
 
-        // hydrate General (user) fields; now uses EMAIL as a fallback for displayName
-        setDisplayName(meData?.displayName || app?.displayName || meData?.email || "");
-        setPhone(meData?.identity?.phone || app?.phone || app?.identity?.phone || "");
-        setAvatarUrl(meData?.identity?.photoUrl || app?.identity?.photoUrl || "");
+        // pick base → client → pro → me
+        const base =
+          clientData ||
+          proData ||
+          meData ||
+          {};
 
-        const lgaUpper = (meData?.identity?.city || app?.lga || app?.identity?.city || "").toString().toUpperCase();
-        const stateUpper = (meData?.identity?.state || app?.identity?.state || "").toString().toUpperCase();
-        setLga(lgaUpper);
-        setStateVal(stateUpper);
-
-        // pro details
-        setProfileVisible(Boolean(app?.professional?.profileVisible ?? true));
-        setNationwide(Boolean(app?.professional?.nationwide ?? false));
-        setStatesCovered(Array.isArray(app?.availability?.statesCovered) ? app.availability.statesCovered : []);
-        setServices(Array.isArray(app?.professional?.services) ? app.professional.services : []);
-        setYears(app?.professional?.years || "");
-        const hc = String(app?.professional?.hasCert || "no");
-        setHasCert(hc === "yes" ? "yes" : "no");
-        setCertUrl(app?.professional?.certUrl || "");
-        setWorkPhotos(
-          Array.isArray(app?.professional?.workPhotos) && app.professional.workPhotos.length
-            ? app.professional.workPhotos
-            : [""]
+        // GENERAL fields
+        setDisplayName(
+          base.displayName ||
+            base.fullName ||
+            base?.identity?.fullName ||
+            meData?.email ||
+            ""
+        );
+        setPhone(
+          clientData?.phone ||
+            clientData?.identity?.phone ||
+            proData?.phone ||
+            proData?.identity?.phone ||
+            meData?.identity?.phone ||
+            ""
         );
 
-        // bank
-        const bk = app?.bank || {};
-        setBankName(bk.bankName || "");
-        setAccountName(bk.accountName || "");
-        setAccountNumber(String(bk.accountNumber || ""));
-        setBvn(String(bk.bvn || ""));
+        const st =
+          clientData?.state ||
+          clientData?.identity?.state ||
+          proData?.identity?.state ||
+          meData?.identity?.state ||
+          "";
+        const lg =
+          clientData?.lga ||
+          clientData?.identity?.city ||
+          proData?.identity?.city ||
+          meData?.identity?.city ||
+          "";
+
+        setStateVal(String(st || "").toUpperCase());
+        setLga(String(lg || "").toUpperCase());
+
+        setAvatarUrl(
+          clientData?.photoUrl ||
+            clientData?.identity?.photoUrl ||
+            proData?.identity?.photoUrl ||
+            meData?.identity?.photoUrl ||
+            ""
+        );
+
+        // PRO details (only if pro exists)
+        if (proData) {
+          setProfileVisible(
+            Boolean(proData?.professional?.profileVisible ?? true)
+          );
+          setNationwide(
+            Boolean(proData?.professional?.nationwide ?? false)
+          );
+          setStatesCovered(
+            Array.isArray(proData?.availability?.statesCovered)
+              ? proData.availability.statesCovered
+              : []
+          );
+          setServices(
+            Array.isArray(proData?.professional?.services)
+              ? proData.professional.services
+              : []
+          );
+          setYears(proData?.professional?.years || "");
+          const hc = String(proData?.professional?.hasCert || "no");
+          setHasCert(hc === "yes" ? "yes" : "no");
+          setCertUrl(proData?.professional?.certUrl || "");
+          setWorkPhotos(
+            Array.isArray(proData?.professional?.workPhotos) &&
+              proData.professional.workPhotos.length
+              ? proData.professional.workPhotos
+              : [""]
+          );
+
+          // bank
+          const bk = proData?.bank || {};
+          setBankName(bk.bankName || "");
+          setAccountName(bk.accountName || "");
+          setAccountNumber(String(bk.accountNumber || ""));
+          setBvn(String(bk.bvn || ""));
+        } else {
+          // no pro -> clear pro-only fields
+          setProfileVisible(true);
+          setNationwide(false);
+          setStatesCovered([]);
+          setServices([]);
+          setYears("");
+          setHasCert("no");
+          setCertUrl("");
+          setWorkPhotos([""]);
+          setBankName("");
+          setAccountName("");
+          setAccountNumber("");
+          setBvn("");
+        }
       } catch {
         if (alive) setErr("Failed to load your profile.");
       } finally {
@@ -226,18 +323,27 @@ export default function SettingsPage() {
     [displayName, phone, lga, stateVal]
   );
   const canSavePro = useMemo(
-    () => hasPro && (services.length > 0 || years || hasCert === "yes" || workPhotos.filter(Boolean).length > 0),
+    () =>
+      hasPro &&
+      (services.length > 0 ||
+        years ||
+        hasCert === "yes" ||
+        workPhotos.filter(Boolean).length > 0),
     [hasPro, services, years, hasCert, workPhotos]
   );
   const canSaveBank = useMemo(
-    () => hasPro && !!bankName && !!accountName && digitsOnly(accountNumber).length === 10 && digitsOnly(bvn).length === 11,
+    () =>
+      hasPro &&
+      !!bankName &&
+      !!accountName &&
+      digitsOnly(accountNumber).length === 10 &&
+      digitsOnly(bvn).length === 11,
     [hasPro, bankName, accountName, accountNumber, bvn]
   );
 
   /* ---------- Helpers ---------- */
   function withProIdentifiers(base = {}) {
     if (!hasPro) return null;
-    // NOTE: we do NOT expose UID in the UI; keeping in payload is harmless and ignored by the API if not used.
     const idFields = {
       _id: appDoc?._id,
       uid: me?.uid,
@@ -255,7 +361,7 @@ export default function SettingsPage() {
 
   /* ---------- Save handlers ---------- */
 
-  // 1) Save GENERAL PROFILE via Profile router (backend supports this)
+  // 1) Save GENERAL PROFILE
   const saveProfile = useCallback(async () => {
     if (!canSaveProfile || savingProfile) return;
     clearMsg();
@@ -263,8 +369,12 @@ export default function SettingsPage() {
     try {
       const payload = {
         displayName,
+        phone,
+        state: stateVal,
+        lga,
+        avatarUrl,
         identity: {
-          ...(me?.identity || {}),
+          ...(client?.identity || me?.identity || {}),
           phone,
           state: stateVal,
           city: lga,
@@ -273,25 +383,57 @@ export default function SettingsPage() {
       };
 
       let res;
-      try {
+
+      if (client) {
+        // ✅ client exists → client is source of truth
         res = await api.put("/api/profile/me", payload);
-      } catch {
-        res = await api.put("/api/profile", payload);
+        setClient(res?.data || payload);
+      } else if (appDoc?._id) {
+        // ✅ pro-only user → write to pro
+        res = await api.put("/api/pros/me", {
+          ...appDoc,
+          identity: payload.identity,
+          displayName: payload.displayName,
+          phone: payload.phone,
+        });
+        setAppDoc(res?.data?.item || { ...appDoc, ...payload });
+      } else {
+        // ✅ fallback → create client profile
+        res = await api.put("/api/profile/me", payload);
+        setClient(res?.data || payload);
       }
 
-      const updated = res?.data?.user || payload;
+      // keep /api/me in sync (for header, etc.)
       setMe((prev) => ({
         ...(prev || {}),
-        ...updated,
-        identity: { ...(prev?.identity || {}), ...(updated.identity || payload.identity) },
+        displayName,
+        identity: {
+          ...(prev?.identity || {}),
+          phone,
+          state: stateVal,
+          city: lga,
+          photoUrl: avatarUrl,
+        },
       }));
+
       flashOK("Profile saved.");
     } catch (e) {
       setErr(e?.response?.data?.error || "Failed to save profile.");
     } finally {
       setSavingProfile(false);
     }
-  }, [canSaveProfile, savingProfile, displayName, phone, stateVal, lga, avatarUrl, me]);
+  }, [
+    canSaveProfile,
+    savingProfile,
+    displayName,
+    phone,
+    stateVal,
+    lga,
+    avatarUrl,
+    client,
+    appDoc,
+    me,
+  ]);
 
   // 2) Save PRO DETAILS to /api/pros/me — ONLY if pro exists
   const saveProDetails = useCallback(async () => {
@@ -300,8 +442,7 @@ export default function SettingsPage() {
     if (blockIfNoPro()) return;
     setSavingPro(true);
     try {
-      const payload = withProIdentifiers({
-        ...(appDoc || {}),
+      const payload = {
         professional: {
           ...(appDoc?.professional || {}),
           services,
@@ -317,18 +458,30 @@ export default function SettingsPage() {
           statesCovered: nationwide ? stateList : statesCovered,
         },
         status: appDoc?.status || "submitted",
-      });
-      if (!payload) return;
+      };
 
       const { data } = await api.put("/api/pros/me", payload);
-      setAppDoc(data?.item || payload);
+      setAppDoc(data?.item || { ...appDoc, ...payload });
       flashOK("Professional details saved.");
     } catch (e) {
       setErr(e?.response?.data?.error || "Failed to save professional details.");
     } finally {
       setSavingPro(false);
     }
-  }, [canSavePro, savingPro, appDoc, services, years, hasCert, certUrl, profileVisible, nationwide, workPhotos, stateList, statesCovered]);
+  }, [
+    canSavePro,
+    savingPro,
+    appDoc,
+    services,
+    years,
+    hasCert,
+    certUrl,
+    profileVisible,
+    nationwide,
+    workPhotos,
+    stateList,
+    statesCovered,
+  ]);
 
   // 3) Save BANK to /api/pros/me — ONLY if pro exists
   const saveBank = useCallback(async () => {
@@ -337,8 +490,7 @@ export default function SettingsPage() {
     if (blockIfNoPro()) return;
     setSavingBank(true);
     try {
-      const payload = withProIdentifiers({
-        ...(appDoc || {}),
+      const payload = {
         bank: {
           bankName,
           accountName,
@@ -346,18 +498,25 @@ export default function SettingsPage() {
           bvn: digitsOnly(bvn).slice(0, 11),
         },
         status: appDoc?.status || "submitted",
-      });
-      if (!payload) return;
+      };
 
       const { data } = await api.put("/api/pros/me", payload);
-      setAppDoc(data?.item || payload);
+      setAppDoc(data?.item || { ...appDoc, ...payload });
       flashOK("Payment details saved.");
     } catch (e) {
       setErr(e?.response?.data?.error || "Failed to save payment details.");
     } finally {
       setSavingBank(false);
     }
-  }, [canSaveBank, savingBank, appDoc, bankName, accountName, accountNumber, bvn]);
+  }, [
+    canSaveBank,
+    savingBank,
+    appDoc,
+    bankName,
+    accountName,
+    accountNumber,
+    bvn,
+  ]);
 
   /* ---------- UI ---------- */
   return (
@@ -365,7 +524,9 @@ export default function SettingsPage() {
       <div className="flex items-baseline justify-between">
         <div>
           <h1 className="text-2xl font-semibold mb-1">Settings</h1>
-          <p className="text-zinc-400">Manage your profile and professional details.</p>
+          <p className="text-zinc-400">
+            Manage your profile and professional details.
+          </p>
         </div>
         {me?.isAdmin && (
           <Link
@@ -378,8 +539,16 @@ export default function SettingsPage() {
         )}
       </div>
 
-      {err && <div className="mt-4 rounded border border-red-800 bg-red-900/40 text-red-100 px-3 py-2">{err}</div>}
-      {ok && <div className="mt-4 rounded border border-green-800 bg-green-900/30 text-green-100 px-3 py-2">{ok}</div>}
+      {err && (
+        <div className="mt-4 rounded border border-red-800 bg-red-900/40 text-red-100 px-3 py-2">
+          {err}
+        </div>
+      )}
+      {ok && (
+        <div className="mt-4 rounded border border-green-800 bg-green-900/30 text-green-100 px-3 py-2">
+          {ok}
+        </div>
+      )}
 
       {loading ? (
         <div className="mt-6">Loading…</div>
@@ -401,14 +570,20 @@ export default function SettingsPage() {
             {/* Banner if no pro profile */}
             {!hasPro && (
               <div className="rounded-lg border border-yellow-700 bg-yellow-900/20 text-yellow-200 px-4 py-3">
-                You don’t have a professional profile yet. You can browse & book as a client, but to
-                create or edit a professional profile please{" "}
-                <Link to="/become" className="underline text-gold">apply here</Link>.
+                You don’t have a professional profile yet. You can browse & book
+                as a client, but to create or edit a professional profile please{" "}
+                <Link to="/become" className="underline text-gold">
+                  apply here
+                </Link>
+                .
               </div>
             )}
 
             {/* General */}
-            <section id="general" className="rounded-lg border border-zinc-800 p-4">
+            <section
+              id="general"
+              className="rounded-lg border border-zinc-800 p-4"
+            >
               <h2 className="text-lg font-semibold mb-3">General</h2>
 
               {/* Avatar + name/phone */}
@@ -436,8 +611,18 @@ export default function SettingsPage() {
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <Input label="Display Name" value={displayName} onChange={(e)=>setDisplayName(e.target.value)} required />
-                <Input label="Phone" value={phone} onChange={(e)=>setPhone(e.target.value)} required />
+                <Input
+                  label="Display Name"
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  required
+                />
+                <Input
+                  label="Phone"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  required
+                />
               </div>
 
               <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -449,7 +634,10 @@ export default function SettingsPage() {
                 <Label>State & LGA</Label>
                 <NgGeoPicker
                   valueState={stateVal}
-                  onChangeState={(st)=>{ setStateVal(st); setLga(""); }}
+                  onChangeState={(st) => {
+                    setStateVal(st);
+                    setLga("");
+                  }}
                   valueLga={lga}
                   onChangeLga={setLga}
                   required
@@ -458,7 +646,11 @@ export default function SettingsPage() {
               </div>
 
               <p className="text-xs text-zinc-500 mt-3">
-                For Wallet PIN, go to <Link className="underline" to="/wallet">Wallet</Link>.
+                For Wallet PIN, go to{" "}
+                <Link className="underline" to="/wallet">
+                  Wallet
+                </Link>
+                .
               </p>
 
               <div className="flex justify-end mt-4">
@@ -474,19 +666,28 @@ export default function SettingsPage() {
 
             {/* Professional Profile */}
             <section id="pro" className="rounded-lg border border-zinc-800 p-4">
-              <h2 className="text-lg font-semibold mb-3">Professional Profile</h2>
+              <h2 className="text-lg font-semibold mb-3">
+                Professional Profile
+              </h2>
 
               {!appDoc && (
                 <div className="text-sm text-zinc-400 mb-3">
                   You haven’t submitted a professional application yet.{" "}
-                  <Link to="/become" className="text-gold underline">Apply now →</Link>
+                  <Link to="/become" className="text-gold underline">
+                    Apply now →
+                  </Link>
                 </div>
               )}
 
               <div className="flex items-center justify-between mb-2">
                 <Label>What services do you offer?</Label>
                 <label className="text-xs flex items-center gap-2">
-                  <input type="checkbox" checked={profileVisible} onChange={(e)=>setProfileVisible(e.target.checked)} disabled={!hasPro} />
+                  <input
+                    type="checkbox"
+                    checked={profileVisible}
+                    onChange={(e) => setProfileVisible(e.target.checked)}
+                    disabled={!hasPro}
+                  />
                   Profile visible in search
                 </label>
               </div>
@@ -509,15 +710,19 @@ export default function SettingsPage() {
                 <Select
                   label="Years of Experience"
                   value={years}
-                  onChange={(e)=>setYears(e.target.value)}
-                  options={hasPro ? ["0–1 year","2–4 years","5–10 years","10+ years"] : []}
+                  onChange={(e) => setYears(e.target.value)}
+                  options={
+                    hasPro
+                      ? ["0–1 year", "2–4 years", "5–10 years", "10+ years"]
+                      : []
+                  }
                   disabled={!hasPro}
                 />
                 <Select
                   label="Any certification?"
                   value={hasCert}
-                  onChange={(e)=>setHasCert(e.target.value)}
-                  options={hasPro ? ["no","yes"] : []}
+                  onChange={(e) => setHasCert(e.target.value)}
+                  options={hasPro ? ["no", "yes"] : []}
                   disabled={!hasPro}
                 />
                 {hasCert === "yes" && hasPro && (
@@ -528,10 +733,12 @@ export default function SettingsPage() {
                         className="flex-1 bg-black border border-zinc-800 rounded-lg px-3 py-2"
                         placeholder="Certificate URL"
                         value={certUrl}
-                        onChange={(e)=>setCertUrl(e.target.value)}
+                        onChange={(e) => setCertUrl(e.target.value)}
                       />
                       <UploadButton
-                        title={widgetReady ? "Upload" : "Upload (loading…)"}
+                        title={
+                          widgetReady ? "Upload" : "Upload (loading…)"
+                        }
                         onUploaded={setCertUrl}
                         widgetFactory={widgetFactory}
                         disabled={!widgetReady}
@@ -544,7 +751,12 @@ export default function SettingsPage() {
               {/* Coverage */}
               <div className="mt-4 space-y-2">
                 <label className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" checked={nationwide} onChange={(e)=>setNationwide(e.target.checked)} disabled={!hasPro} />
+                  <input
+                    type="checkbox"
+                    checked={nationwide}
+                    onChange={(e) => setNationwide(e.target.checked)}
+                    disabled={!hasPro}
+                  />
                   Offer services nationwide (Nigeria)
                 </label>
                 {!nationwide && (
@@ -556,7 +768,7 @@ export default function SettingsPage() {
                           <input
                             type="checkbox"
                             checked={statesCovered.includes(st)}
-                            onChange={()=>toggleStateCovered(st)}
+                            onChange={() => toggleStateCovered(st)}
                             disabled={!hasPro}
                           />
                           {st}
@@ -574,28 +786,34 @@ export default function SettingsPage() {
                   <div key={idx} className="flex items-center gap-2 mb-2">
                     <input
                       className="flex-1 bg-black border border-zinc-800 rounded-lg px-3 py-2"
-                      placeholder={`Photo URL ${idx+1}`}
+                      placeholder={`Photo URL ${idx + 1}`}
                       value={u}
-                      onChange={(e)=>{
-                        const arr=[...workPhotos]; arr[idx]=e.target.value;
+                      onChange={(e) => {
+                        const arr = [...workPhotos];
+                        arr[idx] = e.target.value;
                         setWorkPhotos(arr);
                       }}
                       disabled={!hasPro}
                     />
                     <UploadButton
                       title={widgetReady ? "Upload" : "Upload (loading…)"}
-                      onUploaded={(url)=>{
-                        const arr=[...workPhotos]; arr[idx]=url;
+                      onUploaded={(url) => {
+                        const arr = [...workPhotos];
+                        arr[idx] = url;
                         setWorkPhotos(arr);
                       }}
                       widgetFactory={widgetFactory}
                       disabled={!widgetReady || !hasPro}
                     />
-                    {idx>0 && (
+                    {idx > 0 && (
                       <button
                         type="button"
                         className="text-sm text-red-400"
-                        onClick={()=> setWorkPhotos(workPhotos.filter((_,i)=>i!==idx))}
+                        onClick={() =>
+                          setWorkPhotos(
+                            workPhotos.filter((_, i) => i !== idx)
+                          )
+                        }
                         disabled={!hasPro}
                       >
                         Remove
@@ -606,7 +824,7 @@ export default function SettingsPage() {
                 <button
                   type="button"
                   className="text-sm text-gold underline"
-                  onClick={()=>setWorkPhotos([...workPhotos, ""])}
+                  onClick={() => setWorkPhotos([...workPhotos, ""])}
                   disabled={!hasPro}
                 >
                   + Add another
@@ -625,22 +843,41 @@ export default function SettingsPage() {
             </section>
 
             {/* Payments */}
-            <section id="payments" className="rounded-lg border border-zinc-800 p-4">
+            <section
+              id="payments"
+              className="rounded-lg border border-zinc-800 p-4"
+            >
               <h2 className="text-lg font-semibold mb-3">Payments</h2>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <Input label="Bank Name" value={bankName} onChange={(e)=>setBankName(e.target.value)} required disabled={!hasPro} />
-                <Input label="Account Name" value={accountName} onChange={(e)=>setAccountName(e.target.value)} required disabled={!hasPro} />
+                <Input
+                  label="Bank Name"
+                  value={bankName}
+                  onChange={(e) => setBankName(e.target.value)}
+                  required
+                  disabled={!hasPro}
+                />
+                <Input
+                  label="Account Name"
+                  value={accountName}
+                  onChange={(e) => setAccountName(e.target.value)}
+                  required
+                  disabled={!hasPro}
+                />
                 <Input
                   label="Account Number"
                   value={accountNumber}
-                  onChange={(e)=>setAccountNumber(digitsOnly(e.target.value).slice(0,10))}
+                  onChange={(e) =>
+                    setAccountNumber(digitsOnly(e.target.value).slice(0, 10))
+                  }
                   required
                   disabled={!hasPro}
                 />
                 <Input
                   label="BVN"
                   value={bvn}
-                  onChange={(e)=>setBvn(digitsOnly(e.target.value).slice(0,11))}
+                  onChange={(e) =>
+                    setBvn(digitsOnly(e.target.value).slice(0, 11))
+                  }
                   required
                   disabled={!hasPro}
                 />
@@ -665,13 +902,19 @@ export default function SettingsPage() {
                 <h2 className="text-lg font-semibold mb-3">Admin</h2>
                 <p className="text-sm text-zinc-400">
                   Configure platform rules in{" "}
-                  <Link className="underline" to="/admin?tab=settings">System Settings</Link>.
+                  <Link className="underline" to="/admin?tab=settings">
+                    System Settings
+                  </Link>
+                  .
                 </p>
               </section>
             )}
 
             {/* Advanced */}
-            <section id="advanced" className="rounded-lg border border-zinc-800 p-4">
+            <section
+              id="advanced"
+              className="rounded-lg border border-zinc-800 p-4"
+            >
               <h2 className="text-lg font-semibold mb-3">Advanced</h2>
 
               {/* Deactivate link */}
@@ -684,7 +927,8 @@ export default function SettingsPage() {
                   Deactivate Account
                 </Link>
                 <div className="text-xs text-zinc-500">
-                  This won’t delete your data immediately. You’ll submit a request and our team will review it.
+                  This won’t delete your data immediately. You’ll submit a
+                  request and our team will review it.
                 </div>
               </div>
             </section>
@@ -724,7 +968,10 @@ function Label({ children }) {
 function Input({ label, required, disabled, ...props }) {
   return (
     <label className="block">
-      <Label>{label}{required ? " *" : ""}</Label>
+      <Label>
+        {label}
+        {required ? " *" : ""}
+      </Label>
       <input
         {...props}
         disabled={disabled}
@@ -733,22 +980,36 @@ function Input({ label, required, disabled, ...props }) {
     </label>
   );
 }
-function Select({ label, options=[], required, disabled, ...props }) {
+function Select({ label, options = [], required, disabled, ...props }) {
   return (
     <label className="block">
-      <Label>{label}{required ? " *" : ""}</Label>
+      <Label>
+        {label}
+        {required ? " *" : ""}
+      </Label>
       <select
         {...props}
         disabled={disabled}
         className="w-full bg-black border border-zinc-800 rounded-lg px-3 py-2 disabled:opacity-50"
       >
-        <option value="">{required ? "Select…" : "Select (optional)…"}</option>
-        {options.map((o)=> <option key={o} value={o}>{o}</option>)}
+        <option value="">
+          {required ? "Select…" : "Select (optional)…"}
+        </option>
+        {options.map((o) => (
+          <option key={o} value={o}>
+            {o}
+          </option>
+        ))}
       </select>
     </label>
   );
 }
-function UploadButton({ title="Upload", onUploaded, widgetFactory, disabled }) {
+function UploadButton({
+  title = "Upload",
+  onUploaded,
+  widgetFactory,
+  disabled,
+}) {
   function open() {
     const widget = widgetFactory?.(onUploaded);
     if (!widget) {
@@ -792,7 +1053,11 @@ function ImageLightbox({ src, onClose }) {
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/70" onClick={onClose} />
       <div className="relative z-10 max-w-3xl max-h-[85vh] border border-zinc-800 rounded-xl overflow-hidden">
-        <img src={src} alt="Preview" className="block max-h-[85vh] object-contain" />
+        <img
+          src={src}
+          alt="Preview"
+          className="block max-h-[85vh] object-contain"
+        />
       </div>
     </div>
   );

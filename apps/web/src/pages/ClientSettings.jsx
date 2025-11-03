@@ -8,6 +8,8 @@ export default function ClientSettings() {
   const [error, setError] = useState("");
   const [ok, setOk] = useState("");
   const [me, setMe] = useState(null);
+  const [client, setClient] = useState(null);
+  const [pro, setPro] = useState(null);
 
   const [states, setStates] = useState([]);
   const [lgas, setLgas] = useState([]);
@@ -20,7 +22,7 @@ export default function ClientSettings() {
     photoUrl: "",
   });
 
-  // ✅ Load user data (single UID) and geo list
+  // ✅ Load user data (single UID) + client + pro + geo
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -29,45 +31,71 @@ export default function ClientSettings() {
         setError("");
 
         // 1️⃣ Load main account + geo
-        const [{ data: meData }, { data: geo }] = await Promise.all([
+        const [meRes, geoRes, clientRes, proRes] = await Promise.all([
           api.get("/api/me"),
           api.get("/api/geo/ng"),
+          api.get("/api/profile/me").catch(() => null),
+          api.get("/api/pros/me").catch(() => null),
         ]);
         if (!alive) return;
 
-        setMe(meData || null);
-        setStates(geo?.states || []);
+        const meData = meRes?.data || null;
+        const clientData = clientRes?.data || null;
+        const proData = proRes?.data || null;
 
-        // 2️⃣ Load client profile (if exists)
-        let profile = null;
-        try {
-          const { data } = await api.get("/api/profile/client/me");
-          profile = data || null;
-        } catch {
-          profile = null;
-        }
+        setMe(meData);
+        setClient(clientData);
+        setPro(proData);
+        setStates(geoRes?.data?.states || []);
 
-        // 3️⃣ Auto-fill with priority: profile → me → fallback
+        // 2️⃣ Auto-fill with priority: client → pro → me → fallback
+        const base = clientData || proData || meData || {};
+        const baseState =
+          clientData?.state ||
+          clientData?.identity?.state ||
+          proData?.identity?.state ||
+          meData?.identity?.state ||
+          "";
+        const baseLga =
+          clientData?.lga ||
+          clientData?.identity?.city ||
+          proData?.identity?.city ||
+          meData?.identity?.city ||
+          "";
+
         setForm((cur) => ({
           ...cur,
           displayName:
-            profile?.fullName ||
-            meData?.displayName ||
+            clientData?.fullName ||
+            clientData?.displayName ||
+            base.displayName ||
+            base.fullName ||
             meData?.email ||
             "",
-          phone: profile?.phone || meData?.phone || "",
-          state: profile?.state || "",
-          lga: profile?.lga || meData?.lga || "",
-          address: profile?.address || "",
-          photoUrl: profile?.photoUrl || meData?.photoUrl || "",
+          phone:
+            clientData?.phone ||
+            clientData?.identity?.phone ||
+            proData?.phone ||
+            proData?.identity?.phone ||
+            meData?.phone ||
+            meData?.identity?.phone ||
+            "",
+          state: baseState,
+          lga: baseLga,
+          address: clientData?.address || "",
+          photoUrl:
+            clientData?.photoUrl ||
+            clientData?.identity?.photoUrl ||
+            proData?.identity?.photoUrl ||
+            meData?.identity?.photoUrl ||
+            "",
         }));
 
-        // 4️⃣ Preload LGAs if user already has a state
-        const st = profile?.state || "";
-        if (st) {
+        // 3️⃣ Preload LGAs if user already has a state
+        if (baseState) {
           try {
             const { data: lgasData } = await api.get(
-              `/api/geo/ng/lgas/${encodeURIComponent(st)}`
+              `/api/geo/ng/lgas/${encodeURIComponent(baseState)}`
             );
             if (alive) setLgas(lgasData || []);
           } catch {
@@ -110,14 +138,54 @@ export default function ClientSettings() {
       setError("");
       setOk("");
 
-      await api.put("/api/profile/client/me", {
+      const payload = {
         fullName: form.displayName?.trim(),
+        displayName: form.displayName?.trim(),
         phone: form.phone?.trim(),
         state: form.state,
         lga: form.lga,
         address: form.address?.trim(),
         photoUrl: form.photoUrl || "",
-      });
+        identity: {
+          phone: form.phone?.trim(),
+          state: form.state,
+          city: form.lga,
+          photoUrl: form.photoUrl || "",
+        },
+      };
+
+      let res;
+      if (client) {
+        // ✅ client exists → write to client profile
+        res = await api.put("/api/profile/me", payload);
+        setClient(res?.data || payload);
+      } else if (pro?._id) {
+        // ✅ no client but pro exists → write to pro doc
+        res = await api.put("/api/pros/me", {
+          ...pro,
+          displayName: payload.displayName,
+          phone: payload.phone,
+          identity: payload.identity,
+        });
+        setPro(res?.data?.item || { ...pro, ...payload });
+      } else {
+        // ✅ no client, no pro → create client profile
+        res = await api.put("/api/profile/me", payload);
+        setClient(res?.data || payload);
+      }
+
+      // keep /api/me in sync in UI
+      setMe((prev) => ({
+        ...(prev || {}),
+        displayName: payload.displayName,
+        identity: {
+          ...(prev?.identity || {}),
+          phone: payload.phone,
+          state: payload.state,
+          city: payload.lga,
+          photoUrl: payload.photoUrl,
+        },
+      }));
 
       setOk("Saved!");
     } catch {

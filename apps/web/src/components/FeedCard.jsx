@@ -1,3 +1,5 @@
+// apps/web/src/components/FeedCard.jsx
+import { useState } from "react";
 import { Link } from "react-router-dom";
 
 function timeAgo(iso) {
@@ -16,6 +18,8 @@ function timeAgo(iso) {
 }
 
 export default function FeedCard({ post }) {
+  const [lightbox, setLightbox] = useState("");
+
   const pro = post.pro || {};
   const proId = pro._id || pro.id || post.proId;
   const proName = pro.name || post.authorName || "Professional";
@@ -34,15 +38,24 @@ export default function FeedCard({ post }) {
       {/* header */}
       <div className="flex items-center gap-3 px-4 py-3 border-b border-zinc-800">
         {avatar ? (
-          <img src={avatar} alt="" className="w-10 h-10 rounded-full object-cover border border-zinc-800" />
+          <button
+            type="button"
+            onClick={() => setLightbox(avatar)}
+            className="w-10 h-10 rounded-full overflow-hidden border border-zinc-800"
+            title="Click to view photo"
+          >
+            <img src={avatar} alt="" className="w-full h-full object-cover" loading="lazy" />
+          </button>
         ) : (
           <div className="w-10 h-10 rounded-full border border-zinc-800 bg-zinc-900 grid place-items-center font-semibold">
-            {String(proName).slice(0,1).toUpperCase()}
+            {String(proName).slice(0, 1).toUpperCase()}
           </div>
         )}
         <div className="min-w-0">
           <div className="text-sm font-semibold truncate">{proName}</div>
-          <div className="text-xs text-zinc-500">{lga} • {timeAgo(created)}</div>
+          <div className="text-xs text-zinc-500">
+            {lga} • {timeAgo(created)}
+          </div>
         </div>
         <div className="ml-auto">
           {proId && (
@@ -72,6 +85,7 @@ export default function FeedCard({ post }) {
                 alt=""
                 className="absolute inset-0 w-full h-full object-cover"
                 loading="lazy"
+                onClick={() => setLightbox(mediaUrl)}
               />
             )}
           </div>
@@ -114,6 +128,25 @@ export default function FeedCard({ post }) {
           )}
         </div>
       </div>
+
+      {/* lightbox for avatar/media */}
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70"
+          onClick={() => setLightbox("")}
+        >
+          <div className="max-w-3xl max-h-[85vh] rounded-xl overflow-hidden border border-zinc-700">
+            <img src={lightbox} alt="preview" className="block max-h-[85vh] object-contain" />
+          </div>
+        </div>
+      )}
     </article>
   );
 }
+
+/**
+ * NOTES (FeedCard.jsx)
+ * 1. Avatar and media are now clickable to enlarge → fixes “avatars don’t click to expand”.
+ * 2. We still prefer data from post.pro (pro doc) but fall back to post.* fields.
+ * 3. We didn’t add any fake/demo phone, bio, or LGA — real info will show.
+ */

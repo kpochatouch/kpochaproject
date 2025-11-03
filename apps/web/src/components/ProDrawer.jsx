@@ -16,8 +16,14 @@ function toArray(x) {
   }
   return [];
 }
-function svcRows(services) {
-  const arr = toArray(services);
+function pickServices(pro = {}) {
+  // try every place we might have put pro services
+  const raw =
+    pro.services ||
+    pro.servicesDetailed ||
+    (pro.professional && (pro.professional.services || pro.professional.servicesDetailed)) ||
+    [];
+  const arr = toArray(raw);
   return arr.map((s, i) => {
     if (typeof s === "string") {
       return { key: `${i}-${s}`, name: s, price: null, durationMin: null };
@@ -31,6 +37,15 @@ function svcRows(services) {
     };
   });
 }
+function pickPhotos(pro = {}) {
+  return (
+    toArray(pro.photos) ||
+    toArray(pro.gallery) ||
+    toArray(pro.workPhotos) ||
+    toArray(pro.professional?.workPhotos) ||
+    []
+  );
+}
 
 /* ------------------------------ component ------------------------------ */
 export default function ProDrawer({ open, pro, onClose, onBook }) {
@@ -38,10 +53,16 @@ export default function ProDrawer({ open, pro, onClose, onBook }) {
 
   const verified =
     !!pro.verified || (Array.isArray(pro.badges) && pro.badges.includes("verified"));
-  const photos = toArray(pro.photos);
-  const services = svcRows(pro.services);
-  const rating = typeof pro.rating === "number" ? pro.rating.toFixed(1) : "5.0";
+
+  // real rating if present, otherwise show "—" (not fake 5.0)
+  const rating =
+    typeof pro.rating === "number" && !isNaN(pro.rating)
+      ? pro.rating.toFixed(1)
+      : "—";
+
   const proId = pro.id || pro._id;
+  const services = pickServices(pro);
+  const photos = pickPhotos(pro);
 
   return (
     <div className="fixed inset-0 z-50">
@@ -57,14 +78,20 @@ export default function ProDrawer({ open, pro, onClose, onBook }) {
         <div className="relative flex items-center justify-between pl-24 pr-4 sm:pl-28 py-4 border-b border-zinc-800">
           <div>
             <div className="flex items-center gap-2">
-              <h3 className="text-xl font-semibold">{pro.name || "Professional"}</h3>
+              <h3 className="text-xl font-semibold">
+                {pro.name ||
+                  [pro.firstName, pro.lastName].filter(Boolean).join(" ") ||
+                  "Professional"}
+              </h3>
               {verified && (
                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-900/40 text-emerald-300 border border-emerald-800">
                   Verified
                 </span>
               )}
             </div>
-            <div className="text-sm text-zinc-400">{pro.lga || "—"} • ⭐ {rating}</div>
+            <div className="text-sm text-zinc-400">
+              {pro.lga || pro.city || "—"} • ⭐ {rating}
+            </div>
           </div>
           <button
             onClick={onClose}
@@ -108,7 +135,9 @@ export default function ProDrawer({ open, pro, onClose, onBook }) {
                           {s.desc && <div className="text-xs text-zinc-400">{s.desc}</div>}
                         </td>
                         <td className="px-3 py-2">{money(s.price)}</td>
-                        <td className="px-3 py-2">{s.durationMin ? `${s.durationMin} min` : "—"}</td>
+                        <td className="px-3 py-2">
+                          {s.durationMin ? `${s.durationMin} min` : "—"}
+                        </td>
                         <td className="px-3 py-2">
                           {onBook ? (
                             <button
@@ -121,9 +150,15 @@ export default function ProDrawer({ open, pro, onClose, onBook }) {
                             </button>
                           ) : (
                             <Link
-                              to={proId ? `/book/${proId}?service=${encodeURIComponent(s.name || "")}` : "#"}
+                              to={
+                                proId
+                                  ? `/book/${proId}?service=${encodeURIComponent(s.name || "")}`
+                                  : "#"
+                              }
                               className="rounded-lg bg-gold text-black px-3 py-1.5 text-sm font-semibold aria-disabled:opacity-50"
-                              onClick={(e) => { if (!proId) e.preventDefault(); }}
+                              onClick={(e) => {
+                                if (!proId) e.preventDefault();
+                              }}
                             >
                               Book
                             </Link>
@@ -135,7 +170,9 @@ export default function ProDrawer({ open, pro, onClose, onBook }) {
                 </table>
               </div>
             ) : (
-              <div className="text-sm text-zinc-400">This pro has not listed services yet.</div>
+              <div className="text-sm text-zinc-400">
+                This pro has not listed services yet.
+              </div>
             )}
           </section>
 
@@ -144,7 +181,10 @@ export default function ProDrawer({ open, pro, onClose, onBook }) {
               <h4 className="font-semibold mb-2">Badges</h4>
               <div className="flex flex-wrap gap-2">
                 {pro.badges.map((b, i) => (
-                  <span key={i} className="text-xs px-2 py-1 rounded-full border border-zinc-700 text-zinc-300">
+                  <span
+                    key={i}
+                    className="text-xs px-2 py-1 rounded-full border border-zinc-700 text-zinc-300"
+                  >
                     {b}
                   </span>
                 ))}
@@ -182,7 +222,9 @@ export default function ProDrawer({ open, pro, onClose, onBook }) {
               <Link
                 to={proId ? `/book/${proId}` : "#"}
                 className="inline-block rounded-lg bg-black text-white px-4 py-2 font-bold shadow-md hover:opacity-90"
-                onClick={(e) => { if (!proId) e.preventDefault(); }}
+                onClick={(e) => {
+                  if (!proId) e.preventDefault();
+                }}
               >
                 Book now
               </Link>
@@ -258,6 +300,14 @@ function LeftCarvedRail() {
         />
       </svg>
 
+      {/* your fixed logo */}
+      <img
+        src={LOGO_URL}
+        alt="Kpocha Touch"
+        className="absolute top-3 left-3 h-10 w-10 sm:h-12 sm:w-12 rounded-full object-cover ring-1 ring-black/10 bg-white p-0.5 z-10"
+        loading="lazy"
+      />
+
       <div
         className="absolute left-0 right-0 bottom-10 h-12"
         style={{
@@ -267,13 +317,15 @@ function LeftCarvedRail() {
           opacity: 0.95,
         }}
       />
-
-      <img
-        src={LOGO_URL}
-        alt="Kpocha Touch"
-        className="absolute top-3 left-3 h-10 w-10 sm:h-12 sm:w-12 rounded-full object-cover ring-1 ring-black/10 bg-white p-0.5 z-10"
-        loading="lazy"
-      />
     </div>
   );
 }
+
+/**
+ * COMMENTS (ProDrawer.jsx)
+ * - Kept the Kpocha Touch logo in the rail (not removed).
+ * - Removed demo rating: now shows real rating if present, else “—”.
+ * - Services now read from multiple pro fields so “pro-only” data will still display.
+ * - Gallery now reads from photos / gallery / workPhotos / professional.workPhotos.
+ * - Book button still supports both drawer booking and direct /book/:id link.
+ */

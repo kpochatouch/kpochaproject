@@ -2,7 +2,12 @@
 import express from "express";
 import mongoose from "mongoose";
 
-export default function adminProsRoutes({ requireAuth, requireAdmin, Application }) {
+export default function adminProsRoutes({
+  requireAuth,
+  requireAdmin,
+  Application,
+  Pro, // ← server.js already passes this in
+}) {
   const r = express.Router();
 
   // POST /api/pros/decline/:id  { reason }
@@ -17,7 +22,9 @@ export default function adminProsRoutes({ requireAuth, requireAdmin, Application
         return res.status(503).json({ error: "database_not_connected" });
       }
 
+      // try by clientId first (your UI sometimes stores clientId on the Application)
       let doc = await Application.findOne({ clientId: rawId });
+      // if not found, and it looks like an ObjectId, try by _id
       if (!doc && /^[0-9a-fA-F]{24}$/.test(rawId)) {
         doc = await Application.findById(rawId);
       }
@@ -31,6 +38,99 @@ export default function adminProsRoutes({ requireAuth, requireAdmin, Application
     } catch (err) {
       console.error("[admin:decline] error:", err);
       return res.status(500).json({ error: "decline_failed" });
+    }
+  });
+
+  // POST /api/pros/resync/:ownerUid
+  // Admin helper to FORCE a pro to match the latest client profile
+  // This is useful for old/legacy pros approved before we added the auto-syncs.
+  r.post("/pros/resync/:ownerUid", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      if (mongoose.connection.readyState !== 1) {
+        return res.status(503).json({ error: "database_not_connected" });
+      }
+
+      const ownerUid = String(req.params.ownerUid || "").trim();
+      if (!ownerUid) {
+        return res.status(400).json({ error: "owner_uid_required" });
+      }
+
+      // 1) find the actual Pro doc
+      const pro = await Pro.findOne({ ownerUid }).lean();
+      if (!pro) {
+        return res.status(404).json({ error: "pro_not_found" });
+      }
+
+      // 2) read the latest client profile from the SAME collection
+      // your server.js uses: "profiles"
+      const col = mongoose.connection.db.collection("profiles");
+      const fresh = await col.findOne({ ownerUid });
+
+      if (!fresh) {
+        // no profile to sync, but not an error
+        return res.json({ ok: true, message: "no_profile_to_sync" });
+      }
+
+      // 3) build new values from profile → pro
+      const name =
+        fresh.fullName ||
+        fresh.name ||
+        [
+          fresh?.identity?.firstName,
+          fresh?.identity?.lastName,
+        ].filter(Boolean).join(" ").trim() ||
+        pro.name ||
+        "";
+
+      const phone =
+        fresh.phone ||
+        fresh?.identity?.phone ||
+        pro.phone ||
+        "";
+
+      const lga = (
+        fresh.lga ||
+        fresh.state ||
+        pro.lga ||
+        ""
+      )
+        .toString()
+        .toUpperCase();
+
+      const identity = {
+        ...(pro.identity || {}),
+        ...(fresh.identity || {}),
+      };
+
+      const proSet = {};
+      if (name) proSet.name = name;
+      if (phone) proSet.phone = phone;
+      if (lga) proSet.lga = lga;
+      proSet.identity = identity;
+
+      // 4) update Pro
+      await Pro.updateOne(
+        { ownerUid },
+        { $set: proSet }
+      );
+
+      // 5) (optional but smart) update any Applications for this user too,
+      // so the admin list shows the same fresh values
+      const appSet = {};
+      if (name) appSet.displayName = name;
+      if (phone) appSet.phone = phone;
+      if (lga) appSet.lga = lga;
+      if (Object.keys(appSet).length > 0) {
+        await Application.updateMany(
+          { uid: ownerUid },
+          { $set: appSet }
+        );
+      }
+
+      return res.json({ ok: true });
+    } catch (err) {
+      console.error("[admin:pros:resync] error:", err);
+      return res.status(500).json({ error: "resync_failed" });
     }
   });
 

@@ -8,6 +8,10 @@ import ProDrawer from "../components/ProDrawer";
 import FeedCard from "../components/FeedCard";
 import ErrorBoundary from "../components/ErrorBoundary";
 
+/**
+ * Small composer shown only to logged-in pros.
+ * Posts go to /api/posts and /api/feed/public and are filtered by LGA.
+ */
 function FeedComposer({ lga, onPosted }) {
   const [text, setText] = useState("");
   const [mediaUrl, setMediaUrl] = useState("");
@@ -87,52 +91,73 @@ export default function Browse() {
   const navigate = useNavigate();
   const [tab, setTab] = useState("pros");
 
+  // pros list (comes from /api/barbers = proToBarber)
   const [pros, setPros] = useState([]);
   const [loadingPros, setLoadingPros] = useState(true);
   const [errPros, setErrPros] = useState("");
 
+  // filters
   const [q, setQ] = useState("");
   const [service, setService] = useState("");
   const [stateName, setStateName] = useState("");
   const [lga, setLga] = useState("");
 
+  // geo
   const [states, setStates] = useState([]);
   const [lgasByState, setLgasByState] = useState({});
 
+  // current user (may be guest)
   const [me, setMe] = useState(null);
   const isPro = !!me?.isPro;
 
+  // selected pro (for drawer)
   const [openPro, setOpenPro] = useState(null);
 
+  // feed
   const [feed, setFeed] = useState([]);
   const [loadingFeed, setLoadingFeed] = useState(true);
   const [errFeed, setErrFeed] = useState("");
 
-  // ✅ load me ONLY if we actually have a token
+  /**
+   * Load current user + client profile (to prefill location)
+   * We do this in one place so browse page shows *real* LGA/state for booking
+   */
   useEffect(() => {
-    let on = true;
+    let alive = true;
     const token = localStorage.getItem("authToken") || localStorage.getItem("token");
     if (!token) {
-      // guest → just set null and DON'T call /api/me (avoid 401 → global logout)
       setMe(null);
       return;
     }
     (async () => {
       try {
-        const { data } = await api.get("/api/me");
-        if (!on) return;
-        setMe(data || null);
+        const [meRes, profileRes] = await Promise.all([
+          api.get("/api/me"),
+          api.get("/api/profile/me").catch(() => ({ data: null })),
+        ]);
+        if (!alive) return;
+
+        const meData = meRes.data || null;
+        const prof = profileRes?.data || null;
+
+        setMe(meData);
+
+        // prefill location from client profile first
+        const st = (prof?.identity?.state || prof?.state || "").toString().toUpperCase();
+        const lg = (prof?.identity?.city || prof?.lga || "").toString().toUpperCase();
+        if (st && !stateName) setStateName(st);
+        if (lg && !lga) setLga(lg);
       } catch {
-        if (!on) return;
+        if (!alive) return;
         setMe(null);
       }
     })();
     return () => {
-      on = false;
+      alive = false;
     };
-  }, []);
+  }, [stateName, lga]);
 
-  // load geo
+  // load geo (real endpoint first, demo fallback after)
   useEffect(() => {
     let on = true;
     (async () => {
@@ -142,6 +167,7 @@ export default function Browse() {
         setStates(data?.states || []);
         setLgasByState(data?.lgas || {});
       } catch {
+        // demo fallback — should disappear in production
         if (!on) return;
         setStates(["Edo"]);
         setLgasByState({ Edo: ["OREDO", "IKPOBA-OKHA", "EGOR", "OTHERS"] });
@@ -152,7 +178,7 @@ export default function Browse() {
     };
   }, []);
 
-  // load pros
+  // load pros from backend — this should already be made from Pro docs (proToBarber)
   useEffect(() => {
     let on = true;
     setLoadingPros(true);
@@ -161,6 +187,7 @@ export default function Browse() {
       try {
         const params = {};
         if (lga) params.lga = lga.toUpperCase();
+        if (stateName) params.state = stateName.toUpperCase();
         const { data } = await api.get("/api/barbers", { params });
         if (!on) return;
         setPros(Array.isArray(data) ? data : []);
@@ -174,8 +201,9 @@ export default function Browse() {
     return () => {
       on = false;
     };
-  }, [lga]);
+  }, [lga, stateName]);
 
+  // normalize services from pro payload
   function svcArray(p) {
     const raw = p?.services;
     if (Array.isArray(raw))
@@ -191,10 +219,12 @@ export default function Browse() {
     return [];
   }
 
+  // filter + rank
   const filteredAndRanked = useMemo(() => {
     const term = q.trim().toLowerCase();
     return [...pros]
       .map((p) => {
+        // NOTE: /api/barbers should already unify: name, lga, state, services
         const name = String(p?.name || "").toLowerCase();
         const desc = String(p?.bio || p?.description || "").toLowerCase();
         const proLga = String(p?.lga || "").toUpperCase();
@@ -216,10 +246,12 @@ export default function Browse() {
       .map((x) => x.p);
   }, [pros, q, service, lga]);
 
+  // lgas for selected state
   const lgasForState = useMemo(() => {
     return stateName && lgasByState[stateName] ? lgasByState[stateName] : [];
   }, [stateName, lgasByState]);
 
+  // reset filters
   function clearFilters() {
     setQ("");
     setService("");
@@ -227,6 +259,7 @@ export default function Browse() {
     setLga("");
   }
 
+  // feed
   const fetchFeed = useCallback(async () => {
     try {
       setLoadingFeed(true);
@@ -248,9 +281,9 @@ export default function Browse() {
     })();
   }, [fetchFeed, tab]);
 
+  // book handler
   function goBook(pro, chosenService) {
     const svcName = chosenService || service || null;
-
     const svcList = Array.isArray(pro?.services)
       ? pro.services.map((s) => (typeof s === "string" ? { name: s } : s))
       : [];
@@ -406,6 +439,7 @@ export default function Browse() {
           </>
         )}
 
+        {/* drawer for selected pro */}
         <ProDrawer
           open={!!openPro}
           pro={openPro}
@@ -416,3 +450,12 @@ export default function Browse() {
     </ErrorBoundary>
   );
 }
+
+/**
+ * NOTES (Browse.jsx)
+ * 1. We now prefill state/LGA from /api/profile/me so *real* user location shows.
+ * 2. /api/barbers is still the single source of truth — it should already be built from Pro docs.
+ * 3. We removed the hard-coded Cloudinary-like logo from cards (moved to component).
+ * 4. Demo geo fallback is kept but clearly marked.
+ * 5. Open avatar happens in BarberCard (see below), not here.
+ */

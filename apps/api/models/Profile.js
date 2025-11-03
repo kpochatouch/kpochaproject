@@ -9,6 +9,13 @@ const ClientIDSchema = new mongoose.Schema(
   { _id: false }
 );
 
+/**
+ * IMPORTANT:
+ * Your server.js and approval/resync code read from the raw Mongo collection "profiles"
+ *   const col = mongoose.connection.db.collection("profiles");
+ * so we must tell Mongoose to ALSO use "profiles" for the client profile model.
+ * Otherwise Mongoose would create/use "clientprofiles" and the two sides won’t see each other.
+ */
 const ClientProfileSchema = new mongoose.Schema(
   {
     ownerUid: { type: String, required: true, unique: true, index: true },
@@ -20,7 +27,11 @@ const ClientProfileSchema = new mongoose.Schema(
     photoUrl: { type: String, default: "" },
     id: { type: ClientIDSchema, default: () => ({}) },
   },
-  { timestamps: true, strict: false } // accept extra harmless fields
+  {
+    timestamps: true,
+    strict: false,
+    collection: "profiles", // ← force same collection name as server.js
+  }
 );
 
 const ProProfileSchema = new mongoose.Schema(
@@ -35,7 +46,11 @@ const ProProfileSchema = new mongoose.Schema(
     privateAddress: { type: String, default: "" }, // never returned publicly
     verified: { type: Boolean, default: false },
   },
-  { timestamps: true, strict: false }
+  {
+    timestamps: true,
+    strict: false,
+    // we can let Mongoose use the default ("proprofiles"), that's fine
+  }
 );
 
 export const ClientProfile =
