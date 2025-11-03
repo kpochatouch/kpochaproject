@@ -103,7 +103,7 @@ async function handlePutClientMe(req, res) {
       if (pro) {
         // pull the freshest profile directly from the "profiles" collection
         const col = mongoose.connection.db.collection("profiles");
-        const fresh = await col.findOne({ ownerUid: req.user.uid });
+        const fresh = await col.findOne({ uid: req.user.uid });
 
         // if for any reason we cannot read the fresh profile, stop here
         if (!fresh) {

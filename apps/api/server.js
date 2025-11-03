@@ -655,6 +655,24 @@ app.post("/api/pros/approve/:id", requireAuth, requireAdmin, async (req, res) =>
     const ownerUid = appDoc.uid;
     if (!ownerUid) return res.status(400).json({ error: "missing_applicant_uid" });
 
+        // 🔁 Sync core identity from client profile (pro uses client profile)
+    try {
+      const col = mongoose.connection.db.collection("profiles");
+      const fresh = await col.findOne({ uid: ownerUid }); // <-- fixed
+      if (fresh) {
+        appDoc.displayName =
+          fresh.fullName ||
+          fresh.name ||
+          [fresh?.identity?.firstName, fresh?.identity?.lastName].filter(Boolean).join(" ").trim() ||
+          appDoc.displayName;
+        appDoc.phone = fresh.phone || fresh?.identity?.phone || appDoc.phone;
+        appDoc.lga = (fresh.lga || fresh.state || appDoc.lga || "").toString().toUpperCase();
+        appDoc.identity = { ...(appDoc.identity || {}), ...(fresh.identity || {}) };
+      }
+    } catch (e) {
+      console.warn("[approve:profile sync] skipped:", e?.message || e);
+    }
+
     // Try to infer coordinates from likely locations in the stored application payload
     const lat =
       Number(appDoc?.business?.lat ?? appDoc?.identity?.lat ?? appDoc?.lat);

@@ -11,14 +11,16 @@ const ClientIDSchema = new mongoose.Schema(
 
 /**
  * IMPORTANT:
- * Your server.js and approval/resync code read from the raw Mongo collection "profiles"
- *   const col = mongoose.connection.db.collection("profiles");
- * so we must tell Mongoose to ALSO use "profiles" for the client profile model.
- * Otherwise Mongoose would create/use "clientprofiles" and the two sides won’t see each other.
+ * - server.js and some routes read the raw Mongo collection "profiles" with { uid: ... }
+ * - some newer code started using { ownerUid: ... }
+ * So we support BOTH here, and we force the collection name to "profiles".
  */
 const ClientProfileSchema = new mongoose.Schema(
   {
-    ownerUid: { type: String, required: true, unique: true, index: true },
+    // support both keys so old and new code see the same document
+    uid: { type: String, index: true },
+    ownerUid: { type: String, index: true },
+
     fullName: { type: String, default: "" },
     phone: { type: String, default: "" },
     state: { type: String, default: "" },
@@ -30,9 +32,20 @@ const ClientProfileSchema = new mongoose.Schema(
   {
     timestamps: true,
     strict: false,
-    collection: "profiles", // ← force same collection name as server.js
+    collection: "profiles", // must match what server.js reads directly
   }
 );
+
+// keep uid/ownerUid in sync so raw queries always find the doc
+ClientProfileSchema.pre("save", function (next) {
+  if (!this.uid && this.ownerUid) {
+    this.uid = this.ownerUid;
+  }
+  if (!this.ownerUid && this.uid) {
+    this.ownerUid = this.uid;
+  }
+  next();
+});
 
 const ProProfileSchema = new mongoose.Schema(
   {
@@ -49,7 +62,7 @@ const ProProfileSchema = new mongoose.Schema(
   {
     timestamps: true,
     strict: false,
-    // we can let Mongoose use the default ("proprofiles"), that's fine
+    // default collection is fine here
   }
 );
 
