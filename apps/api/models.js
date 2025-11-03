@@ -1,3 +1,7 @@
+
+
+
+
 // apps/api/models.js
 import mongoose from "mongoose";
 
@@ -129,6 +133,7 @@ const ProSchema = new mongoose.Schema(
     // legacy rating field — we won't trust it if there are no reviews
     rating: { type: Number, default: 0 },
 
+    // current location for services
     services: { type: [ServiceItemSchema], default: [] },
 
     profileVisible: { type: Boolean, default: true },
@@ -152,37 +157,44 @@ const ProSchema = new mongoose.Schema(
 
 // Helpful indexes
 ProSchema.index({ profileVisible: 1, lga: 1 });
+ProSchema.index({ profileVisible: 1, state: 1 });         // ← add this
+ProSchema.index({ profileVisible: 1, state: 1, lga: 1 }); // ← optional but nice for state+LGA
 ProSchema.index({ "services.name": 1 });
 ProSchema.index({ "services.id": 1 });
 ProSchema.index({ loc: "2dsphere" }); // used by $geoNear
 
-// Normalize LGA casing on save (keeps filters reliable)
-ProSchema.pre("save", function normalizeLga(next) {
+// Normalize LGA + state casing on save (keeps filters reliable)
+ProSchema.pre("save", function normalizeLocation(next) {
   if (this.lga) this.lga = String(this.lga).toUpperCase();
+  if (this.state) this.state = String(this.state).toUpperCase();
   next();
 });
 
 /* ---------------------------- Public mapper (safe) -------------------------- */
 /**
  * SAFE mapper used by /api/barbers.
- * Changes from your version:
- * 1. If pro has 0 reviews (metrics.totalReviews <= 0), we force rating = 0
- *    even if the document has an old rating like 4.8.
- * 2. If services is empty but professional.services exists (old form),
- *    we surface those.
+ *
+ * ROOT FIXES:
+ * 1. We will ONLY show a rating if there is at least 1 real review
+ *    (metrics.totalReviews > 0). If not, rating=0 and 5 empty stars.
+ * 2. We will surface services from multiple legacy places:
+ *    - pro.services
+ *    - pro.professional.services
+ *    so the drawer stops saying "This pro has not listed services yet."
  */
 export function proToBarber(doc) {
   const d = doc?.toObject ? doc.toObject() : doc;
 
-  // 1) Source services from current or legacy location
+  /* ----- 1) pick up services from wherever they were saved ----- */
   let rawServices = Array.isArray(d?.services) ? d.services : [];
-  if (
-    (!rawServices || !rawServices.length) &&
-    d?.professional &&
-    Array.isArray(d.professional.services)
-  ) {
-    // some old application payloads put services under professional.services
-    rawServices = d.professional.services;
+
+  // legacy location from older application payloads
+  if ((!rawServices || rawServices.length === 0) && d?.professional) {
+    if (Array.isArray(d.professional.services)) {
+      rawServices = d.professional.services;
+    } else if (Array.isArray(d.professional.serviceList)) {
+      rawServices = d.professional.serviceList;
+    }
   }
 
   const normalizedServices = Array.isArray(rawServices)
@@ -192,14 +204,15 @@ export function proToBarber(doc) {
           name: s?.name || "",
           price: Number.isFinite(s?.price) ? s.price : 0,
         }))
-        .filter((s) => s.name)
+        .filter((s) => s.name) // remove blanks
     : [];
 
-  // 2) Figure out if this rating is "real"
+  /* ----- 2) rating: show NOTHING unless there is a real review ----- */
   const totalReviews = Number(d?.metrics?.totalReviews || 0);
-  let rating = 0;
+  const hasRealReviews = totalReviews > 0;
 
-  if (totalReviews > 0) {
+  let rating = 0;
+  if (hasRealReviews) {
     // only trust rating when we actually have reviews
     const metricsAvg = Number(d?.metrics?.avgRating);
     if (Number.isFinite(metricsAvg) && metricsAvg > 0) {
@@ -209,14 +222,15 @@ export function proToBarber(doc) {
     }
   }
 
-  // Clamp to 0..5 and round to one decimal for display
+  // clamp + round
   rating = Math.max(0, Math.min(5, rating));
   const ratingRounded = Math.round(rating * 10) / 10;
 
-  // Build a 5-star helper (whole-star fill; UI can render empty stars in grey)
-  const fullStars = Math.floor(ratingRounded); // 0..5
-  const emptyStars = 5 - fullStars; // complements to 5
+  // build star helper
+  const fullStars = hasRealReviews ? Math.floor(ratingRounded) : 0;
+  const emptyStars = 5 - fullStars;
 
+  /* ----- 3) final public shape ----- */
   return {
     id: d._id?.toString?.() || String(d._id || ""),
     name: d.name || "",
@@ -224,8 +238,8 @@ export function proToBarber(doc) {
     state: (d.state || "").toString().toUpperCase(),
     availability: d.availability || "Available",
 
-    // will be 0 if there are no reviews → frontend hides stars
-    rating: ratingRounded,
+    // will be 0 if there are no reviews → frontend should hide/grey it
+    rating: hasRealReviews ? ratingRounded : 0,
 
     ratingStars: {
       full: fullStars,
@@ -253,11 +267,9 @@ export const Pro =
   mongoose.models.Pro || mongoose.model("Pro", ProSchema);
 
 /* -------------------------------------------------------------------------- */
-/* COMMENTARY
-   - We now ignore old/hardcoded ratings when there are no reviews.
-   - We now surface legacy professional.services so the drawer stops
-     saying “This pro has not listed services yet.”
-   - Frontend already hides stars when rating=0, so this will make the
-     cards go grey until there are real reviews.
+/* SUMMARY
+   - if metrics.totalReviews is 0 or missing → API sends rating: 0 and 0 full stars
+   - services are pulled from pro.services OR pro.professional.services
+   - this removes old / hardcoded-looking 4.8s from the API layer
 */
 /* -------------------------------------------------------------------------- */

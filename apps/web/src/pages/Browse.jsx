@@ -143,8 +143,8 @@ export default function Browse() {
         setMe(meData);
 
         // prefill location from client profile first
-        const st = (prof?.identity?.state || prof?.state || "").toString().toUpperCase();
-        const lg = (prof?.identity?.city || prof?.lga || "").toString().toUpperCase();
+        const st = (prof?.identity?.state || prof?.state || "").toString().trim(); // keep normal casing
+        const lg = (prof?.identity?.city || prof?.lga || "").toString().toUpperCase(); // LGAs stay UPPER
         if (st && !stateName) setStateName(st);
         if (lg && !lga) setLga(lg);
       } catch {
@@ -227,19 +227,24 @@ export default function Browse() {
         // NOTE: /api/barbers should already unify: name, lga, state, services
         const name = String(p?.name || "").toLowerCase();
         const desc = String(p?.bio || p?.description || "").toLowerCase();
-        const proLga = String(p?.lga || "").toUpperCase();
+        const proState = String(p?.state || "").trim().toUpperCase(); // NEW
+        const proLga = String(p?.lga || "").trim().toUpperCase();
         const servicesLC = svcArray(p);
 
         const matchName = term ? name.includes(term) || desc.includes(term) : true;
         const matchSvc = service ? servicesLC.includes(service.toLowerCase()) : true;
+        const matchState = stateName ? proState === stateName.toUpperCase() : true; // NEW
         const matchLga = lga ? proLga === lga.toUpperCase() : true;
+
+        const ok = matchName && matchSvc && matchState && matchLga; // NEW combo
+
 
         let score = 0;
         if (service && matchSvc) score += 3;
         if (lga && matchLga) score += 2;
         if (term && matchName) score += 1;
 
-        return { p, ok: matchName && matchSvc && matchLga, score };
+        return { p, ok: matchName && matchSvc && matchLga && matchState, score };
       })
       .filter((x) => x.ok)
       .sort((a, b) => b.score - a.score)

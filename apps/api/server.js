@@ -38,7 +38,6 @@ import geoRouter from "./routes/geo.js"; // << mount router; no more inlined NG 
 import riskRoutes from "./routes/risk.js"; // ← NEW
 import awsLivenessRoutes from "./routes/awsLiveness.js";
 
-
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
@@ -301,7 +300,7 @@ const app = express();
 
 /* ------------------- CORS (hardened, with Vercel previews) ------------------- */
 const ALLOW_LIST = (process.env.CORS_ORIGIN || "http://localhost:5173")
-  .split(/[,\s]+/)
+  .split(/[,\s]+/)          // ← fixed the extra ]
   .map((s) => s.trim())
   .filter(Boolean);
 
@@ -309,14 +308,12 @@ function originAllowed(origin) {
   if (!origin) return true; // non-browser / same-origin
   try {
     const oh = new URL(origin).host;
-    // Allow explicit allow-list
     for (const o of ALLOW_LIST) {
       try {
         if (new URL(o).host === oh) return true;
         if (o === origin) return true;
       } catch {}
     }
-    // Allow any *.vercel.app preview unless disabled
     if ((process.env.ALLOW_VERCEL_PREVIEWS || "true") !== "false") {
       if (oh.endsWith(".vercel.app")) return true;
     }
@@ -400,7 +397,7 @@ async function requirePro(req, res, next) {
 function maintenanceBypass(req) {
   if (req.path === "/api/health") return true;
   if (req.path.startsWith("/api/paystack/webhook")) return true;
-  if (req.path.startsWith("/api/settings")) return true; // allow admins to toggle
+  if (req.path.startsWith("/api/settings")) return true;
   return false;
 }
 app.use(async (req, res, next) => {
@@ -457,14 +454,12 @@ app.get("/api/me", requireAuth, async (req, res) => {
   try {
     const isAdmin = isAdminUid(req.user.uid);
 
-    // Lightweight Pro flag
     let isPro = false;
     try {
       const p = await Pro.findOne({ ownerUid: req.user.uid }).select("_id").lean();
       isPro = !!p;
     } catch {}
 
-    // Pull basic identity for Settings prefill
     let identity = {};
     let displayName = "";
     try {
@@ -530,7 +525,7 @@ app.use("/api/wallet", requireAuth, (req, res, next) => {
   if (!write) return next();
   return requirePro(req, res, next);
 });
-app.use("/api", walletWithAuth(requireAuth, requireAdmin)); // client wallet + topup + verify + pro withdraw
+app.use("/api", walletWithAuth(requireAuth, requireAdmin));
 
 // PIN / Profile / Posts / Payments
 app.use("/api", pinRoutes({ requireAuth, Application }));
@@ -544,9 +539,8 @@ app.use("/api", uploadsRoutes({ requireAuth }));
 // Payout bank details
 app.use("/api", payoutRoutes({ requireAuth, Application }));
 
-// 🔐 Risk / Liveness logging (no external deps)
-app.use("/api", riskRoutes({ requireAuth, requireAdmin, Application })); // ← NEW
-
+// 🔐 Risk / Liveness logging
+app.use("/api", riskRoutes({ requireAuth, requireAdmin, Application }));
 app.use("/api", awsLivenessRoutes({ requireAuth }));
 
 // Admin pros (approve + decline)
@@ -559,7 +553,7 @@ try {
   console.warn("[api] ℹ️ Admin pros routes not mounted:", e?.message || e);
 }
 
-// Geo (states + LGAs) — served by router to avoid duplication
+// Geo routes
 try {
   if (geoRouter) {
     app.use("/api", geoRouter);
@@ -582,9 +576,9 @@ try {
   }
 } catch {}
 
-/* ------------------- Admin & Pros endpoints required by your frontend ------------------- */
+/* ------------------- Admin & Pros endpoints ------------------- */
 
-/** ✅ Public, read-only Settings (used by web app) */
+/** Public settings */
 app.get("/api/settings", async (_req, res) => {
   try {
     const s = await loadSettings();
@@ -601,7 +595,6 @@ app.get("/api/settings", async (_req, res) => {
   }
 });
 
-/** Settings: GET for admin panel */
 app.get("/api/settings/admin", requireAuth, requireAdmin, async (_req, res) => {
   try {
     const s = await loadSettings();
@@ -612,7 +605,6 @@ app.get("/api/settings/admin", requireAuth, requireAdmin, async (_req, res) => {
   }
 });
 
-/** Settings: PUT (admin). UI calls PUT /api/settings, so we provide both */
 async function saveSettingsAndRestart(req, res) {
   try {
     const doc = await updateSettings(req.body || {}, req.user?.uid || "admin");
@@ -626,7 +618,7 @@ async function saveSettingsAndRestart(req, res) {
 app.put("/api/settings", requireAuth, requireAdmin, saveSettingsAndRestart);
 app.put("/api/settings/admin", requireAuth, requireAdmin, saveSettingsAndRestart);
 
-/** Applications: list pending for Admin.jsx */
+/** Applications: list pending */
 app.get("/api/pros/pending", requireAuth, requireAdmin, async (_req, res) => {
   try {
     const docs = await Application.find({ status: { $in: ["submitted", "pending"] } })
@@ -640,7 +632,10 @@ app.get("/api/pros/pending", requireAuth, requireAdmin, async (_req, res) => {
   }
 });
 
-/** Approve application → upsert Pro */
+/** Approve application → upsert Pro
+ * IMPORTANT: we now copy application.professional.services into Pro.services
+ * so that /api/barbers (which uses proToBarber) will actually see them.
+ */
 app.post("/api/pros/approve/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
@@ -655,10 +650,10 @@ app.post("/api/pros/approve/:id", requireAuth, requireAdmin, async (req, res) =>
     const ownerUid = appDoc.uid;
     if (!ownerUid) return res.status(400).json({ error: "missing_applicant_uid" });
 
-        // 🔁 Sync core identity from client profile (pro uses client profile)
+    // sync identity from profile collection
     try {
       const col = mongoose.connection.db.collection("profiles");
-      const fresh = await col.findOne({ uid: ownerUid }); // <-- fixed
+      const fresh = await col.findOne({ uid: ownerUid });
       if (fresh) {
         appDoc.displayName =
           fresh.fullName ||
@@ -673,12 +668,26 @@ app.post("/api/pros/approve/:id", requireAuth, requireAdmin, async (req, res) =>
       console.warn("[approve:profile sync] skipped:", e?.message || e);
     }
 
-    // Try to infer coordinates from likely locations in the stored application payload
-    const lat =
-      Number(appDoc?.business?.lat ?? appDoc?.identity?.lat ?? appDoc?.lat);
-    const lon =
-      Number(appDoc?.business?.lon ?? appDoc?.identity?.lon ?? appDoc?.lon);
+    // coords
+    const lat = Number(appDoc?.business?.lat ?? appDoc?.identity?.lat ?? appDoc?.lat);
+    const lon = Number(appDoc?.business?.lon ?? appDoc?.identity?.lon ?? appDoc?.lon);
     const hasCoords = Number.isFinite(lat) && Number.isFinite(lon);
+
+    // normalize services from application
+    let derivedServices = [];
+    if (appDoc?.professional && Array.isArray(appDoc.professional.services)) {
+      derivedServices = appDoc.professional.services.map((s) =>
+        typeof s === "string"
+          ? { name: s, price: 0, visible: true, description: "", durationMins: 0 }
+          : {
+              name: s.name || "",
+              price: Number.isFinite(s.price) ? s.price : 0,
+              visible: typeof s.visible === "boolean" ? s.visible : true,
+              description: s.description || "",
+              durationMins: Number.isFinite(s.durationMins) ? s.durationMins : 0,
+            }
+      ).filter((s) => s.name);
+    }
 
     const base = {
       ownerUid,
@@ -699,6 +708,7 @@ app.post("/api/pros/approve/:id", requireAuth, requireAdmin, async (req, res) =>
       availability: appDoc.availability || {},
       bank: appDoc.bank || {},
       status: "approved",
+      ...(derivedServices.length ? { services: derivedServices } : {}),
       ...(hasCoords ? { loc: { type: "Point", coordinates: [lon, lat] } } : {}),
     };
 
@@ -719,7 +729,7 @@ app.post("/api/pros/approve/:id", requireAuth, requireAdmin, async (req, res) =>
   }
 });
 
-/** Admin: view a single application JSON (for "View JSON" button) */
+/** Admin: view single application */
 app.get("/api/applications/:id/admin", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
@@ -756,10 +766,20 @@ app.get("/api/health", (_req, res) => res.json({ ok: true, time: new Date().toIS
 /* ------------------- Barbers ------------------- */
 app.get("/api/barbers", async (req, res) => {
   try {
-    if (mongoose.connection.readyState !== 1) return res.status(503).json({ error: "Database not connected" });
-    const { lga } = req.query;
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({ error: "Database not connected" });
+    }
+
+    const { lga, state } = req.query;
     const q = {};
-    if (lga) q.lga = String(lga).toUpperCase();
+
+    if (state) {
+      q.state = String(state).toUpperCase();
+    }
+    if (lga) {
+      q.lga = String(lga).toUpperCase();
+    }
+
     const docs = await Pro.find(q).lean();
     return res.json(docs.map(proToBarber));
   } catch (err) {
@@ -767,6 +787,7 @@ app.get("/api/barbers", async (req, res) => {
     res.status(500).json({ error: "Failed to load barbers" });
   }
 });
+
 
 app.get("/api/barbers/:id", async (req, res) => {
   try {
@@ -781,7 +802,7 @@ app.get("/api/barbers/:id", async (req, res) => {
 });
 
 /* ------------------- Barbers Nearby ------------------- */
-const GEOAPIFY_KEY = process.env.GEOAPIFY_KEY || ""; // require from env
+const GEOAPIFY_KEY = process.env.GEOAPIFY_KEY || "";
 
 async function reverseGeocode(lat, lon) {
   if (!GEOAPIFY_KEY) return null;
@@ -798,7 +819,6 @@ async function reverseGeocode(lat, lon) {
   return { state, lga };
 }
 
-/** Reverse geocode (used by ClientRegister 'Use my location') */
 app.get("/api/geo/rev", async (req, res) => {
   try {
     const lat = Number(req.query.lat);
@@ -849,13 +869,16 @@ app.get("/api/barbers/nearby", async (req, res) => {
         return { ...shaped, distanceKm: Math.round((d.dist / 1000) * 10) / 10 };
       });
     } catch {
+      // geo search failed → fall back to normal query using state + LGA
       used = "lga";
       const rev = await reverseGeocode(lat, lon);
       const lga = rev?.lga || "";
       const state = rev?.state || "";
-      let q = {};
-      if (lga) q = { lga };
-      else if (state) q = { lga: new RegExp(`^${state}\\b`, "i") };
+
+      const q = {};
+      if (state) q.state = state;          // filter by state if we got it
+      if (lga) q.lga = lga;                // and also by LGA if we got it
+
       const docs = await Pro.find(q).limit(100).lean();
       items = docs.map((d) => ({ ...proToBarber(d), distanceKm: null }));
     }
@@ -875,7 +898,7 @@ app.get("/api/chatbase/userhash", requireAuth, async (req, res) => {
     if (!CHATBASE_SECRET) {
       return res.status(500).json({ error: "chatbase_secret_missing" });
     }
-    const userId = req.user.uid; // Firebase UID
+    const userId = req.user.uid;
     const userHash = crypto.createHmac("sha256", CHATBASE_SECRET).update(userId).digest("hex");
     return res.json({ userId, userHash });
   } catch (e) {
@@ -892,7 +915,6 @@ app.post("/api/applications", requireAuth, async (req, res) => {
 
     const payload = req.body || {};
 
-    // minimal top-level fields for quick filtering
     const first = payload?.identity?.firstName || "";
     const last = payload?.identity?.lastName || "";
     const displayName =
@@ -908,7 +930,6 @@ app.post("/api/applications", requireAuth, async (req, res) => {
         payload?.identity?.state ||
         "").toString().toUpperCase();
 
-    // legacy "services" string for Admin list preview
     const servicesStr = Array.isArray(payload?.professional?.services)
       ? payload.professional.services.join(", ")
       : (payload.services || "");
@@ -923,11 +944,7 @@ app.post("/api/applications", requireAuth, async (req, res) => {
       lga,
       services: servicesStr,
       status,
-
-      // store full payload for approval step
       ...payload,
-
-      // normalize agreements on server as booleans
       acceptedTerms: !!payload.acceptedTerms,
       acceptedPrivacy: !!payload.acceptedPrivacy,
       agreements: {
@@ -983,7 +1000,7 @@ async function handlePaystackEvent(event) {
   }
 }
 
-/* ------------------- Start (Socket.IO if available) ------------------- */
+/* ------------------- Start ------------------- */
 await initSchedulers();
 
 try {
