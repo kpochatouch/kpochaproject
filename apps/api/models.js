@@ -80,7 +80,8 @@ const BadgeSchema = new mongoose.Schema(
 const MetricsSchema = new mongoose.Schema(
   {
     totalReviews: { type: Number, default: 0 },
-    avgRating: { type: Number, default: 4.8 },
+    // 🔁 Start at zero — no fake 4.8 anywhere
+    avgRating: { type: Number, default: 0 },
     recentDeclines: { type: Number, default: 0 },
     totalStrikes: { type: Number, default: 0 },
     lastDecisionAt: { type: Date, default: null },
@@ -121,7 +122,8 @@ const ProSchema = new mongoose.Schema(
     // availability can be string ("Available") or a rich object
     availability: { type: mongoose.Schema.Types.Mixed, default: "Available" },
 
-    rating: { type: Number, default: 4.8 }, // legacy field
+    // 🔁 Legacy field should not pretend to be 4.8 by default
+    rating: { type: Number, default: 0 },
 
     services: { type: [ServiceItemSchema], default: [] },
 
@@ -157,7 +159,11 @@ ProSchema.pre("save", function normalizeLga(next) {
 });
 
 /* ---------------------------- Public mapper (safe) -------------------------- */
-/** SAFE mapper used by /api/barbers – hides private fields and filters services */
+/** SAFE mapper used by /api/barbers – hides private fields and filters services
+ *  Also returns a star helper for UI:
+ *  - rating: real numeric average (0..5)
+ *  - ratingStars: { full: 0..5, empty: 0..5 }  // always totals 5 for grey-star bars
+ */
 export function proToBarber(doc) {
   const d = doc?.toObject ? doc.toObject() : doc;
 
@@ -170,12 +176,39 @@ export function proToBarber(doc) {
         }))
     : [];
 
+  // 🧮 Determine the true rating:
+  // prefer metrics.avgRating if it exists (>0), otherwise legacy rating (>0), else 0
+  let rating = 0;
+  const metricsAvg = Number(d?.metrics?.avgRating);
+  if (Number.isFinite(metricsAvg) && metricsAvg > 0) {
+    rating = metricsAvg;
+  } else if (Number.isFinite(d?.rating) && d.rating > 0) {
+    rating = Number(d.rating);
+  }
+
+  // Clamp to 0..5 and round to one decimal for display
+  rating = Math.max(0, Math.min(5, rating));
+  const ratingRounded = Math.round(rating * 10) / 10;
+
+  // Build a 5-star helper (whole-star fill; UI can render empty stars in grey)
+  const fullStars = Math.floor(ratingRounded); // 0..5
+  const emptyStars = 5 - fullStars;            // complements to 5
+
   return {
     id: d._id?.toString?.() || String(d._id || ""),
     name: d.name || "",
     lga: (d.lga || "").toString().toUpperCase(),
     availability: d.availability || "Available",
-    rating: Number.isFinite(d?.metrics?.avgRating) ? d.metrics.avgRating : Number(d?.rating || 0),
+
+    // 🔁 Numeric rating (0..5). Will be 0 if no reviews yet.
+    rating: ratingRounded,
+
+    // ⭐ Five-star helper for grey bar rendering in UI
+    ratingStars: {
+      full: fullStars,
+      empty: emptyStars,
+    },
+
     services: normalizedServices,
     shopName: d?.contactPublic?.shopName || "",
     shopAddress: d?.contactPublic?.shopAddress || "",
@@ -191,3 +224,14 @@ export const Application =
 
 export const Pro =
   mongoose.models.Pro || mongoose.model("Pro", ProSchema);
+
+/* -------------------------------------------------------------------------- */
+/* COMMENTARY (for quick understanding)
+   - Removed fake 4.8 defaults everywhere (now both metrics.avgRating and
+     Pro.rating default to 0).
+   - Mapper prefers metrics.avgRating; falls back to legacy Pro.rating; else 0.
+   - Mapper always returns rating in [0..5] and an easy `ratingStars` object
+     so the frontend can paint 5 grey stars and fill `full` of them.
+   - No DB wipe is required; once deployed, cards stop showing fake 4.8.
+*/
+/* -------------------------------------------------------------------------- */

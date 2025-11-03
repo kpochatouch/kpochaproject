@@ -1,8 +1,7 @@
-// apps/web/src/components/ProDrawer.jsx
 import { Link } from "react-router-dom";
 
-const LOGO_URL =
-  "https://res.cloudinary.com/dupex2y3k/image/upload/v1760302703/kpocha-touch-logo_srzbiu.jpg";
+// Env-based logo
+const APP_LOGO_URL = import.meta.env.VITE_APP_LOGO_URL || "";
 
 /* ------------------------------ helpers ------------------------------ */
 function money(n) {
@@ -11,39 +10,22 @@ function money(n) {
 }
 function toArray(x) {
   if (Array.isArray(x)) return x;
-  if (typeof x === "string") {
+  if (typeof x === "string")
     return x.split(",").map((s) => s.trim()).filter(Boolean);
-  }
   return [];
 }
-function pickServices(pro = {}) {
-  // try every place we might have put pro services
-  const raw =
-    pro.services ||
-    pro.servicesDetailed ||
-    (pro.professional && (pro.professional.services || pro.professional.servicesDetailed)) ||
-    [];
-  const arr = toArray(raw);
-  return arr.map((s, i) => {
-    if (typeof s === "string") {
-      return { key: `${i}-${s}`, name: s, price: null, durationMin: null };
-    }
-    return {
-      key: s._id || s.id || `${i}-${s?.name || "Service"}`,
-      name: s?.name || "Service",
-      price: s?.price ?? null,
-      durationMin: s?.durationMin ?? null,
-      desc: s?.desc,
-    };
-  });
-}
-function pickPhotos(pro = {}) {
-  return (
-    toArray(pro.photos) ||
-    toArray(pro.gallery) ||
-    toArray(pro.workPhotos) ||
-    toArray(pro.professional?.workPhotos) ||
-    []
+function svcRows(services) {
+  const arr = toArray(services);
+  return arr.map((s, i) =>
+    typeof s === "string"
+      ? { key: `${i}-${s}`, name: s }
+      : {
+          key: s._id || s.id || `${i}-${s?.name || "Service"}`,
+          name: s?.name || "Service",
+          price: s?.price ?? null,
+          durationMin: s?.durationMin ?? null,
+          desc: s?.desc,
+        }
   );
 }
 
@@ -52,36 +34,40 @@ export default function ProDrawer({ open, pro, onClose, onBook }) {
   if (!open || !pro) return null;
 
   const verified =
-    !!pro.verified || (Array.isArray(pro.badges) && pro.badges.includes("verified"));
+    !!pro.verified ||
+    (Array.isArray(pro.badges) && pro.badges.includes("verified"));
+  const photos = toArray(pro.photos);
+  const services = svcRows(pro.services);
 
-  // real rating if present, otherwise show "—" (not fake 5.0)
-  const rating =
-    typeof pro.rating === "number" && !isNaN(pro.rating)
-      ? pro.rating.toFixed(1)
-      : "—";
+  // rating source priority: metrics.avgRating -> rating
+  const rawRating =
+    Number(
+      pro?.metrics && typeof pro.metrics.avgRating !== "undefined"
+        ? pro.metrics.avgRating
+        : pro.rating
+    ) || 0;
+
+  const fullStars =
+    Number.isFinite(Number(pro?.ratingStars?.full))
+      ? Math.max(0, Math.min(5, Number(pro.ratingStars.full)))
+      : Math.max(0, Math.min(5, Math.round(rawRating)));
+  const emptyStars = 5 - fullStars;
+  const rating = Math.max(0, Math.min(5, rawRating));
 
   const proId = pro.id || pro._id;
-  const services = pickServices(pro);
-  const photos = pickPhotos(pro);
+  const gallery = photos.length ? photos : pro.photoUrl ? [pro.photoUrl] : [];
 
   return (
     <div className="fixed inset-0 z-50">
-      {/* Backdrop */}
       <div className="absolute inset-0 bg-black/60" onClick={onClose} aria-hidden />
-
-      {/* Panel */}
       <div className="absolute right-0 top-0 h-full w-full sm:w-[560px] bg-[#0f1116] text-white border-l border-zinc-800 shadow-2xl overflow-hidden">
-        {/* Decorative rail */}
-        <LeftCarvedRail />
+        <LeftCarvedRail logoUrl={APP_LOGO_URL} />
 
-        {/* Header */}
         <div className="relative flex items-center justify-between pl-24 pr-4 sm:pl-28 py-4 border-b border-zinc-800">
           <div>
             <div className="flex items-center gap-2">
               <h3 className="text-xl font-semibold">
-                {pro.name ||
-                  [pro.firstName, pro.lastName].filter(Boolean).join(" ") ||
-                  "Professional"}
+                {pro.name || "Professional"}
               </h3>
               {verified && (
                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-900/40 text-emerald-300 border border-emerald-800">
@@ -89,8 +75,25 @@ export default function ProDrawer({ open, pro, onClose, onBook }) {
                 </span>
               )}
             </div>
-            <div className="text-sm text-zinc-400">
-              {pro.lga || pro.city || "—"} • ⭐ {rating}
+            <div className="text-sm text-zinc-400 flex items-center gap-1">
+              {pro.lga || "—"}
+              {rating > 0 && (
+                <>
+                  <span className="h-3 w-px bg-zinc-700 mx-1" />
+                  {Array.from({ length: fullStars }).map((_, i) => (
+                    <span
+                      key={`f${i}`}
+                      className={`text-yellow-400 star-anim ${rating >= 4.6 ? "star-glow" : ""}`}
+                    >
+                      ★
+                    </span>
+                  ))}
+                  {Array.from({ length: emptyStars }).map((_, i) => (
+                    <span key={`e${i}`} className="text-zinc-600 star-anim">★</span>
+                  ))}
+                  <span className="ml-1">{rating.toFixed(1)}</span>
+                </>
+              )}
             </div>
           </div>
           <button
@@ -131,8 +134,14 @@ export default function ProDrawer({ open, pro, onClose, onBook }) {
                     {services.map((s) => (
                       <tr key={s.key} className="border-t border-zinc-800">
                         <td className="px-3 py-2">
-                          <div className="font-medium text-zinc-100">{s.name}</div>
-                          {s.desc && <div className="text-xs text-zinc-400">{s.desc}</div>}
+                          <div className="font-medium text-zinc-100">
+                            {s.name}
+                          </div>
+                          {s.desc && (
+                            <div className="text-xs text-zinc-400">
+                              {s.desc}
+                            </div>
+                          )}
                         </td>
                         <td className="px-3 py-2">{money(s.price)}</td>
                         <td className="px-3 py-2">
@@ -152,13 +161,13 @@ export default function ProDrawer({ open, pro, onClose, onBook }) {
                             <Link
                               to={
                                 proId
-                                  ? `/book/${proId}?service=${encodeURIComponent(s.name || "")}`
+                                  ? `/book/${proId}?service=${encodeURIComponent(
+                                      s.name || ""
+                                    )}`
                                   : "#"
                               }
                               className="rounded-lg bg-gold text-black px-3 py-1.5 text-sm font-semibold aria-disabled:opacity-50"
-                              onClick={(e) => {
-                                if (!proId) e.preventDefault();
-                              }}
+                              onClick={(e) => !proId && e.preventDefault()}
                             >
                               Book
                             </Link>
@@ -192,18 +201,24 @@ export default function ProDrawer({ open, pro, onClose, onBook }) {
             </section>
           )}
 
-          {photos.length > 0 && (
+          {gallery.length > 0 && (
             <section>
               <h4 className="font-semibold mb-2">Gallery</h4>
               <div className="grid grid-cols-3 gap-2">
-                {photos.map((src, i) => (
-                  <img
+                {gallery.map((src, i) => (
+                  <button
                     key={i}
-                    src={src}
-                    alt={`Photo ${i + 1}`}
-                    className="w-full h-28 object-cover rounded-md border border-zinc-800"
-                    loading="lazy"
-                  />
+                    onClick={() => window.open(src, "_blank")}
+                    className="block"
+                    title="Open image"
+                  >
+                    <img
+                      src={src}
+                      alt={`Photo ${i + 1}`}
+                      className="w-full h-28 object-cover rounded-md border border-zinc-800"
+                      loading="lazy"
+                    />
+                  </button>
                 ))}
               </div>
             </section>
@@ -222,9 +237,7 @@ export default function ProDrawer({ open, pro, onClose, onBook }) {
               <Link
                 to={proId ? `/book/${proId}` : "#"}
                 className="inline-block rounded-lg bg-black text-white px-4 py-2 font-bold shadow-md hover:opacity-90"
-                onClick={(e) => {
-                  if (!proId) e.preventDefault();
-                }}
+                onClick={(e) => !proId && e.preventDefault()}
               >
                 Book now
               </Link>
@@ -238,19 +251,12 @@ export default function ProDrawer({ open, pro, onClose, onBook }) {
           </div>
         </div>
       </div>
-
-      <style>{`
-        @keyframes kt-marquee-y {
-          0% { transform: translateY(100%); }
-          100% { transform: translateY(-100%); }
-        }
-      `}</style>
     </div>
   );
 }
 
 /* ------------------------------ Carved Rail ------------------------------ */
-function LeftCarvedRail() {
+function LeftCarvedRail({ logoUrl }) {
   return (
     <div className="pointer-events-none absolute inset-y-0 left-0 w-20 sm:w-24">
       <svg
@@ -268,14 +274,7 @@ function LeftCarvedRail() {
           </pattern>
         </defs>
         <path
-          d="
-            M0,0
-            L76,0
-            C62,100 62,180 76,260
-            C88,330 88,390 76,460
-            C62,540 62,620 76,720
-            L0,720 Z
-          "
+          d="M0,0 L76,0 C62,100 62,180 76,260 C88,330 88,390 76,460 C62,540 62,620 76,720 L0,720 Z"
           fill="url(#ktRailGrad)"
         />
         <path d="M12,28 L88,28 L50,88 Z" fill="url(#ktDots)" opacity="0.22" />
@@ -287,26 +286,11 @@ function LeftCarvedRail() {
         preserveAspectRatio="none"
       >
         <path
-          d="
-            M0,0
-            L64,0
-            C54,100 54,180 64,260
-            C72,330 72,390 64,460
-            C54,540 54,620 64,720
-            L0,720 Z
-          "
+          d="M0,0 L64,0 C54,100 54,180 64,260 C72,330 72,390 64,460 C54,540 54,620 64,720 L0,720 Z"
           fill="rgba(255,255,255,0.25)"
           style={{ mixBlendMode: "overlay" }}
         />
       </svg>
-
-      {/* your fixed logo */}
-      <img
-        src={LOGO_URL}
-        alt="Kpocha Touch"
-        className="absolute top-3 left-3 h-10 w-10 sm:h-12 sm:w-12 rounded-full object-cover ring-1 ring-black/10 bg-white p-0.5 z-10"
-        loading="lazy"
-      />
 
       <div
         className="absolute left-0 right-0 bottom-10 h-12"
@@ -317,15 +301,15 @@ function LeftCarvedRail() {
           opacity: 0.95,
         }}
       />
+
+      {logoUrl && (
+        <img
+          src={logoUrl}
+          alt="Kpocha Touch"
+          className="absolute top-3 left-3 h-10 w-10 sm:h-12 sm:w-12 rounded-full object-cover ring-1 ring-black/10 bg-white p-0.5 z-10"
+          loading="lazy"
+        />
+      )}
     </div>
   );
 }
-
-/**
- * COMMENTS (ProDrawer.jsx)
- * - Kept the Kpocha Touch logo in the rail (not removed).
- * - Removed demo rating: now shows real rating if present, else “—”.
- * - Services now read from multiple pro fields so “pro-only” data will still display.
- * - Gallery now reads from photos / gallery / workPhotos / professional.workPhotos.
- * - Book button still supports both drawer booking and direct /book/:id link.
- */

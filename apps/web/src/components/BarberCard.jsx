@@ -1,14 +1,11 @@
-// apps/web/src/components/BarberCard.jsx
-import { useState } from "react";
 import { Link } from "react-router-dom";
 
 /**
- * BRANDING:
- * This must stay. Do NOT remove or make "optional" — app branding depends on it.
- * If later you want to swap it, change the URL here or move to env, but keep the slot.
+ * Branding is sourced from .env for flexibility.
+ * In Vite you can set this in your .env.local:
+ *   VITE_APP_LOGO_URL=https://your-cdn/.../kpocha-touch.png
  */
-// Use .env variable instead of hard-coded link
-const LOGO_URL = import.meta.env.VITE_APP_LOGO_URL || "";
+const APP_LOGO_URL = import.meta.env.VITE_APP_LOGO_URL || "";
 
 /* ------------------------------ Helpers ------------------------------ */
 function toArrayServices(svcs) {
@@ -34,19 +31,12 @@ function priceTag(s) {
   return `${name} ₦${Number(price).toLocaleString()}`;
 }
 
-/** Turn availability (string | object) into a short, safe label; empty string means “don’t render chip” */
 function availabilityLabel(av) {
   if (!av) return "";
-  if (typeof av === "string") {
-    const t = av.trim();
-    return t ? t : "";
-  }
+  if (typeof av === "string") return av.trim();
   if (typeof av === "object") {
-    if (typeof av.status === "string" && av.status.trim()) return av.status.trim();
-    const start = av.start ? String(av.start).trim() : "";
-    const end = av.end ? String(av.end).trim() : "";
-    if (start && end) return `Hours ${start}-${end}`;
-    return "";
+    if (av.status) return String(av.status).trim();
+    if (av.start && av.end) return `Hours ${av.start}-${av.end}`;
   }
   return "";
 }
@@ -54,14 +44,12 @@ function availabilityLabel(av) {
 function Avatar({ url, seed, onClick }) {
   if (url) {
     return (
-      <button
-        type="button"
+      <img
+        src={url}
+        alt="Profile"
+        className="w-20 h-20 rounded-full border-2 border-zinc-700 object-cover shadow-lg cursor-pointer"
         onClick={onClick}
-        className="w-20 h-20 rounded-full border-2 border-zinc-700 overflow-hidden shadow-lg"
-        title="Click to view photo"
-      >
-        <img src={url} alt="Profile" className="w-full h-full object-cover" loading="lazy" />
-      </button>
+      />
     );
   }
   const initials =
@@ -73,58 +61,55 @@ function Avatar({ url, seed, onClick }) {
       .map((s) => s?.[0]?.toUpperCase())
       .join("") || "PR";
   return (
-    <div className="w-20 h-20 rounded-full border-2 border-zinc-700 bg-zinc-900 flex items-center justify-center text-xl font-semibold">
+    <div
+      className="w-20 h-20 rounded-full border-2 border-zinc-700 bg-zinc-900 flex items-center justify-center text-xl font-semibold"
+      onClick={onClick}
+    >
       {initials}
     </div>
   );
 }
 
-/* =======================================================================
-   Card with bottom actions:
-   - View now → opens drawer via onOpen(barber)
-   - Book now → calls onBook(serviceName|null) OR links to /book/:id
-   ======================================================================= */
+/* ===================================================================== */
 export default function BarberCard({ barber = {}, onOpen, onBook }) {
-  const [lightbox, setLightbox] = useState("");
-
   const id = barber.id || barber._id || "";
   const name =
     barber.name ||
     [barber.firstName, barber.lastName].filter(Boolean).join(" ").trim() ||
     "Professional";
 
-  const role =
-    (typeof barber.title === "string" && barber.title.trim()) ||
-    "" /* neutral: no fake demo text */;
-
-  const rating =
-    typeof barber.rating === "number" && Number.isFinite(barber.rating)
-      ? barber.rating
-      : null;
-
+  const role = typeof barber.title === "string" ? barber.title.trim() : "";
   const availability = availabilityLabel(barber.availability);
   const verified = !!barber.verified;
 
-  const lga = (barber.lga || "").toString().trim();
-  const state = (barber.state || "").toString().trim();
+  const lga = String(barber.lga || "").trim();
+  const state = String(barber.state || "").trim();
 
-  // prefer *real pro doc* fields
-  const services = toArrayServices(
-    barber.services ||
-      barber.servicesDetailed ||
-      (barber.professional && (barber.professional.services || barber.professional.servicesDetailed)) ||
-      []
-  );
+  const services = toArrayServices(barber.services);
   const topThree = services.slice(0, 3);
+  const bio = String(barber.bio || barber.description || "").trim();
+  const photoUrl = barber.photoUrl || barber.avatarUrl || "";
 
-  const bio = (barber.bio || barber.description || "").toString().trim();
+  // Rating source priority: metrics.avgRating -> rating
+  const rawRating =
+    Number(
+      barber?.metrics && typeof barber.metrics.avgRating !== "undefined"
+        ? barber.metrics.avgRating
+        : barber.rating
+    ) || 0;
 
-  // prefer image from pro -> identity -> plain avatar
-  const photoUrl =
-    barber.photoUrl ||
-    barber.avatarUrl ||
-    (barber.identity && (barber.identity.photoUrl || barber.identity.avatarUrl)) ||
-    "";
+  // If backend gave ratingStars.full use it, otherwise compute from rounded rating
+  const fullStars =
+    Number.isFinite(Number(barber?.ratingStars?.full))
+      ? Math.max(0, Math.min(5, Number(barber.ratingStars.full)))
+      : Math.max(0, Math.min(5, Math.round(rawRating)));
+
+  const emptyStars = 5 - fullStars;
+  const rating = Math.max(0, Math.min(5, rawRating));
+
+  function handleAvatarClick() {
+    onOpen?.(barber);
+  }
 
   return (
     <div
@@ -139,10 +124,25 @@ export default function BarberCard({ barber = {}, onOpen, onBook }) {
           "0 1px 0 rgba(255,255,255,0.03) inset, 0 10px 30px rgba(0,0,0,0.45)",
       }}
     >
-      {/* KPOCHA TOUCH LOGO (DO NOT REMOVE) */}
-      {LOGO_URL && (
+      {/* Dot decoration */}
+      <svg
+        className="absolute left-1/2 -translate-x-1/2 -top-1 h-16 w-24 opacity-30"
+        viewBox="0 0 80 60"
+        fill="none"
+        aria-hidden="true"
+      >
+        <defs>
+          <pattern id="dots" x="0" y="0" width="4" height="4" patternUnits="userSpaceOnUse">
+            <circle cx="1" cy="1" r="0.6" fill="#ff7a00" />
+          </pattern>
+        </defs>
+        <path d="M0,0 L80,0 L40,60 Z" fill="url(#dots)" />
+      </svg>
+
+      {/* Logo from .env */}
+      {APP_LOGO_URL && (
         <img
-          src={LOGO_URL}
+          src={APP_LOGO_URL}
           alt="Kpocha Touch"
           className="absolute right-4 top-3 h-9 w-9 rounded-full object-cover ring-1 ring-white/10 bg-white/10 p-0.5"
           loading="lazy"
@@ -152,7 +152,7 @@ export default function BarberCard({ barber = {}, onOpen, onBook }) {
       {/* Top content */}
       <div className="flex gap-5 px-5 pt-5 pb-16">
         <div className="shrink-0">
-          <Avatar url={photoUrl} seed={name} onClick={() => photoUrl && setLightbox(photoUrl)} />
+          <Avatar url={photoUrl} seed={name} onClick={handleAvatarClick} />
         </div>
 
         <div className="min-w-0 flex-1">
@@ -160,20 +160,31 @@ export default function BarberCard({ barber = {}, onOpen, onBook }) {
             <div className="text-[20px] font-extrabold tracking-wide truncate">
               {name}
             </div>
-            {role ? <div className="text-sm text-zinc-400">{role}</div> : null}
+            {role && <div className="text-sm text-zinc-400">{role}</div>}
           </div>
 
+          {/* Rating, location, etc. */}
           <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-zinc-300">
-            {rating != null && (
-              <span className="inline-flex items-center gap-1">
-                <span className="text-amber-300">★</span>
-                <span className="font-semibold">{rating.toFixed(1)}</span>
+            {rating > 0 && (
+              <span className="inline-flex items-center gap-0.5">
+                {Array.from({ length: fullStars }).map((_, i) => (
+                  <span
+                    key={`f${i}`}
+                    className={`text-yellow-400 star-anim ${rating >= 4.6 ? "star-glow" : ""}`}
+                  >
+                    ★
+                  </span>
+                ))}
+                {Array.from({ length: emptyStars }).map((_, i) => (
+                  <span key={`e${i}`} className="text-zinc-600 star-anim">★</span>
+                ))}
+                <span className="ml-1 font-semibold">{rating.toFixed(1)}</span>
               </span>
             )}
 
             {(state || lga) && (
               <>
-                {rating != null && <span className="h-3 w-px bg-zinc-700" />}
+                {rating > 0 && <span className="h-3 w-px bg-zinc-700" />}
                 <span className="truncate">
                   {[state, lga].filter(Boolean).join(", ")}
                 </span>
@@ -199,26 +210,23 @@ export default function BarberCard({ barber = {}, onOpen, onBook }) {
             )}
           </div>
 
-          {/* Top services */}
+          {/* Top 3 services */}
           {!!topThree.length && (
             <div className="mt-3 flex flex-wrap gap-2">
               {topThree.map((s, i) => {
                 const label = priceTag(s);
                 const svcName = s?.name || "";
-                if (onBook && svcName) {
-                  return (
-                    <button
-                      key={`${svcName}-${i}`}
-                      type="button"
-                      onClick={() => onBook(svcName)}
-                      className="rounded-full border border-zinc-700 bg-zinc-900/60 px-3 py-1 text-xs text-zinc-200 hover:bg-zinc-900"
-                      title={`Book "${svcName}"`}
-                    >
-                      {label}
-                    </button>
-                  );
-                }
-                return (
+                return onBook && svcName ? (
+                  <button
+                    key={`${svcName}-${i}`}
+                    type="button"
+                    onClick={() => onBook(svcName)}
+                    className="rounded-full border border-zinc-700 bg-zinc-900/60 px-3 py-1 text-xs text-zinc-200 hover:bg-zinc-900"
+                    title={`Book ${svcName}`}
+                  >
+                    {label}
+                  </button>
+                ) : (
                   <span
                     key={`${label}-${i}`}
                     className="rounded-full border border-zinc-700 bg-zinc-900/60 px-3 py-1 text-xs text-zinc-200"
@@ -234,12 +242,11 @@ export default function BarberCard({ barber = {}, onOpen, onBook }) {
         </div>
       </div>
 
-      {/* Gradient footer (keep visual) */}
+      {/* Gradient footer */}
       <div
         className="pointer-events-none absolute bottom-0 left-0 right-0 h-16"
         style={{
-          background:
-            "linear-gradient(90deg, #ff7a00 0%, #ff3b3b 45%, #ff2d55 100%)",
+          background: "linear-gradient(90deg, #ff7a00 0%, #ff3b3b 45%, #ff2d55 100%)",
           clipPath:
             "path('M0,0 C120,30 260,-5 360,12 C420,22 480,40 520,0 L520,64 L0,64 Z')",
         }}
@@ -249,17 +256,14 @@ export default function BarberCard({ barber = {}, onOpen, onBook }) {
       {/* Bottom action bar */}
       <div className="absolute inset-x-5 bottom-3 z-10 flex items-center justify-between">
         <button
-          type="button"
           onClick={() => onOpen?.(barber)}
           className="px-4 py-2 rounded-lg bg-black text-white font-bold text-sm shadow-md hover:opacity-90"
           title="View full profile"
         >
           View now
         </button>
-
         {onBook ? (
           <button
-            type="button"
             onClick={() => onBook(null)}
             className="px-4 py-2 rounded-lg bg-black text-white font-bold text-sm shadow-md hover:opacity-90"
           >
@@ -269,35 +273,12 @@ export default function BarberCard({ barber = {}, onOpen, onBook }) {
           <Link
             to={id ? `/book/${id}` : "#"}
             className="px-4 py-2 rounded-lg bg-black text-white font-bold text-sm shadow-md hover:opacity-90"
-            aria-disabled={!id}
-            onClick={(e) => {
-              if (!id) e.preventDefault();
-            }}
+            onClick={(e) => !id && e.preventDefault()}
           >
             Book now
           </Link>
         )}
       </div>
-
-      {/* Avatar lightbox */}
-      {lightbox && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70"
-          onClick={() => setLightbox("")}
-        >
-          <div className="max-w-2xl max-h-[85vh] rounded-xl overflow-hidden border border-zinc-700">
-            <img src={lightbox} alt="Pro photo" className="block max-h-[85vh] object-contain" />
-          </div>
-        </div>
-      )}
     </div>
   );
 }
-
-/**
- * COMMENTS (BarberCard.jsx)
- * - Kept the Kpocha Touch logo hard-coded on top-right.
- * - Avatar is now clickable → expands in lightbox.
- * - We now prefer real pro fields (services, identity.photoUrl) so public list shows real data.
- * - Book + View still work the same with the drawer.
- */
