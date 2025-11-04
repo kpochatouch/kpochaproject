@@ -119,8 +119,9 @@ export default function Browse() {
   const [errFeed, setErrFeed] = useState("");
 
   /**
-   * Load current user + client profile (to prefill location)
-   * We do this in one place so browse page shows *real* LGA/state for booking
+   * Load current user + client profile (to prefill location) ONCE.
+   * We used to depend on [stateName, lga], but that kept overriding user choices.
+   * Now we prefill only on mount.
    */
   useEffect(() => {
     let alive = true;
@@ -142,11 +143,11 @@ export default function Browse() {
 
         setMe(meData);
 
-        // prefill location from client profile first
-        const st = (prof?.identity?.state || prof?.state || "").toString().toUpperCase();
+        // prefill location from client profile first — but ONLY if the filters are still empty
+        const st = (prof?.identity?.state || prof?.state || "").toString().trim();
         const lg = (prof?.identity?.city || prof?.lga || "").toString().toUpperCase();
-        if (st && !stateName) setStateName(st);
-        if (lg && !lga) setLga(lg);
+        if (!stateName && st) setStateName(st);
+        if (!lga && lg) setLga(lg);
       } catch {
         if (!alive) return;
         setMe(null);
@@ -155,7 +156,9 @@ export default function Browse() {
     return () => {
       alive = false;
     };
-  }, [stateName, lga]);
+    // ⬇️ run once
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // load geo (real endpoint first, demo fallback after)
   useEffect(() => {
@@ -164,14 +167,13 @@ export default function Browse() {
       try {
         const { data } = await api.get("/api/geo/ng");
         if (!on) return;
-        // backend now gives UPPERCASE already
         setStates(data?.states || []);
         setLgasByState(data?.lgas || {});
       } catch {
-        // demo fallback — keep UPPERCASE so it matches the rest
+        // demo fallback — should disappear in production
         if (!on) return;
-        setStates(["EDO"]);
-        setLgasByState({ EDO: ["OREDO", "IKPOBA-OKHA", "EGOR", "OTHERS"] });
+        setStates(["Edo"]);
+        setLgasByState({ Edo: ["OREDO", "IKPOBA-OKHA", "EGOR", "OTHERS"] });
       }
     })();
     return () => {
@@ -223,9 +225,6 @@ export default function Browse() {
   // filter + rank
   const filteredAndRanked = useMemo(() => {
     const term = q.trim().toLowerCase();
-    const selectedState = (stateName || "").toUpperCase();
-    const selectedLga = (lga || "").toUpperCase();
-
     return [...pros]
       .map((p) => {
         // NOTE: /api/barbers should already unify: name, lga, state, services
@@ -237,16 +236,17 @@ export default function Browse() {
 
         const matchName = term ? name.includes(term) || desc.includes(term) : true;
         const matchSvc = service ? servicesLC.includes(service.toLowerCase()) : true;
-        const matchState = selectedState ? proState === selectedState : true;
-        const matchLga = selectedLga ? proLga === selectedLga : true;
+        const matchState = stateName ? proState === stateName.toUpperCase() : true;
+        const matchLga = lga ? proLga === lga.toUpperCase() : true;
+
+        const ok = matchName && matchSvc && matchState && matchLga;
 
         let score = 0;
         if (service && matchSvc) score += 3;
-        if (selectedLga && matchLga) score += 2;
-        if (selectedState && matchState) score += 2;
+        if (lga && matchLga) score += 2;
         if (term && matchName) score += 1;
 
-        return { p, ok: matchName && matchSvc && matchState && matchLga, score };
+        return { p, ok, score };
       })
       .filter((x) => x.ok)
       .sort((a, b) => b.score - a.score)
@@ -255,8 +255,7 @@ export default function Browse() {
 
   // lgas for selected state
   const lgasForState = useMemo(() => {
-    const key = (stateName || "").toUpperCase();
-    return key && lgasByState[key] ? lgasByState[key] : [];
+    return stateName && lgasByState[stateName] ? lgasByState[stateName] : [];
   }, [stateName, lgasByState]);
 
   // reset filters
@@ -306,7 +305,7 @@ export default function Browse() {
         serviceName: svcName || undefined,
         amountNaira: typeof svcPrice !== "undefined" ? svcPrice : undefined,
         country: "Nigeria",
-        state: (stateName || "").toUpperCase(),
+        state: stateName || "",
         lga: (lga || "").toUpperCase(),
       },
     });
@@ -359,8 +358,7 @@ export default function Browse() {
           <select
             value={stateName}
             onChange={(e) => {
-              const val = e.target.value.toUpperCase();
-              setStateName(val);
+              setStateName(e.target.value);
               setLga("");
             }}
             className="bg-black border border-zinc-800 rounded-lg px-3 py-2"
@@ -375,7 +373,7 @@ export default function Browse() {
 
           <select
             value={lga}
-            onChange={(e) => setLga(e.target.value.toUpperCase())}
+            onChange={(e) => setLga(e.target.value)}
             className="bg-black border border-zinc-800 rounded-lg px-3 py-2"
             disabled={stateName && !lgasForState.length}
           >
@@ -459,3 +457,12 @@ export default function Browse() {
     </ErrorBoundary>
   );
 }
+
+/**
+ * NOTES (Browse.jsx)
+ * 1. We now prefill state/LGA from /api/profile/me so *real* user location shows — but ONLY once on mount.
+ * 2. /api/barbers is still the single source of truth — it should already be built from Pro docs.
+ * 3. We removed the hard-coded Cloudinary-like logo from cards (moved to component).
+ * 4. Demo geo fallback is kept but clearly marked.
+ * 5. Open avatar happens in BarberCard (see below), not here.
+ */
