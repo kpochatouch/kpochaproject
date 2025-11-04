@@ -304,7 +304,7 @@ const app = express();
 
 /* ------------------- CORS (hardened, with Vercel previews) ------------------- */
 const ALLOW_LIST = (process.env.CORS_ORIGIN || "http://localhost:5173")
-  .split(/[,\s]+/) // ← fixed the extra ]
+  .split(/[,\s]+/)
   .map((s) => s.trim())
   .filter(Boolean);
 
@@ -636,10 +636,7 @@ app.get("/api/pros/pending", requireAuth, requireAdmin, async (_req, res) => {
   }
 });
 
-/** Approve application → upsert Pro
- * IMPORTANT: we now copy application.professional.services into Pro.services
- * so that /api/barbers (which uses proToBarber) will actually see them.
- */
+/** Approve application → upsert Pro */
 app.post("/api/pros/approve/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
@@ -766,31 +763,68 @@ app.delete("/api/dev/reset", async (_req, res) => {
 app.get("/api/health", (_req, res) => res.json({ ok: true, time: new Date().toISOString() }));
 
 /* ------------------- Barbers ------------------- */
+/**
+ * This one is the important change.
+ * - matches top-level state/lga
+ * - ALSO matches identity.state / identity.city
+ * - case-insensitive exact match
+ * - optional service filter
+ * - still returns proToBarber(...)
+ */
 app.get("/api/barbers", async (req, res) => {
   try {
     if (mongoose.connection.readyState !== 1) {
       return res.status(503).json({ error: "Database not connected" });
     }
 
-    const { lga, state } = req.query;
-    const q = {};
+    const stateRaw = (req.query.state || "").trim();
+    const lgaRaw = (req.query.lga || "").trim();
+    const serviceRaw = (req.query.service || "").trim();
 
-    // state: make it case-insensitive, because DB often has "Edo" and frontend sends "EDO"
-    if (state) {
-      q.state = new RegExp(`^${String(state).trim()}$`, "i");
+    const and = [];
+
+    // state: match either pro.state OR pro.identity.state (case-insensitive exact)
+    if (stateRaw) {
+      const re = new RegExp(`^${escapeRegex(stateRaw)}$`, "i");
+      and.push({
+        $or: [{ state: re }, { "identity.state": re }],
+      });
     }
 
-    if (lga) {
-      q.lga = String(lga).toUpperCase();
+    // lga: match either pro.lga OR pro.identity.city (case-insensitive exact)
+    if (lgaRaw) {
+      const re = new RegExp(`^${escapeRegex(lgaRaw)}$`, "i");
+      and.push({
+        $or: [{ lga: re }, { "identity.city": re }],
+      });
     }
 
-    const docs = await Pro.find(q).lean();
+    // service: match common patterns
+    if (serviceRaw) {
+      const re = new RegExp(escapeRegex(serviceRaw), "i");
+      and.push({
+        $or: [
+          { services: { $elemMatch: { $regex: re } } },   // ['Barbering', ...]
+          { "services.name": { $regex: re } },             // [{name:'Barbering'}]
+          { "servicesDetailed.name": { $regex: re } },     // if you ever stored like this
+        ],
+      });
+    }
+
+    const query = and.length ? { $and: and } : {};
+
+    const docs = await Pro.find(query).lean();
     return res.json(docs.map(proToBarber));
   } catch (err) {
     console.error("[barbers] DB error:", err);
     res.status(500).json({ error: "Failed to load barbers" });
   }
 });
+
+// helper for the route above
+function escapeRegex(str = "") {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 app.get("/api/barbers/:id", async (req, res) => {
   try {
@@ -885,7 +919,7 @@ app.get("/api/barbers/nearby", async (req, res) => {
       const state = rev?.state || "";
 
       const q = {};
-      if (state) q.state = new RegExp(`^${state}$`, "i"); // ← make state case-insensitive here too
+      if (state) q.state = new RegExp(`^${state}$`, "i");
       if (lga) q.lga = lga;
 
       const docs = await Pro.find(q).limit(100).lean();
