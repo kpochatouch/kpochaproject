@@ -28,46 +28,102 @@ export const api = axios.create({
 });
 
 /* =========================================
-   AUTH TOKEN (Firebase preferred, localStorage fallback)
+   AUTH HANDLING
+   - we keep listening to Firebase changes
+   - we refresh token on each request if possible
+   - we still support manual setAuthToken() (your Login.jsx uses it)
    ========================================= */
-let authReady = new Promise((resolve) => {
+let firebaseAuth = null;
+let authListenerStarted = false;
+// latest token we heard from Firebase (or manual setter)
+let latestToken = null;
+
+// start a persistent listener so sign-out/sign-in later also updates tokens
+function ensureAuthListener() {
+  if (authListenerStarted) return;
+  authListenerStarted = true;
   try {
-    const auth = getAuth();
-    const stop = onAuthStateChanged(auth, () => {
-      stop();
-      resolve();
+    firebaseAuth = getAuth();
+    onAuthStateChanged(firebaseAuth, async (user) => {
+      if (user) {
+        try {
+          const t = await user.getIdToken();
+          latestToken = t;
+          // keep parity with your manual setter
+          try {
+            localStorage.setItem("token", t);
+          } catch {}
+        } catch {
+          // ignore
+        }
+      } else {
+        latestToken = null;
+        try {
+          localStorage.removeItem("token");
+        } catch {}
+      }
     });
   } catch {
-    resolve();
+    // firebase not available (SSR / build) — we just skip
   }
-});
+}
+ensureAuthListener();
 
 api.interceptors.request.use(async (config) => {
-  await authReady;
+  // make sure listener is running
+  ensureAuthListener();
 
-  // Try Firebase ID token first
-  try {
-    const auth = getAuth();
-    const user = auth?.currentUser || null;
+  // 1) if we have firebase and a current user, ask for a fresh token
+  if (firebaseAuth) {
+    const user = firebaseAuth.currentUser;
     if (user) {
-      const idToken = await user.getIdToken();
-      if (idToken) config.headers.Authorization = `Bearer ${idToken}`;
-      return config;
+      try {
+        // getIdToken() (no force) will refresh if needed
+        const fresh = await user.getIdToken();
+        if (fresh) {
+          latestToken = fresh;
+          config.headers.Authorization = `Bearer ${fresh}`;
+          return config;
+        }
+      } catch {
+        // fall through to latestToken/localStorage
+      }
     }
-  } catch {}
+  }
 
-  // Fallback to localStorage token (for admin tools)
+  // 2) if we have a token from the listener, use it
+  if (latestToken) {
+    config.headers.Authorization = `Bearer ${latestToken}`;
+    return config;
+  }
+
+  // 3) fallback to localStorage token (used by your Login.jsx)
   try {
-    const token = localStorage.getItem("token");
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-  } catch {}
+    const t = localStorage.getItem("token");
+    if (t) {
+      latestToken = t;
+      config.headers.Authorization = `Bearer ${t}`;
+    }
+  } catch {
+    // ignore
+  }
 
   return config;
 });
 
+// manual override used in Login.jsx after sign-in
 export function setAuthToken(token) {
-  if (!token) localStorage.removeItem("token");
-  else localStorage.setItem("token", token);
+  if (!token) {
+    try {
+      localStorage.removeItem("token");
+    } catch {}
+    latestToken = null;
+  } else {
+    try {
+      localStorage.setItem("token", token);
+    } catch {}
+    latestToken = token;
+  }
 }
 
 /* small helper to drop empties */
@@ -75,7 +131,6 @@ function stripEmpty(obj = {}) {
   const out = {};
   for (const [k, v] of Object.entries(obj)) {
     if (v === "" || v === null || typeof v === "undefined") continue;
-    // also drop NaN
     if (typeof v === "number" && Number.isNaN(v)) continue;
     out[k] = v;
   }
@@ -106,7 +161,7 @@ export async function getProMe() {
 /**
  * Unified bundle:
  * - /api/me → firebase uid + email
- * - /api/profile/me → client profile (SOURCE OF TRUTH)
+ * - /api/profile/me → client profile
  * - /api/pros/me → pro doc (if exists)
  */
 export async function loadMeBundle() {
@@ -336,17 +391,15 @@ export async function submitProApplication(payload) {
 
 /* Unified Client Profile (one UID per user) */
 export async function getClientProfile() {
-  const { data } = await api.get("/api/profile/me"); // unified alias
+  const { data } = await api.get("/api/profile/me");
   return data;
 }
 export async function updateClientProfile(payload) {
-  // 🔴 strip empties so backend doesn't reject
   const clean = stripEmpty(payload);
   const { data } = await api.put("/api/profile/me", clean);
   return data;
 }
 
-// alias for the new flow name I used in Settings.jsx
 export const saveClientProfile = updateClientProfile;
 
 /* Optional booking/admin helpers */
@@ -365,7 +418,7 @@ export async function getClientProfileAdmin(clientUid) {
   return data;
 }
 
-/* Pro extras (gallery, bio, whatsapp, shop – NOT name/phone/lga) */
+/* Pro extras */
 export async function updateProProfile(payload) {
   const { data } = await api.put("/api/profile/pro/me", payload);
   return data;
