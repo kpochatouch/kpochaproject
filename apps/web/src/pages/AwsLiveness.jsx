@@ -35,7 +35,7 @@ export default function AwsLiveness() {
         const { data } = await api.post("/api/aws-liveness/session", {});
         if (!data?.ok || !data.sessionId) {
           throw new Error(
-            data?.error || "Failed to create Kpocha Face Verification session"
+            data?.error || "Failed to create AWS liveness session"
           );
         }
 
@@ -43,7 +43,7 @@ export default function AwsLiveness() {
         setLoading(false);
       } catch (e) {
         console.error("[AwsLiveness] start failed:", e);
-        setErr(e?.message || "Could not start Kpocha Face Verification.");
+        setErr(e?.message || "Could not start AWS liveness.");
         setLoading(false);
       }
     })();
@@ -73,7 +73,7 @@ export default function AwsLiveness() {
   if (loading) {
     return (
       <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center">
-        <h1 className="text-xl font-semibold mb-2">Kpocha Face Verification</h1>
+        <h1 className="text-xl font-semibold mb-2">AWS Liveness</h1>
         <p className="text-sm text-zinc-300 mb-2">
           Preparing your liveness session…
         </p>
@@ -90,7 +90,7 @@ export default function AwsLiveness() {
   if (err) {
     return (
       <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center">
-        <h1 className="text-xl font-semibold mb-2">Kpocha Face Verification</h1>
+        <h1 className="text-xl font-semibold mb-2">AWS Liveness</h1>
         <p className="text-sm text-red-400 mb-4">{err}</p>
         <button
           onClick={() => nav(back)}
@@ -104,7 +104,7 @@ export default function AwsLiveness() {
 
   return (
     <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center p-4">
-      <h1 className="text-xl font-semibold mb-4">Kpocha Face Verification</h1>
+      <h1 className="text-xl font-semibold mb-4">AWS Liveness</h1>
 
       {/* give AWS enough width, keep centered */}
       <div className="w-full max-w-2xl mx-auto">

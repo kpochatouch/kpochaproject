@@ -8,47 +8,8 @@
               #000;
 }
 
-/* --- AWS LIVENESS FIX ---
-   We let the AWS component size itself BUT we don't let the video/canvas
-   grow wider than the box we put it in (your <div class="w-full max-w-2xl ...">).
-   This is what stops the overlay from drifting. */
+/* make sure Tailwind doesn't shrink AWS liveness internals */
 .aws-liveness video,
 .aws-liveness canvas {
-  max-width: 100% !important;
-}
-
-/* =======================
-   ⭐ Star Animations
-   ======================= */
-@keyframes starFade {
-  0% {
-    opacity: 0;
-    transform: scale(0.5) rotate(-20deg);
-    filter: brightness(0.6);
-  }
-  60% {
-    opacity: 1;
-    transform: scale(1.15) rotate(5deg);
-    filter: brightness(1.2);
-  }
-  100% {
-    opacity: 1;
-    transform: scale(1) rotate(0deg);
-    filter: brightness(1);
-  }
-}
-
-.star-anim {
-  display: inline-block;
-  animation: starFade 0.5s ease-out;
-  transform-origin: center;
-}
-
-/* 💫 gentle glow for elite ratings (used when rating >= 4.6) */
-@keyframes starGlow {
-  0%, 100% { text-shadow: 0 0 6px rgba(255, 215, 0, 0.5); }
-  50%      { text-shadow: 0 0 12px rgba(255, 215, 0, 1); }
-}
-.star-glow {
-  animation: starGlow 2s ease-in-out infinite alternate;
+  max-width: none !important;
 }
