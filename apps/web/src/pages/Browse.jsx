@@ -9,21 +9,17 @@ import FeedCard from "../components/FeedCard";
 import ErrorBoundary from "../components/ErrorBoundary";
 
 /**
- * Feed composer (for PROs) – now with device upload
- * 1. user writes text
- * 2. user can paste URL OR upload
- * 3. if upload -> we call /api/uploads/sign -> upload to Cloudinary -> set mediaUrl
+ * Feed composer – now with device upload
  */
 function FeedComposer({ lga, onPosted }) {
   const [text, setText] = useState("");
   const [mediaUrl, setMediaUrl] = useState("");
-  const [mediaType, setMediaType] = useState("image"); // "image" | "video"
+  const [mediaType, setMediaType] = useState("image");
   const [posting, setPosting] = useState(false);
   const [msg, setMsg] = useState("");
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef(null);
 
-  // user picks a file from device
   async function handleFileChange(e) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -31,7 +27,7 @@ function FeedComposer({ lga, onPosted }) {
     try {
       setUploading(true);
 
-      // 1) get signed params from your backend
+      // get signed params
       const signRes = await api.post("/api/uploads/sign", {
         folder: "kpocha-feed",
         overwrite: true,
@@ -46,12 +42,11 @@ function FeedComposer({ lga, onPosted }) {
         overwrite,
         tags,
       } = signRes.data || {};
-
       if (!cloudName || !apiKey || !timestamp || !signature) {
         throw new Error("Upload signing failed");
       }
 
-      // 2) upload straight to Cloudinary
+      // upload to Cloudinary
       const form = new FormData();
       form.append("file", file);
       form.append("api_key", apiKey);
@@ -64,20 +59,12 @@ function FeedComposer({ lga, onPosted }) {
 
       const uploadRes = await fetch(
         `https://api.cloudinary.com/v1_1/${cloudName}/auto/upload`,
-        {
-          method: "POST",
-          body: form,
-        }
+        { method: "POST", body: form }
       );
-
-      if (!uploadRes.ok) {
-        throw new Error("Cloudinary upload failed");
-      }
+      if (!uploadRes.ok) throw new Error("Cloudinary upload failed");
       const uploaded = await uploadRes.json();
 
-      // 3) set URL + type
       setMediaUrl(uploaded.secure_url || uploaded.url || "");
-      // detect type from file
       if (file.type.startsWith("video/")) {
         setMediaType("video");
       } else {
@@ -89,10 +76,7 @@ function FeedComposer({ lga, onPosted }) {
       setMsg("Upload failed. Please try again.");
     } finally {
       setUploading(false);
-      // reset input so picking the same file again works
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   }
 
@@ -104,21 +88,15 @@ function FeedComposer({ lga, onPosted }) {
     }
     try {
       setPosting(true);
-      const body = {
+      await api.post("/api/posts", {
         text: text.trim(),
         media: mediaUrl
-          ? [
-              {
-                url: mediaUrl.trim(),
-                type: mediaType,
-              },
-            ]
+          ? [{ url: mediaUrl.trim(), type: mediaType }]
           : [],
         lga: (lga || "").toUpperCase(),
         isPublic: true,
         tags: [],
-      };
-      await api.post("/api/posts", body);
+      });
       setText("");
       setMediaUrl("");
       setMsg("Posted!");
@@ -137,7 +115,6 @@ function FeedComposer({ lga, onPosted }) {
         {msg ? <span className="text-xs text-zinc-400">{msg}</span> : null}
       </div>
 
-      {/* text */}
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}
@@ -146,7 +123,6 @@ function FeedComposer({ lga, onPosted }) {
         rows={3}
       />
 
-      {/* media row */}
       <div className="flex flex-wrap gap-2 mb-3">
         <input
           value={mediaUrl}
@@ -154,7 +130,6 @@ function FeedComposer({ lga, onPosted }) {
           placeholder="Image/Video URL (optional)"
           className="flex-1 min-w-[160px] bg-black border border-zinc-800 rounded-lg px-3 py-2"
         />
-
         <select
           value={mediaType}
           onChange={(e) => setMediaType(e.target.value)}
@@ -163,7 +138,6 @@ function FeedComposer({ lga, onPosted }) {
           <option value="image">Image</option>
           <option value="video">Video</option>
         </select>
-
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
@@ -181,7 +155,6 @@ function FeedComposer({ lga, onPosted }) {
         />
       </div>
 
-      {/* preview */}
       {mediaUrl ? (
         <div className="mb-3">
           <p className="text-xs text-zinc-400 mb-1">Preview:</p>
@@ -189,13 +162,13 @@ function FeedComposer({ lga, onPosted }) {
             <video
               src={mediaUrl}
               controls
-              className="max-h-48 rounded-lg border border-zinc-800"
+              className="w-full max-h-52 rounded-lg border border-zinc-800 object-cover"
             />
           ) : (
             <img
               src={mediaUrl}
               alt="uploaded"
-              className="max-h-48 rounded-lg border border-zinc-800"
+              className="w-full max-h-52 rounded-lg border border-zinc-800 object-cover"
             />
           )}
         </div>
@@ -203,7 +176,7 @@ function FeedComposer({ lga, onPosted }) {
 
       <div className="flex items-center justify-between">
         <p className="text-xs text-zinc-500">
-          You can paste a Cloudinary/S3 URL or upload directly.
+          You can paste a URL or upload directly.
         </p>
         <button
           onClick={submit}
@@ -221,41 +194,31 @@ export default function Browse() {
   const navigate = useNavigate();
   const [tab, setTab] = useState("pros");
 
-  // pros list
   const [pros, setPros] = useState([]);
   const [loadingPros, setLoadingPros] = useState(true);
   const [errPros, setErrPros] = useState("");
 
-  // filters
   const [q, setQ] = useState("");
   const [service, setService] = useState("");
   const [stateName, setStateName] = useState("");
   const [lga, setLga] = useState("");
 
-  // geo
   const [states, setStates] = useState([]);
   const [lgasByState, setLgasByState] = useState({});
 
-  // current user
   const [me, setMe] = useState(null);
-  const isPro = !!me?.isPro;
-
-  // selected pro
   const [openPro, setOpenPro] = useState(null);
 
-  // feed
   const [feed, setFeed] = useState([]);
   const [loadingFeed, setLoadingFeed] = useState(true);
   const [errFeed, setErrFeed] = useState("");
 
-  // prefill guard
   const didPrefillFromProfileRef = useRef(false);
 
-  // load current user + profile
+  // load me
   useEffect(() => {
     let alive = true;
-    const token =
-      localStorage.getItem("authToken") || localStorage.getItem("token");
+    const token = localStorage.getItem("authToken") || localStorage.getItem("token");
     if (!token) {
       setMe(null);
       return;
@@ -267,27 +230,13 @@ export default function Browse() {
           api.get("/api/profile/me").catch(() => ({ data: null })),
         ]);
         if (!alive) return;
-
         const meData = meRes.data || null;
         const prof = profileRes?.data || null;
-
         setMe(meData);
 
         if (!didPrefillFromProfileRef.current) {
-          const st = (
-            prof?.identity?.state ||
-            prof?.state ||
-            ""
-          )
-            .toString()
-            .toUpperCase();
-          const lg = (
-            prof?.identity?.city ||
-            prof?.lga ||
-            ""
-          )
-            .toString()
-            .toUpperCase();
+          const st = (prof?.identity?.state || prof?.state || "").toString().toUpperCase();
+          const lg = (prof?.identity?.city || prof?.lga || "").toString().toUpperCase();
           if (st) setStateName(st);
           if (lg) setLga(lg);
           didPrefillFromProfileRef.current = true;
@@ -314,9 +263,7 @@ export default function Browse() {
       } catch {
         if (!on) return;
         setStates(["EDO"]);
-        setLgasByState({
-          EDO: ["OREDO", "IKPOBA-OKHA", "EGOR", "OTHERS"],
-        });
+        setLgasByState({ EDO: ["OREDO", "IKPOBA-OKHA", "EGOR", "OTHERS"] });
       }
     })();
     return () => {
@@ -336,11 +283,7 @@ export default function Browse() {
         if (stateName) params.state = stateName.toUpperCase();
         const { data } = await api.get("/api/barbers", { params });
         if (!on) return;
-        const list = Array.isArray(data)
-          ? data
-          : Array.isArray(data?.items)
-          ? data.items
-          : [];
+        const list = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : [];
         setPros(list);
       } catch {
         if (!on) return;
@@ -354,23 +297,15 @@ export default function Browse() {
     };
   }, [lga, stateName]);
 
-  // normalize services from pro payload
   function svcArray(p) {
     const raw = p?.services;
     if (Array.isArray(raw))
-      return raw
-        .map((s) => (typeof s === "string" ? s : s?.name))
-        .filter(Boolean)
-        .map((s) => s.toLowerCase());
+      return raw.map((s) => (typeof s === "string" ? s : s?.name)).filter(Boolean).map((s) => s.toLowerCase());
     if (typeof raw === "string")
-      return raw
-        .split(",")
-        .map((s) => s.trim().toLowerCase())
-        .filter(Boolean);
+      return raw.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
     return [];
   }
 
-  // filter + rank
   const filteredAndRanked = useMemo(() => {
     const term = q.trim().toLowerCase();
     const selectedState = (stateName || "").toUpperCase();
@@ -380,22 +315,12 @@ export default function Browse() {
       .map((p) => {
         const name = String(p?.name || "").toLowerCase();
         const desc = String(p?.bio || p?.description || "").toLowerCase();
-        const proState = String(
-          p?.state || p?.identity?.state || ""
-        )
-          .trim()
-          .toUpperCase();
-        const proLga = String(p?.lga || p?.identity?.city || "")
-          .trim()
-          .toUpperCase();
+        const proState = String(p?.state || p?.identity?.state || "").trim().toUpperCase();
+        const proLga = String(p?.lga || p?.identity?.city || "").trim().toUpperCase();
         const servicesLC = svcArray(p);
 
-        const matchName = term
-          ? name.includes(term) || desc.includes(term)
-          : true;
-        const matchSvc = service
-          ? servicesLC.includes(service.toLowerCase())
-          : true;
+        const matchName = term ? name.includes(term) || desc.includes(term) : true;
+        const matchSvc = service ? servicesLC.includes(service.toLowerCase()) : true;
         const matchState = selectedState ? proState === selectedState : true;
         const matchLga = selectedLga ? proLga === selectedLga : true;
 
@@ -412,13 +337,11 @@ export default function Browse() {
       .map((x) => x.p);
   }, [pros, q, service, lga, stateName]);
 
-  // lgas for selected state
   const lgasForState = useMemo(() => {
     const key = (stateName || "").toUpperCase();
     return key && lgasByState[key] ? lgasByState[key] : [];
   }, [stateName, lgasByState]);
 
-  // reset filters
   function clearFilters() {
     setQ("");
     setService("");
@@ -427,30 +350,21 @@ export default function Browse() {
   }
 
   // feed fetch
-  const fetchFeed = useCallback(
-    async () => {
-      try {
-        setLoadingFeed(true);
-        setErrFeed("");
-        const params = {};
-        if (lga) params.lga = lga.toUpperCase();
-        const r = await api
-          .get("/api/feed/public", { params })
-          .catch(() => ({ data: [] }));
-        const list = Array.isArray(r.data)
-          ? r.data
-          : Array.isArray(r.data?.items)
-          ? r.data.items
-          : [];
-        setFeed(list);
-      } catch {
-        setErrFeed("Could not load feed.");
-      } finally {
-        setLoadingFeed(false);
-      }
-    },
-    [lga]
-  );
+  const fetchFeed = useCallback(async () => {
+    try {
+      setLoadingFeed(true);
+      setErrFeed("");
+      const params = {};
+      if (lga) params.lga = lga.toUpperCase();
+      const r = await api.get("/api/feed/public", { params }).catch(() => ({ data: [] }));
+      const list = Array.isArray(r.data) ? r.data : Array.isArray(r.data?.items) ? r.data.items : [];
+      setFeed(list);
+    } catch {
+      setErrFeed("Could not load feed.");
+    } finally {
+      setLoadingFeed(false);
+    }
+  }, [lga]);
 
   useEffect(() => {
     (async () => {
@@ -458,15 +372,12 @@ export default function Browse() {
     })();
   }, [fetchFeed, tab]);
 
-  // book handler
   function goBook(pro, chosenService) {
     const svcName = chosenService || service || null;
     const svcList = Array.isArray(pro?.services)
       ? pro.services.map((s) => (typeof s === "string" ? { name: s } : s))
       : [];
-    const svcPrice = svcName
-      ? svcList.find((s) => s.name === svcName)?.price
-      : undefined;
+    const svcPrice = svcName ? svcList.find((s) => s.name === svcName)?.price : undefined;
 
     const proId = pro?.id || pro?._id;
     if (!proId) return;
@@ -475,14 +386,15 @@ export default function Browse() {
       state: {
         proId,
         serviceName: svcName || undefined,
-        amountNaira:
-          typeof svcPrice !== "undefined" ? svcPrice : undefined,
+        amountNaira: typeof svcPrice !== "undefined" ? svcPrice : undefined,
         country: "Nigeria",
         state: (stateName || "").toUpperCase(),
         lga: (lga || "").toUpperCase(),
       },
     });
   }
+
+  const canPostOnFeed = !!me; // 👈 show composer for any logged-in user
 
   return (
     <ErrorBoundary>
@@ -493,9 +405,7 @@ export default function Browse() {
           <div className="inline-flex rounded-xl border border-zinc-800 overflow-hidden">
             <button
               className={`px-4 py-2 text-sm ${
-                tab === "pros"
-                  ? "bg-gold text-black font-semibold"
-                  : "hover:bg-zinc-900"
+                tab === "pros" ? "bg-gold text-black font-semibold" : "hover:bg-zinc-900"
               }`}
               onClick={() => setTab("pros")}
             >
@@ -503,9 +413,7 @@ export default function Browse() {
             </button>
             <button
               className={`px-4 py-2 text-sm border-l border-zinc-800 ${
-                tab === "feed"
-                  ? "bg-gold text-black font-semibold"
-                  : "hover:bg-zinc-900"
+                tab === "feed" ? "bg-gold text-black font-semibold" : "hover:bg-zinc-900"
               }`}
               onClick={() => setTab("feed")}
             >
@@ -514,7 +422,7 @@ export default function Browse() {
           </div>
         </div>
 
-        {/* filters (still shown for pros tab) */}
+        {/* filters (same) */}
         <div className="flex flex-wrap items-center gap-2 mb-6">
           <input
             value={q}
@@ -573,35 +481,33 @@ export default function Browse() {
 
         {/* content */}
         {tab === "pros" ? (
-            <>
-              {errPros && (
-                <div className="mb-4 rounded border border-red-800 bg-red-900/30 text-red-100 px-3 py-2">
-                  {errPros}
-                </div>
-              )}
+          <>
+            {errPros && (
+              <div className="mb-4 rounded border border-red-800 bg-red-900/30 text-red-100 px-3 py-2">
+                {errPros}
+              </div>
+            )}
 
-              {loadingPros ? (
-                <p className="text-zinc-400">Loading…</p>
-              ) : filteredAndRanked.length ? (
-                <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {filteredAndRanked.map((pro) => (
-                    <BarberCard
-                      key={pro.id || pro._id}
-                      barber={pro}
-                      onOpen={setOpenPro}
-                      onBook={(svc) => goBook(pro, svc)}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <div className="text-zinc-400">
-                  No professionals match your filters.
-                </div>
-              )}
-            </>
+            {loadingPros ? (
+              <p className="text-zinc-400">Loading…</p>
+            ) : filteredAndRanked.length ? (
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filteredAndRanked.map((pro) => (
+                  <BarberCard
+                    key={pro.id || pro._id}
+                    barber={pro}
+                    onOpen={setOpenPro}
+                    onBook={(svc) => goBook(pro, svc)}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="text-zinc-400">No professionals match your filters.</div>
+            )}
+          </>
         ) : (
           <>
-            {isPro && <FeedComposer lga={lga} onPosted={fetchFeed} />}
+            {canPostOnFeed && <FeedComposer lga={lga} onPosted={fetchFeed} />}
 
             {errFeed && (
               <div className="mb-4 rounded border border-red-800 bg-red-900/30 text-red-100 px-3 py-2">
@@ -614,20 +520,22 @@ export default function Browse() {
             ) : feed.length ? (
               <div className="grid md:grid-cols-2 gap-4">
                 {feed.map((post) => (
-                  <FeedCard key={post._id || post.id} post={post} />
+                  <FeedCard
+                    key={post._id || post.id}
+                    post={post}
+                    currentUid={me?.uid || me?.id || null}
+                    onDeleted={fetchFeed}
+                  />
                 ))}
               </div>
             ) : (
               <div className="rounded-lg border border-zinc-800 p-6 text-zinc-400">
-                No updates yet. Once professionals start posting photos and
-                promos, they’ll appear here. You can still book from the Pros
-                tab.
+                No updates yet. Once professionals start posting photos and promos, they’ll appear here.
               </div>
             )}
           </>
         )}
 
-        {/* drawer */}
         <ProDrawer
           open={!!openPro}
           pro={openPro}
