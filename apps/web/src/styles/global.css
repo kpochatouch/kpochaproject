@@ -8,10 +8,13 @@
               #000;
 }
 
-/* let AWS liveness control its own video/canvas sizing */
+/* --- AWS LIVENESS FIX ---
+   We let the AWS component size itself BUT we don't let the video/canvas
+   grow wider than the box we put it in (your <div class="w-full max-w-2xl ...">).
+   This is what stops the overlay from drifting. */
 .aws-liveness video,
 .aws-liveness canvas {
-  max-width: none !important;
+  max-width: 100% !important;
 }
 
 /* =======================
