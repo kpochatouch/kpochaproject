@@ -78,6 +78,7 @@ export default function ClientRegister() {
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
 
+  // we keep state as returned by the API (proper casing) so NgGeoPicker can match it
   const [stateVal, setStateVal] = useState("");
   const [lga, setLga] = useState("");
   const [address, setAddress] = useState("");
@@ -124,6 +125,7 @@ export default function ClientRegister() {
         if (data) {
           setFullName(data.fullName || "");
           setPhone(data.phone || "");
+          // keep original casing for UI
           setStateVal(data.state || "");
           setLga((data.lga || "").toString().toUpperCase());
           setAddress(data.address || "");
@@ -165,8 +167,7 @@ export default function ClientRegister() {
 
   // ===== Can save? =====
   const canSave = useMemo(() => {
-    const base =
-      !!fullName && !!phone && (!!stateVal || !!lga) && !!address;
+    const base = !!fullName && !!phone && (!!stateVal || !!lga) && !!address;
     const agreed = agreements.terms && agreements.privacy;
     if (!verifyNow) return base && agreed;
     return (
@@ -200,11 +201,15 @@ export default function ClientRegister() {
       const lonClean =
         lon === "" || lon === null ? null : Number(lon);
 
+      // we send uppercase to the backend to match Pro/Profile/Browse
+      const stateUP = (stateVal || "").toString().toUpperCase().trim();
+      const lgaUP = (lga || stateVal || "").toString().toUpperCase().trim();
+
       const payload = {
         fullName: fullName?.trim(),
         phone: phone?.trim(),
-        state: stateVal?.trim(),
-        lga: (lga || stateVal || "").toString().toUpperCase().trim(),
+        state: stateUP,
+        lga: lgaUP,
         address: address?.trim(),
         photoUrl: photoUrl?.trim(),
         acceptedTerms: !!agreements.terms,
@@ -212,6 +217,13 @@ export default function ClientRegister() {
         agreements: {
           terms: !!agreements.terms,
           privacy: !!agreements.privacy,
+        },
+        // keep identity in sync like other settings pages
+        identity: {
+          phone: phone?.trim(),
+          state: stateUP,
+          city: lgaUP,
+          photoUrl: photoUrl?.trim(),
         },
       };
 
@@ -276,6 +288,7 @@ export default function ClientRegister() {
         .filter(Boolean)
         .join(", ");
 
+      // we keep UI value as whatever we detect (usually uppercase from rev)
       setStateVal((s) => detectedState || s);
       setLga((l) => detectedLga || l);
       setAddress((a) => detectedAddress || a);
@@ -379,7 +392,6 @@ export default function ClientRegister() {
                 )}
               </div>
 
-              {/* 👇 this is what you asked for */}
               <button
                 type="button"
                 onClick={() =>

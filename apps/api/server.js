@@ -254,11 +254,13 @@ async function initSchedulers() {
           .limit(500)
           .lean();
 
-        let ok = 0, fail = 0;
+        let ok = 0,
+          fail = 0;
         for (const b of toRelease) {
           try {
             const res = await releasePendingToAvailableForBooking(b, { reason: "auto_release_cron" });
-            if (res?.ok) ok++; else fail++;
+            if (res?.ok) ok++;
+            else fail++;
           } catch (e) {
             fail++;
             console.error("[scheduler] release error for booking", b._id?.toString?.(), e?.message || e);
@@ -266,7 +268,9 @@ async function initSchedulers() {
         }
 
         console.log(
-          `[scheduler] Auto-release ran in ${Math.round((Date.now() - started) / 1000)}s. Processed=${toRelease.length}, ok=${ok}, fail=${fail}`
+          `[scheduler] Auto-release ran in ${Math.round((Date.now() - started) / 1000)}s. Processed=${
+            toRelease.length
+          }, ok=${ok}, fail=${fail}`
         );
       } catch (err) {
         console.error("[scheduler] Auto-release error:", err.message);
@@ -300,7 +304,7 @@ const app = express();
 
 /* ------------------- CORS (hardened, with Vercel previews) ------------------- */
 const ALLOW_LIST = (process.env.CORS_ORIGIN || "http://localhost:5173")
-  .split(/[,\s]+/)          // ← fixed the extra ]
+  .split(/[,\s]+/) // ← fixed the extra ]
   .map((s) => s.trim())
   .filter(Boolean);
 
@@ -676,17 +680,19 @@ app.post("/api/pros/approve/:id", requireAuth, requireAdmin, async (req, res) =>
     // normalize services from application
     let derivedServices = [];
     if (appDoc?.professional && Array.isArray(appDoc.professional.services)) {
-      derivedServices = appDoc.professional.services.map((s) =>
-        typeof s === "string"
-          ? { name: s, price: 0, visible: true, description: "", durationMins: 0 }
-          : {
-              name: s.name || "",
-              price: Number.isFinite(s.price) ? s.price : 0,
-              visible: typeof s.visible === "boolean" ? s.visible : true,
-              description: s.description || "",
-              durationMins: Number.isFinite(s.durationMins) ? s.durationMins : 0,
-            }
-      ).filter((s) => s.name);
+      derivedServices = appDoc.professional.services
+        .map((s) =>
+          typeof s === "string"
+            ? { name: s, price: 0, visible: true, description: "", durationMins: 0 }
+            : {
+                name: s.name || "",
+                price: Number.isFinite(s.price) ? s.price : 0,
+                visible: typeof s.visible === "boolean" ? s.visible : true,
+                description: s.description || "",
+                durationMins: Number.isFinite(s.durationMins) ? s.durationMins : 0,
+              }
+        )
+        .filter((s) => s.name);
     }
 
     const base = {
@@ -712,11 +718,7 @@ app.post("/api/pros/approve/:id", requireAuth, requireAdmin, async (req, res) =>
       ...(hasCoords ? { loc: { type: "Point", coordinates: [lon, lat] } } : {}),
     };
 
-    const pro = await Pro.findOneAndUpdate(
-      { ownerUid },
-      { $set: base },
-      { new: true, upsert: true }
-    );
+    const pro = await Pro.findOneAndUpdate({ ownerUid }, { $set: base }, { new: true, upsert: true });
 
     appDoc.status = "approved";
     appDoc.approvedAt = new Date();
@@ -773,9 +775,11 @@ app.get("/api/barbers", async (req, res) => {
     const { lga, state } = req.query;
     const q = {};
 
+    // state: make it case-insensitive, because DB often has "Edo" and frontend sends "EDO"
     if (state) {
-      q.state = String(state).toUpperCase();
+      q.state = new RegExp(`^${String(state).trim()}$`, "i");
     }
+
     if (lga) {
       q.lga = String(lga).toUpperCase();
     }
@@ -788,10 +792,10 @@ app.get("/api/barbers", async (req, res) => {
   }
 });
 
-
 app.get("/api/barbers/:id", async (req, res) => {
   try {
-    if (mongoose.connection.readyState !== 1) return res.status(503).json({ error: "Database not connected" });
+    if (mongoose.connection.readyState !== 1)
+      return res.status(503).json({ error: "Database not connected" });
     const doc = await Pro.findById(req.params.id).lean();
     if (!doc) return res.status(404).json({ error: "Not found" });
     return res.json(proToBarber(doc));
@@ -807,9 +811,9 @@ const GEOAPIFY_KEY = process.env.GEOAPIFY_KEY || "";
 async function reverseGeocode(lat, lon) {
   if (!GEOAPIFY_KEY) return null;
   const r = await fetch(
-    `https://api.geoapify.com/v1/geocode/reverse?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(
-      lon
-    )}&apiKey=${encodeURIComponent(GEOAPIFY_KEY)}`
+    `https://api.geoapify.com/v1/geocode/reverse?lat=${encodeURIComponent(
+      lat
+    )}&lon=${encodeURIComponent(lon)}&apiKey=${encodeURIComponent(GEOAPIFY_KEY)}`
   );
   if (!r.ok) return null;
   const j = await r.json();
@@ -830,7 +834,9 @@ app.get("/api/geo/rev", async (req, res) => {
       return res.status(500).json({ error: "geo_api_key_missing" });
     }
     const r = await fetch(
-      `https://api.geoapify.com/v1/geocode/reverse?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}&apiKey=${encodeURIComponent(GEOAPIFY_KEY)}`
+      `https://api.geoapify.com/v1/geocode/reverse?lat=${encodeURIComponent(
+        lat
+      )}&lon=${encodeURIComponent(lon)}&apiKey=${encodeURIComponent(GEOAPIFY_KEY)}`
     );
     if (!r.ok) return res.status(502).json({ error: "geo_provider_failed" });
     const j = await r.json();
@@ -843,14 +849,17 @@ app.get("/api/geo/rev", async (req, res) => {
 
 app.get("/api/barbers/nearby", async (req, res) => {
   try {
-    if (mongoose.connection.readyState !== 1) return res.status(503).json({ error: "Database not connected" });
+    if (mongoose.connection.readyState !== 1)
+      return res.status(503).json({ error: "Database not connected" });
 
     const lat = Number(req.query.lat);
     const lon = Number(req.query.lon);
     const radiusKm = Math.max(1, Math.min(200, Number(req.query.radiusKm || 25)));
-    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return res.status(400).json({ error: "lat & lon required" });
+    if (!Number.isFinite(lat) || !Number.isFinite(lon))
+      return res.status(400).json({ error: "lat & lon required" });
 
-    let used = "geo", items = [];
+    let used = "geo",
+      items = [];
     try {
       const agg = await Pro.aggregate([
         {
@@ -876,8 +885,8 @@ app.get("/api/barbers/nearby", async (req, res) => {
       const state = rev?.state || "";
 
       const q = {};
-      if (state) q.state = state;          // filter by state if we got it
-      if (lga) q.lga = lga;                // and also by LGA if we got it
+      if (state) q.state = new RegExp(`^${state}$`, "i"); // ← make state case-insensitive here too
+      if (lga) q.lga = lga;
 
       const docs = await Pro.find(q).limit(100).lean();
       items = docs.map((d) => ({ ...proToBarber(d), distanceKm: null }));
@@ -924,15 +933,16 @@ app.post("/api/applications", requireAuth, async (req, res) => {
       "Unnamed Applicant";
 
     const phone = payload?.identity?.phone || payload.phone || "";
-    const lga =
-      (payload.lga ||
-        payload?.identity?.lga ||
-        payload?.identity?.state ||
-        "").toString().toUpperCase();
+    const lga = (
+      payload.lga ||
+      payload?.identity?.lga ||
+      payload?.identity?.state ||
+      ""
+    ).toString().toUpperCase();
 
     const servicesStr = Array.isArray(payload?.professional?.services)
       ? payload.professional.services.join(", ")
-      : (payload.services || "");
+      : payload.services || "";
 
     const status = "submitted";
 

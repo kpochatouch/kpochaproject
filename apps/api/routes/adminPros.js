@@ -6,7 +6,7 @@ export default function adminProsRoutes({
   requireAuth,
   requireAdmin,
   Application,
-  Pro, // ← server.js already passes this in
+  Pro, // passed in from server.js
 }) {
   const r = express.Router();
 
@@ -22,16 +22,16 @@ export default function adminProsRoutes({
         return res.status(503).json({ error: "database_not_connected" });
       }
 
-      // try by clientId first (your UI sometimes stores clientId on the Application)
+      // try by clientId first
       let doc = await Application.findOne({ clientId: rawId });
-      // if not found, and it looks like an ObjectId, try by _id
+      // fallback: try ObjectId
       if (!doc && /^[0-9a-fA-F]{24}$/.test(rawId)) {
         doc = await Application.findById(rawId);
       }
       if (!doc) return res.status(404).json({ error: "application_not_found" });
 
       doc.status = "rejected";
-      doc.rejectedReason = reason; // <-- matches your Application schema
+      doc.rejectedReason = reason;
       await doc.save();
 
       return res.json({ ok: true });
@@ -42,8 +42,7 @@ export default function adminProsRoutes({
   });
 
   // POST /api/pros/resync/:ownerUid
-  // Admin helper to FORCE a pro to match the latest client profile
-  // This is useful for old/legacy pros approved before we added the auto-syncs.
+  // Forces a Pro to match the latest client profile in "profiles" collection
   r.post("/pros/resync/:ownerUid", requireAuth, requireAdmin, async (req, res) => {
     try {
       if (mongoose.connection.readyState !== 1) {
@@ -61,11 +60,9 @@ export default function adminProsRoutes({
         return res.status(404).json({ error: "pro_not_found" });
       }
 
-      // 2) read the latest client profile from the SAME collection
-      // your server.js uses: "profiles"
+      // 2) read the latest client profile (same collection we used in server.js)
       const col = mongoose.connection.db.collection("profiles");
-      const fresh = await col.findOne({ ownerUid });
-
+      const fresh = await col.findOne({ uid: ownerUid });
       if (!fresh) {
         // no profile to sync, but not an error
         return res.json({ ok: true, message: "no_profile_to_sync" });
@@ -75,10 +72,7 @@ export default function adminProsRoutes({
       const name =
         fresh.fullName ||
         fresh.name ||
-        [
-          fresh?.identity?.firstName,
-          fresh?.identity?.lastName,
-        ].filter(Boolean).join(" ").trim() ||
+        [fresh?.identity?.firstName, fresh?.identity?.lastName].filter(Boolean).join(" ").trim() ||
         pro.name ||
         "";
 
@@ -88,10 +82,20 @@ export default function adminProsRoutes({
         pro.phone ||
         "";
 
+      // normalize to uppercase — matches server.js, models.js, and web filters
       const lga = (
         fresh.lga ||
+        fresh.city || // sometimes city is used
         fresh.state ||
         pro.lga ||
+        ""
+      )
+        .toString()
+        .toUpperCase();
+
+      const state = (
+        fresh.state ||
+        pro.state ||
         ""
       )
         .toString()
@@ -106,25 +110,20 @@ export default function adminProsRoutes({
       if (name) proSet.name = name;
       if (phone) proSet.phone = phone;
       if (lga) proSet.lga = lga;
+      if (state) proSet.state = state;
       proSet.identity = identity;
 
       // 4) update Pro
-      await Pro.updateOne(
-        { ownerUid },
-        { $set: proSet }
-      );
+      await Pro.updateOne({ ownerUid }, { $set: proSet });
 
-      // 5) (optional but smart) update any Applications for this user too,
-      // so the admin list shows the same fresh values
+      // 5) also update application docs for this user to keep admin list in sync
       const appSet = {};
       if (name) appSet.displayName = name;
       if (phone) appSet.phone = phone;
       if (lga) appSet.lga = lga;
+      if (state) appSet.state = state;
       if (Object.keys(appSet).length > 0) {
-        await Application.updateMany(
-          { uid: ownerUid },
-          { $set: appSet }
-        );
+        await Application.updateMany({ uid: ownerUid }, { $set: appSet });
       }
 
       return res.json({ ok: true });

@@ -143,8 +143,8 @@ export default function Browse() {
         setMe(meData);
 
         // prefill location from client profile first
-        const st = (prof?.identity?.state || prof?.state || "").toString().trim(); // keep normal casing
-        const lg = (prof?.identity?.city || prof?.lga || "").toString().toUpperCase(); // LGAs stay UPPER
+        const st = (prof?.identity?.state || prof?.state || "").toString().toUpperCase();
+        const lg = (prof?.identity?.city || prof?.lga || "").toString().toUpperCase();
         if (st && !stateName) setStateName(st);
         if (lg && !lga) setLga(lg);
       } catch {
@@ -164,13 +164,14 @@ export default function Browse() {
       try {
         const { data } = await api.get("/api/geo/ng");
         if (!on) return;
+        // backend now gives UPPERCASE already
         setStates(data?.states || []);
         setLgasByState(data?.lgas || {});
       } catch {
-        // demo fallback — should disappear in production
+        // demo fallback — keep UPPERCASE so it matches the rest
         if (!on) return;
-        setStates(["Edo"]);
-        setLgasByState({ Edo: ["OREDO", "IKPOBA-OKHA", "EGOR", "OTHERS"] });
+        setStates(["EDO"]);
+        setLgasByState({ EDO: ["OREDO", "IKPOBA-OKHA", "EGOR", "OTHERS"] });
       }
     })();
     return () => {
@@ -222,38 +223,40 @@ export default function Browse() {
   // filter + rank
   const filteredAndRanked = useMemo(() => {
     const term = q.trim().toLowerCase();
+    const selectedState = (stateName || "").toUpperCase();
+    const selectedLga = (lga || "").toUpperCase();
+
     return [...pros]
       .map((p) => {
         // NOTE: /api/barbers should already unify: name, lga, state, services
         const name = String(p?.name || "").toLowerCase();
         const desc = String(p?.bio || p?.description || "").toLowerCase();
-        const proState = String(p?.state || "").trim().toUpperCase(); // NEW
+        const proState = String(p?.state || "").trim().toUpperCase();
         const proLga = String(p?.lga || "").trim().toUpperCase();
         const servicesLC = svcArray(p);
 
         const matchName = term ? name.includes(term) || desc.includes(term) : true;
         const matchSvc = service ? servicesLC.includes(service.toLowerCase()) : true;
-        const matchState = stateName ? proState === stateName.toUpperCase() : true; // NEW
-        const matchLga = lga ? proLga === lga.toUpperCase() : true;
-
-        const ok = matchName && matchSvc && matchState && matchLga; // NEW combo
-
+        const matchState = selectedState ? proState === selectedState : true;
+        const matchLga = selectedLga ? proLga === selectedLga : true;
 
         let score = 0;
         if (service && matchSvc) score += 3;
-        if (lga && matchLga) score += 2;
+        if (selectedLga && matchLga) score += 2;
+        if (selectedState && matchState) score += 2;
         if (term && matchName) score += 1;
 
-        return { p, ok: matchName && matchSvc && matchLga && matchState, score };
+        return { p, ok: matchName && matchSvc && matchState && matchLga, score };
       })
       .filter((x) => x.ok)
       .sort((a, b) => b.score - a.score)
       .map((x) => x.p);
-  }, [pros, q, service, lga]);
+  }, [pros, q, service, lga, stateName]);
 
   // lgas for selected state
   const lgasForState = useMemo(() => {
-    return stateName && lgasByState[stateName] ? lgasByState[stateName] : [];
+    const key = (stateName || "").toUpperCase();
+    return key && lgasByState[key] ? lgasByState[key] : [];
   }, [stateName, lgasByState]);
 
   // reset filters
@@ -303,7 +306,7 @@ export default function Browse() {
         serviceName: svcName || undefined,
         amountNaira: typeof svcPrice !== "undefined" ? svcPrice : undefined,
         country: "Nigeria",
-        state: stateName || "",
+        state: (stateName || "").toUpperCase(),
         lga: (lga || "").toUpperCase(),
       },
     });
@@ -356,7 +359,8 @@ export default function Browse() {
           <select
             value={stateName}
             onChange={(e) => {
-              setStateName(e.target.value);
+              const val = e.target.value.toUpperCase();
+              setStateName(val);
               setLga("");
             }}
             className="bg-black border border-zinc-800 rounded-lg px-3 py-2"
@@ -371,7 +375,7 @@ export default function Browse() {
 
           <select
             value={lga}
-            onChange={(e) => setLga(e.target.value)}
+            onChange={(e) => setLga(e.target.value.toUpperCase())}
             className="bg-black border border-zinc-800 rounded-lg px-3 py-2"
             disabled={stateName && !lgasForState.length}
           >
@@ -455,12 +459,3 @@ export default function Browse() {
     </ErrorBoundary>
   );
 }
-
-/**
- * NOTES (Browse.jsx)
- * 1. We now prefill state/LGA from /api/profile/me so *real* user location shows.
- * 2. /api/barbers is still the single source of truth — it should already be built from Pro docs.
- * 3. We removed the hard-coded Cloudinary-like logo from cards (moved to component).
- * 4. Demo geo fallback is kept but clearly marked.
- * 5. Open avatar happens in BarberCard (see below), not here.
- */

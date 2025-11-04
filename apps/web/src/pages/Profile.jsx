@@ -32,7 +32,9 @@ export default function Profile() {
         if (mounted) setLoading(false);
       }
     })();
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   function maskId(id = "") {
@@ -47,8 +49,32 @@ export default function Profile() {
     me?.email ||
     "Your Account";
 
-  const avatarUrl = clientProfile?.photoUrl || me?.photoUrl || "";
-  const phone = clientProfile?.phone || me?.phone || "";
+  // add identity.photoUrl fallback to stay in sync with Settings/Become
+  const avatarUrl =
+    clientProfile?.photoUrl ||
+    me?.photoUrl ||
+    me?.identity?.photoUrl ||
+    "";
+
+  const phone =
+    clientProfile?.phone ||
+    clientProfile?.identity?.phone ||
+    me?.phone ||
+    me?.identity?.phone ||
+    "";
+
+  const state =
+    clientProfile?.state ||
+    clientProfile?.identity?.state ||
+    me?.identity?.state ||
+    "";
+
+  const lga =
+    clientProfile?.lga ||
+    clientProfile?.identity?.city ||
+    me?.lga ||
+    me?.identity?.city ||
+    "";
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-10">
@@ -101,7 +127,8 @@ export default function Profile() {
             <div className="grid sm:grid-cols-2 gap-4">
               <ReadOnly label="Email" value={me.email || "—"} />
               <ReadOnly label="Phone" value={phone || "—"} />
-              <ReadOnly label="Preferred LGA / City" value={clientProfile?.lga || me?.lga || "—"} />
+              <ReadOnly label="Preferred State" value={state || "—"} />
+              <ReadOnly label="Preferred LGA / City" value={lga || "—"} />
               <ReadOnly label="User ID" value={me.uid} mono />
             </div>
 
@@ -109,15 +136,15 @@ export default function Profile() {
             {typeof me.deactivationStatus !== "undefined" && (
               <div className="mt-3 grid sm:grid-cols-2 gap-4">
                 <ReadOnly
-                  label="Account Deactivation"
-                  value={
-                    me.deactivationStatus
-                      ? me.deactivationStatus === "pending"
-                        ? "Pending"
-                        : me.deactivationStatus
-                      : "—"
-                  }
-                />
+                    label="Account Deactivation"
+                    value={
+                      me.deactivationStatus
+                        ? me.deactivationStatus === "pending"
+                          ? "Pending"
+                          : me.deactivationStatus
+                        : "—"
+                    }
+                  />
                 <div className="flex items-end">
                   <a
                     href="/deactivate"
@@ -136,7 +163,8 @@ export default function Profile() {
             hint="Only visible to admins and to a professional who has accepted your booking. Never shown publicly."
           >
             <div className="grid sm:grid-cols-2 gap-4">
-              <ReadOnly label="House Address" value={clientProfile?.houseAddress || "—"} />
+              {/* your client settings saves `address`, not `houseAddress` */}
+              <ReadOnly label="House Address" value={clientProfile?.address || "—"} />
               <ReadOnly
                 label="Means of ID"
                 value={
@@ -160,7 +188,9 @@ export default function Profile() {
               <>
                 <div className="flex items-center justify-between mb-3">
                   <div className="text-sm text-zinc-300">
-                    ✅ Approved{me.proName ? ` — ${me.proName}` : ""}{me.lga ? ` (${me.lga})` : ""}
+                    ✅ Approved
+                    {me.proName ? ` — ${me.proName}` : ""}
+                    {me.lga ? ` (${me.lga})` : ""}
                   </div>
                   <a
                     href="/pro"
@@ -177,9 +207,9 @@ export default function Profile() {
             ) : (
               <div className="flex items-center justify-between">
                 <div className="text-sm text-zinc-300">You’re not a professional yet.</div>
-                {/* ✅ Link to /apply for the best UX (direct route in App.jsx) */}
+                {/* make consistent with other pages -> /become */}
                 <a
-                  href="/apply"
+                  href="/become"
                   className="rounded-lg border border-gold px-3 py-1.5 text-sm hover:bg-gold hover:text-black"
                 >
                   Become a Pro
@@ -195,10 +225,16 @@ export default function Profile() {
               <ReadOnly label="Admin" value={me.isAdmin ? "Yes" : "No"} />
             </div>
             <div className="flex gap-2 mt-4">
-              <a href="/wallet" className="rounded-lg bg-zinc-800 hover:bg-zinc-700 px-3 py-2 text-sm">
+              <a
+                href="/wallet"
+                className="rounded-lg bg-zinc-800 hover:bg-zinc-700 px-3 py-2 text-sm"
+              >
                 Manage Wallet / PIN
               </a>
-              <a href="/settings" className="rounded-lg border border-zinc-700 hover:bg-zinc-900 px-3 py-2 text-sm">
+              <a
+                href="/settings"
+                className="rounded-lg border border-zinc-700 hover:bg-zinc-900 px-3 py-2 text-sm"
+              >
                 Account Settings
               </a>
             </div>
@@ -225,7 +261,11 @@ function ReadOnly({ label, value, mono }) {
   return (
     <label className="block">
       <span className="text-xs text-zinc-400">{label}</span>
-      <div className={`mt-1 w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 ${mono ? "font-mono break-all" : ""}`}>
+      <div
+        className={`mt-1 w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 ${
+          mono ? "font-mono break-all" : ""
+        }`}
+      >
         {value || "—"}
       </div>
     </label>

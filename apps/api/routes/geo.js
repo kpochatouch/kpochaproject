@@ -21,14 +21,19 @@ function normalizeStateName(s) {
   const v = String(s || "").trim().toUpperCase();
   if (!v) return "";
   if (v === "FCT" || v === "F.C.T" || v === "ABUJA") return "FEDERAL CAPITAL TERRITORY";
-  // Common alternate spellings can be normalized here if needed
   return v;
+}
+
+function normalizeLgaName(l) {
+  return String(l || "").trim().toUpperCase();
 }
 
 function buildIndexFrom(geo) {
   const idx = new Map();
   for (const [state, lgas] of Object.entries(geo || {})) {
-    idx.set(normalizeStateName(state), Array.isArray(lgas) ? lgas.slice() : []);
+    const st = normalizeStateName(state);
+    const list = Array.isArray(lgas) ? lgas.map(normalizeLgaName) : [];
+    idx.set(st, list);
   }
   return idx;
 }
@@ -36,35 +41,57 @@ function buildIndexFrom(geo) {
 function loadGeo({ force = false } = {}) {
   if (GEO && STATE_INDEX && !force) return;
   const raw = fs.readFileSync(GEO_PATH, "utf8");
-  GEO = JSON.parse(raw);                // { "Abia": [ "Aba North", ... ], ... }
-  STATE_INDEX = buildIndexFrom(GEO);    // Map("ABIA" -> [...])
+  const parsed = JSON.parse(raw); // { "Abia": [ "Aba North", ... ], ... }
+
+  // store original, but we will always serve uppercased version
+  GEO = parsed;
+  STATE_INDEX = buildIndexFrom(parsed);
 }
 
 // Initial load
 loadGeo();
 
-/** GET /api/geo/ng
- * Returns the full structure:
- * { country: "Nigeria", states: string[], lgas: { [state]: string[] } }
+/**
+ * GET /api/geo/ng
+ * Returns the full structure, but uppercased so frontend and backend match:
+ * {
+ *   country: "Nigeria",
+ *   states: ["ABIA", "ADAMAWA", ...],
+ *   lgas: { "EDO": ["OREDO", ...], ... }
+ * }
  */
 router.get("/geo/ng", (_req, res) => {
   try {
     loadGeo();
-    const states = Object.keys(GEO).sort((a, b) => a.localeCompare(b));
-    res.json({ country: "Nigeria", states, lgas: GEO });
+
+    // states in UPPERCASE
+    const states = Array.from(STATE_INDEX.keys()).sort((a, b) => a.localeCompare(b));
+
+    // lgas object also in UPPERCASE
+    const lgas = {};
+    for (const [st, list] of STATE_INDEX.entries()) {
+      lgas[st] = list.slice().sort((a, b) => a.localeCompare(b));
+    }
+
+    res.json({
+      country: "Nigeria",
+      states,
+      lgas,
+    });
   } catch (e) {
     console.error("[geo/ng] error:", e);
     res.status(500).json({ error: "geo_load_failed" });
   }
 });
 
-/** GET /api/geo/states
- * Returns: string[]  (for legacy UI dropdown)
+/**
+ * GET /api/geo/states
+ * Returns: string[] (UPPERCASE)  (for legacy UI dropdown)
  */
 router.get("/geo/states", (_req, res) => {
   try {
     loadGeo();
-    const states = Object.keys(GEO).sort((a, b) => a.localeCompare(b));
+    const states = Array.from(STATE_INDEX.keys()).sort((a, b) => a.localeCompare(b));
     res.json(states);
   } catch (e) {
     console.error("[geo/states] error:", e);
@@ -72,8 +99,9 @@ router.get("/geo/states", (_req, res) => {
   }
 });
 
-/** GET /api/geo/lgas?state=Edo
- * Returns: string[] (LGAs for the given state, legacy UI shape)
+/**
+ * GET /api/geo/lgas?state=EDO
+ * Returns: string[] (LGAs for the given state, UPPERCASE)
  */
 router.get("/geo/lgas", (req, res) => {
   try {

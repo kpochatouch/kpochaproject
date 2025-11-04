@@ -1,7 +1,3 @@
-
-
-
-
 // apps/api/models.js
 import mongoose from "mongoose";
 
@@ -88,7 +84,6 @@ const BadgeSchema = new mongoose.Schema(
 const MetricsSchema = new mongoose.Schema(
   {
     totalReviews: { type: Number, default: 0 },
-    // start at 0 — we don't want fake 4.8s
     avgRating: { type: Number, default: 0 },
     recentDeclines: { type: Number, default: 0 },
     totalStrikes: { type: Number, default: 0 },
@@ -155,10 +150,10 @@ const ProSchema = new mongoose.Schema(
   }
 );
 
-// Helpful indexes
+// Helpful indexes (these make /api/barbers?state=... or ?lga=... faster)
 ProSchema.index({ profileVisible: 1, lga: 1 });
-ProSchema.index({ profileVisible: 1, state: 1 });         // ← add this
-ProSchema.index({ profileVisible: 1, state: 1, lga: 1 }); // ← optional but nice for state+LGA
+ProSchema.index({ profileVisible: 1, state: 1 });
+ProSchema.index({ profileVisible: 1, state: 1, lga: 1 });
 ProSchema.index({ "services.name": 1 });
 ProSchema.index({ "services.id": 1 });
 ProSchema.index({ loc: "2dsphere" }); // used by $geoNear
@@ -172,20 +167,31 @@ ProSchema.pre("save", function normalizeLocation(next) {
 
 /* ---------------------------- Public mapper (safe) -------------------------- */
 /**
- * SAFE mapper used by /api/barbers.
+ * SAFE mapper used by /api/barbers and the Browse page.
  *
- * ROOT FIXES:
- * 1. We will ONLY show a rating if there is at least 1 real review
- *    (metrics.totalReviews > 0). If not, rating=0 and 5 empty stars.
- * 2. We will surface services from multiple legacy places:
- *    - pro.services
- *    - pro.professional.services
- *    so the drawer stops saying "This pro has not listed services yet."
+ * Extra safeguards here because sometimes the Pro doc was created from an application
+ * that only had identity.state or identity.city (not top-level state/lga).
  */
 export function proToBarber(doc) {
   const d = doc?.toObject ? doc.toObject() : doc;
 
-  /* ----- 1) pick up services from wherever they were saved ----- */
+  // 1) location: try top-level first, then fall back to identity/professional
+  const lgaRaw =
+    d.lga ||
+    d?.identity?.lga ||
+    d?.identity?.city || // some payloads used "city" for LGA
+    d?.professional?.lga ||
+    "";
+  const stateRaw =
+    d.state ||
+    d?.identity?.state ||
+    d?.professional?.state ||
+    "";
+
+  const lga = lgaRaw ? String(lgaRaw).toUpperCase() : "";
+  const state = stateRaw ? String(stateRaw).toUpperCase() : "";
+
+  // 2) pick up services from wherever they were saved
   let rawServices = Array.isArray(d?.services) ? d.services : [];
 
   // legacy location from older application payloads
@@ -197,23 +203,28 @@ export function proToBarber(doc) {
     }
   }
 
+  // sometimes services were saved as simple strings
   const normalizedServices = Array.isArray(rawServices)
     ? rawServices
         .filter((s) => (typeof s?.visible === "boolean" ? s.visible : true))
-        .map((s) => ({
-          name: s?.name || "",
-          price: Number.isFinite(s?.price) ? s.price : 0,
-        }))
-        .filter((s) => s.name) // remove blanks
+        .map((s) => {
+          if (typeof s === "string") {
+            return { name: s, price: 0 };
+          }
+          return {
+            name: s?.name || "",
+            price: Number.isFinite(s?.price) ? s.price : 0,
+          };
+        })
+        .filter((s) => s.name)
     : [];
 
-  /* ----- 2) rating: show NOTHING unless there is a real review ----- */
+  // 3) rating: show NOTHING unless there is a real review
   const totalReviews = Number(d?.metrics?.totalReviews || 0);
   const hasRealReviews = totalReviews > 0;
 
   let rating = 0;
   if (hasRealReviews) {
-    // only trust rating when we actually have reviews
     const metricsAvg = Number(d?.metrics?.avgRating);
     if (Number.isFinite(metricsAvg) && metricsAvg > 0) {
       rating = metricsAvg;
@@ -222,25 +233,20 @@ export function proToBarber(doc) {
     }
   }
 
-  // clamp + round
   rating = Math.max(0, Math.min(5, rating));
   const ratingRounded = Math.round(rating * 10) / 10;
 
-  // build star helper
   const fullStars = hasRealReviews ? Math.floor(ratingRounded) : 0;
   const emptyStars = 5 - fullStars;
 
-  /* ----- 3) final public shape ----- */
   return {
     id: d._id?.toString?.() || String(d._id || ""),
     name: d.name || "",
-    lga: (d.lga || "").toString().toUpperCase(),
-    state: (d.state || "").toString().toUpperCase(),
+    lga,
+    state,
     availability: d.availability || "Available",
 
-    // will be 0 if there are no reviews → frontend should hide/grey it
     rating: hasRealReviews ? ratingRounded : 0,
-
     ratingStars: {
       full: fullStars,
       empty: emptyStars,
@@ -268,8 +274,9 @@ export const Pro =
 
 /* -------------------------------------------------------------------------- */
 /* SUMMARY
-   - if metrics.totalReviews is 0 or missing → API sends rating: 0 and 0 full stars
-   - services are pulled from pro.services OR pro.professional.services
-   - this removes old / hardcoded-looking 4.8s from the API layer
+   - state/lga are now uppercased on save, AND proToBarber also re-derives them
+     from identity/professional if top-level fields were empty.
+   - services are pulled from pro.services OR pro.professional.services OR simple strings.
+   - extra indexes help /api/barbers when Browse.jsx sends ?state=... or ?lga=...
 */
 /* -------------------------------------------------------------------------- */

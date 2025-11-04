@@ -11,8 +11,8 @@ export default function ClientSettings() {
   const [client, setClient] = useState(null);
   const [pro, setPro] = useState(null);
 
-  const [states, setStates] = useState([]);
-  const [lgas, setLgas] = useState([]);
+  // geo (single load, same shape as NgGeoPicker)
+  const [geo, setGeo] = useState({ states: [], lgas: {} });
   const [form, setForm] = useState({
     displayName: "",
     phone: "",
@@ -30,7 +30,6 @@ export default function ClientSettings() {
         setLoading(true);
         setError("");
 
-        // 1️⃣ Load main account + geo
         const [meRes, geoRes, clientRes, proRes] = await Promise.all([
           api.get("/api/me"),
           api.get("/api/geo/ng"),
@@ -42,26 +41,43 @@ export default function ClientSettings() {
         const meData = meRes?.data || null;
         const clientData = clientRes?.data || null;
         const proData = proRes?.data || null;
+        const statesRaw = Array.isArray(geoRes?.data?.states) ? geoRes.data.states : [];
+        const lgasRaw = geoRes?.data?.lgas || {};
 
         setMe(meData);
         setClient(clientData);
         setPro(proData);
-        setStates(geoRes?.data?.states || []);
+        setGeo({ states: statesRaw, lgas: lgasRaw });
 
         // 2️⃣ Auto-fill with priority: client → pro → me → fallback
         const base = clientData || proData || meData || {};
-        const baseState =
+
+        const baseStateRaw =
           clientData?.state ||
           clientData?.identity?.state ||
           proData?.identity?.state ||
           meData?.identity?.state ||
           "";
-        const baseLga =
+        const baseLgaRaw =
           clientData?.lga ||
           clientData?.identity?.city ||
           proData?.identity?.city ||
           meData?.identity?.city ||
           "";
+
+        // match incoming state to the actual list (ignoring case)
+        const normalizedState =
+          statesRaw.find((s) => s.toUpperCase() === String(baseStateRaw).toUpperCase()) ||
+          String(baseStateRaw);
+
+        // same for LGA if we have a state
+        const lgasForState =
+          normalizedState && lgasRaw[normalizedState]
+            ? lgasRaw[normalizedState]
+            : [];
+        const normalizedLga =
+          lgasForState.find((x) => x.toUpperCase() === String(baseLgaRaw).toUpperCase()) ||
+          String(baseLgaRaw);
 
         setForm((cur) => ({
           ...cur,
@@ -80,8 +96,8 @@ export default function ClientSettings() {
             meData?.phone ||
             meData?.identity?.phone ||
             "",
-          state: baseState,
-          lga: baseLga,
+          state: normalizedState || "",
+          lga: normalizedLga || "",
           address: clientData?.address || "",
           photoUrl:
             clientData?.photoUrl ||
@@ -90,18 +106,6 @@ export default function ClientSettings() {
             meData?.identity?.photoUrl ||
             "",
         }));
-
-        // 3️⃣ Preload LGAs if user already has a state
-        if (baseState) {
-          try {
-            const { data: lgasData } = await api.get(
-              `/api/geo/ng/lgas/${encodeURIComponent(baseState)}`
-            );
-            if (alive) setLgas(lgasData || []);
-          } catch {
-            if (alive) setLgas([]);
-          }
-        }
       } catch {
         if (alive) setError("Failed to load your settings.");
       } finally {
@@ -113,21 +117,15 @@ export default function ClientSettings() {
     };
   }, []);
 
-  // ✅ Change state → reload LGAs
-  async function onChangeState(nextState) {
+  // derived lgas for selected state
+  const lgaOptions = useMemo(() => {
+    if (!form.state) return [];
+    return geo.lgas[form.state] || [];
+  }, [form.state, geo.lgas]);
+
+  // ✅ Change state → clear LGA and show local options
+  function onChangeState(nextState) {
     setForm((f) => ({ ...f, state: nextState, lga: "" }));
-    if (!nextState) {
-      setLgas([]);
-      return;
-    }
-    try {
-      const { data } = await api.get(
-        `/api/geo/ng/lgas/${encodeURIComponent(nextState)}`
-      );
-      setLgas(data || []);
-    } catch {
-      setLgas([]);
-    }
   }
 
   // ✅ Save profile (keeps same UID, upserts)
@@ -138,18 +136,22 @@ export default function ClientSettings() {
       setError("");
       setOk("");
 
+      // store in uppercase to match API + Pro layer
+      const stateUP = (form.state || "").toUpperCase();
+      const lgaUP = (form.lga || "").toUpperCase();
+
       const payload = {
         fullName: form.displayName?.trim(),
         displayName: form.displayName?.trim(),
         phone: form.phone?.trim(),
-        state: form.state,
-        lga: form.lga,
+        state: stateUP,
+        lga: lgaUP,
         address: form.address?.trim(),
         photoUrl: form.photoUrl || "",
         identity: {
           phone: form.phone?.trim(),
-          state: form.state,
-          city: form.lga,
+          state: stateUP,
+          city: lgaUP,
           photoUrl: form.photoUrl || "",
         },
       };
@@ -197,8 +199,8 @@ export default function ClientSettings() {
   }
 
   const stateOpts = useMemo(
-    () => ["", ...states].map((s) => ({ v: s, t: s || "Select state…" })),
-    [states]
+    () => ["", ...geo.states].map((s) => ({ v: s, t: s || "Select state…" })),
+    [geo.states]
   );
 
   return (
@@ -270,13 +272,13 @@ export default function ClientSettings() {
                   onChange={(e) =>
                     setForm((f) => ({ ...f, lga: e.target.value }))
                   }
-                  disabled={!lgas?.length}
+                  disabled={!lgaOptions?.length}
                   required
                 >
                   <option value="">
-                    {lgas.length ? "Select LGA…" : "Select a state first…"}
+                    {lgaOptions.length ? "Select LGA…" : "Select a state first…"}
                   </option>
-                  {lgas.map((x) => (
+                  {lgaOptions.map((x) => (
                     <option key={x} value={x}>
                       {x}
                     </option>

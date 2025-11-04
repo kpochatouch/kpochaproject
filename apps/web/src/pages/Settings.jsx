@@ -44,7 +44,7 @@ export default function SettingsPage() {
   const [phone, setPhone] = useState("");
   const [avatarUrl, setAvatarUrl] = useState("");
 
-  // Location (user-level)
+  // Location (user-level) — keep uppercase to match backend
   const [stateVal, setStateVal] = useState("");
   const [lga, setLga] = useState("");
 
@@ -99,7 +99,11 @@ export default function SettingsPage() {
       try {
         const { data } = await api.get("/api/geo/ng");
         if (!alive) return;
-        setAllStates(Array.isArray(data?.states) ? data.states : []);
+        // ensure uppercase here too
+        const states = Array.isArray(data?.states)
+          ? data.states.map((s) => s.toString().toUpperCase())
+          : [];
+        setAllStates(states);
       } catch {
         /* ignore */
       }
@@ -114,8 +118,9 @@ export default function SettingsPage() {
   );
 
   function toggleStateCovered(st) {
+    const key = st.toUpperCase();
     setStatesCovered((p) =>
-      p.includes(st) ? p.filter((x) => x !== st) : [...p, st]
+      p.includes(key) ? p.filter((x) => x !== key) : [...p, key]
     );
   }
   function toggleService(name) {
@@ -242,6 +247,7 @@ export default function SettingsPage() {
           meData?.identity?.city ||
           "";
 
+        // ensure uppercase to match NgGeoPicker + backend
         setStateVal(String(st || "").toUpperCase());
         setLga(String(lg || "").toUpperCase());
 
@@ -263,7 +269,9 @@ export default function SettingsPage() {
           );
           setStatesCovered(
             Array.isArray(proData?.availability?.statesCovered)
-              ? proData.availability.statesCovered
+              ? proData.availability.statesCovered.map((s) =>
+                  s.toString().toUpperCase()
+                )
               : []
           );
           setServices(
@@ -341,24 +349,6 @@ export default function SettingsPage() {
     [hasPro, bankName, accountName, accountNumber, bvn]
   );
 
-  /* ---------- Helpers ---------- */
-  function withProIdentifiers(base = {}) {
-    if (!hasPro) return null;
-    const idFields = {
-      _id: appDoc?._id,
-      uid: me?.uid,
-      createdAt: appDoc?.createdAt,
-    };
-    return { ...base, ...idFields };
-  }
-  function blockIfNoPro() {
-    if (!hasPro) {
-      setErr("No professional profile exists yet. Please apply first.");
-      return true;
-    }
-    return false;
-  }
-
   /* ---------- Save handlers ---------- */
 
   // 1) Save GENERAL PROFILE
@@ -370,14 +360,14 @@ export default function SettingsPage() {
       const payload = {
         displayName,
         phone,
-        state: stateVal,
-        lga,
+        state: stateVal.toUpperCase(),
+        lga: lga.toUpperCase(),
         avatarUrl,
         identity: {
           ...(client?.identity || me?.identity || {}),
           phone,
-          state: stateVal,
-          city: lga,
+          state: stateVal.toUpperCase(),
+          city: lga.toUpperCase(),
           photoUrl: avatarUrl,
         },
       };
@@ -385,11 +375,11 @@ export default function SettingsPage() {
       let res;
 
       if (client) {
-        // ✅ client exists → client is source of truth
+        // client exists → client is source of truth
         res = await api.put("/api/profile/me", payload);
         setClient(res?.data || payload);
       } else if (appDoc?._id) {
-        // ✅ pro-only user → write to pro
+        // pro-only user → write to pro
         res = await api.put("/api/pros/me", {
           ...appDoc,
           identity: payload.identity,
@@ -398,20 +388,20 @@ export default function SettingsPage() {
         });
         setAppDoc(res?.data?.item || { ...appDoc, ...payload });
       } else {
-        // ✅ fallback → create client profile
+        // fallback → create client profile
         res = await api.put("/api/profile/me", payload);
         setClient(res?.data || payload);
       }
 
-      // keep /api/me in sync (for header, etc.)
+      // keep /api/me in sync
       setMe((prev) => ({
         ...(prev || {}),
         displayName,
         identity: {
           ...(prev?.identity || {}),
           phone,
-          state: stateVal,
-          city: lga,
+          state: stateVal.toUpperCase(),
+          city: lga.toUpperCase(),
           photoUrl: avatarUrl,
         },
       }));
@@ -439,7 +429,10 @@ export default function SettingsPage() {
   const saveProDetails = useCallback(async () => {
     if (!canSavePro || savingPro) return;
     clearMsg();
-    if (blockIfNoPro()) return;
+    if (!hasPro) {
+      setErr("No professional profile exists yet. Please apply first.");
+      return;
+    }
     setSavingPro(true);
     try {
       const payload = {
@@ -455,7 +448,7 @@ export default function SettingsPage() {
         },
         availability: {
           ...(appDoc?.availability || {}),
-          statesCovered: nationwide ? stateList : statesCovered,
+          statesCovered: nationwide ? stateList : statesCovered.map((x) => x.toUpperCase()),
         },
         status: appDoc?.status || "submitted",
       };
@@ -481,13 +474,17 @@ export default function SettingsPage() {
     workPhotos,
     stateList,
     statesCovered,
+    hasPro,
   ]);
 
   // 3) Save BANK to /api/pros/me — ONLY if pro exists
   const saveBank = useCallback(async () => {
     if (!canSaveBank || savingBank) return;
     clearMsg();
-    if (blockIfNoPro()) return;
+    if (!hasPro) {
+      setErr("No professional profile exists yet. Please apply first.");
+      return;
+    }
     setSavingBank(true);
     try {
       const payload = {
@@ -516,6 +513,7 @@ export default function SettingsPage() {
     accountName,
     accountNumber,
     bvn,
+    hasPro,
   ]);
 
   /* ---------- UI ---------- */
@@ -568,7 +566,7 @@ export default function SettingsPage() {
           {/* Content */}
           <div className="lg:col-span-2 space-y-8">
             {/* Banner if no pro profile */}
-            {!hasPro && (
+            {!appDoc && (
               <div className="rounded-lg border border-yellow-700 bg-yellow-900/20 text-yellow-200 px-4 py-3">
                 You don’t have a professional profile yet. You can browse & book
                 as a client, but to create or edit a professional profile please{" "}
@@ -627,7 +625,6 @@ export default function SettingsPage() {
 
               <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <ReadOnly label="Email" value={me?.email || ""} />
-                {/* UID intentionally hidden from users */}
               </div>
 
               <div className="mt-3">
@@ -635,11 +632,11 @@ export default function SettingsPage() {
                 <NgGeoPicker
                   valueState={stateVal}
                   onChangeState={(st) => {
-                    setStateVal(st);
+                    setStateVal(st.toUpperCase());
                     setLga("");
                   }}
                   valueLga={lga}
-                  onChangeLga={setLga}
+                  onChangeLga={(lg) => setLga(lg.toUpperCase())}
                   required
                   className="grid grid-cols-1 gap-3"
                 />
@@ -736,9 +733,7 @@ export default function SettingsPage() {
                         onChange={(e) => setCertUrl(e.target.value)}
                       />
                       <UploadButton
-                        title={
-                          widgetReady ? "Upload" : "Upload (loading…)"
-                        }
+                        title={widgetReady ? "Upload" : "Upload (loading…)"}
                         onUploaded={setCertUrl}
                         widgetFactory={widgetFactory}
                         disabled={!widgetReady}
