@@ -1,19 +1,28 @@
+// apps/web/src/components/ProDrawer.jsx (or wherever you keep it)
 import { Link } from "react-router-dom";
 
 // Env-based logo
 const APP_LOGO_URL = import.meta.env.VITE_APP_LOGO_URL || "";
 
-/* ------------------------------ helpers ------------------------------ */
+/* ------------------------------------------------------------------ */
+/* Helpers                                                            */
+/* ------------------------------------------------------------------ */
 function money(n) {
   if (n === null || n === undefined || isNaN(Number(n))) return "—";
   return `₦${Number(n).toLocaleString()}`;
 }
+
 function toArray(x) {
   if (Array.isArray(x)) return x;
-  if (typeof x === "string")
-    return x.split(",").map((s) => s.trim()).filter(Boolean);
+  if (typeof x === "string") {
+    return x
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
   return [];
 }
+
 function svcRows(services) {
   const arr = toArray(services);
   return arr.map((s, i) =>
@@ -29,13 +38,40 @@ function svcRows(services) {
   );
 }
 
-/* ------------------------------ component ------------------------------ */
+function renderStars({ rating, fullStars, emptyStars }) {
+  if (rating <= 0) return null;
+  return (
+    <>
+      <span className="h-3 w-px bg-zinc-700 mx-1" />
+      {Array.from({ length: fullStars }).map((_, i) => (
+        <span
+          key={`f${i}`}
+          className={`text-yellow-400 kpo-star-anim ${
+            rating >= 4.6 ? "kpo-star-glow" : ""
+          }`}
+        >
+          ★
+        </span>
+      ))}
+      {Array.from({ length: emptyStars }).map((_, i) => (
+        <span key={`e${i}`} className="text-zinc-600 kpo-star-anim">
+          ★
+        </span>
+      ))}
+      <span className="ml-1">{rating.toFixed(1)}</span>
+    </>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Main component                                                     */
+/* ------------------------------------------------------------------ */
 export default function ProDrawer({ open, pro, onClose, onBook }) {
   if (!open || !pro) return null;
 
   const verified =
-    !!pro.verified ||
-    (Array.isArray(pro.badges) && pro.badges.includes("verified"));
+    !!pro.verified || (Array.isArray(pro.badges) && pro.badges.includes("verified"));
+
   const photos = toArray(pro.photos);
   const services = svcRows(pro.services);
 
@@ -59,11 +95,18 @@ export default function ProDrawer({ open, pro, onClose, onBook }) {
 
   return (
     <div className="fixed inset-0 z-50">
-      <div className="absolute inset-0 bg-black/60" onClick={onClose} aria-hidden />
+      {/* backdrop */}
+      <div
+        className="absolute inset-0 bg-black/60"
+        onClick={onClose}
+        aria-hidden
+      />
+      {/* panel */}
       <div className="absolute right-0 top-0 h-full w-full sm:w-[560px] bg-[#0f1116] text-white border-l border-zinc-800 shadow-2xl overflow-hidden">
         <LeftCarvedRail logoUrl={APP_LOGO_URL} />
 
-        <div className="relative flex items-center justify-between pl-24 pr-4 sm:pl-28 py-4 border-b border-zinc-800">
+        {/* header */}
+        <div className="relative flex items-center justify-between pl-24 sm:pl-28 pr-4 py-4 border-b border-zinc-800">
           <div>
             <div className="flex items-center gap-2">
               <h3 className="text-xl font-semibold">
@@ -77,23 +120,7 @@ export default function ProDrawer({ open, pro, onClose, onBook }) {
             </div>
             <div className="text-sm text-zinc-400 flex items-center gap-1">
               {pro.lga || "—"}
-              {rating > 0 && (
-                <>
-                  <span className="h-3 w-px bg-zinc-700 mx-1" />
-                  {Array.from({ length: fullStars }).map((_, i) => (
-                    <span
-                      key={`f${i}`}
-                      className={`text-yellow-400 star-anim ${rating >= 4.6 ? "star-glow" : ""}`}
-                    >
-                      ★
-                    </span>
-                  ))}
-                  {Array.from({ length: emptyStars }).map((_, i) => (
-                    <span key={`e${i}`} className="text-zinc-600 star-anim">★</span>
-                  ))}
-                  <span className="ml-1">{rating.toFixed(1)}</span>
-                </>
-              )}
+              {renderStars({ rating, fullStars, emptyStars })}
             </div>
           </div>
           <button
@@ -106,7 +133,7 @@ export default function ProDrawer({ open, pro, onClose, onBook }) {
           </button>
         </div>
 
-        {/* Content */}
+        {/* body */}
         <div className="relative h-[calc(100%-60px)] overflow-y-auto px-4 pl-24 sm:pl-28 pb-6 space-y-6">
           {(pro.bio || pro.description) && (
             <section>
@@ -117,6 +144,7 @@ export default function ProDrawer({ open, pro, onClose, onBook }) {
             </section>
           )}
 
+          {/* services */}
           <section>
             <h4 className="font-semibold mb-2">Services &amp; Pricing</h4>
             {services.length ? (
@@ -138,9 +166,7 @@ export default function ProDrawer({ open, pro, onClose, onBook }) {
                             {s.name}
                           </div>
                           {s.desc && (
-                            <div className="text-xs text-zinc-400">
-                              {s.desc}
-                            </div>
+                            <div className="text-xs text-zinc-400">{s.desc}</div>
                           )}
                         </td>
                         <td className="px-3 py-2">{money(s.price)}</td>
@@ -185,6 +211,7 @@ export default function ProDrawer({ open, pro, onClose, onBook }) {
             )}
           </section>
 
+          {/* badges */}
           {Array.isArray(pro.badges) && pro.badges.length > 0 && (
             <section>
               <h4 className="font-semibold mb-2">Badges</h4>
@@ -201,6 +228,7 @@ export default function ProDrawer({ open, pro, onClose, onBook }) {
             </section>
           )}
 
+          {/* gallery */}
           {gallery.length > 0 && (
             <section>
               <h4 className="font-semibold mb-2">Gallery</h4>
@@ -224,6 +252,7 @@ export default function ProDrawer({ open, pro, onClose, onBook }) {
             </section>
           )}
 
+          {/* actions */}
           <div className="pt-2 flex gap-2">
             {onBook ? (
               <button
@@ -255,7 +284,9 @@ export default function ProDrawer({ open, pro, onClose, onBook }) {
   );
 }
 
-/* ------------------------------ Carved Rail ------------------------------ */
+/* ------------------------------------------------------------------ */
+/* Carved rail                                                        */
+/* ------------------------------------------------------------------ */
 function LeftCarvedRail({ logoUrl }) {
   return (
     <div className="pointer-events-none absolute inset-y-0 left-0 w-20 sm:w-24">
@@ -269,7 +300,14 @@ function LeftCarvedRail({ logoUrl }) {
             <stop offset="0%" stopColor="#FFE9DC" />
             <stop offset="100%" stopColor="#FFC7D6" />
           </linearGradient>
-          <pattern id="ktDots" x="0" y="0" width="4" height="4" patternUnits="userSpaceOnUse">
+          <pattern
+            id="ktDots"
+            x="0"
+            y="0"
+            width="4"
+            height="4"
+            patternUnits="userSpaceOnUse"
+          >
             <circle cx="1" cy="1" r="0.6" fill="#ff7a00" />
           </pattern>
         </defs>

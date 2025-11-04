@@ -8,8 +8,44 @@
               #000;
 }
 
-/* make sure Tailwind doesn't shrink AWS liveness internals */
+/* ✅ keep the working AWS behavior */
 .aws-liveness video,
 .aws-liveness canvas {
   max-width: none !important;
+}
+
+/* =====================================================
+   ⭐ Rating star animations — namespaced
+   ===================================================== */
+@keyframes kpo-star-fade {
+  0% {
+    opacity: 0;
+    transform: scale(0.5) rotate(-20deg);
+    filter: brightness(0.6);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.15) rotate(5deg);
+    filter: brightness(1.2);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) rotate(0deg);
+    filter: brightness(1);
+  }
+}
+
+.kpo-star-anim {
+  display: inline-block;
+  animation: kpo-star-fade 0.5s ease-out;
+  transform-origin: center;
+}
+
+@keyframes kpo-star-glow {
+  0%, 100% { text-shadow: 0 0 6px rgba(255, 215, 0, 0.5); }
+  50%      { text-shadow: 0 0 12px rgba(255, 215, 0, 1); }
+}
+
+.kpo-star-glow {
+  animation: kpo-star-glow 2s ease-in-out infinite alternate;
 }
