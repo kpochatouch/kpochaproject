@@ -1,10 +1,13 @@
 // apps/api/sockets/index.js
-// Socket.IO signaling + lightweight chat relay (multi-peer friendly)
-// server.js attaches like:
-//   const server = http.createServer(app);
-//   attachSockets(server);
+// Socket.IO signaling + lightweight chat relay + feed events
 
 import { Server } from "socket.io";
+
+// we will stash io here so routes can emit
+let ioRef = null;
+export function getIO() {
+  return ioRef;
+}
 
 // ---- CORS mirror (aligned with server.js) ----
 function buildOriginChecker() {
@@ -51,6 +54,9 @@ export default function attachSockets(httpServer) {
     pingInterval: 20000,
   });
 
+  // store for routes
+  ioRef = io;
+
   io.on("connection", (socket) => {
     const uid = socket.handshake.auth?.uid || socket.handshake.query?.uid || null;
 
@@ -64,11 +70,15 @@ export default function attachSockets(httpServer) {
       socket.data.who = who || uid || "anon";
 
       const peers = Array.from(io.sockets.adapter.rooms.get(r) || []).filter((id) => id !== socket.id);
-      socket.to(r).emit("presence:join", { user: socket.data.who, id: socket.id, count: peers.length + 1 });
+      socket.to(r).emit("presence:join", {
+        user: socket.data.who,
+        id: socket.id,
+        count: peers.length + 1,
+      });
       cb?.({ ok: true, room: r, peers, count: peers.length + 1 });
     });
 
-    // Convenience: join by booking id
+    // join by booking id
     socket.on("join:booking", ({ bookingId, who } = {}, cb) => {
       const id = bookingId != null ? String(bookingId) : "";
       if (!id) return cb?.({ ok: false, error: "bookingId_required" });
@@ -79,7 +89,11 @@ export default function attachSockets(httpServer) {
       socket.data.who = who || uid || "anon";
 
       const peers = Array.from(io.sockets.adapter.rooms.get(r) || []).filter((sid) => sid !== socket.id);
-      socket.to(r).emit("presence:join", { user: socket.data.who, id: socket.id, count: peers.length + 1 });
+      socket.to(r).emit("presence:join", {
+        user: socket.data.who,
+        id: socket.id,
+        count: peers.length + 1,
+      });
       cb?.({ ok: true, room: r, peers, count: peers.length + 1 });
     });
 
@@ -88,12 +102,15 @@ export default function attachSockets(httpServer) {
       const r = roomName(room) || socket.data.room;
       if (!r) return cb?.({ ok: false, error: "room_required" });
       socket.leave(r);
-      socket.to(r).emit("presence:leave", { user: socket.data.who || uid || "anon", id: socket.id });
+      socket.to(r).emit("presence:leave", {
+        user: socket.data.who || uid || "anon",
+        id: socket.id,
+      });
       if (socket.data.room === r) delete socket.data.room;
       cb?.({ ok: true });
     });
 
-    // --- Chat (name preserved) ---
+    // --- Chat ---
     socket.on("chat:message", (msg = {}) => {
       const r = roomName(msg?.room) || socket.data.room;
       const text = msg?.text ?? msg?.message ?? msg?.body;
@@ -107,7 +124,7 @@ export default function attachSockets(httpServer) {
       });
     });
 
-    // --- WebRTC signaling (names preserved, no self-echo) ---
+    // --- WebRTC signaling ---
     ["webrtc:offer", "webrtc:answer", "webrtc:ice"].forEach((evt) => {
       socket.on(evt, ({ room, payload } = {}) => {
         const r = roomName(room) || socket.data.room;
@@ -116,7 +133,7 @@ export default function attachSockets(httpServer) {
       });
     });
 
-    // Optional generic signaling
+    // Generic signaling
     socket.on("signal", ({ room, type, data } = {}) => {
       const r = roomName(room) || socket.data.room;
       if (!r || !type) return;
@@ -138,6 +155,6 @@ export default function attachSockets(httpServer) {
     console.warn("[sockets] connection_error:", err.code, err.message);
   });
 
-  console.log("[sockets] ✅ Socket.IO attached");
+  console.log("[sockets] ✅ Socket.IO attached (with feed events hook)");
   return io;
 }

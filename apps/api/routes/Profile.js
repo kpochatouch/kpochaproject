@@ -70,6 +70,27 @@ function filterProPublic(p) {
   };
 }
 
+function buildProfilesSetFromPayload(payload = {}) {
+  const set = {};
+  if (payload.fullName) set.fullName = payload.fullName;
+  if (payload.phone) set.phone = payload.phone;
+  if (payload.state) set.state = String(payload.state).toUpperCase();
+  if (payload.lga) set.lga = String(payload.lga).toUpperCase();
+  if (payload.address) set.address = payload.address;
+  if (payload.photoUrl) set.photoUrl = payload.photoUrl;
+  if (payload.identity && typeof payload.identity === "object") {
+    set.identity = payload.identity;
+    if (payload.identity.photoUrl) set.photoUrl = payload.identity.photoUrl;
+  }
+  if (payload.kyc) set.kyc = payload.kyc;
+  if (typeof payload.acceptedTerms === "boolean")
+    set.acceptedTerms = payload.acceptedTerms;
+  if (typeof payload.acceptedPrivacy === "boolean")
+    set.acceptedPrivacy = payload.acceptedPrivacy;
+  if (payload.agreements) set.agreements = payload.agreements;
+  return set;
+}
+
 /* ============================================================
    CLIENT PROFILE
    ============================================================ */
@@ -77,9 +98,30 @@ function filterProPublic(p) {
 async function handleGetClientMe(req, res) {
   try {
     const p = await ClientProfile.findOne({ ownerUid: req.user.uid }).lean();
-    const masked = maskClientProfileForClientView(p, { includeEmail: true }) || {};
-    return res.json({ ...masked, email: req.user.email || "" });
-  } catch {
+
+    // also tell the UI whether this user is a pro, and the pro photo
+    const pro = await Pro.findOne({ ownerUid: req.user.uid })
+      .select("_id name photoUrl status")
+      .lean()
+      .catch(() => null);
+
+    const masked =
+      maskClientProfileForClientView(p, { includeEmail: true }) || {};
+
+    return res.json({
+      ...masked,
+      email: req.user.email || "",
+      pro: pro
+        ? {
+            id: pro._id.toString(),
+            name: pro.name || "",
+            status: pro.status || "approved",
+            photoUrl: pro.photoUrl || "",
+          }
+        : null,
+    });
+  } catch (e) {
+    console.warn("[profile:get/me] error", e?.message || e);
     return res.status(500).json({ error: "Failed to load profile" });
   }
 }
@@ -88,82 +130,114 @@ async function handlePutClientMe(req, res) {
   try {
     const payload = req.body || {};
     if (payload.lga) payload.lga = String(payload.lga).toUpperCase();
+    if (payload.state) payload.state = String(payload.state).toUpperCase();
 
-    // 1) save / upsert client profile
+    // 1) save / upsert client profile in the mongoose model
     const updated = await ClientProfile.findOneAndUpdate(
       { ownerUid: req.user.uid },
       { $set: { ...payload, ownerUid: req.user.uid } },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     ).lean();
 
-    // 2) 🔁 mirror to Pro if this user is already a Pro
-    //    (this is the "pro uses client profile" rule)
+    // 1b) also keep the raw "profiles" collection in sync
+    try {
+      const col = mongoose.connection.db.collection("profiles");
+      const $set = buildProfilesSetFromPayload(payload);
+      if (Object.keys($set).length > 0) {
+        await col.updateOne(
+          { uid: req.user.uid },
+          { $set: $set },
+          { upsert: true }
+        );
+      }
+    } catch (e) {
+      console.warn("[profile->profiles col sync] skipped:", e?.message || e);
+    }
+
+    // 2) mirror to Pro if user already has a Pro
     try {
       const pro = await Pro.findOne({ ownerUid: req.user.uid }).lean();
       if (pro) {
-        // pull the freshest profile directly from the "profiles" collection
         const col = mongoose.connection.db.collection("profiles");
-        const fresh = await col.findOne({ uid: req.user.uid });
+        const fresh = await col.findOne({ uid: req.user.uid }).catch(() => null);
 
-        // if for any reason we cannot read the fresh profile, stop here
-        if (!fresh) {
-          console.warn(
-            "[profile->pro sync] no fresh profile found for",
-            req.user.uid
-          );
-        } else {
-          const name =
-            fresh.fullName ||
-            fresh.displayName ||
-            fresh.name ||
+        const mirror = {};
+
+        const nameFromFresh =
+          fresh?.fullName ||
+          fresh?.displayName ||
+          fresh?.name ||
+          [
+            fresh?.identity?.firstName,
+            fresh?.identity?.lastName,
+          ]
+            .filter(Boolean)
+            .join(" ")
+            .trim() ||
+          "";
+
+        const nameFromPayload =
+          payload.fullName ||
+          (payload.identity &&
             [
-              fresh?.identity?.firstName,
-              fresh?.identity?.lastName,
+              payload.identity.firstName,
+              payload.identity.lastName,
             ]
               .filter(Boolean)
               .join(" ")
-              .trim() ||
-            "";
+              .trim()) ||
+          "";
 
-          const phone =
-            fresh.phone ||
-            fresh?.identity?.phone ||
-            "";
+        const name = nameFromPayload || nameFromFresh;
+        if (name) mirror.name = name;
 
-          const lga = (
-            fresh.lga ||
-            fresh.state ||
+        const phone =
+          payload.phone ||
+          payload.identity?.phone ||
+          fresh?.phone ||
+          fresh?.identity?.phone ||
+          "";
+        if (phone) mirror.phone = phone;
+
+        const lga =
+          (payload.lga ||
+            payload.state ||
+            payload.identity?.lga ||
+            payload.identity?.state ||
+            fresh?.lga ||
+            fresh?.state ||
             fresh?.identity?.lga ||
             fresh?.identity?.state ||
-            ""
-          )
+            "")
             .toString()
             .toUpperCase();
+        if (lga) mirror.lga = lga;
 
-          const mirror = {};
-          if (name) mirror.name = name;
-          if (phone) mirror.phone = phone;
-          if (lga) mirror.lga = lga;
+        const photoUrl =
+          payload.photoUrl ||
+          payload.identity?.photoUrl ||
+          fresh?.photoUrl ||
+          fresh?.identity?.photoUrl ||
+          "";
+        if (photoUrl) mirror.photoUrl = photoUrl;
 
-          // merge identity but don't destroy existing pro.identity
-          mirror.identity = {
-            ...(pro.identity || {}),
-            ...(fresh.identity || {}),
-          };
+        mirror.identity = {
+          ...(pro.identity || {}),
+          ...(fresh?.identity || {}),
+          ...(payload.identity || {}),
+        };
 
-          await Pro.updateOne(
-            { ownerUid: req.user.uid },
-            { $set: mirror }
-          );
-        }
+        await Pro.updateOne({ ownerUid: req.user.uid }, { $set: mirror });
       }
     } catch (e) {
       console.warn("[profile->pro sync] skipped:", e?.message || e);
     }
 
-    const masked = maskClientProfileForClientView(updated, { includeEmail: true }) || {};
+    const masked =
+      maskClientProfileForClientView(updated, { includeEmail: true }) || {};
     return res.json({ ...masked, email: req.user.email || "" });
   } catch (e) {
+    console.warn("[profile:put/me] error", e?.message || e);
     return res.status(500).json({ error: "Failed to save profile" });
   }
 }
@@ -183,7 +257,9 @@ router.get(
   requireAdmin,
   async (req, res) => {
     try {
-      const p = await ClientProfile.findOne({ ownerUid: req.params.uid }).lean();
+      const p = await ClientProfile.findOne({
+        ownerUid: req.params.uid,
+      }).lean();
       return res.json(p || null);
     } catch {
       return res.status(500).json({ error: "Failed to load client profile" });
@@ -191,7 +267,7 @@ router.get(
   }
 );
 
-// Pro can view client for a booking
+// Pro can view client for a booking (safe version)
 router.get(
   "/profile/client/:uid/for-booking/:bookingId",
   requireAuth,
@@ -200,24 +276,47 @@ router.get(
       const b = await Booking.findById(req.params.bookingId).lean();
       if (!b) return res.status(404).json({ error: "Booking not found" });
 
-      const isProOwner = b.proOwnerUid && b.proOwnerUid === req.user.uid;
-      const canView = ["pending_payment", "scheduled", "accepted", "completed"].includes(
-        b.status
-      );
+      let isProOwner = false;
+
+      // old way: booking saved proOwnerUid
+      if (b.proOwnerUid && b.proOwnerUid === req.user.uid) {
+        isProOwner = true;
+      } else if (b.proId) {
+        // also allow if this user owns the pro in the booking
+        const pro = await Pro.findOne({
+          _id: b.proId,
+          ownerUid: req.user.uid,
+        })
+          .select("_id")
+          .lean();
+        if (pro) isProOwner = true;
+      }
+
+      const canView = [
+        "pending_payment",
+        "scheduled",
+        "accepted",
+        "completed",
+      ].includes(b.status);
+
       if (!(isProOwner && canView)) {
-        return res
-          .status(403)
-          .json({ error: "Not authorized to view client details for this booking" });
+        return res.status(403).json({
+          error: "Not authorized to view client details for this booking",
+        });
       }
 
       if (b.clientUid !== req.params.uid) {
-        return res.status(400).json({ error: "Client UID does not match booking" });
+        return res
+          .status(400)
+          .json({ error: "Client UID does not match booking" });
       }
 
-      const p = await ClientProfile.findOne({ ownerUid: req.params.uid }).lean();
+      const p = await ClientProfile.findOne({
+        ownerUid: req.params.uid,
+      }).lean();
       const masked = maskClientProfileForClientView(p) || null;
       return res.json(masked);
-    } catch {
+    } catch (e) {
       return res
         .status(500)
         .json({ error: "Failed to load client profile for booking" });
@@ -230,7 +329,9 @@ router.get(
    ============================================================ */
 router.get("/profile/pro/:proId", async (req, res) => {
   try {
-    const p = await ProProfile.findOne({ proId: req.params.proId }).lean();
+    const p = await ProProfile.findOne({
+      proId: req.params.proId,
+    }).lean();
     if (!p) return res.json(null);
     return res.json(filterProPublic(p));
   } catch {
@@ -242,7 +343,9 @@ router.put("/profile/pro/me", requireAuth, async (req, res) => {
   try {
     const pro = await Pro.findOne({ ownerUid: req.user.uid }).lean();
     if (!pro)
-      return res.status(403).json({ error: "You are not an approved professional" });
+      return res
+        .status(403)
+        .json({ error: "You are not an approved professional" });
 
     const payload = req.body || {};
     const toSet = { ...payload, ownerUid: req.user.uid, proId: pro._id };
@@ -265,7 +368,9 @@ router.get(
   requireAdmin,
   async (req, res) => {
     try {
-      const p = await ProProfile.findOne({ proId: req.params.proId }).lean();
+      const p = await ProProfile.findOne({
+        proId: req.params.proId,
+      }).lean();
       return res.json(p || null);
     } catch {
       return res.status(500).json({ error: "Failed to load pro profile" });

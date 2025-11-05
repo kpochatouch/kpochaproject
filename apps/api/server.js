@@ -30,13 +30,16 @@ import {
 import pinRoutes from "./routes/pin.js";
 import profileRouter from "./routes/Profile.js";
 import postsRouter from "./routes/posts.js";
+import commentsRouter from "./routes/comments.js";
 import paymentsRouter from "./routes/payments.js";
 import uploadsRoutes from "./routes/uploads.js";
 import payoutRoutes from "./routes/payout.js";
 import adminProsRoutes from "./routes/adminPros.js";
-import geoRouter from "./routes/geo.js"; // << mount router; no more inlined NG geo
-import riskRoutes from "./routes/risk.js"; // ← NEW
+import geoRouter from "./routes/geo.js";
+import riskRoutes from "./routes/risk.js";
 import awsLivenessRoutes from "./routes/awsLiveness.js";
+import redis from "./lib/redis.js";
+import postStatsRouter from "./routes/postStats.js";
 
 dotenv.config();
 
@@ -74,7 +77,8 @@ function requireAdmin(req, res, next) {
 /* ------------------- Firebase Admin ------------------- */
 try {
   const keyPath =
-    process.env.SERVICE_KEY_PATH || new URL("./serviceAccountKey.json", import.meta.url).pathname;
+    process.env.SERVICE_KEY_PATH ||
+    new URL("./serviceAccountKey.json", import.meta.url).pathname;
 
   const svc = JSON.parse(fs.readFileSync(keyPath, "utf8"));
   admin.initializeApp({ credential: admin.credential.cert(svc) });
@@ -110,7 +114,9 @@ async function fixWalletCollectionOnce() {
         { $rename: { userUid: "ownerUid" } }
       );
       if (renameRes?.modifiedCount) {
-        console.log(`[wallets] 🔧 Renamed userUid → ownerUid for ${renameRes.modifiedCount} docs`);
+        console.log(
+          `[wallets] 🔧 Renamed userUid → ownerUid for ${renameRes.modifiedCount} docs`
+        );
       }
     } catch {}
 
@@ -175,7 +181,10 @@ const MaintenanceSchema = new mongoose.Schema(
   { _id: false }
 );
 const NotificationsSchema = new mongoose.Schema(
-  { emailEnabled: { type: Boolean, default: false }, smsEnabled: { type: Boolean, default: false } },
+  {
+    emailEnabled: { type: Boolean, default: false },
+    smsEnabled: { type: Boolean, default: false },
+  },
   { _id: false }
 );
 
@@ -189,7 +198,10 @@ const SettingsSchema = new mongoose.Schema(
     maintenance: { type: MaintenanceSchema, default: () => ({}) },
     notifications: { type: NotificationsSchema, default: () => ({}) },
     withdrawals: {
-      type: new mongoose.Schema({ requireApproval: { type: Boolean, default: true } }, { _id: false }),
+      type: new mongoose.Schema(
+        { requireApproval: { type: Boolean, default: true } },
+        { _id: false }
+      ),
     },
     security: { allowedOrigins: { type: [String], default: [] } },
     webhooks: { paystack: { secret: { type: String, default: "" } } },
@@ -197,7 +209,8 @@ const SettingsSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
-const Settings = mongoose.models.Settings || mongoose.model("Settings", SettingsSchema);
+const Settings =
+  mongoose.models.Settings || mongoose.model("Settings", SettingsSchema);
 
 let SETTINGS_CACHE = null;
 async function loadSettings({ force = false } = {}) {
@@ -258,19 +271,25 @@ async function initSchedulers() {
           fail = 0;
         for (const b of toRelease) {
           try {
-            const res = await releasePendingToAvailableForBooking(b, { reason: "auto_release_cron" });
+            const res = await releasePendingToAvailableForBooking(b, {
+              reason: "auto_release_cron",
+            });
             if (res?.ok) ok++;
             else fail++;
           } catch (e) {
             fail++;
-            console.error("[scheduler] release error for booking", b._id?.toString?.(), e?.message || e);
+            console.error(
+              "[scheduler] release error for booking",
+              b._id?.toString?.(),
+              e?.message || e
+            );
           }
         }
 
         console.log(
-          `[scheduler] Auto-release ran in ${Math.round((Date.now() - started) / 1000)}s. Processed=${
-            toRelease.length
-          }, ok=${ok}, fail=${fail}`
+          `[scheduler] Auto-release ran in ${Math.round(
+            (Date.now() - started) / 1000
+          )}s. Processed=${toRelease.length}, ok=${ok}, fail=${fail}`
         );
       } catch (err) {
         console.error("[scheduler] Auto-release error:", err.message);
@@ -284,7 +303,9 @@ async function initSchedulers() {
     const t = cron.schedule(s.bookingRules.noShowSweepCron, async () => {
       try {
         const strikeLimit = s.bookingRules.noShowStrikeLimit ?? 2;
-        console.log(`[scheduler] No-show sweep ran. Strike limit: ${strikeLimit}`);
+        console.log(
+          `[scheduler] No-show sweep ran. Strike limit: ${strikeLimit}`
+        );
       } catch (err) {
         console.error("[scheduler] No-show sweep error:", err.message);
       }
@@ -302,14 +323,16 @@ async function restartSchedulers() {
 /* ------------------- Express App ------------------- */
 const app = express();
 
+app.set("redis", redis);
+
 /* ------------------- CORS (hardened, with Vercel previews) ------------------- */
 const ALLOW_LIST = (process.env.CORS_ORIGIN || "http://localhost:5173")
-  .split(/[,\s]+/)
+  .split(/[,\s]+/g)
   .map((s) => s.trim())
   .filter(Boolean);
 
 function originAllowed(origin) {
-  if (!origin) return true; // non-browser / same-origin
+  if (!origin) return true;
   try {
     const oh = new URL(origin).host;
     for (const o of ALLOW_LIST) {
@@ -329,7 +352,7 @@ const corsOptions = {
   origin(origin, cb) {
     const ok = originAllowed(origin);
     if (ok) return cb(null, true);
-    console.warn("[CORS] Blocked:", origin, "Allowed:", ALLOW_LIST, "VercelPreviews=on");
+    console.warn("[CORS] Blocked:", origin, "Allowed:", ALLOW_LIST);
     return cb(new Error("CORS blocked"));
   },
   credentials: true,
@@ -349,13 +372,22 @@ app.post(
   express.raw({ type: "application/json" }),
   async (req, res) => {
     try {
-      const secret = process.env.PAYSTACK_SECRET_KEY || process.env.PAYSTACK_WEBHOOK_SECRET || "";
+      const secret =
+        process.env.PAYSTACK_SECRET_KEY ||
+        process.env.PAYSTACK_WEBHOOK_SECRET ||
+        "";
       const signature = req.headers["x-paystack-signature"];
-      const computed = crypto.createHmac("sha512", secret).update(req.body).digest("hex");
-      if (!signature || signature !== computed) return res.status(401).send("Invalid signature");
+      const computed = crypto
+        .createHmac("sha512", secret)
+        .update(req.body)
+        .digest("hex");
+      if (!signature || signature !== computed)
+        return res.status(401).send("Invalid signature");
 
       const event = JSON.parse(req.body.toString());
-      handlePaystackEvent(event).catch((err) => console.error("[paystack] handler error:", err));
+      handlePaystackEvent(event).catch((err) =>
+        console.error("[paystack] handler error:", err)
+      );
       res.sendStatus(200);
     } catch (err) {
       console.error("[paystack] webhook processing error:", err);
@@ -366,6 +398,26 @@ app.post(
 
 // JSON after webhooks
 app.use(express.json());
+
+/* ------------------- View identity (for logging) ------------------- */
+app.use((req, res, next) => {
+  const forwarded =
+    (req.headers["x-forwarded-for"] &&
+      String(req.headers["x-forwarded-for"]).split(",")[0].trim()) ||
+    req.socket?.remoteAddress ||
+    "";
+  const ua = req.headers["user-agent"] || "";
+  const anonId = crypto
+    .createHash("sha1")
+    .update(`${forwarded}|${ua}`)
+    .digest("hex");
+  req.viewIdentity = {
+    ip: forwarded,
+    ua,
+    anonId,
+  };
+  next();
+});
 
 /* ------------------- Auth Middleware ------------------- */
 async function requireAuth(req, res, next) {
@@ -385,10 +437,11 @@ async function requireAuth(req, res, next) {
   }
 }
 
-/** ✅ Pro-only guard (used for payout/withdraw routes) */
 async function requirePro(req, res, next) {
   try {
-    const pro = await Pro.findOne({ ownerUid: req.user.uid }).select("_id").lean();
+    const pro = await Pro.findOne({ ownerUid: req.user.uid })
+      .select("_id")
+      .lean();
     if (!pro) return res.status(403).json({ error: "pro_only" });
     req.proId = pro._id.toString();
     next();
@@ -397,7 +450,7 @@ async function requirePro(req, res, next) {
   }
 }
 
-/* ------------------- Maintenance Mode Gate ------------------- */
+/* ------------------- Maintenance ------------------- */
 function maintenanceBypass(req) {
   if (req.path === "/api/health") return true;
   if (req.path.startsWith("/api/paystack/webhook")) return true;
@@ -428,75 +481,130 @@ app.use(async (req, res, next) => {
   }
 });
 
-/* ------------------- Verified client identity helpers ------------------- */
+/* ------------------- Helpers ------------------- */
 async function getVerifiedClientIdentity(uid) {
   try {
     const col = mongoose.connection.db.collection("profiles");
     const p = await col.findOne(
       { uid },
-      { projection: { fullName: 1, name: 1, displayName: 1, phone: 1, identity: 1 } }
+      {
+        projection: {
+          fullName: 1,
+          name: 1,
+          displayName: 1,
+          phone: 1,
+          identity: 1,
+          photoUrl: 1,
+        },
+      }
     );
-    if (!p) return { fullName: "", phone: "" };
+    if (!p) return { fullName: "", phone: "", photoUrl: "" };
 
     const fullName =
       p.fullName ||
       p.name ||
       p.displayName ||
-      [p?.identity?.firstName, p?.identity?.middleName, p?.identity?.lastName].filter(Boolean).join(" ").trim() ||
+      [p?.identity?.firstName, p?.identity?.middleName, p?.identity?.lastName]
+        .filter(Boolean)
+        .join(" ")
+        .trim() ||
       "";
 
     const phone = p.phone || p?.identity?.phone || "";
+    const photoUrl =
+      p.photoUrl || p?.identity?.photoUrl || "";
 
-    return { fullName, phone };
+    return { fullName, phone, photoUrl };
   } catch {
-    return { fullName: "", phone: "" };
+    return { fullName: "", phone: "", photoUrl: "" };
   }
 }
 
 /* ------------------- Current user profile summary ------------------- */
+/**
+ * ★ this is the important fix
+ * we return:
+ * - photoUrl
+ * - isPro
+ * - pro: { id, name, status, photoUrl }
+ */
 app.get("/api/me", requireAuth, async (req, res) => {
   try {
-    const isAdmin = isAdminUid(req.user.uid);
-
-    let isPro = false;
+    let proDoc = null;
     try {
-      const p = await Pro.findOne({ ownerUid: req.user.uid }).select("_id").lean();
-      isPro = !!p;
+      proDoc = await Pro.findOne({ ownerUid: req.user.uid })
+        .select("_id name photoUrl status")
+        .lean();
     } catch {}
 
-    let identity = {};
-    let displayName = "";
+    let profileDoc = null;
     try {
       const col = mongoose.connection.db.collection("profiles");
-      const doc = await col.findOne(
+      profileDoc = await col.findOne(
         { uid: req.user.uid },
-        { projection: { displayName: 1, name: 1, fullName: 1, identity: 1 } }
+        {
+          projection: {
+            displayName: 1,
+            name: 1,
+            fullName: 1,
+            identity: 1,
+            photoUrl: 1,
+            hasPro: 1,
+            proId: 1,
+            proStatus: 1,
+          },
+        }
       );
-      if (doc) {
-        identity = doc.identity || {};
-        displayName =
-          doc.displayName ||
-          doc.name ||
-          doc.fullName ||
-          [doc?.identity?.firstName, doc?.identity?.lastName].filter(Boolean).join(" ").trim() ||
-          "";
-      }
     } catch {}
+
+    const identity = profileDoc?.identity || {};
+    const displayName =
+      profileDoc?.displayName ||
+      profileDoc?.name ||
+      profileDoc?.fullName ||
+      [identity?.firstName, identity?.lastName].filter(Boolean).join(" ").trim() ||
+      "";
+
+    // choose best photo
+    const photoUrl =
+      profileDoc?.photoUrl ||
+      identity?.photoUrl ||
+      proDoc?.photoUrl ||
+      "";
+
+    const isAdmin = isAdminUid(req.user.uid);
+    const isPro = !!proDoc || !!profileDoc?.hasPro;
 
     res.json({
       uid: req.user.uid,
       email: req.user.email || "",
       displayName,
       identity,
+      photoUrl,
       isAdmin,
       isPro,
+      pro: proDoc
+        ? {
+            id: proDoc._id.toString(),
+            name: proDoc.name || displayName || "",
+            status: proDoc.status || "approved",
+            photoUrl: proDoc.photoUrl || photoUrl || "",
+          }
+        : profileDoc?.proId
+        ? {
+            id: profileDoc.proId.toString(),
+            name: displayName || "",
+            status: profileDoc.proStatus || "approved",
+            photoUrl,
+          }
+        : null,
     });
   } catch (e) {
     res.status(500).json({ error: "failed_me" });
   }
 });
 
-/** 🔒 Enforce verified name/phone on bookings POST */
+/** Enforce verified name/phone on bookings POST */
 app.use("/api/bookings", requireAuth, async (req, _res, next) => {
   try {
     if (req.method !== "POST") return next();
@@ -522,42 +630,43 @@ app.use("/api/bookings", requireAuth, async (req, _res, next) => {
 /* ------------------- Routers ------------------- */
 app.use("/api", bookingsRouter);
 
-// 🔒 Pro payout write-ops guard for /api/wallet
+// wallet write guard
 app.use("/api/wallet", requireAuth, (req, res, next) => {
   const write =
-    req.method === "POST" || req.method === "PUT" || req.method === "DELETE" || req.method === "PATCH";
+    req.method === "POST" ||
+    req.method === "PUT" ||
+    req.method === "DELETE" ||
+    req.method === "PATCH";
   if (!write) return next();
   return requirePro(req, res, next);
 });
 app.use("/api", walletWithAuth(requireAuth, requireAdmin));
 
-// PIN / Profile / Posts / Payments
 app.use("/api", pinRoutes({ requireAuth, Application }));
 app.use("/api", profileRouter);
 app.use("/api", postsRouter);
+app.use("/api", commentsRouter);
 app.use("/api", paymentsRouter({ requireAuth }));
-
-// Uploads (Cloudinary signature)
+app.use("/api", postStatsRouter);
 app.use("/api", uploadsRoutes({ requireAuth }));
-
-// Payout bank details
 app.use("/api", payoutRoutes({ requireAuth, Application }));
-
-// 🔐 Risk / Liveness logging
 app.use("/api", riskRoutes({ requireAuth, requireAdmin, Application }));
 app.use("/api", awsLivenessRoutes({ requireAuth }));
 
-// Admin pros (approve + decline)
+// admin pros
 try {
   const maybe = adminProsRoutes;
-  const mounted = typeof maybe === "function" ? maybe({ requireAuth, requireAdmin, Application, Pro }) : maybe;
+  const mounted =
+    typeof maybe === "function"
+      ? maybe({ requireAuth, requireAdmin, Application, Pro })
+      : maybe;
   if (mounted) app.use("/api", mounted);
   console.log("[api] ✅ Admin pros routes mounted");
 } catch (e) {
   console.warn("[api] ℹ️ Admin pros routes not mounted:", e?.message || e);
 }
 
-// Geo routes
+// geo
 try {
   if (geoRouter) {
     app.use("/api", geoRouter);
@@ -567,11 +676,11 @@ try {
   console.warn("[api] ℹ️ Geo routes not mounted:", e?.message || e);
 }
 
-/* ----- Optional availability router ----- */
+// optional availability
 try {
-  const { default: availabilityRouter } = await import("./routes/availability.js").catch(() => ({
-    default: null,
-  }));
+  const { default: availabilityRouter } = await import("./routes/availability.js").catch(
+    () => ({ default: null })
+  );
   if (availabilityRouter) {
     app.use("/api", availabilityRouter);
     console.log("[api] ✅ Availability routes mounted");
@@ -580,9 +689,7 @@ try {
   }
 } catch {}
 
-/* ------------------- Admin & Pros endpoints ------------------- */
-
-/** Public settings */
+/* ------------------- Public settings ------------------- */
 app.get("/api/settings", async (_req, res) => {
   try {
     const s = await loadSettings();
@@ -612,7 +719,9 @@ app.get("/api/settings/admin", requireAuth, requireAdmin, async (_req, res) => {
 async function saveSettingsAndRestart(req, res) {
   try {
     const doc = await updateSettings(req.body || {}, req.user?.uid || "admin");
-    await restartSchedulers().catch((e) => console.warn("[settings] restart warn:", e?.message || e));
+    await restartSchedulers().catch((e) =>
+      console.warn("[settings] restart warn:", e?.message || e)
+    );
     res.json(doc);
   } catch (err) {
     console.error("[settings:put]", err?.message || err);
@@ -622,10 +731,12 @@ async function saveSettingsAndRestart(req, res) {
 app.put("/api/settings", requireAuth, requireAdmin, saveSettingsAndRestart);
 app.put("/api/settings/admin", requireAuth, requireAdmin, saveSettingsAndRestart);
 
-/** Applications: list pending */
+/* ------------------- Pros Admin ------------------- */
 app.get("/api/pros/pending", requireAuth, requireAdmin, async (_req, res) => {
   try {
-    const docs = await Application.find({ status: { $in: ["submitted", "pending"] } })
+    const docs = await Application.find({
+      status: { $in: ["submitted", "pending"] },
+    })
       .sort({ createdAt: -1 })
       .limit(500)
       .lean();
@@ -636,7 +747,14 @@ app.get("/api/pros/pending", requireAuth, requireAdmin, async (_req, res) => {
   }
 });
 
-/** Approve application → upsert Pro */
+// small helper to coerce prices coming from forms like "15,000"
+function toKpochaNumber(val) {
+  if (val === null || val === undefined) return 0;
+  const num = Number(String(val).replace(/,/g, "").trim());
+  return Number.isFinite(num) ? num : 0;
+}
+
+/** Approve application → upsert Pro, and mark profile as hasPro */
 app.post("/api/pros/approve/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
@@ -651,42 +769,98 @@ app.post("/api/pros/approve/:id", requireAuth, requireAdmin, async (req, res) =>
     const ownerUid = appDoc.uid;
     if (!ownerUid) return res.status(400).json({ error: "missing_applicant_uid" });
 
-    // sync identity from profile collection
+    // pull freshest profile, so we can sync photo + phone + lga
+    let freshProfile = null;
     try {
       const col = mongoose.connection.db.collection("profiles");
-      const fresh = await col.findOne({ uid: ownerUid });
-      if (fresh) {
+      freshProfile = await col.findOne({ uid: ownerUid });
+      if (freshProfile) {
         appDoc.displayName =
-          fresh.fullName ||
-          fresh.name ||
-          [fresh?.identity?.firstName, fresh?.identity?.lastName].filter(Boolean).join(" ").trim() ||
+          freshProfile.fullName ||
+          freshProfile.name ||
+          [freshProfile?.identity?.firstName, freshProfile?.identity?.lastName]
+            .filter(Boolean)
+            .join(" ")
+            .trim() ||
           appDoc.displayName;
-        appDoc.phone = fresh.phone || fresh?.identity?.phone || appDoc.phone;
-        appDoc.lga = (fresh.lga || fresh.state || appDoc.lga || "").toString().toUpperCase();
-        appDoc.identity = { ...(appDoc.identity || {}), ...(fresh.identity || {}) };
+        appDoc.phone =
+          freshProfile.phone ||
+          freshProfile?.identity?.phone ||
+          appDoc.phone;
+        appDoc.lga = (
+          freshProfile.lga ||
+          freshProfile.state ||
+          appDoc.lga ||
+          ""
+        )
+          .toString()
+          .toUpperCase();
+        appDoc.identity = {
+          ...(appDoc.identity || {}),
+          ...(freshProfile.identity || {}),
+        };
+        // keep photo too
+        if (freshProfile.photoUrl || freshProfile?.identity?.photoUrl) {
+          appDoc.identity.photoUrl =
+            freshProfile.photoUrl || freshProfile?.identity?.photoUrl;
+        }
       }
     } catch (e) {
       console.warn("[approve:profile sync] skipped:", e?.message || e);
     }
 
     // coords
-    const lat = Number(appDoc?.business?.lat ?? appDoc?.identity?.lat ?? appDoc?.lat);
-    const lon = Number(appDoc?.business?.lon ?? appDoc?.identity?.lon ?? appDoc?.lon);
+    const lat = Number(
+      appDoc?.business?.lat ?? appDoc?.identity?.lat ?? appDoc?.lat
+    );
+    const lon = Number(
+      appDoc?.business?.lon ?? appDoc?.identity?.lon ?? appDoc?.lon
+    );
     const hasCoords = Number.isFinite(lat) && Number.isFinite(lon);
 
-    // normalize services from application
+    // normalize services
     let derivedServices = [];
-    if (appDoc?.professional && Array.isArray(appDoc.professional.services)) {
+
+    // 1) from servicesDetailed (your BecomePro.jsx sends this)
+    if (Array.isArray(appDoc.servicesDetailed) && appDoc.servicesDetailed.length) {
+      derivedServices = appDoc.servicesDetailed
+        .map((s) => {
+          const name = (s.name || s.id || "").trim();
+          if (!name) return null;
+          const price = toKpochaNumber(s.price || s.promoPrice || 0);
+          return {
+            name,
+            price,
+            visible: true,
+            description: s.description || "",
+            durationMins: toKpochaNumber(s.durationMins || 0),
+          };
+        })
+        .filter(Boolean);
+    }
+
+    // 2) fallback: from professional.services
+    if (
+      !derivedServices.length &&
+      appDoc?.professional &&
+      Array.isArray(appDoc.professional.services)
+    ) {
       derivedServices = appDoc.professional.services
         .map((s) =>
           typeof s === "string"
-            ? { name: s, price: 0, visible: true, description: "", durationMins: 0 }
+            ? {
+                name: s,
+                price: 0,
+                visible: true,
+                description: "",
+                durationMins: 0,
+              }
             : {
                 name: s.name || "",
-                price: Number.isFinite(s.price) ? s.price : 0,
+                price: toKpochaNumber(s.price),
                 visible: typeof s.visible === "boolean" ? s.visible : true,
                 description: s.description || "",
-                durationMins: Number.isFinite(s.durationMins) ? s.durationMins : 0,
+                durationMins: toKpochaNumber(s.durationMins || 0),
               }
         )
         .filter((s) => s.name);
@@ -696,16 +870,21 @@ app.post("/api/pros/approve/:id", requireAuth, requireAdmin, async (req, res) =>
       ownerUid,
       name:
         appDoc.displayName ||
-        [appDoc?.identity?.firstName, appDoc?.identity?.lastName].filter(Boolean).join(" ") ||
+        [appDoc?.identity?.firstName, appDoc?.identity?.lastName]
+          .filter(Boolean)
+          .join(" ") ||
         appDoc.email ||
         "Unnamed Pro",
       email: appDoc.email || "",
       phone: appDoc.phone || appDoc?.identity?.phone || "",
-      lga:
-        (appDoc.lga ||
-          appDoc?.identity?.city ||
-          appDoc?.identity?.state ||
-          "").toString().toUpperCase(),
+      lga: (
+        appDoc.lga ||
+        appDoc?.identity?.city ||
+        appDoc?.identity?.state ||
+        ""
+      )
+        .toString()
+        .toUpperCase(),
       identity: appDoc.identity || {},
       professional: appDoc.professional || {},
       availability: appDoc.availability || {},
@@ -715,13 +894,40 @@ app.post("/api/pros/approve/:id", requireAuth, requireAdmin, async (req, res) =>
       ...(hasCoords ? { loc: { type: "Point", coordinates: [lon, lat] } } : {}),
     };
 
-    const pro = await Pro.findOneAndUpdate({ ownerUid }, { $set: base }, { new: true, upsert: true });
+    const pro = await Pro.findOneAndUpdate(
+      { ownerUid },
+      { $set: base },
+      { new: true, upsert: true }
+    );
+
+    // also mark profile so frontend stops saying "you don't have a professional profile yet"
+    try {
+      const col = mongoose.connection.db.collection("profiles");
+      await col.updateOne(
+        { uid: ownerUid },
+        {
+          $set: {
+            hasPro: true,
+            proId: pro._id,
+            proStatus: "approved",
+            ...(pro.photoUrl ? { photoUrl: pro.photoUrl } : {}),
+          },
+        },
+        { upsert: true }
+      );
+    } catch (e) {
+      console.warn("[approve:profile flag] skipped", e?.message || e);
+    }
 
     appDoc.status = "approved";
     appDoc.approvedAt = new Date();
     await appDoc.save();
 
-    res.json({ ok: true, proId: pro._id.toString(), applicationId: appDoc._id.toString() });
+    res.json({
+      ok: true,
+      proId: pro._id.toString(),
+      applicationId: appDoc._id.toString(),
+    });
   } catch (err) {
     console.error("[pros/approve]", err?.message || err);
     res.status(500).json({ error: "approve_failed" });
@@ -760,17 +966,11 @@ app.delete("/api/dev/reset", async (_req, res) => {
 });
 
 /* ------------------- Health ------------------- */
-app.get("/api/health", (_req, res) => res.json({ ok: true, time: new Date().toISOString() }));
+app.get("/api/health", (_req, res) =>
+  res.json({ ok: true, time: new Date().toISOString() })
+);
 
 /* ------------------- Barbers ------------------- */
-/**
- * This one is the important change.
- * - matches top-level state/lga
- * - ALSO matches identity.state / identity.city
- * - case-insensitive exact match
- * - optional service filter
- * - still returns proToBarber(...)
- */
 app.get("/api/barbers", async (req, res) => {
   try {
     if (mongoose.connection.readyState !== 1) {
@@ -783,7 +983,6 @@ app.get("/api/barbers", async (req, res) => {
 
     const and = [];
 
-    // state: match either pro.state OR pro.identity.state (case-insensitive exact)
     if (stateRaw) {
       const re = new RegExp(`^${escapeRegex(stateRaw)}$`, "i");
       and.push({
@@ -791,7 +990,6 @@ app.get("/api/barbers", async (req, res) => {
       });
     }
 
-    // lga: match either pro.lga OR pro.identity.city (case-insensitive exact)
     if (lgaRaw) {
       const re = new RegExp(`^${escapeRegex(lgaRaw)}$`, "i");
       and.push({
@@ -799,14 +997,13 @@ app.get("/api/barbers", async (req, res) => {
       });
     }
 
-    // service: match common patterns
     if (serviceRaw) {
       const re = new RegExp(escapeRegex(serviceRaw), "i");
       and.push({
         $or: [
-          { services: { $elemMatch: { $regex: re } } },   // ['Barbering', ...]
-          { "services.name": { $regex: re } },             // [{name:'Barbering'}]
-          { "servicesDetailed.name": { $regex: re } },     // if you ever stored like this
+          { services: { $elemMatch: { $regex: re } } },
+          { "services.name": { $regex: re } },
+          { "servicesDetailed.name": { $regex: re } },
         ],
       });
     }
@@ -821,7 +1018,6 @@ app.get("/api/barbers", async (req, res) => {
   }
 });
 
-// helper for the route above
 function escapeRegex(str = "") {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -912,7 +1108,6 @@ app.get("/api/barbers/nearby", async (req, res) => {
         return { ...shaped, distanceKm: Math.round((d.dist / 1000) * 10) / 10 };
       });
     } catch {
-      // geo search failed → fall back to normal query using state + LGA
       used = "lga";
       const rev = await reverseGeocode(lat, lon);
       const lga = rev?.lga || "";
@@ -942,7 +1137,10 @@ app.get("/api/chatbase/userhash", requireAuth, async (req, res) => {
       return res.status(500).json({ error: "chatbase_secret_missing" });
     }
     const userId = req.user.uid;
-    const userHash = crypto.createHmac("sha256", CHATBASE_SECRET).update(userId).digest("hex");
+    const userHash = crypto
+      .createHmac("sha256", CHATBASE_SECRET)
+      .update(userId)
+      .digest("hex");
     return res.json({ userId, userHash });
   } catch (e) {
     return res.status(500).json({ error: "hash_failed" });
@@ -972,7 +1170,9 @@ app.post("/api/applications", requireAuth, async (req, res) => {
       payload?.identity?.lga ||
       payload?.identity?.state ||
       ""
-    ).toString().toUpperCase();
+    )
+      .toString()
+      .toUpperCase();
 
     const servicesStr = Array.isArray(payload?.professional?.services)
       ? payload.professional.services.join(", ")

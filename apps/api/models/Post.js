@@ -27,28 +27,37 @@ const ProSnapshotSchema = new mongoose.Schema(
 const PostSchema = new mongoose.Schema(
   {
     // ownership
-    proOwnerUid: { type: String, required: true, index: true },        // Firebase UID of the Pro owner
+    proOwnerUid: { type: String, required: true, index: true }, // Firebase UID of the Pro owner
     proId: { type: mongoose.Schema.Types.ObjectId, ref: "Pro", required: true, index: true },
 
     // snapshot of the author (denormalized for speed)
     pro: { type: ProSnapshotSchema, required: true },
 
     // content
-    text: { type: String, default: "" },                                // what the router sends as text
+    text: { type: String, default: "" },
     media: { type: [MediaSchema], default: [] },
     tags: { type: [String], default: [], index: true },
 
     // visibility / scoping
-    lga: { type: String, default: "", index: true },                    // UPPERCASE (see save hook)
+    lga: { type: String, default: "", index: true }, // UPPERCASE (see save hook)
     isPublic: { type: Boolean, default: true, index: true },
+
+    // moderation
     hidden: { type: Boolean, default: false, index: true },
+    hiddenBy: { type: String, default: "" }, // admin uid
+    deleted: { type: Boolean, default: false, index: true },
+    deletedAt: { type: Date, default: null },
+    deletedBy: { type: String, default: "" },
+
+    // edits
+    editedAt: { type: Date, default: null },
   },
   { timestamps: true }
 );
 
 // helpful indexes for feeds
-PostSchema.index({ isPublic: 1, hidden: 1, createdAt: -1 });
-PostSchema.index({ lga: 1, isPublic: 1, createdAt: -1 });
+PostSchema.index({ isPublic: 1, hidden: 1, deleted: 1, createdAt: -1 });
+PostSchema.index({ lga: 1, isPublic: 1, hidden: 1, deleted: 1, createdAt: -1 });
 PostSchema.index({ proOwnerUid: 1, createdAt: -1 });
 
 // normalize LGA casing

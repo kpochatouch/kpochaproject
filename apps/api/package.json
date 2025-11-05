@@ -20,6 +20,7 @@
     "nigeria-states-lgas": "^0.0.2",
     "nigerian-states-and-lgas": "^1.0.8",
     "node-cron": "^4.2.1",
+    "redis": "^5.9.0",
     "socket.io": "^4.8.1",
     "socket.io-client": "^4.8.1"
   },

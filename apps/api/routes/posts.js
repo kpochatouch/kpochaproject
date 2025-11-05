@@ -2,9 +2,10 @@
 import express from "express";
 import mongoose from "mongoose";
 import admin from "firebase-admin";
-import { Pro } from "../models.js";                 // for author snapshot
-import Post from "../models/Post.js";               // your new Post model file
-import PostStats from "../models/PostStats.js";     // your new PostStats model file
+import { Pro } from "../models.js";
+import Post from "../models/Post.js";
+import PostStats from "../models/PostStats.js";
+import redisClient from "../lib/redis.js"; // <-- correct path
 
 /* --------------------------- Auth middleware --------------------------- */
 async function requireAuth(req, res, next) {
@@ -26,7 +27,6 @@ const toUpper = (v) => (typeof v === "string" ? v.trim().toUpperCase() : v);
 const trim = (v) => (typeof v === "string" ? v.trim() : v);
 const todayStr = () => new Date().toISOString().slice(0, 10); // YYYY-MM-DD
 
-// Same public shaper you were using before
 function sanitizePostForClient(p) {
   const obj = typeof p.toObject === "function" ? p.toObject() : { ...p };
   return {
@@ -46,7 +46,6 @@ function sanitizePostForClient(p) {
   };
 }
 
-// Score function: tweak weights as you like
 function scoreFrom(stats) {
   const s = stats || {};
   const v = Number(s.viewsCount || 0);
@@ -54,7 +53,6 @@ function scoreFrom(stats) {
   const c = Number(s.commentsCount || 0);
   const sh = Number(s.sharesCount || 0);
   const sv = Number(s.savesCount || 0);
-  // lightweight Reddit-ish blend
   return l * 3 + c * 4 + sh * 5 + sv * 2 + v * 0.2;
 }
 
@@ -62,18 +60,13 @@ function scoreFrom(stats) {
 const router = express.Router();
 
 /* -------------------------------------------------------------------- */
-/* CREATE a post (pro only)                                             */
+/* CREATE                                                               */
 /* -------------------------------------------------------------------- */
-/**
- * POST /api/posts
- * Body: { text?, media?:[{url,type}], lga?, isPublic?:true, tags?:[] }
- */
 router.post("/posts", requireAuth, async (req, res) => {
   try {
     const body = req.body || {};
     let { text = "", media = [], lga = "", isPublic = true, tags = [] } = body;
 
-    // Find pro doc for the current user (1:1 ownership assumed)
     const proDoc = await Pro.findOne({ ownerUid: req.user.uid }).lean();
     if (!proDoc) return res.status(403).json({ error: "not_a_pro" });
 
@@ -83,7 +76,9 @@ router.post("/posts", requireAuth, async (req, res) => {
       .filter((m) => m && typeof m.url === "string" && m.url.trim())
       .map((m) => ({ url: trim(m.url), type: m.type === "video" ? "video" : "image" }));
 
-    tags = Array.isArray(tags) ? tags.map((t) => String(t || "").trim()).filter(Boolean).slice(0, 10) : [];
+    tags = Array.isArray(tags)
+      ? tags.map((t) => String(t || "").trim()).filter(Boolean).slice(0, 10)
+      : [];
     const lgaFinal = toUpper(lga || proDoc.lga || "");
 
     const post = await Post.create({
@@ -102,7 +97,6 @@ router.post("/posts", requireAuth, async (req, res) => {
       isPublic: !!isPublic,
     });
 
-    // create empty stats doc for this post
     await PostStats.findOneAndUpdate(
       { postId: post._id },
       { $setOnInsert: { postId: post._id, trendingScore: 0 } },
@@ -119,8 +113,6 @@ router.post("/posts", requireAuth, async (req, res) => {
 /* -------------------------------------------------------------------- */
 /* PUBLIC FEEDS                                                         */
 /* -------------------------------------------------------------------- */
-
-// GET /api/feed/public?lga=OREDO&limit=20&before=<iso|ts>
 router.get("/feed/public", async (req, res) => {
   try {
     const { lga = "", limit = 20, before = null } = req.query;
@@ -140,7 +132,6 @@ router.get("/feed/public", async (req, res) => {
   }
 });
 
-// GET /api/posts/author/:uid → all posts by a given pro owner uid (public + your own)
 router.get("/posts/author/:uid", async (req, res) => {
   try {
     const uid = String(req.params.uid || "");
@@ -158,7 +149,6 @@ router.get("/posts/author/:uid", async (req, res) => {
   }
 });
 
-// GET /api/posts/me  (owner’s posts)
 router.get("/posts/me", requireAuth, async (req, res) => {
   try {
     const items = await Post.find({ proOwnerUid: req.user.uid })
@@ -173,23 +163,22 @@ router.get("/posts/me", requireAuth, async (req, res) => {
 });
 
 /* -------------------------------------------------------------------- */
-/* INTERACTIONS (likes, views, shares, saves)                           */
+/* INTERACTIONS                                                         */
 /* -------------------------------------------------------------------- */
-
-// like
 router.post("/posts/:id/like", requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
     if (!isObjId(id)) return res.status(400).json({ error: "invalid_id" });
 
-    // only increment if user hasn’t liked before
     const upd = await PostStats.updateOne(
       { postId: new mongoose.Types.ObjectId(id), likedBy: { $ne: req.user.uid } },
       {
         $addToSet: { likedBy: req.user.uid },
         $inc: { likesCount: 1 },
         $setOnInsert: { postId: new mongoose.Types.ObjectId(id) },
-        $push: { daily: { day: todayStr(), views: 0, likes: 1, comments: 0, shares: 0, saves: 0 } },
+        $push: {
+          daily: { day: todayStr(), views: 0, likes: 1, comments: 0, shares: 0, saves: 0 },
+        },
       },
       { upsert: true }
     );
@@ -210,7 +199,6 @@ router.post("/posts/:id/like", requireAuth, async (req, res) => {
   }
 });
 
-// unlike
 router.delete("/posts/:id/like", requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
@@ -221,7 +209,6 @@ router.delete("/posts/:id/like", requireAuth, async (req, res) => {
       { $pull: { likedBy: req.user.uid }, $inc: { likesCount: -1 } }
     );
 
-    // clamp and rescore
     const stats = await PostStats.findOne({ postId: new mongoose.Types.ObjectId(id) }).lean();
     const likesCount = Math.max(0, Number(stats?.likesCount || 0));
     const trendingScore = scoreFrom({ ...stats, likesCount });
@@ -234,34 +221,69 @@ router.delete("/posts/:id/like", requireAuth, async (req, res) => {
   }
 });
 
-// view (public; doesn’t require auth)
+/**
+ * VIEW with Redis de-dup
+ */
 router.post("/posts/:id/view", async (req, res) => {
   try {
     const { id } = req.params;
     if (!isObjId(id)) return res.status(400).json({ error: "invalid_id" });
 
-    await PostStats.updateOne(
-      { postId: new mongoose.Types.ObjectId(id) },
-      {
-        $inc: { viewsCount: 1 },
-        $setOnInsert: { postId: new mongoose.Types.ObjectId(id) },
-        $push: { daily: { day: todayStr(), views: 1, likes: 0, comments: 0, shares: 0, saves: 0 } },
-      },
-      { upsert: true }
-    );
+    const postObjectId = new mongoose.Types.ObjectId(id);
 
-    const stats = await PostStats.findOne({ postId: new mongoose.Types.ObjectId(id) }).lean();
+    const viewerId = req.user?.uid || req.viewIdentity?.anonId || null;
+    let shouldIncrement = true;
+
+    if (redisClient && viewerId) {
+      const redisKey = `post:view:${id}:${viewerId}`;
+      try {
+        const setRes = await redisClient.set(redisKey, "1", {
+          EX: 3600,
+          NX: true,
+        });
+        if (setRes !== "OK") {
+          shouldIncrement = false;
+        }
+      } catch (e) {
+        console.warn("[posts:view] redis set failed:", e?.message || e);
+        shouldIncrement = true;
+      }
+    }
+
+    const update = { $setOnInsert: { postId: postObjectId } };
+
+    if (shouldIncrement) {
+      update.$inc = { viewsCount: 1 };
+      update.$push = {
+        daily: {
+          day: todayStr(),
+          views: 1,
+          likes: 0,
+          comments: 0,
+          shares: 0,
+          saves: 0,
+        },
+      };
+    }
+
+    await PostStats.updateOne({ postId: postObjectId }, update, { upsert: true });
+
+    const stats = await PostStats.findOne({ postId: postObjectId }).lean();
     const trendingScore = scoreFrom(stats);
     await PostStats.updateOne({ postId: id }, { $set: { trendingScore } });
 
-    return res.json({ ok: true, viewsCount: stats?.viewsCount || 0, trendingScore });
+    return res.json({
+      ok: true,
+      deduped: !shouldIncrement,
+      viewsCount: stats?.viewsCount || 0,
+      trendingScore,
+    });
   } catch (err) {
     console.error("[posts:view] error:", err);
     return res.status(500).json({ error: "view_failed" });
   }
 });
 
-// share
 router.post("/posts/:id/share", requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
@@ -273,7 +295,9 @@ router.post("/posts/:id/share", requireAuth, async (req, res) => {
         $inc: { sharesCount: 1 },
         $addToSet: { sharedBy: req.user.uid },
         $setOnInsert: { postId: new mongoose.Types.ObjectId(id) },
-        $push: { daily: { day: todayStr(), views: 0, likes: 0, comments: 0, shares: 1, saves: 0 } },
+        $push: {
+          daily: { day: todayStr(), views: 0, likes: 0, comments: 0, shares: 1, saves: 0 },
+        },
       },
       { upsert: true }
     );
@@ -289,7 +313,6 @@ router.post("/posts/:id/share", requireAuth, async (req, res) => {
   }
 });
 
-// save
 router.post("/posts/:id/save", requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
@@ -301,7 +324,9 @@ router.post("/posts/:id/save", requireAuth, async (req, res) => {
         $addToSet: { savedBy: req.user.uid },
         $inc: { savesCount: 1 },
         $setOnInsert: { postId: new mongoose.Types.ObjectId(id) },
-        $push: { daily: { day: todayStr(), views: 0, likes: 0, comments: 0, shares: 0, saves: 1 } },
+        $push: {
+          daily: { day: todayStr(), views: 0, likes: 0, comments: 0, shares: 0, saves: 1 },
+        },
       },
       { upsert: true }
     );
@@ -322,7 +347,6 @@ router.post("/posts/:id/save", requireAuth, async (req, res) => {
   }
 });
 
-// unsave
 router.delete("/posts/:id/save", requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
@@ -347,8 +371,6 @@ router.delete("/posts/:id/save", requireAuth, async (req, res) => {
 /* -------------------------------------------------------------------- */
 /* TRENDING                                                             */
 /* -------------------------------------------------------------------- */
-
-// GET /api/posts/trending?lga=&limit=20
 router.get("/posts/trending", async (req, res) => {
   try {
     const { lga = "", limit = 20 } = req.query;
@@ -356,18 +378,18 @@ router.get("/posts/trending", async (req, res) => {
     const q = { isPublic: true, hidden: { $ne: true } };
     if (lga) q.lga = toUpper(String(lga));
 
-    // get top stats, then fetch posts
     const topStats = await PostStats.find({})
       .sort({ trendingScore: -1 })
-      .limit(lim * 2) // fetch a few extra then filter by q
+      .limit(lim * 2)
       .lean();
 
     const ids = topStats.map((s) => s.postId);
     const posts = await Post.find({ _id: { $in: ids }, ...q }).lean();
 
-    // keep order of stats
     const order = new Map(ids.map((id, idx) => [String(id), idx]));
-    posts.sort((a, b) => (order.get(String(a._id)) ?? 0) - (order.get(String(b._id)) ?? 0));
+    posts.sort(
+      (a, b) => (order.get(String(a._id)) ?? 0) - (order.get(String(b._id)) ?? 0)
+    );
 
     return res.json(posts.slice(0, lim).map(sanitizePostForClient));
   } catch (err) {
@@ -377,9 +399,8 @@ router.get("/posts/trending", async (req, res) => {
 });
 
 /* -------------------------------------------------------------------- */
-/* DELETE (owner)                                                       */
+/* DELETE                                                               */
 /* -------------------------------------------------------------------- */
-
 router.delete("/posts/:id", requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
