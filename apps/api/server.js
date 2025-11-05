@@ -38,7 +38,7 @@ import adminProsRoutes from "./routes/adminPros.js";
 import geoRouter from "./routes/geo.js";
 import riskRoutes from "./routes/risk.js";
 import awsLivenessRoutes from "./routes/awsLiveness.js";
-import redis from "./lib/redis.js";
+import redis from "./redis.js";
 import postStatsRouter from "./routes/postStats.js";
 
 dotenv.config();

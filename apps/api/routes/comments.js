@@ -5,8 +5,8 @@ import admin from "firebase-admin";
 
 import Comment from "../models/Comment.js";
 import PostStats from "../models/PostStats.js";
-import { ClientProfile } from "../models/Profile.js";  // ← you already have this
-import { getIO } from "../sockets/index.js";           // ← new
+import { ClientProfile } from "../models/Profile.js";
+import { getIO } from "../sockets/index.js";
 
 const router = express.Router();
 
@@ -67,12 +67,12 @@ router.get("/posts/:postId/comments", async (req, res) => {
     // fetch all profiles for these commenters in one go
     const uids = [...new Set(items.map((c) => c.ownerUid).filter(Boolean))];
     const profiles = uids.length
-      ? await ClientProfile.find({ uid: { $in: uids } })
-          .select("uid fullName photoUrl")
+      ? await ClientProfile.find({ ownerUid: { $in: uids } })
+          .select("ownerUid fullName photoUrl")
           .lean()
       : [];
 
-    const profileMap = new Map(profiles.map((p) => [p.uid, p]));
+    const profileMap = new Map(profiles.map((p) => [p.ownerUid, p]));
 
     const shaped = items.map((c) =>
       shapeComment(c, profileMap.get(c.ownerUid) || null)
@@ -121,8 +121,8 @@ router.post("/posts/:postId/comments", requireAuth, async (req, res) => {
 
     // fetch profile for this user so UI can show avatar immediately
     const profile =
-      (await ClientProfile.findOne({ uid: req.user.uid })
-        .select("uid fullName photoUrl")
+      (await ClientProfile.findOne({ ownerUid: req.user.uid })
+        .select("ownerUid fullName photoUrl")
         .lean()
         .catch(() => null)) || null;
 

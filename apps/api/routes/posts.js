@@ -5,7 +5,7 @@ import admin from "firebase-admin";
 import { Pro } from "../models.js";
 import Post from "../models/Post.js";
 import PostStats from "../models/PostStats.js";
-import redisClient from "../lib/redis.js"; // <-- correct path
+import redisClient from "../redis.js";
 
 /* --------------------------- Auth middleware --------------------------- */
 async function requireAuth(req, res, next) {
@@ -230,8 +230,8 @@ router.post("/posts/:id/view", async (req, res) => {
     if (!isObjId(id)) return res.status(400).json({ error: "invalid_id" });
 
     const postObjectId = new mongoose.Types.ObjectId(id);
-
     const viewerId = req.user?.uid || req.viewIdentity?.anonId || null;
+
     let shouldIncrement = true;
 
     if (redisClient && viewerId) {
