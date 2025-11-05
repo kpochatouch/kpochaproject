@@ -8,9 +8,7 @@ import ProDrawer from "../components/ProDrawer";
 import FeedCard from "../components/FeedCard";
 import ErrorBoundary from "../components/ErrorBoundary";
 
-/**
- * Feed composer – now with device upload
- */
+/* ---------------- Feed composer ---------------- */
 function FeedComposer({ lga, onPosted }) {
   const [text, setText] = useState("");
   const [mediaUrl, setMediaUrl] = useState("");
@@ -26,27 +24,16 @@ function FeedComposer({ lga, onPosted }) {
     setMsg("");
     try {
       setUploading(true);
-
-      // get signed params
       const signRes = await api.post("/api/uploads/sign", {
         folder: "kpocha-feed",
         overwrite: true,
       });
-      const {
-        cloudName,
-        apiKey,
-        timestamp,
-        signature,
-        folder,
-        public_id,
-        overwrite,
-        tags,
-      } = signRes.data || {};
+      const { cloudName, apiKey, timestamp, signature, folder, public_id, overwrite, tags } =
+        signRes.data || {};
       if (!cloudName || !apiKey || !timestamp || !signature) {
         throw new Error("Upload signing failed");
       }
 
-      // upload to Cloudinary
       const form = new FormData();
       form.append("file", file);
       form.append("api_key", apiKey);
@@ -90,9 +77,7 @@ function FeedComposer({ lga, onPosted }) {
       setPosting(true);
       await api.post("/api/posts", {
         text: text.trim(),
-        media: mediaUrl
-          ? [{ url: mediaUrl.trim(), type: mediaType }]
-          : [],
+        media: mediaUrl ? [{ url: mediaUrl.trim(), type: mediaType }] : [],
         lga: (lga || "").toUpperCase(),
         isPublic: true,
         tags: [],
@@ -109,7 +94,7 @@ function FeedComposer({ lga, onPosted }) {
   }
 
   return (
-    <div className="mb-6 p-4 rounded-xl border border-zinc-800 bg-black/30">
+    <div className="mb-6 p-4 rounded-xl border border-zinc-800 bg-black/30 w-full max-w-2xl mx-auto">
       <div className="flex items-center justify-between gap-2 mb-2">
         <h3 className="font-semibold text-white">Share an update</h3>
         {msg ? <span className="text-xs text-zinc-400">{msg}</span> : null}
@@ -175,9 +160,7 @@ function FeedComposer({ lga, onPosted }) {
       ) : null}
 
       <div className="flex items-center justify-between">
-        <p className="text-xs text-zinc-500">
-          You can paste a URL or upload directly.
-        </p>
+        <p className="text-xs text-zinc-500">You can paste a URL or upload directly.</p>
         <button
           onClick={submit}
           disabled={posting || uploading}
@@ -190,6 +173,7 @@ function FeedComposer({ lga, onPosted }) {
   );
 }
 
+/* ---------------- Main Browse page ---------------- */
 export default function Browse() {
   const navigate = useNavigate();
   const [tab, setTab] = useState("pros");
@@ -283,7 +267,11 @@ export default function Browse() {
         if (stateName) params.state = stateName.toUpperCase();
         const { data } = await api.get("/api/barbers", { params });
         if (!on) return;
-        const list = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : [];
+        const list = Array.isArray(data)
+          ? data
+          : Array.isArray(data?.items)
+          ? data.items
+          : [];
         setPros(list);
       } catch {
         if (!on) return;
@@ -300,9 +288,15 @@ export default function Browse() {
   function svcArray(p) {
     const raw = p?.services;
     if (Array.isArray(raw))
-      return raw.map((s) => (typeof s === "string" ? s : s?.name)).filter(Boolean).map((s) => s.toLowerCase());
+      return raw
+        .map((s) => (typeof s === "string" ? s : s?.name))
+        .filter(Boolean)
+        .map((s) => s.toLowerCase());
     if (typeof raw === "string")
-      return raw.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+      return raw
+        .split(",")
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean);
     return [];
   }
 
@@ -357,7 +351,11 @@ export default function Browse() {
       const params = {};
       if (lga) params.lga = lga.toUpperCase();
       const r = await api.get("/api/feed/public", { params }).catch(() => ({ data: [] }));
-      const list = Array.isArray(r.data) ? r.data : Array.isArray(r.data?.items) ? r.data.items : [];
+      const list = Array.isArray(r.data)
+        ? r.data
+        : Array.isArray(r.data?.items)
+        ? r.data.items
+        : [];
       setFeed(list);
     } catch {
       setErrFeed("Could not load feed.");
@@ -394,7 +392,9 @@ export default function Browse() {
     });
   }
 
-  const canPostOnFeed = !!me; // 👈 show composer for any logged-in user
+  // show composer if we at least have a token
+  const token = localStorage.getItem("authToken") || localStorage.getItem("token");
+  const canPostOnFeed = !!token;
 
   return (
     <ErrorBoundary>
@@ -422,7 +422,7 @@ export default function Browse() {
           </div>
         </div>
 
-        {/* filters (same) */}
+        {/* filters */}
         <div className="flex flex-wrap items-center gap-2 mb-6">
           <input
             value={q}
@@ -507,32 +507,54 @@ export default function Browse() {
           </>
         ) : (
           <>
-            {canPostOnFeed && <FeedComposer lga={lga} onPosted={fetchFeed} />}
+            <div className="flex gap-4">
+              {/* left advert rail */}
+              <div className="hidden lg:block w-64 pt-1">
+                <div className="sticky top-20 space-y-4">
+                  <div className="h-40 rounded-lg border border-zinc-800 bg-black/20"></div>
+                  <div className="h-40 rounded-lg border border-zinc-800 bg-black/20"></div>
+                </div>
+              </div>
 
-            {errFeed && (
-              <div className="mb-4 rounded border border-red-800 bg-red-900/30 text-red-100 px-3 py-2">
-                {errFeed}
-              </div>
-            )}
+              {/* main feed column */}
+              <div className="flex-1 max-w-2xl mx-auto">
+                {canPostOnFeed && <FeedComposer lga={lga} onPosted={fetchFeed} />}
 
-            {loadingFeed ? (
-              <p className="text-zinc-400">Loading feed…</p>
-            ) : feed.length ? (
-              <div className="grid md:grid-cols-2 gap-4">
-                {feed.map((post) => (
-                  <FeedCard
-                    key={post._id || post.id}
-                    post={post}
-                    currentUid={me?.uid || me?.id || null}
-                    onDeleted={fetchFeed}
-                  />
-                ))}
+                {errFeed && (
+                  <div className="mb-4 rounded border border-red-800 bg-red-900/30 text-red-100 px-3 py-2">
+                    {errFeed}
+                  </div>
+                )}
+
+                {loadingFeed ? (
+                  <p className="text-zinc-400">Loading feed…</p>
+                ) : feed.length ? (
+                  <div className="space-y-4">
+                    {feed.map((post) => (
+                      <FeedCard
+                        key={post._id || post.id}
+                        post={post}
+                        currentUser={me ? { uid: me.uid || me.id, ...me } : null}
+                        onDeleted={fetchFeed}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-zinc-800 p-6 text-zinc-400">
+                    No updates yet. Once professionals start posting photos and promos, they’ll
+                    appear here.
+                  </div>
+                )}
               </div>
-            ) : (
-              <div className="rounded-lg border border-zinc-800 p-6 text-zinc-400">
-                No updates yet. Once professionals start posting photos and promos, they’ll appear here.
+
+              {/* right advert rail */}
+              <div className="hidden lg:block w-64 pt-1">
+                <div className="sticky top-20 space-y-4">
+                  <div className="h-40 rounded-lg border border-zinc-800 bg-black/20"></div>
+                  <div className="h-40 rounded-lg border border-zinc-800 bg-black/20"></div>
+                </div>
               </div>
-            )}
+            </div>
           </>
         )}
 
