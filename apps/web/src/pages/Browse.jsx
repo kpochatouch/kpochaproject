@@ -1,6 +1,5 @@
-// apps/web/src/pages/Browse.jsx
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { api } from "../lib/api";
 import BarberCard from "../components/BarberCard";
 import ServicePicker from "../components/ServicePicker";
@@ -176,7 +175,10 @@ function FeedComposer({ lga, onPosted }) {
 /* ---------------- Main Browse page ---------------- */
 export default function Browse() {
   const navigate = useNavigate();
-  const [tab, setTab] = useState("pros");
+  const location = useLocation();
+
+  // FEED FIRST by default
+  const [tab, setTab] = useState("feed");
 
   const [pros, setPros] = useState([]);
   const [loadingPros, setLoadingPros] = useState(true);
@@ -370,6 +372,12 @@ export default function Browse() {
     })();
   }, [fetchFeed, tab]);
 
+  // If someone opens /browse?post=ID, keep feed tab and later we could scroll to it
+  useEffect(() => {
+    const qs = new URLSearchParams(location.search);
+    if (qs.get("post")) setTab("feed");
+  }, [location.search]);
+
   function goBook(pro, chosenService) {
     const svcName = chosenService || service || null;
     const svcList = Array.isArray(pro?.services)
@@ -392,7 +400,7 @@ export default function Browse() {
     });
   }
 
-  // show composer if we at least have a token
+  // composer visibility
   const token = localStorage.getItem("authToken") || localStorage.getItem("token");
   const canPostOnFeed = !!token;
 
@@ -404,20 +412,20 @@ export default function Browse() {
           <h1 className="text-2xl font-semibold">Discover</h1>
           <div className="inline-flex rounded-xl border border-zinc-800 overflow-hidden">
             <button
+              className={`px-4 py-2 text-sm border-r border-zinc-800 ${
+                tab === "feed" ? "bg-gold text-black font-semibold" : "hover:bg-zinc-900"
+              }`}
+              onClick={() => setTab("feed")}
+            >
+              Feed
+            </button>
+            <button
               className={`px-4 py-2 text-sm ${
                 tab === "pros" ? "bg-gold text-black font-semibold" : "hover:bg-zinc-900"
               }`}
               onClick={() => setTab("pros")}
             >
               Pros
-            </button>
-            <button
-              className={`px-4 py-2 text-sm border-l border-zinc-800 ${
-                tab === "feed" ? "bg-gold text-black font-semibold" : "hover:bg-zinc-900"
-              }`}
-              onClick={() => setTab("feed")}
-            >
-              Feed
             </button>
           </div>
         </div>
@@ -511,8 +519,8 @@ export default function Browse() {
               {/* left advert rail */}
               <div className="hidden lg:block w-64 pt-1">
                 <div className="sticky top-20 space-y-4">
-                  <div className="h-40 rounded-lg border border-zinc-800 bg-black/20"></div>
-                  <div className="h-40 rounded-lg border border-zinc-800 bg-black/20"></div>
+                  <div className="h-40 rounded-lg border border-zinc-800 bg-black/20" />
+                  <div className="h-40 rounded-lg border border-zinc-800 bg-black/20" />
                 </div>
               </div>
 
@@ -550,8 +558,8 @@ export default function Browse() {
               {/* right advert rail */}
               <div className="hidden lg:block w-64 pt-1">
                 <div className="sticky top-20 space-y-4">
-                  <div className="h-40 rounded-lg border border-zinc-800 bg-black/20"></div>
-                  <div className="h-40 rounded-lg border border-zinc-800 bg-black/20"></div>
+                  <div className="h-40 rounded-lg border border-zinc-800 bg-black/20" />
+                  <div className="h-40 rounded-lg border border-zinc-800 bg-black/20" />
                 </div>
               </div>
             </div>
