@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 
-/* ---------------- utils ---------------- */
+/* ---------------- helpers ---------------- */
 function timeAgo(ts) {
   if (!ts) return "";
   const d = new Date(ts);
@@ -17,8 +17,8 @@ function timeAgo(ts) {
 }
 function num(n) {
   const x = Number(n || 0);
-  if (x >= 1000000) return (x / 1000000).toFixed(1).replace(/\.0$/, "") + "m";
-  if (x >= 1000) return (x / 1000).toFixed(1).replace(/\.0$/, "") + "k";
+  if (x >= 1_000_000) return (x / 1_000_000).toFixed(1).replace(/\.0$/, "") + "m";
+  if (x >= 1_000) return (x / 1_000).toFixed(1).replace(/\.0$/, "") + "k";
   return String(x);
 }
 
@@ -27,7 +27,6 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
   const isOwner =
     currentUser?.uid && post.proOwnerUid && currentUser.uid === post.proOwnerUid;
 
-  /* ---------------- state ---------------- */
   const [stats, setStats] = useState({
     viewsCount: 0,
     likesCount: 0,
@@ -43,6 +42,9 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [busy, setBusy] = useState({ like: false, save: false, share: false });
   const menuRef = useRef(null);
+
+  // for video preview
+  const videoRef = useRef(null);
 
   /* ---------------- load stats + view ---------------- */
   useEffect(() => {
@@ -77,7 +79,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
     };
   }, [postId]);
 
-  /* ---------------- actions (no optimistic jumps) ---------------- */
+  /* ---------------- actions ---------------- */
   async function doLike() {
     if (!currentUser) return alert("Login to like");
     if (!postId || busy.like) return;
@@ -90,8 +92,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
       if (r?.data) {
         setStats((s) => ({
           ...s,
-          likesCount:
-            r.data.likesCount != null ? r.data.likesCount : s.likesCount,
+          likesCount: r.data.likesCount ?? s.likesCount,
           likedByMe: !already,
         }));
       }
@@ -111,8 +112,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
       if (r?.data) {
         setStats((s) => ({
           ...s,
-          savesCount:
-            r.data.savesCount != null ? r.data.savesCount : s.savesCount,
+          savesCount: r.data.savesCount ?? s.savesCount,
           savedByMe: !already,
         }));
       }
@@ -145,7 +145,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
         alert("Link copied. Paste to share.");
       }
     } catch {
-      // user canceled — no problem
+      // ignore
     } finally {
       setBusy((b) => ({ ...b, share: false }));
     }
@@ -204,12 +204,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
   }
 
   async function deletePost() {
-    if (
-      !window.confirm(
-        "Delete this post permanently? This cannot be undone."
-      )
-    )
-      return;
+    if (!window.confirm("Delete this post permanently?")) return;
     try {
       await api.delete(`/api/posts/${postId}`);
       onDeleted?.(postId);
@@ -223,6 +218,19 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
     const url = `${base}/browse?post=${postId}`;
     navigator.clipboard?.writeText(url);
     setMenuOpen(false);
+  }
+
+  function toggleFollow() {
+    // no backend yet
+    alert("Follow / Unfollow coming soon");
+  }
+
+  /* --------------- video preview logic (5s) --------------- */
+  function handleVideoTimeUpdate() {
+    const v = videoRef.current;
+    if (v && v.currentTime > 5) {
+      v.pause();
+    }
   }
 
   /* --------------- render --------------- */
@@ -263,13 +271,11 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
               Book
             </Link>
           )}
-          {/* menu */}
           <div className="relative" ref={menuRef}>
             <button
               onClick={() => setMenuOpen((v) => !v)}
               className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-800 text-white"
               aria-label="More"
-              title="More"
             >
               ⋯
             </button>
@@ -279,7 +285,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
                   onClick={doSave}
                   className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
                 >
-                  {stats.savedByMe ? "Unsave post" : "Save post / Add to Collection"}
+                  {stats.savedByMe ? "Unsave post" : "Save post / Add to collection"}
                 </button>
                 <button
                   onClick={copyLink}
@@ -312,21 +318,20 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
                   </button>
                 )}
 
-                {/* dummy items for now */}
                 <button
-                  onClick={() => alert("Report: coming soon")}
+                  onClick={() => alert("Report post: coming soon")}
                   className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
                 >
                   Report post
                 </button>
                 <button
-                  onClick={() => alert("Follow/Unfollow: coming soon")}
+                  onClick={() => alert("Follow / Unfollow: coming soon")}
                   className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
                 >
                   Follow / Unfollow
                 </button>
                 <button
-                  onClick={() => alert("Block: coming soon")}
+                  onClick={() => alert("Block user: coming soon")}
                   className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
                 >
                   Block user
@@ -366,12 +371,13 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
         <div className="bg-black">
           {media.type === "video" ? (
             <video
+              ref={videoRef}
               src={media.url}
-              autoPlay
               muted
-              loop
+              autoPlay
               playsInline
               controls
+              onTimeUpdate={handleVideoTimeUpdate}
               className="w-full max-h-[520px] object-cover"
             />
           ) : (
@@ -380,23 +386,21 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
         </div>
       )}
 
-      {/* UPPER ROW: counts */}
+      {/* upper counts */}
       <div className="flex items-center justify-between px-4 py-2 text-xs text-gray-400">
         <div className="flex items-center gap-3">
           <div title="Likes">❤️ {num(stats.likesCount)}</div>
-          <button
-            className="hover:text-gray-200"
-            onClick={toggleComments}
-            title="Comments"
-          >
+          <button onClick={toggleComments} className="hover:text-gray-200" title="Comments">
             💬 {num(stats.commentsCount)}
           </button>
           <div title="Shares">↗ {num(stats.sharesCount)}</div>
         </div>
-        <div title="Views">👁 {num(stats.viewsCount)} <span className="ml-1">views</span></div>
+        <div title="Views">
+          👁 {num(stats.viewsCount)} <span className="ml-1">views</span>
+        </div>
       </div>
 
-      {/* LOWER ROW: actions */}
+      {/* lower action bar */}
       <div className="flex border-t border-[#1F1F1F]">
         <button
           onClick={doLike}
@@ -419,6 +423,16 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
           disabled={busy.share}
         >
           ↗ Share
+        </button>
+      </div>
+
+      {/* follow / unfollow line */}
+      <div className="px-4 py-2 border-t border-[#1F1F1F]">
+        <button
+          onClick={toggleFollow}
+          className="text-xs bg-gray-800 hover:bg-gray-700 text-white px-3 py-1 rounded-full"
+        >
+          Follow / Unfollow
         </button>
       </div>
 
@@ -470,10 +484,25 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
 
                     {/* comment actions */}
                     <div className="mt-1 text-[11px] text-gray-400 flex gap-3">
+                      <button
+                        onClick={() => alert("Like comment: coming soon")}
+                        className="hover:text-gray-100"
+                        type="button"
+                      >
+                        Like
+                      </button>
+                      <button
+                        onClick={() => alert("Reply: coming soon")}
+                        className="hover:text-gray-100"
+                        type="button"
+                      >
+                        Reply
+                      </button>
                       {mine ? (
                         <button
                           onClick={() => deleteComment(c._id)}
                           className="hover:text-red-400"
+                          type="button"
                         >
                           Delete
                         </button>
@@ -481,6 +510,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
                         <button
                           onClick={() => alert("Report comment: coming soon")}
                           className="hover:text-gray-200"
+                          type="button"
                         >
                           Report
                         </button>
