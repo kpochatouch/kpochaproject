@@ -5,6 +5,7 @@ import admin from "firebase-admin";
 
 import Comment from "../models/Comment.js";
 import PostStats from "../models/PostStats.js";
+import Post from "../models/Post.js"; // 👈 make sure this is here
 import { ClientProfile } from "../models/Profile.js";
 import { getIO } from "../sockets/index.js";
 
@@ -93,6 +94,18 @@ router.post("/posts/:postId/comments", requireAuth, async (req, res) => {
     const { postId } = req.params;
     if (!isObjId(postId)) return res.status(400).json({ error: "invalid_post_id" });
 
+    // 🔴 this is the piece you were missing
+    // check post exists, not hidden/deleted, and comments aren’t disabled for others
+    const post = await Post.findById(postId)
+      .select("proOwnerUid commentsDisabled hidden deleted")
+      .lean();
+    if (!post || post.deleted || post.hidden) {
+      return res.status(404).json({ error: "post_not_found" });
+    }
+    if (post.commentsDisabled && post.proOwnerUid !== req.user.uid) {
+      return res.status(403).json({ error: "comments_disabled" });
+    }
+
     const { text = "", attachments = [], parentId = null } = req.body || {};
 
     const comment = await Comment.create({
@@ -100,7 +113,10 @@ router.post("/posts/:postId/comments", requireAuth, async (req, res) => {
       ownerUid: req.user.uid,
       text: String(text || "").trim(),
       attachments: Array.isArray(attachments) ? attachments : [],
-      parentId: parentId && isObjId(parentId) ? new mongoose.Types.ObjectId(parentId) : null,
+      parentId:
+        parentId && isObjId(parentId)
+          ? new mongoose.Types.ObjectId(parentId)
+          : null,
     });
 
     // bump stats

@@ -44,10 +44,13 @@ const PostSchema = new mongoose.Schema(
 
     // moderation
     hidden: { type: Boolean, default: false, index: true },
-    hiddenBy: { type: String, default: "" }, // admin uid
+    hiddenBy: { type: String, default: "" }, // admin / owner uid
     deleted: { type: Boolean, default: false, index: true },
     deletedAt: { type: Date, default: null },
     deletedBy: { type: String, default: "" },
+
+    // comments control
+    commentsDisabled: { type: Boolean, default: false },
 
     // edits
     editedAt: { type: Date, default: null },

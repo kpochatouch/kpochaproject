@@ -1,11 +1,11 @@
 // apps/web/src/components/FeedCard.jsx
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 
-function timeAgo(ts) {
-  if (!ts) return "";
-  const d = new Date(ts);
-  const diff = Date.now() - d.getTime();
+function timeAgo(iso) {
+  if (!iso) return "";
+  const diff = Date.now() - new Date(iso).getTime();
   const mins = Math.floor(diff / 60000);
   if (mins < 1) return "just now";
   if (mins < 60) return `${mins}m`;
@@ -15,140 +15,397 @@ function timeAgo(ts) {
   return `${days}d`;
 }
 
-export default function FeedCard({ post, currentUid, onDeleted }) {
-  const id = post._id || post.id;
-  const author = post.pro || {};
-  const media = Array.isArray(post.media) ? post.media : [];
-  const mainMedia = media[0] || null;
-  const isOwner = currentUid && post.proOwnerUid && currentUid === post.proOwnerUid;
+export default function FeedCard({ post, currentUser, currentUid, onDeleted }) {
+  // normalize current user
+  const effectiveUid = currentUser?.uid || currentUid || null;
 
-  const [likes, setLikes] = useState(0);
-  const [views, setViews] = useState(0);
-  const [saves, setSaves] = useState(0);
-  const [liked, setLiked] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [busy, setBusy] = useState(false);
+  // figure out whose post this is
+  const proDoc = post.pro || {};
+  const proId =
+    proDoc._id ||
+    proDoc.id ||
+    post.proId ||
+    null; // this is what your /book/:id uses
+  const authorName = proDoc.name || post.authorName || "Professional";
+  const authorAvatar = proDoc.photoUrl || post.authorAvatar || "";
+  const authorLga = proDoc.lga || post.lga || "Nigeria";
 
-  // count a view
+  const isOwner =
+    !!effectiveUid && post.proOwnerUid && effectiveUid === post.proOwnerUid;
+
+  // stats state
+  const [stats, setStats] = useState({
+    viewsCount: 0,
+    likesCount: 0,
+    commentsCount: 0,
+    sharesCount: 0,
+    savesCount: 0,
+    likedByMe: false,
+    savedByMe: false,
+  });
+
+  // comments state
+  const [comments, setComments] = useState([]);
+  const [showComments, setShowComments] = useState(false);
+  const [commentText, setCommentText] = useState("");
+
+  // ui state
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [loadingLike, setLoadingLike] = useState(false);
+  const [loadingSave, setLoadingSave] = useState(false);
+
+  // load stats + count view
   useEffect(() => {
-    if (!id) return;
+    let stop = false;
     (async () => {
       try {
-        const r = await api.post(`/api/posts/${id}/view`);
-        setViews(r.data?.viewsCount ?? (v => v) ?? 0);
+        const res = await api.get(`/api/posts/${post._id}/stats`);
+        if (!stop) {
+          setStats((s) => ({ ...s, ...res.data }));
+        }
       } catch {
         // ignore
       }
     })();
-  }, [id]);
+
+    // fire-and-forget view
+    api.post(`/api/posts/${post._id}/view`).catch(() => {});
+    return () => {
+      stop = true;
+    };
+  }, [post._id]);
 
   async function toggleLike() {
-    if (!id) return;
+    if (!effectiveUid) {
+      alert("Login to like");
+      return;
+    }
+    if (loadingLike) return;
+    setLoadingLike(true);
+    const wasLiked = stats.likedByMe;
+
+    // optimistic
+    setStats((s) => ({
+      ...s,
+      likedByMe: !wasLiked,
+      likesCount: wasLiked ? Math.max(0, s.likesCount - 1) : s.likesCount + 1,
+    }));
+
     try {
-      setBusy(true);
-      if (liked) {
-        const r = await api.delete(`/api/posts/${id}/like`);
-        setLikes(r.data?.likesCount ?? 0);
-        setLiked(false);
+      if (!wasLiked) {
+        const res = await api.post(`/api/posts/${post._id}/like`);
+        setStats((s) => ({
+          ...s,
+          likesCount: res.data.likesCount ?? s.likesCount,
+          likedByMe: true,
+        }));
       } else {
-        const r = await api.post(`/api/posts/${id}/like`);
-        setLikes(r.data?.likesCount ?? (likes + 1));
-        setLiked(true);
+        const res = await api.delete(`/api/posts/${post._id}/like`);
+        setStats((s) => ({
+          ...s,
+          likesCount: res.data.likesCount ?? s.likesCount,
+          likedByMe: false,
+        }));
       }
     } catch {
-      // ignore
+      // revert
+      setStats((s) => ({
+        ...s,
+        likedByMe: wasLiked,
+        likesCount: wasLiked
+          ? s.likesCount + 1
+          : Math.max(0, s.likesCount - 1),
+      }));
     } finally {
-      setBusy(false);
+      setLoadingLike(false);
     }
   }
 
   async function toggleSave() {
-    if (!id) return;
+    if (!effectiveUid) {
+      alert("Login to save");
+      return;
+    }
+    if (loadingSave) return;
+    setLoadingSave(true);
+    const wasSaved = stats.savedByMe;
+
+    // optimistic
+    setStats((s) => ({
+      ...s,
+      savedByMe: !wasSaved,
+      savesCount: wasSaved ? Math.max(0, s.savesCount - 1) : s.savesCount + 1,
+    }));
+
     try {
-      setBusy(true);
-      if (saved) {
-        const r = await api.delete(`/api/posts/${id}/save`);
-        setSaves(r.data?.savesCount ?? 0);
-        setSaved(false);
+      if (!wasSaved) {
+        const res = await api.post(`/api/posts/${post._id}/save`);
+        setStats((s) => ({
+          ...s,
+          savesCount: res.data.savesCount ?? s.savesCount,
+          savedByMe: true,
+        }));
       } else {
-        const r = await api.post(`/api/posts/${id}/save`);
-        setSaves(r.data?.savesCount ?? (saves + 1));
-        setSaved(true);
+        const res = await api.delete(`/api/posts/${post._id}/save`);
+        setStats((s) => ({
+          ...s,
+          savesCount: res.data.savesCount ?? s.savesCount,
+          savedByMe: false,
+        }));
       }
     } catch {
-      // ignore
+      // revert
+      setStats((s) => ({
+        ...s,
+        savedByMe: wasSaved,
+        savesCount: wasSaved
+          ? s.savesCount + 1
+          : Math.max(0, s.savesCount - 1),
+      }));
     } finally {
-      setBusy(false);
+      setLoadingSave(false);
     }
   }
 
-  async function doShare() {
-    if (!id) return;
+  async function handleShare() {
+    if (!effectiveUid) {
+      alert("Login to share");
+      return;
+    }
     try {
-      setBusy(true);
-      await api.post(`/api/posts/${id}/share`);
-      // optional: copy link
-      try {
-        await navigator.clipboard.writeText(window.location.origin + "/browse?post=" + id);
-      } catch {
-        // ignore clipboard failure
-      }
+      const res = await api.post(`/api/posts/${post._id}/share`);
+      setStats((s) => ({
+        ...s,
+        sharesCount: res.data.sharesCount ?? s.sharesCount + 1,
+      }));
     } catch {
       // ignore
-    } finally {
-      setBusy(false);
     }
   }
 
-  async function doDelete() {
-    if (!id) return;
+  async function loadComments() {
+    try {
+      const res = await api.get(`/api/posts/${post._id}/comments`);
+      setComments(res.data);
+    } catch {
+      // ignore
+    }
+  }
+
+  async function handleToggleComments() {
+    const next = !showComments;
+    setShowComments(next);
+    if (next && comments.length === 0) {
+      await loadComments();
+    }
+  }
+
+  async function submitComment(e) {
+    e?.preventDefault();
+    if (!effectiveUid) return alert("Login to comment");
+    const text = commentText.trim();
+    if (!text) return;
+
+    const tmpId = "tmp-" + Date.now();
+    const optimistic = {
+      _id: tmpId,
+      postId: post._id,
+      text,
+      authorName: currentUser?.displayName || "You",
+      authorAvatar: currentUser?.photoUrl || "",
+      createdAt: new Date().toISOString(),
+    };
+
+    setComments((c) => [optimistic, ...c]);
+    setCommentText("");
+    setStats((s) => ({ ...s, commentsCount: s.commentsCount + 1 }));
+
+    try {
+      const res = await api.post(`/api/posts/${post._id}/comments`, { text });
+      setComments((c) => [
+        res.data.comment,
+        ...c.filter((cm) => cm._id !== tmpId),
+      ]);
+      setStats((s) => ({
+        ...s,
+        commentsCount: res.data.commentsCount ?? s.commentsCount,
+      }));
+    } catch (err) {
+      // revert
+      setComments((c) => c.filter((cm) => cm._id !== tmpId));
+      setStats((s) => ({
+        ...s,
+        commentsCount: Math.max(0, s.commentsCount - 1),
+      }));
+      if (err?.response?.data?.error === "comments_disabled") {
+        alert("Comments are turned off for this post.");
+      }
+    }
+  }
+
+  async function handleDelete() {
+    if (!effectiveUid) return alert("Login");
     if (!window.confirm("Delete this post?")) return;
     try {
-      await api.delete(`/api/posts/${id}`);
-      onDeleted?.();
+      await api.delete(`/api/posts/${post._id}`);
+      onDeleted?.(post._id);
     } catch {
-      // ignore
+      alert("Failed to delete");
     }
   }
 
+  async function handleHide() {
+    try {
+      await api.patch(`/api/posts/${post._id}/hide`);
+      onDeleted?.(post._id);
+    } catch {
+      alert("Failed to hide");
+    }
+  }
+
+  async function handleDisableComments() {
+    try {
+      await api.patch(`/api/posts/${post._id}/comments/disable`);
+      post.commentsDisabled = true;
+      setShowComments(false);
+    } catch {
+      alert("Failed to disable comments");
+    }
+  }
+
+  async function handleEnableComments() {
+    try {
+      await api.patch(`/api/posts/${post._id}/comments/enable`);
+      post.commentsDisabled = false;
+    } catch {
+      alert("Failed to enable comments");
+    }
+  }
+
+  function handleCopyLink() {
+    const base = window.location.origin;
+    const url = `${base}/browse?post=${post._id}`;
+    navigator.clipboard?.writeText(url).catch(() => {});
+    setMenuOpen(false);
+  }
+
+  const media = Array.isArray(post.media) ? post.media : [];
+  const mainMedia = media[0] || null;
+
   return (
-    <article className="rounded-xl border border-zinc-800 bg-black/40 overflow-hidden flex flex-col">
+    <div className="bg-[#0F0F0F] border border-[#1F1F1F] rounded-xl overflow-hidden">
       {/* header */}
-      <header className="flex items-center gap-3 px-4 py-3">
-        {author.photoUrl ? (
+      <div className="flex items-center gap-3 px-4 py-3">
+        {/* avatar */}
+        {authorAvatar ? (
           <img
-            src={author.photoUrl}
-            alt={author.name || "Pro"}
-            className="w-10 h-10 rounded-full object-cover border border-zinc-700"
+            src={authorAvatar}
+            alt={authorName}
+            className="w-10 h-10 rounded-full object-cover"
           />
         ) : (
-          <div className="w-10 h-10 rounded-full bg-zinc-800 flex items-center justify-center text-sm">
-            {(author.name || "P").slice(0, 1).toUpperCase()}
+          <div className="w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center text-sm text-white">
+            {authorName.slice(0, 1)}
           </div>
         )}
+
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <p className="font-semibold text-sm truncate">
-              {author.name || post.authorName || "Professional"}
-            </p>
-            <span className="text-[10px] text-zinc-500">{timeAgo(post.createdAt)}</span>
+            <div className="text-sm font-semibold text-white truncate">
+              {authorName}
+            </div>
+            <span className="text-[10px] text-gray-500">
+              {timeAgo(post.createdAt)}
+            </span>
           </div>
-          <p className="text-xs text-zinc-500 truncate">
-            {author.lga || post.lga || ""}
-          </p>
+          <div className="text-xs text-gray-400 truncate">
+            {authorLga} • Public
+          </div>
         </div>
-        {/* small book button like your cards */}
-        <button className="text-xs rounded-md bg-gold text-black px-3 py-1 font-semibold">
-          Book
-        </button>
-      </header>
 
-      {/* text */}
-      {post.text ? (
-        <p className="px-4 pb-3 text-sm text-zinc-200 whitespace-pre-wrap">
+        {/* real book button */}
+        {proId ? (
+          <Link
+            to={`/book/${proId}`}
+            className="hidden sm:inline-flex bg-[#F5C542] text-black text-xs font-semibold px-3 py-1 rounded-md hover:opacity-90"
+          >
+            Book
+          </Link>
+        ) : null}
+
+        {/* 3-dot */}
+        <div className="relative">
+          <button
+            onClick={() => setMenuOpen((v) => !v)}
+            className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-800 text-white"
+          >
+            ⋯
+          </button>
+          {menuOpen && (
+            <div className="absolute right-0 mt-2 w-52 bg-[#141414] border border-[#2a2a2a] rounded-lg shadow-lg z-30">
+              <button
+                onClick={handleCopyLink}
+                className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
+              >
+                Copy link
+              </button>
+              <button
+                onClick={toggleSave}
+                className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
+              >
+                {stats.savedByMe ? "Unsave post" : "Save post"}
+              </button>
+              {proId && (
+                <Link
+                  to={`/book/${proId}`}
+                  className="block px-3 py-2 text-sm hover:bg-[#1b1b1b]"
+                  onClick={() => setMenuOpen(false)}
+                >
+                  View profile / services
+                </Link>
+              )}
+              {isOwner && (
+                <>
+                  <button
+                    onClick={handleHide}
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
+                  >
+                    Hide post
+                  </button>
+                  {post.commentsDisabled ? (
+                    <button
+                      onClick={handleEnableComments}
+                      className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
+                    >
+                      Enable comments
+                    </button>
+                  ) : (
+                    <button
+                      onClick={handleDisableComments}
+                      className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
+                    >
+                      Disable comments
+                    </button>
+                  )}
+                  <button
+                    onClick={handleDelete}
+                    className="w-full text-left px-3 py-2 text-sm text-red-400 hover:bg-[#1b1b1b]"
+                  >
+                    Delete
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* body text */}
+      {post.text && (
+        <div className="px-4 pb-3 text-sm text-white whitespace-pre-wrap">
           {post.text}
-        </p>
-      ) : null}
+        </div>
+      )}
 
       {/* media */}
       {mainMedia ? (
@@ -157,64 +414,108 @@ export default function FeedCard({ post, currentUid, onDeleted }) {
             <video
               src={mainMedia.url}
               controls
-              className="w-full aspect-[4/3] object-cover"
+              className="w-full max-h-[420px] object-cover"
             />
           ) : (
             <img
               src={mainMedia.url}
-              alt="post media"
-              className="w-full aspect-[4/3] object-cover"
+              alt=""
+              className="w-full max-h-[420px] object-cover"
             />
           )}
         </div>
       ) : null}
 
-      {/* actions */}
-      <footer className="px-4 py-3 flex items-center gap-2 flex-wrap border-t border-zinc-800">
+      {/* counts row like FB */}
+      <div className="flex items-center justify-between px-4 py-2 text-xs text-gray-400">
+        <div>{stats.likesCount} likes</div>
+        <div className="flex gap-3">
+          <button onClick={handleToggleComments}>
+            {stats.commentsCount} comments
+          </button>
+          <div>{stats.sharesCount} shares</div>
+        </div>
+      </div>
+
+      {/* action bar */}
+      <div className="flex border-t border-[#1F1F1F] divide-x divide-[#1F1F1F]">
         <button
           onClick={toggleLike}
-          disabled={busy}
-          className={`text-xs px-3 py-1.5 rounded-md border ${
-            liked ? "bg-zinc-100 text-black border-zinc-100" : "border-zinc-700 text-zinc-200"
+          className={`flex-1 py-2 text-sm flex items-center justify-center gap-1 ${
+            stats.likedByMe ? "text-[#F5C542]" : "text-gray-200"
           }`}
         >
-          ❤️ Like {likes ? `(${likes})` : ""}
+          👍 Like
         </button>
         <button
-          onClick={doShare}
-          disabled={busy}
-          className="text-xs px-3 py-1.5 rounded-md border border-zinc-700 text-zinc-200"
-        >
-          ↗ Share
-        </button>
-        <button
-          onClick={toggleSave}
-          disabled={busy}
-          className={`text-xs px-3 py-1.5 rounded-md border ${
-            saved ? "bg-zinc-100 text-black border-zinc-100" : "border-zinc-700 text-zinc-200"
-          }`}
-        >
-          💾 Save {saves ? `(${saves})` : ""}
-        </button>
-        <button
-          disabled
-          className="text-xs px-3 py-1.5 rounded-md border border-zinc-800 text-zinc-500"
-          title="Comments not wired yet"
+          onClick={handleToggleComments}
+          className="flex-1 py-2 text-sm flex items-center justify-center gap-1 text-gray-200"
         >
           💬 Comment
         </button>
-        <span className="ml-auto text-[10px] text-zinc-500">
-          {views ? `${views} views` : ""}
-        </span>
-        {isOwner ? (
-          <button
-            onClick={doDelete}
-            className="text-[10px] text-red-300 border border-red-500/40 rounded px-2 py-1"
-          >
-            Delete
-          </button>
-        ) : null}
-      </footer>
-    </article>
+        <button
+          onClick={handleShare}
+          className="flex-1 py-2 text-sm flex items-center justify-center gap-1 text-gray-200"
+        >
+          ↗ Share
+        </button>
+      </div>
+
+      {/* comments panel */}
+      {showComments && (
+        <div className="px-4 py-3 border-t border-[#1F1F1F]">
+          {!post.commentsDisabled ? (
+            <form onSubmit={submitComment} className="flex gap-2 mb-3">
+              <input
+                value={commentText}
+                onChange={(e) => setCommentText(e.target.value)}
+                placeholder="Write a comment..."
+                className="flex-1 bg-[#121212] border border-[#2b2b2b] rounded-full px-3 py-2 text-sm text-white"
+              />
+              <button
+                type="submit"
+                className="text-sm bg-[#F5C542] text-black rounded-full px-3 py-1"
+              >
+                Post
+              </button>
+            </form>
+          ) : (
+            <div className="text-xs text-red-400 mb-3">
+              Comments are disabled for this post.
+            </div>
+          )}
+
+          <div className="space-y-3">
+            {comments.map((c) => (
+              <div key={c._id} className="flex gap-2">
+                <div className="w-8 h-8 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center text-xs">
+                  {c.authorAvatar ? (
+                    <img
+                      src={c.authorAvatar}
+                      alt={c.authorName}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    (c.authorName || "U")[0]
+                  )}
+                </div>
+                <div className="bg-[#141414] rounded-2xl px-3 py-2 flex-1">
+                  <div className="text-xs text-white font-semibold">
+                    {c.authorName}
+                  </div>
+                  <div className="text-sm text-gray-200">{c.text}</div>
+                  <div className="text-[10px] text-gray-500 mt-1">
+                    {new Date(c.createdAt).toLocaleString()}
+                  </div>
+                </div>
+              </div>
+            ))}
+            {comments.length === 0 && (
+              <div className="text-xs text-gray-500">No comments yet.</div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

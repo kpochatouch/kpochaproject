@@ -27,6 +27,7 @@ const toUpper = (v) => (typeof v === "string" ? v.trim().toUpperCase() : v);
 const trim = (v) => (typeof v === "string" ? v.trim() : v);
 const todayStr = () => new Date().toISOString().slice(0, 10); // YYYY-MM-DD
 
+// what we send to frontend
 function sanitizePostForClient(p) {
   const obj = typeof p.toObject === "function" ? p.toObject() : { ...p };
   return {
@@ -40,6 +41,7 @@ function sanitizePostForClient(p) {
     lga: obj.lga,
     isPublic: !!obj.isPublic,
     hidden: !!obj.hidden,
+    commentsDisabled: !!obj.commentsDisabled, // 👈 important for FeedCard
     createdAt: obj.createdAt,
     authorName: obj.pro?.name || "Professional",
     authorAvatar: obj.pro?.photoUrl || "",
@@ -67,6 +69,7 @@ router.post("/posts", requireAuth, async (req, res) => {
     const body = req.body || {};
     let { text = "", media = [], lga = "", isPublic = true, tags = [] } = body;
 
+    // find pro profile for this uid
     const proDoc = await Pro.findOne({ ownerUid: req.user.uid }).lean();
     if (!proDoc) return res.status(403).json({ error: "not_a_pro" });
 
@@ -74,11 +77,18 @@ router.post("/posts", requireAuth, async (req, res) => {
     if (!Array.isArray(media)) media = [];
     media = media
       .filter((m) => m && typeof m.url === "string" && m.url.trim())
-      .map((m) => ({ url: trim(m.url), type: m.type === "video" ? "video" : "image" }));
+      .map((m) => ({
+        url: trim(m.url),
+        type: m.type === "video" ? "video" : "image",
+      }));
 
     tags = Array.isArray(tags)
-      ? tags.map((t) => String(t || "").trim()).filter(Boolean).slice(0, 10)
+      ? tags
+          .map((t) => String(t || "").trim())
+          .filter(Boolean)
+          .slice(0, 10)
       : [];
+
     const lgaFinal = toUpper(lga || proDoc.lga || "");
 
     const post = await Post.create({
@@ -97,6 +107,7 @@ router.post("/posts", requireAuth, async (req, res) => {
       isPublic: !!isPublic,
     });
 
+    // make sure stats doc exists
     await PostStats.findOneAndUpdate(
       { postId: post._id },
       { $setOnInsert: { postId: post._id, trendingScore: 0 } },
@@ -111,7 +122,7 @@ router.post("/posts", requireAuth, async (req, res) => {
 });
 
 /* -------------------------------------------------------------------- */
-/* PUBLIC FEEDS                                                         */
+/* PUBLIC FEED                                                          */
 /* -------------------------------------------------------------------- */
 router.get("/feed/public", async (req, res) => {
   try {
@@ -132,6 +143,7 @@ router.get("/feed/public", async (req, res) => {
   }
 });
 
+/* posts by pro-owner uid (public-ish) */
 router.get("/posts/author/:uid", async (req, res) => {
   try {
     const uid = String(req.params.uid || "");
@@ -149,6 +161,7 @@ router.get("/posts/author/:uid", async (req, res) => {
   }
 });
 
+/* my posts */
 router.get("/posts/me", requireAuth, async (req, res) => {
   try {
     const items = await Post.find({ proOwnerUid: req.user.uid })
@@ -163,8 +176,99 @@ router.get("/posts/me", requireAuth, async (req, res) => {
 });
 
 /* -------------------------------------------------------------------- */
+/* OWNER / MODERATION ACTIONS                                           */
+/* -------------------------------------------------------------------- */
+
+// hide post
+router.patch("/posts/:id/hide", requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!isObjId(id)) return res.status(400).json({ error: "invalid_id" });
+
+    const p = await Post.findById(id);
+    if (!p) return res.status(404).json({ error: "not_found" });
+    if (p.proOwnerUid !== req.user.uid)
+      return res.status(403).json({ error: "forbidden" });
+
+    p.hidden = true;
+    p.hiddenBy = req.user.uid;
+    await p.save();
+
+    return res.json({ ok: true, post: sanitizePostForClient(p) });
+  } catch (err) {
+    console.error("[posts:hide] error:", err);
+    return res.status(500).json({ error: "hide_failed" });
+  }
+});
+
+// unhide post
+router.patch("/posts/:id/unhide", requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!isObjId(id)) return res.status(400).json({ error: "invalid_id" });
+
+    const p = await Post.findById(id);
+    if (!p) return res.status(404).json({ error: "not_found" });
+    if (p.proOwnerUid !== req.user.uid)
+      return res.status(403).json({ error: "forbidden" });
+
+    p.hidden = false;
+    await p.save();
+
+    return res.json({ ok: true, post: sanitizePostForClient(p) });
+  } catch (err) {
+    console.error("[posts:unhide] error:", err);
+    return res.status(500).json({ error: "unhide_failed" });
+  }
+});
+
+// disable comments
+router.patch("/posts/:id/comments/disable", requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!isObjId(id)) return res.status(400).json({ error: "invalid_id" });
+
+    const p = await Post.findById(id);
+    if (!p) return res.status(404).json({ error: "not_found" });
+    if (p.proOwnerUid !== req.user.uid)
+      return res.status(403).json({ error: "forbidden" });
+
+    p.commentsDisabled = true;
+    await p.save();
+
+    return res.json({ ok: true, post: sanitizePostForClient(p) });
+  } catch (err) {
+    console.error("[posts:comments:disable] error:", err);
+    return res.status(500).json({ error: "comments_disable_failed" });
+  }
+});
+
+// enable comments
+router.patch("/posts/:id/comments/enable", requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!isObjId(id)) return res.status(400).json({ error: "invalid_id" });
+
+    const p = await Post.findById(id);
+    if (!p) return res.status(404).json({ error: "not_found" });
+    if (p.proOwnerUid !== req.user.uid)
+      return res.status(403).json({ error: "forbidden" });
+
+    p.commentsDisabled = false;
+    await p.save();
+
+    return res.json({ ok: true, post: sanitizePostForClient(p) });
+  } catch (err) {
+    console.error("[posts:comments:enable] error:", err);
+    return res.status(500).json({ error: "comments_enable_failed" });
+  }
+});
+
+/* -------------------------------------------------------------------- */
 /* INTERACTIONS                                                         */
 /* -------------------------------------------------------------------- */
+
+// like
 router.post("/posts/:id/like", requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
@@ -177,13 +281,22 @@ router.post("/posts/:id/like", requireAuth, async (req, res) => {
         $inc: { likesCount: 1 },
         $setOnInsert: { postId: new mongoose.Types.ObjectId(id) },
         $push: {
-          daily: { day: todayStr(), views: 0, likes: 1, comments: 0, shares: 0, saves: 0 },
+          daily: {
+            day: todayStr(),
+            views: 0,
+            likes: 1,
+            comments: 0,
+            shares: 0,
+            saves: 0,
+          },
         },
       },
       { upsert: true }
     );
 
-    const stats = await PostStats.findOne({ postId: new mongoose.Types.ObjectId(id) }).lean();
+    const stats = await PostStats.findOne({
+      postId: new mongoose.Types.ObjectId(id),
+    }).lean();
     const trendingScore = scoreFrom(stats);
     await PostStats.updateOne({ postId: id }, { $set: { trendingScore } });
 
@@ -199,6 +312,7 @@ router.post("/posts/:id/like", requireAuth, async (req, res) => {
   }
 });
 
+// unlike
 router.delete("/posts/:id/like", requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
@@ -209,10 +323,15 @@ router.delete("/posts/:id/like", requireAuth, async (req, res) => {
       { $pull: { likedBy: req.user.uid }, $inc: { likesCount: -1 } }
     );
 
-    const stats = await PostStats.findOne({ postId: new mongoose.Types.ObjectId(id) }).lean();
+    const stats = await PostStats.findOne({
+      postId: new mongoose.Types.ObjectId(id),
+    }).lean();
     const likesCount = Math.max(0, Number(stats?.likesCount || 0));
     const trendingScore = scoreFrom({ ...stats, likesCount });
-    await PostStats.updateOne({ postId: id }, { $set: { likesCount, trendingScore } });
+    await PostStats.updateOne(
+      { postId: id },
+      { $set: { likesCount, trendingScore } }
+    );
 
     return res.json({ ok: true, likesCount, trendingScore });
   } catch (err) {
@@ -234,6 +353,7 @@ router.post("/posts/:id/view", async (req, res) => {
 
     let shouldIncrement = true;
 
+    // optional Redis: don't blow up if missing
     if (redisClient && viewerId) {
       const redisKey = `post:view:${id}:${viewerId}`;
       try {
@@ -284,6 +404,7 @@ router.post("/posts/:id/view", async (req, res) => {
   }
 });
 
+// share
 router.post("/posts/:id/share", requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
@@ -296,23 +417,37 @@ router.post("/posts/:id/share", requireAuth, async (req, res) => {
         $addToSet: { sharedBy: req.user.uid },
         $setOnInsert: { postId: new mongoose.Types.ObjectId(id) },
         $push: {
-          daily: { day: todayStr(), views: 0, likes: 0, comments: 0, shares: 1, saves: 0 },
+          daily: {
+            day: todayStr(),
+            views: 0,
+            likes: 0,
+            comments: 0,
+            shares: 1,
+            saves: 0,
+          },
         },
       },
       { upsert: true }
     );
 
-    const stats = await PostStats.findOne({ postId: new mongoose.Types.ObjectId(id) }).lean();
+    const stats = await PostStats.findOne({
+      postId: new mongoose.Types.ObjectId(id),
+    }).lean();
     const trendingScore = scoreFrom(stats);
     await PostStats.updateOne({ postId: id }, { $set: { trendingScore } });
 
-    return res.json({ ok: true, sharesCount: stats?.sharesCount || 0, trendingScore });
+    return res.json({
+      ok: true,
+      sharesCount: stats?.sharesCount || 0,
+      trendingScore,
+    });
   } catch (err) {
     console.error("[posts:share] error:", err);
     return res.status(500).json({ error: "share_failed" });
   }
 });
 
+// save
 router.post("/posts/:id/save", requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
@@ -325,13 +460,22 @@ router.post("/posts/:id/save", requireAuth, async (req, res) => {
         $inc: { savesCount: 1 },
         $setOnInsert: { postId: new mongoose.Types.ObjectId(id) },
         $push: {
-          daily: { day: todayStr(), views: 0, likes: 0, comments: 0, shares: 0, saves: 1 },
+          daily: {
+            day: todayStr(),
+            views: 0,
+            likes: 0,
+            comments: 0,
+            shares: 0,
+            saves: 1,
+          },
         },
       },
       { upsert: true }
     );
 
-    const stats = await PostStats.findOne({ postId: new mongoose.Types.ObjectId(id) }).lean();
+    const stats = await PostStats.findOne({
+      postId: new mongoose.Types.ObjectId(id),
+    }).lean();
     const trendingScore = scoreFrom(stats);
     await PostStats.updateOne({ postId: id }, { $set: { trendingScore } });
 
@@ -347,6 +491,7 @@ router.post("/posts/:id/save", requireAuth, async (req, res) => {
   }
 });
 
+// unsave
 router.delete("/posts/:id/save", requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
@@ -356,10 +501,16 @@ router.delete("/posts/:id/save", requireAuth, async (req, res) => {
       { postId: new mongoose.Types.ObjectId(id), savedBy: req.user.uid },
       { $pull: { savedBy: req.user.uid }, $inc: { savesCount: -1 } }
     );
-    const stats = await PostStats.findOne({ postId: new mongoose.Types.ObjectId(id) }).lean();
+
+    const stats = await PostStats.findOne({
+      postId: new mongoose.Types.ObjectId(id),
+    }).lean();
     const savesCount = Math.max(0, Number(stats?.savesCount || 0));
     const trendingScore = scoreFrom({ ...stats, savesCount });
-    await PostStats.updateOne({ postId: id }, { $set: { savesCount, trendingScore } });
+    await PostStats.updateOne(
+      { postId: id },
+      { $set: { savesCount, trendingScore } }
+    );
 
     return res.json({ ok: true, savesCount, trendingScore });
   } catch (err) {
@@ -408,7 +559,8 @@ router.delete("/posts/:id", requireAuth, async (req, res) => {
 
     const p = await Post.findById(id);
     if (!p) return res.status(404).json({ error: "not_found" });
-    if (p.proOwnerUid !== req.user.uid) return res.status(403).json({ error: "forbidden" });
+    if (p.proOwnerUid !== req.user.uid)
+      return res.status(403).json({ error: "forbidden" });
 
     await Post.deleteOne({ _id: p._id });
     await PostStats.deleteOne({ postId: p._id }).catch(() => {});
