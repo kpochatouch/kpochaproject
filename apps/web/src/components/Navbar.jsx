@@ -6,9 +6,12 @@ import { api } from "../lib/api";
 
 export default function Navbar() {
   const [me, setMe] = useState(null);
-  const [token, setToken] = useState(() => localStorage.getItem("token") || null);
+  const [token, setToken] = useState(
+    () => localStorage.getItem("token") || null
+  );
   const [open, setOpen] = useState(false);
 
+  // watch firebase auth → keep token in localStorage
   useEffect(() => {
     const auth = getAuth();
     const unsub = onIdTokenChanged(auth, async (user) => {
@@ -24,6 +27,7 @@ export default function Navbar() {
     return () => unsub();
   }, []);
 
+  // fetch /api/me when we have a token
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -63,7 +67,8 @@ export default function Navbar() {
   return (
     <header className="border-b border-zinc-800 sticky top-0 z-40 bg-black/70 backdrop-blur h-[60px]">
       <div className="max-w-6xl mx-auto px-4 h-full flex items-center justify-between gap-3">
-        <Link to="/" className="flex items-center gap-2">
+        {/* centered on mobile, left on md+ */}
+        <Link to="/" className="flex items-center gap-2 mx-auto md:mx-0">
           <img src="/logo.svg" alt="Kpocha Touch" className="h-6 w-auto" />
           <span className="text-gold font-semibold text-sm sm:text-base">
             Kpocha Touch
@@ -159,24 +164,44 @@ export default function Navbar() {
       {open && (
         <div className="md:hidden border-t border-zinc-800 bg-black/95 backdrop-blur">
           <div className="max-w-6xl mx-auto px-4 py-3 flex flex-col gap-2">
-            <NavLink to="/browse" onClick={() => setOpen(false)} className={navLinkClass}>
+            <NavLink
+              to="/browse"
+              onClick={() => setOpen(false)}
+              className={navLinkClass}
+            >
               Browse
             </NavLink>
             {token && (
-              <NavLink to="/wallet" onClick={() => setOpen(false)} className={navLinkClass}>
+              <NavLink
+                to="/wallet"
+                onClick={() => setOpen(false)}
+                className={navLinkClass}
+              >
                 Wallet
               </NavLink>
             )}
-            <NavLink to="/profile" onClick={() => setOpen(false)} className={navLinkClass}>
+            <NavLink
+              to="/profile"
+              onClick={() => setOpen(false)}
+              className={navLinkClass}
+            >
               Profile
             </NavLink>
             {token && (
-              <NavLink to="/settings" onClick={() => setOpen(false)} className={navLinkClass}>
+              <NavLink
+                to="/settings"
+                onClick={() => setOpen(false)}
+                className={navLinkClass}
+              >
                 Settings
               </NavLink>
             )}
             {!isPro && token && (
-              <NavLink to="/become" onClick={() => setOpen(false)} className={navLinkClass}>
+              <NavLink
+                to="/become"
+                onClick={() => setOpen(false)}
+                className={navLinkClass}
+              >
                 Become a Pro
               </NavLink>
             )}
@@ -190,7 +215,11 @@ export default function Navbar() {
               </NavLink>
             )}
             {isAdmin && (
-              <NavLink to="/admin" onClick={() => setOpen(false)} className={navLinkClass}>
+              <NavLink
+                to="/admin"
+                onClick={() => setOpen(false)}
+                className={navLinkClass}
+              >
                 Admin
               </NavLink>
             )}

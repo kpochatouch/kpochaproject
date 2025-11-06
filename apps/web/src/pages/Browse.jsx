@@ -14,8 +14,9 @@ import ServicePicker from "../components/ServicePicker";
 import ProDrawer from "../components/ProDrawer";
 import FeedCard from "../components/FeedCard";
 import ErrorBoundary from "../components/ErrorBoundary";
+import SideMenu from "../components/SideMenu.jsx";
 
-/* ---------------- Feed composer ---------------- */
+/* ---------------- Feed composer (slimmer) ---------------- */
 function FeedComposer({ lga, onPosted }) {
   const [text, setText] = useState("");
   const [mediaUrl, setMediaUrl] = useState("");
@@ -106,55 +107,22 @@ function FeedComposer({ lga, onPosted }) {
   }
 
   return (
-    <div className="mb-6 p-4 rounded-xl border border-zinc-800 bg-black/30 w-full max-w-2xl mx-auto">
+    <div className="mb-4 p-3 rounded-xl border border-zinc-800 bg-black/30 w-full max-w-2xl mx-auto">
       <div className="flex items-center justify-between gap-2 mb-2">
-        <h3 className="font-semibold text-white">Share an update</h3>
-        {msg ? <span className="text-xs text-zinc-400">{msg}</span> : null}
+        <h3 className="font-semibold text-white text-sm">Share an update</h3>
+        {msg ? <span className="text-[10px] text-zinc-400">{msg}</span> : null}
       </div>
 
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}
         placeholder="What are you working on today?"
-        className="w-full bg-black border border-zinc-800 rounded-lg px-3 py-2 mb-3 outline-none focus:border-gold"
-        rows={3}
+        className="w-full bg-black border border-zinc-800 rounded-lg px-3 py-2 mb-2 outline-none focus:border-gold text-sm min-h-[60px]"
       />
 
-      <div className="flex flex-wrap gap-2 mb-3">
-        <input
-          value={mediaUrl}
-          onChange={(e) => setMediaUrl(e.target.value)}
-          placeholder="Image/Video URL (optional)"
-          className="flex-1 min-w-[160px] bg-black border border-zinc-800 rounded-lg px-3 py-2"
-        />
-        <select
-          value={mediaType}
-          onChange={(e) => setMediaType(e.target.value)}
-          className="bg-black border border-zinc-800 rounded-lg px-3 py-2"
-        >
-          <option value="image">Image</option>
-          <option value="video">Video</option>
-        </select>
-        <button
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
-          className="rounded-lg border border-zinc-700 px-3 py-2 text-sm hover:bg-zinc-900"
-          disabled={uploading}
-        >
-          {uploading ? "Uploading…" : "Upload from device"}
-        </button>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*,video/*"
-          className="hidden"
-          onChange={handleFileChange}
-        />
-      </div>
-
       {mediaUrl ? (
-        <div className="mb-3">
-          <p className="text-xs text-zinc-400 mb-1">Preview:</p>
+        <div className="mb-2">
+          <p className="text-[10px] text-zinc-400 mb-1">Preview:</p>
           {mediaType === "video" ? (
             <video
               src={mediaUrl}
@@ -171,14 +139,36 @@ function FeedComposer({ lga, onPosted }) {
         </div>
       ) : null}
 
-      <div className="flex items-center justify-between">
-        <p className="text-xs text-zinc-500">
-          You can paste a URL or upload directly.
-        </p>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="rounded-md border border-zinc-700 px-3 py-1.5 text-xs hover:bg-zinc-900"
+            disabled={uploading}
+          >
+            {uploading ? "Uploading…" : "Upload"}
+          </button>
+          <select
+            value={mediaType}
+            onChange={(e) => setMediaType(e.target.value)}
+            className="bg-black border border-zinc-800 rounded-md px-2 py-1.5 text-xs"
+          >
+            <option value="image">Image</option>
+            <option value="video">Video</option>
+          </select>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*,video/*"
+            className="hidden"
+            onChange={handleFileChange}
+          />
+        </div>
         <button
           onClick={submit}
           disabled={posting || uploading}
-          className="rounded-lg bg-gold text-black px-4 py-2 font-semibold disabled:opacity-50"
+          className="rounded-lg bg-gold text-black px-4 py-1.5 text-sm font-semibold disabled:opacity-50"
         >
           {posting ? "Posting…" : "Post"}
         </button>
@@ -193,7 +183,6 @@ export default function Browse() {
   const location = useLocation();
   const { me, isAdmin, isPro } = useMe();
 
-  // feed first
   const [tab, setTab] = useState("feed");
 
   const [pros, setPros] = useState([]);
@@ -411,8 +400,7 @@ export default function Browse() {
       state: {
         proId,
         serviceName: svcName || undefined,
-        amountNaira:
-          typeof svcPrice !== "undefined" ? svcPrice : undefined,
+        amountNaira: typeof svcPrice !== "undefined" ? svcPrice : undefined,
         country: "Nigeria",
         state: (stateName || "").toUpperCase(),
         lga: (lga || "").toUpperCase(),
@@ -420,7 +408,6 @@ export default function Browse() {
     });
   }
 
-  // token only used to allow posting
   const token =
     typeof window !== "undefined"
       ? localStorage.getItem("authToken") ||
@@ -428,56 +415,19 @@ export default function Browse() {
       : null;
   const canPostOnFeed = !!token;
 
-  const leftMenu = [
-    { label: "Feed", to: "/browse" },
-    { label: "Browse Pros", to: "/browse?tab=pros" },
-    me ? { label: "Profile", to: "/profile" } : null,
-    me ? { label: "Wallet", to: "/wallet" } : null,
-    me ? { label: "Settings", to: "/settings" } : null,
-    me ? { label: "Become a Pro", to: "/become" } : null,
-    isPro ? { label: "Pro Dashboard", to: "/pro-dashboard" } : null,
-    isAdmin ? { label: "Admin", to: "/admin" } : null,
-  ].filter(Boolean);
-
-  // Advert rail actions
-  function previewAd() {
-    if (!adminAdUrl.trim())
-      return setAdMsg("Paste a media URL first.");
-    setAdMsg("Previewing…");
-    setTimeout(() => setAdMsg("Preview ready"), 300);
-  }
-
-  async function publishAd() {
-    if (!adminAdUrl.trim())
-      return setAdMsg("Paste a media URL first.");
-    try {
-      setAdMsg("Publishing…");
-      await api.post("/api/posts", {
-        text: "Sponsored",
-        media: [
-          {
-            url: adminAdUrl.trim(),
-            type: /\.(mp4|mov|webm)$/i.test(adminAdUrl)
-              ? "video"
-              : "image",
-          },
-        ],
-        isPublic: true,
-        tags: ["AD"],
-      });
-      setAdMsg("Published to feed ✔");
-      await fetchFeed();
-    } catch (e) {
-      setAdMsg(e?.response?.data?.error || "Failed to publish ad");
-    }
-  }
-
   return (
     <ErrorBoundary>
       <div className="max-w-6xl mx-auto px-4 py-10">
         {/* header + tabs */}
         <div className="mb-6 flex items-center justify-between gap-3 flex-wrap">
-          <h1 className="text-2xl font-semibold">Discover</h1>
+          <div className="flex items-center gap-2">
+            <img
+              src="/discovery.png"
+              alt="Discover"
+              className="w-6 h-6 object-contain"
+            />
+            <h1 className="text-2xl font-semibold">Discover</h1>
+          </div>
           <div className="inline-flex rounded-xl border border-zinc-800 overflow-hidden">
             <button
               className={`px-4 py-2 text-sm border-right border-zinc-800 ${
@@ -584,20 +534,9 @@ export default function Browse() {
           </>
         ) : (
           <div className="flex gap-4">
-            {/* LEFT MENU */}
-            <div className="hidden lg:block w-56 pt-1">
-              <div className="sticky top-20 space-y-2">
-                {leftMenu.map((item) => (
-                  <button
-                    key={item.label}
-                    onClick={() => navigate(item.to)}
-                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-zinc-900 text-sm text-left"
-                  >
-                    <span className="inline-block w-6 text-center">•</span>
-                    <span>{item.label}</span>
-                  </button>
-                ))}
-              </div>
+            {/* LEFT MENU - now actual component (mobile handled inside) */}
+            <div className="lg:w-56 pt-1">
+              <SideMenu me={me} />
             </div>
 
             {/* FEED */}
@@ -630,8 +569,8 @@ export default function Browse() {
               )}
             </div>
 
-            {/* RIGHT ADS */}
-            <div className="hidden lg:block w-64 pt-1">
+            {/* RIGHT ADS (narrower) */}
+            <div className="hidden lg:block w-56 pt-1">
               <div className="sticky top-20 space-y-4">
                 {isAdmin ? (
                   <div className="rounded-lg border border-zinc-800 bg-black/40 p-3 space-y-2">
@@ -647,15 +586,57 @@ export default function Browse() {
                       placeholder="Image / video URL"
                       className="w-full bg-black border border-zinc-700 rounded px-2 py-1 text-xs"
                     />
+                    <input
+                      type="file"
+                      accept="image/*,video/*"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        const localUrl = URL.createObjectURL(file);
+                        setAdminAdUrl(localUrl);
+                        setAdMsg("Local preview (not uploaded to backend)");
+                      }}
+                      className="w-full text-[10px] text-zinc-400"
+                    />
                     <div className="flex gap-2">
                       <button
-                        onClick={previewAd}
+                        onClick={() => {
+                          if (!adminAdUrl.trim())
+                            return setAdMsg("Paste a media URL first.");
+                          setAdMsg("Previewing…");
+                          setTimeout(() => setAdMsg("Preview ready"), 300);
+                        }}
                         className="flex-1 rounded-md border border-zinc-700 px-2 py-1 text-xs hover:bg-zinc-900"
                       >
                         Preview
                       </button>
                       <button
-                        onClick={publishAd}
+                        onClick={async () => {
+                          if (!adminAdUrl.trim())
+                            return setAdMsg("Paste a media URL first.");
+                          try {
+                            setAdMsg("Publishing…");
+                            await api.post("/api/posts", {
+                              text: "Sponsored",
+                              media: [
+                                {
+                                  url: adminAdUrl.trim(),
+                                  type: /\.(mp4|mov|webm)$/i.test(adminAdUrl)
+                                    ? "video"
+                                    : "image",
+                                },
+                              ],
+                              isPublic: true,
+                              tags: ["AD"],
+                            });
+                            setAdMsg("Published to feed ✔");
+                            await fetchFeed();
+                          } catch (e) {
+                            setAdMsg(
+                              e?.response?.data?.error || "Failed to publish ad"
+                            );
+                          }
+                        }}
                         className="flex-1 rounded-md bg-gold text-black px-2 py-1 text-xs font-semibold"
                       >
                         Publish
@@ -689,12 +670,9 @@ export default function Browse() {
                     )}
                   </div>
                 ) : (
-                  <>
-                    <div className="h-40 rounded-lg border border-zinc-800 bg-black/20 flex items-center justify-center text-xs text-zinc-500">
-                      Advert space
-                    </div>
-                    <div className="h-40 rounded-lg border border-zinc-800 bg-black/20"></div>
-                  </>
+                  <div className="h-40 rounded-lg border border-zinc-800 bg-black/20 flex items-center justify-center text-xs text-zinc-500">
+                    Advert space
+                  </div>
                 )}
               </div>
             </div>

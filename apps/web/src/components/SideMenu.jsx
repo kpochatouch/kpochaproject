@@ -2,104 +2,297 @@
 import { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 
+const icons = {
+  feed: "/menu/feed.png",
+  browse: "/menu/browse-pros.png",
+  profile: "/menu/profile.png",
+  wallet: "/menu/wallet.png",
+  settings: "/menu/settings.png",
+  bookings: "/menu/bookings.png",
+  pro: "/menu/pro.png",
+  chat: "/menu/chat.png",
+  foryou: "/menu/for-you.png",
+  risk: "/menu/risk-logs.png",
+  admin: "/menu/admin.png",
+  help: "/menu/settings.png", // fallback
+};
+
 export default function SideMenu({ me }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const [open, setOpen] = useState(true);
+
+  // mobile open/close
+  const [open, setOpen] = useState(false);
+  // desktop collapse
+  const [collapsed, setCollapsed] = useState(false);
 
   const isAdmin = !!me?.isAdmin;
   const isPro = !!me?.isPro;
 
-  function go(p) {
-    navigate(p);
+  // current path helper (so /browse?tab=pros still highlights browse)
+  const pathname = location.pathname;
+  const search = location.search || "";
+  const isFeed = pathname === "/browse" && !search.includes("tab=pros");
+  const isBrowsePros =
+    pathname === "/browse" && search.includes("tab=pros");
+
+  const baseNav = [
+    {
+      key: "feed",
+      label: "Feed",
+      to: "/browse",
+      active: isFeed,
+    },
+    {
+      key: "browse",
+      label: "Browse Pros",
+      to: "/browse?tab=pros",
+      active: isBrowsePros,
+    },
+    me && {
+      key: "profile",
+      label: "Profile",
+      to: "/profile",
+      active: pathname === "/profile",
+    },
+    me && {
+      key: "wallet",
+      label: "Wallet",
+      to: "/wallet",
+      active: pathname === "/wallet",
+    },
+    me && {
+      key: "settings",
+      label: "Settings",
+      to: "/settings",
+      active: pathname === "/settings",
+    },
+    me && {
+      key: "pro",
+      label: "Become a Pro",
+      to: "/become",
+      active: pathname === "/become",
+    },
+  ].filter(Boolean);
+
+  const socialNav = [
+    {
+      key: "chat",
+      label: "Chat",
+      to: "/chat",
+      // you can flip this to true to enable
+      disabled: true,
+    },
+    {
+      key: "foryou",
+      label: "For You",
+      to: "/browse",
+      disabled: true,
+    },
+  ];
+
+  const proNav = isPro
+    ? [
+        {
+          key: "pro",
+          label: "Pro Dashboard",
+          to: "/pro-dashboard",
+          active: pathname === "/pro-dashboard",
+        },
+        {
+          key: "bookings",
+          label: "Bookings",
+          to: "/browse?tab=pros",
+          active: isBrowsePros,
+        },
+      ]
+    : [];
+
+  const adminNav = isAdmin
+    ? [
+        {
+          key: "admin",
+          label: "Admin Panel",
+          to: "/admin",
+          active: pathname === "/admin",
+        },
+        {
+          key: "risk",
+          label: "Risk / Logs",
+          to: "/risk-logs",
+          active: pathname === "/risk-logs",
+        },
+      ]
+    : [];
+
+  function go(path) {
+    navigate(path);
+    setOpen(false); // close on mobile
   }
 
   return (
-    <div className="sticky top-20">
-      {/* toggle (mobile / narrow) */}
+    <>
+      {/* mobile top button (shows panel) */}
       <button
         onClick={() => setOpen((o) => !o)}
-        className="lg:hidden mb-3 rounded-lg border border-zinc-700 px-3 py-1 text-sm"
+        className="lg:hidden mb-3 rounded-lg border border-zinc-700 px-3 py-1 text-sm bg-black/50"
       >
-        {open ? "Hide menu" : "Menu"}
+        {open ? "Close menu" : "Menu"}
       </button>
 
-      <div
-        className={`transition-all duration-200 ${
-          open ? "opacity-100 translate-x-0" : "opacity-0 -translate-x-2 pointer-events-none"
-        }`}
-      >
-        <div className="w-60 rounded-xl border border-zinc-800 bg-black/40 p-3 space-y-1">
-          <div className="text-[10px] tracking-wide uppercase text-zinc-500 mb-2">
-            Navigation
-          </div>
-
-          <MenuButton
-            label="Feed"
-            active={location.pathname === "/browse"}
-            onClick={() => go("/browse")}
+      <div className="relative">
+        {/* mobile overlay */}
+        {open && (
+          <div
+            className="fixed inset-0 bg-black/30 backdrop-blur-sm z-30 lg:hidden"
+            onClick={() => setOpen(false)}
           />
-          <MenuButton label="Browse Pros" onClick={() => go("/browse?tab=pros")} />
-          <MenuButton label="Profile" onClick={() => go("/profile")} />
-          <MenuButton label="Wallet" onClick={() => go("/wallet")} />
-          <MenuButton label="Settings" onClick={() => go("/settings")} />
+        )}
 
-          {/* future / dummy routes */}
-          <div className="pt-2">
-            <div className="text-[10px] tracking-wide uppercase text-zinc-500 mb-1">
-              Social
+        <div
+          className={`${
+            open ? "translate-x-0" : "-translate-x-full"
+          } lg:translate-x-0 transition-transform duration-200
+             fixed lg:sticky top-16 lg:top-20 left-0 z-40
+             h-[calc(100vh-4rem)] lg:h-auto
+             flex`}
+        >
+          <div
+            className={`${
+              collapsed ? "w-14" : "w-60"
+            } bg-black/70 border-r border-zinc-800 h-full lg:h-auto
+              rounded-none lg:rounded-xl lg:border lg:bg-black/40
+              p-3 space-y-2 overflow-y-auto`}
+          >
+            {/* collapse toggle (desktop only) */}
+            <div className="hidden lg:flex justify-end mb-1">
+              <button
+                onClick={() => setCollapsed((c) => !c)}
+                className="rounded-md border border-zinc-700 px-2 py-1 text-[11px] text-zinc-300 hover:bg-zinc-900"
+                title={collapsed ? "Expand" : "Collapse"}
+              >
+                {collapsed ? "»" : "«"}
+              </button>
             </div>
-            <MenuButton label="Chat" onClick={() => go("/chat")} disabled />
-            <MenuButton label="For you" onClick={() => go("/browse")} disabled />
-          </div>
 
-          {/* pro only */}
-          {isPro && (
-            <div className="pt-2">
-              <div className="text-[10px] tracking-wide uppercase text-zinc-500 mb-1">
-                Pro
+            {!collapsed && (
+              <div className="text-[10px] tracking-wide uppercase text-zinc-500">
+                Navigation
               </div>
-              <MenuButton label="Pro Dashboard" onClick={() => go("/pro-dashboard")} />
-              <MenuButton label="Bookings" onClick={() => go("/wallet")} />
-            </div>
-          )}
+            )}
+            {baseNav.map((item) => (
+              <MenuButton
+                key={item.key}
+                label={item.label}
+                icon={icons[item.key]}
+                active={item.active}
+                collapsed={collapsed}
+                onClick={() => go(item.to)}
+              />
+            ))}
 
-          {/* admin only */}
-          {isAdmin && (
-            <div className="pt-2">
-              <div className="text-[10px] tracking-wide uppercase text-zinc-500 mb-1">
-                Admin
+            {!collapsed && (
+              <div className="pt-1 text-[10px] tracking-wide uppercase text-zinc-500">
+                Social
               </div>
-              <MenuButton label="Admin Panel" onClick={() => go("/admin")} />
-              <MenuButton label="Risk / Logs" onClick={() => go("/admin")} disabled />
-            </div>
-          )}
+            )}
+            {socialNav.map((item) => (
+              <MenuButton
+                key={item.key}
+                label={item.label}
+                icon={icons[item.key]}
+                collapsed={collapsed}
+                disabled={item.disabled}
+                onClick={() => !item.disabled && go(item.to)}
+              />
+            ))}
 
-          <div className="pt-2">
-            <div className="text-[10px] tracking-wide uppercase text-zinc-500 mb-1">
-              Help
-            </div>
-            <MenuButton label="Legal" onClick={() => go("/legal")} />
+            {proNav.length ? (
+              <>
+                {!collapsed && (
+                  <div className="pt-1 text-[10px] tracking-wide uppercase text-zinc-500">
+                    Pro
+                  </div>
+                )}
+                {proNav.map((item) => (
+                  <MenuButton
+                    key={item.key}
+                    label={item.label}
+                    icon={icons[item.key]}
+                    active={item.active}
+                    collapsed={collapsed}
+                    onClick={() => go(item.to)}
+                  />
+                ))}
+              </>
+            ) : null}
+
+            {adminNav.length ? (
+              <>
+                {!collapsed && (
+                  <div className="pt-1 text-[10px] tracking-wide uppercase text-zinc-500">
+                    Admin
+                  </div>
+                )}
+                {adminNav.map((item) => (
+                  <MenuButton
+                    key={item.key}
+                    label={item.label}
+                    icon={icons[item.key]}
+                    active={item.active}
+                    collapsed={collapsed}
+                    onClick={() => go(item.to)}
+                  />
+                ))}
+              </>
+            ) : null}
+
+            {!collapsed && (
+              <div className="pt-1 text-[10px] tracking-wide uppercase text-zinc-500">
+                Help
+              </div>
+            )}
+            <MenuButton
+              label="Legal"
+              icon={icons.help}
+              collapsed={collapsed}
+              onClick={() => go("/legal")}
+            />
           </div>
         </div>
       </div>
-    </div>
+    </>
   );
 }
 
-function MenuButton({ label, onClick, active = false, disabled = false }) {
+function MenuButton({
+  label,
+  icon,
+  onClick,
+  active = false,
+  disabled = false,
+  collapsed = false,
+}) {
   return (
     <button
       onClick={!disabled ? onClick : undefined}
-      className={`w-full text-left px-2 py-2 rounded-lg text-sm flex items-center justify-between
+      className={`w-full flex items-center gap-2 px-2 py-2 rounded-lg text-sm
         ${active ? "bg-zinc-900 text-gold" : "text-zinc-200 hover:bg-zinc-900"}
         ${disabled ? "opacity-50 cursor-not-allowed" : ""}
+        ${collapsed ? "justify-center" : ""}
       `}
     >
-      <span>{label}</span>
-      {active ? (
-        <span className="text-[8px]">●</span>
-      ) : null}
+      {icon ? (
+        <img
+          src={icon}
+          alt=""
+          className={`w-5 h-5 object-contain ${collapsed ? "" : "shrink-0"}`}
+        />
+      ) : (
+        <span className="w-5 h-5 rounded bg-zinc-700 inline-block" />
+      )}
+      {!collapsed && <span className="flex-1 text-left">{label}</span>}
+      {active && !collapsed ? <span className="text-[8px]">●</span> : null}
     </button>
   );
 }

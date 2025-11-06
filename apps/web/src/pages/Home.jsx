@@ -15,8 +15,6 @@ export default function Home() {
   const navigate = useNavigate();
   const [me, setMe] = useState(null);
   const [hasClientProfile, setHasClientProfile] = useState(false);
-
-  // for arrow
   const [atBottom, setAtBottom] = useState(false);
 
   // ✅ Only call /api/me if we already have a token
@@ -54,7 +52,7 @@ export default function Home() {
     })();
   }, [me?.uid]);
 
-  // ✅ unified logic
+  // ✅ unified logic you wanted (/client/register first)
   const onFindProClick = () => {
     if (!me?.uid) return navigate("/client/register");
     if (!hasClientProfile) return navigate("/client/register");
@@ -76,10 +74,8 @@ export default function Home() {
 
   function handleArrowClick() {
     if (atBottom) {
-      // back to top
       window.scrollTo({ top: 0, behavior: "smooth" });
     } else {
-      // scroll to bottom
       window.scrollTo({
         top: document.body.scrollHeight,
         behavior: "smooth",
@@ -92,8 +88,8 @@ export default function Home() {
       {/* HERO */}
       <section
         className={`
-          relative gradient-hero
-          pt-[60px]          /* <- was mt-[60px], this removes the black gap */
+          relative
+          pt-[60px]           /* match navbar height so it's not covered */
           min-h-[85vh]
           flex items-center justify-center
           text-center text-white
@@ -101,15 +97,26 @@ export default function Home() {
           pb-20
         `}
       >
+        {/* ✅ video from /public */}
         <video
           className="absolute inset-0 w-full h-full object-cover opacity-30"
-          src="https://res.cloudinary.com/dupex2y3k/video/upload/v1760305198/kpocha-background-1_s2s9k9.mp4"
+          src="/hero-video.mp4"
           autoPlay
           loop
           muted
           playsInline
         />
-        <div className="absolute inset-0 bg-gradient-to-b from-black/70 via-black/60 to-black/80" />
+
+        {/* ✅ dark overlay, also use bg-alt as a fallback image */}
+        <div
+          className="absolute inset-0 bg-gradient-to-b from-black/70 via-black/60 to-black/80"
+          style={{
+            backgroundImage: "url(/bg-alt.jpg)",
+            backgroundSize: "cover",
+            backgroundPosition: "center",
+            mixBlendMode: "normal",
+          }}
+        />
 
         <motion.div
           className="relative z-10 w-full max-w-5xl mx-auto px-4"
@@ -117,16 +124,16 @@ export default function Home() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 1 }}
         >
-          {/* 🔹 Logo */}
+          {/* ✅ logo from /public */}
           <div className="flex justify-center mb-5">
             <img
-              src="https://res.cloudinary.com/dupex2y3k/image/upload/v1760302703/kpocha-touch-logo_srzbiu.jpg"
+              src="/logo-kpocha.png"
               alt="Kpocha Touch Logo"
-              className="h-20 w-20 rounded-full border border-emerald-600 shadow-md shadow-emerald-500/30"
+              className="h-20 w-20 rounded-full border border-emerald-600 shadow-md shadow-emerald-500/30 bg-black/40 object-contain"
             />
           </div>
 
-          {/* 🔹 Heading */}
+          {/* Heading */}
           <h1 className="text-3xl sm:text-5xl md:text-6xl font-bold tracking-tight mb-3">
             Kpocha Touch <span className="text-gold">Unisex Salon</span>
           </h1>
@@ -156,7 +163,7 @@ export default function Home() {
           </div>
         </motion.div>
 
-        {/* ✅ ticker — LEAVE as-is */}
+        {/* ticker */}
         <motion.div
           className="absolute bottom-0 left-0 w-full py-3 bg-black/40 border-t border-emerald-800 text-emerald-300 text-sm tracking-wide overflow-hidden"
           animate={{ x: ["100%", "-100%"] }}
@@ -195,13 +202,13 @@ export default function Home() {
           className="text-zinc-300 text-center max-w-3xl mx-auto"
         >
           Kpocha Touch Unisex Salon connects clients to{" "}
-            <span className="text-gold">verified</span> barbers and stylists
-            across Nigeria. Discover trusted pros, book instantly, pay securely,
-            and enjoy premium service at home or in-salon.
+          <span className="text-gold">verified</span> barbers and stylists
+          across Nigeria. Discover trusted pros, book instantly, pay securely,
+          and enjoy premium service at home or in-salon.
         </motion.p>
       </section>
 
-      {/* TWO CARDS */}
+      {/* WHY CLIENTS / WHY PROS */}
       <section className="max-w-6xl mx-auto px-4 pb-4">
         <div className="grid md:grid-cols-2 gap-8">
           <motion.div
@@ -277,6 +284,32 @@ export default function Home() {
         </div>
       </section>
 
+      {/* SHOWCASE / BAND WITH LOCAL IMAGE */}
+      <section className="relative">
+        <div
+          className="relative max-w-6xl mx-auto my-12 rounded-2xl overflow-hidden border border-zinc-800"
+          style={{
+            backgroundImage: "url(/bg-alt.jpg)",
+            backgroundSize: "cover",
+            backgroundPosition: "center",
+          }}
+        >
+          <div className="absolute inset-0 bg-black/55" />
+          <div className="relative px-6 py-16 text-center">
+            <motion.h3
+              {...fadeUp}
+              className="text-2xl sm:text-3xl font-bold mb-2"
+            >
+              Built for Nigeria.
+            </motion.h3>
+            <motion.p {...fadeUp} className="text-zinc-300 max-w-2xl mx-auto">
+              From Lagos to Kano, Port Harcourt to Abuja — trusted grooming,
+              verified professionals, and smooth bookings that just work.
+            </motion.p>
+          </div>
+        </div>
+      </section>
+
       {/* HOW IT WORKS */}
       <section className="max-w-6xl mx-auto px-4 py-16">
         <motion.h3
@@ -288,7 +321,10 @@ export default function Home() {
         <div className="grid md:grid-cols-3 gap-6">
           {[
             { t: "Find a Professional", d: "Browse verified experts near you." },
-            { t: "Book & Pay", d: "Pick a time and pay securely via Paystack." },
+            {
+              t: "Book & Pay",
+              d: "Pick a time and pay securely via Paystack.",
+            },
             {
               t: "Get Styled",
               d: "At home or in-salon — premium service, on time.",

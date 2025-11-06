@@ -13,17 +13,31 @@ function scoreFromMetrics(metrics = {}) {
     const steps = Array.isArray(metrics.steps) ? metrics.steps.length : 0;
     const passed = Array.isArray(metrics.passed) ? metrics.passed.length : 0;
 
-    // Base score: how many challenges were completed
+    // base score: how many challenges were completed
     let score = steps ? passed / steps : 0;
 
-    // Slight bonus if uploads were via Cloudinary (client indicated)
+    // slight bonus if uploads were via Cloudinary (client indicated)
     if (metrics.cloudinary) score += 0.05;
 
-    // Clamp 0..1
+    // clamp 0..1
     return Math.max(0, Math.min(1, score));
   } catch {
     return 0;
   }
+}
+
+// helper to get the collection no matter how mongoose was attached
+async function getRiskCollection(req) {
+  // try server.js style: app.set("mongoose", mongoose)
+  const fromApp =
+    req.app.get("mongoose")?.connection?.db?.collection("risk_events") ||
+    req.app.locals.mongoose?.connection?.db?.collection("risk_events");
+
+  if (fromApp) return fromApp;
+
+  // fallback: import mongoose directly
+  const { default: mongoose } = await import("mongoose");
+  return mongoose.connection.db.collection("risk_events");
 }
 
 /**
@@ -34,15 +48,8 @@ export default function riskRoutes({ requireAuth, requireAdmin, Application }) {
 
   /**
    * POST /api/risk/liveness
-   * Body:
-   * {
-   *   reason: "payout" | "onboarding" | "suspicious_login" | string,
-   *   context: { ...any small JSON... },
-   *   selfieUrl: "https://...",
-   *   videoUrl: "https://..." | "",
-   *   metrics: { steps:[], passed:[], cloudinary:bool, ... },
-   *   applicationId?: string // if provided, we attach a summary to that Application
-   * }
+   * This is called by your liveness/AWS flow AFTER it has the selfie/video.
+   * It just stores it + scores it. This is the one you already had.
    */
   router.post("/risk/liveness", requireAuth, async (req, res) => {
     try {
@@ -55,7 +62,7 @@ export default function riskRoutes({ requireAuth, requireAdmin, Application }) {
         applicationId = "",
       } = req.body || {};
 
-      // Minimal validation (don’t over-block)
+      // minimal validation (don’t over-block)
       if (!selfieUrl) {
         return res.status(400).json({ error: "selfie_required" });
       }
@@ -63,15 +70,7 @@ export default function riskRoutes({ requireAuth, requireAdmin, Application }) {
       const score = scoreFromMetrics(metrics);
       const now = new Date();
 
-      // Store raw event in a lightweight collection (no schema)
-      const col = req.app.get("mongoose")?.connection?.db?.collection("risk_events")
-        || (req.app.locals.mongoose?.connection?.db?.collection("risk_events"));
-
-      // If server.js doesn’t expose mongoose via app, fallback:
-      const db = col
-        ? null
-        : (await (await import("mongoose")).default).connection?.db;
-      const riskCol = col || db.collection("risk_events");
+      const riskCol = await getRiskCollection(req);
 
       const doc = {
         type: "liveness",
@@ -83,7 +82,10 @@ export default function riskRoutes({ requireAuth, requireAdmin, Application }) {
         videoUrl,
         metrics,
         score,
-        ip: req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || req.socket?.remoteAddress || "",
+        ip:
+          req.headers["x-forwarded-for"]?.split(",")[0]?.trim() ||
+          req.socket?.remoteAddress ||
+          "",
         userAgent: req.headers["user-agent"] || "",
         createdAt: now,
       };
@@ -91,14 +93,14 @@ export default function riskRoutes({ requireAuth, requireAdmin, Application }) {
       const ins = await riskCol.insertOne(doc);
       const riskId = ins.insertedId?.toString?.() || "";
 
-      // Optionally attach to an Application document for audit
+      // optionally attach to an Application document for audit
       if (applicationId && Application) {
         try {
           await Application.findByIdAndUpdate(
             applicationId,
             {
               $set: {
-                "verification.selfieWithIdUrl": selfieUrl, // preserves your existing key
+                "verification.selfieWithIdUrl": selfieUrl,
                 "verification.livenessVideoUrl": videoUrl || "",
                 "verification.livenessMetrics": metrics,
                 "risk.liveness": { riskId, score, at: now, reason },
@@ -107,7 +109,6 @@ export default function riskRoutes({ requireAuth, requireAdmin, Application }) {
             { new: false }
           );
         } catch (e) {
-          // Non-fatal — we still return ok
           console.warn("[risk] attach to Application failed:", e?.message || e);
         }
       }
@@ -120,18 +121,57 @@ export default function riskRoutes({ requireAuth, requireAdmin, Application }) {
   });
 
   /**
-   * (Optional) Admin view of a single risk event
-   * GET /api/risk/liveness/:id
+   * NEW: GET /api/risk
+   * Admin list of recent risk events (what your React page wanted).
+   */
+  router.get("/risk", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const limit = Math.min(Number(req.query.limit) || 200, 500);
+      const riskCol = await getRiskCollection(req);
+      const items = await riskCol
+        .find({})
+        .sort({ createdAt: -1 })
+        .limit(limit)
+        .toArray();
+      return res.json(items);
+    } catch (e) {
+      console.error("[risk] list error:", e?.message || e);
+      return res.status(500).json({ error: "list_failed" });
+    }
+  });
+
+  /**
+   * Existing: GET /api/risk/liveness/:id
+   * Keep this for backward compatibility.
    */
   router.get("/risk/liveness/:id", requireAuth, requireAdmin, async (req, res) => {
     try {
       const { id } = req.params;
       const { default: mongoose } = await import("mongoose");
-      const riskCol = mongoose.connection.db.collection("risk_events");
+      const riskCol = await getRiskCollection(req);
       const doc = await riskCol.findOne({ _id: new mongoose.Types.ObjectId(id) });
       if (!doc) return res.status(404).json({ error: "not_found" });
       return res.json(doc);
     } catch (e) {
+      console.error("[risk] get liveness error:", e?.message || e);
+      return res.status(500).json({ error: "fetch_failed" });
+    }
+  });
+
+  /**
+   * NEW: GET /api/risk/:id
+   * same as above but without "liveness" in the path
+   */
+  router.get("/risk/:id", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { default: mongoose } = await import("mongoose");
+      const riskCol = await getRiskCollection(req);
+      const doc = await riskCol.findOne({ _id: new mongoose.Types.ObjectId(id) });
+      if (!doc) return res.status(404).json({ error: "not_found" });
+      return res.json(doc);
+    } catch (e) {
+      console.error("[risk] get by id error:", e?.message || e);
       return res.status(500).json({ error: "fetch_failed" });
     }
   });
