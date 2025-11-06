@@ -36,9 +36,13 @@ const ClientRegister = lazy(() => import("./pages/ClientRegister.jsx"));
 const DeactivateAccount = lazy(() => import("./pages/DeactivateAccount.jsx"));
 const ApplyThanks = lazy(() => import("./pages/ApplyThanks.jsx"));
 const PaymentConfirm = lazy(() => import("./pages/PaymentConfirm.jsx"));
-const AwsLiveness = lazy(() => import("./pages/AwsLiveness.jsx")); // only AWS liveness
+const AwsLiveness = lazy(() => import("./pages/AwsLiveness.jsx"));
 
-/* ---------- Chatbase (same as before) ---------- */
+// new pages you added
+const RiskLogs = lazy(() => import("./pages/RiskLogs.jsx"));
+const Chat = lazy(() => import("./pages/Chat.jsx"));
+
+/* ---------- Chatbase hook ---------- */
 function useChatbase() {
   useEffect(() => {
     const CHATBOT_ID = import.meta.env.VITE_CHATBASE_ID;
@@ -54,7 +58,7 @@ function useChatbase() {
           cfg.userHash = r.data.userHash;
         }
       } catch {
-        // anonymous ok
+        // anonymous is fine
       }
 
       window.chatbaseConfig = cfg;
@@ -143,11 +147,11 @@ export default function App() {
 
   // prefetch very common routes once
   useEffect(() => {
-    // don’t await — just fire
     import("./pages/Browse.jsx");
     import("./pages/Profile.jsx");
   }, []);
 
+  // hide chrome for aws-liveness
   const hideChrome = location.pathname.startsWith("/aws-liveness");
 
   return (
@@ -277,6 +281,26 @@ export default function App() {
                   <RequireRole role="admin">
                     <AdminDecline />
                   </RequireRole>
+                }
+              />
+
+              {/* admin - risk logs */}
+              <Route
+                path="/risk-logs"
+                element={
+                  <RequireRole role="admin">
+                    <RiskLogs />
+                  </RequireRole>
+                }
+              />
+
+              {/* chat */}
+              <Route
+                path="/chat"
+                element={
+                  <RequireAuth>
+                    <Chat />
+                  </RequireAuth>
                 }
               />
 
