@@ -1,13 +1,5 @@
 // apps/web/src/App.jsx
-import React, {
-  Suspense,
-  lazy,
-  useEffect,
-  useMemo,
-  useState,
-  createContext,
-  useContext,
-} from "react";
+import React, { Suspense, lazy, useEffect } from "react";
 import {
   Routes,
   Route,
@@ -15,19 +7,15 @@ import {
   useLocation,
   useNavigate,
 } from "react-router-dom";
-import { api, setAuthToken } from "./lib/api";
+import { api } from "./lib/api";
 
-// 🔐 Firebase → API header sync
-import { onIdTokenChanged } from "firebase/auth";
-import { auth } from "./lib/firebase";
-
-/* ---------- Layout & guards ---------- */
 import Navbar from "./components/Navbar.jsx";
 import Footer from "./components/Footer.jsx";
 import RequireAuth from "./components/RequireAuth.jsx";
-import ErrorBoundary from "./components/ErrorBoundary.jsx";
+import RouteLoader from "./components/RouteLoader.jsx";
+import { MeProvider, useMe } from "./context/MeContext.jsx";
 
-/* ---------- Pages (lazy) ---------- */
+// ---------- pages (lazy) ----------
 const Home = lazy(() => import("./pages/Home.jsx"));
 const Browse = lazy(() => import("./pages/Browse.jsx"));
 const BookService = lazy(() => import("./pages/BookService.jsx"));
@@ -40,18 +28,17 @@ const Signup = lazy(() => import("./pages/Signup.jsx"));
 const BecomePro = lazy(() => import("./pages/BecomePro.jsx"));
 const ProDashboard = lazy(() => import("./pages/ProDashboard.jsx"));
 const Admin = lazy(() => import("./pages/Admin.jsx"));
-const Settings = lazy(() => import("./pages/Settings.jsx")); // pro settings
-const ClientSettings = lazy(() => import("./pages/ClientSettings.jsx")); // client settings
+const Settings = lazy(() => import("./pages/Settings.jsx"));
+const ClientSettings = lazy(() => import("./pages/ClientSettings.jsx"));
 const AdminDecline = lazy(() => import("./pages/AdminDecline.jsx"));
 const Legal = lazy(() => import("./pages/Legal.jsx"));
 const ClientRegister = lazy(() => import("./pages/ClientRegister.jsx"));
 const DeactivateAccount = lazy(() => import("./pages/DeactivateAccount.jsx"));
 const ApplyThanks = lazy(() => import("./pages/ApplyThanks.jsx"));
 const PaymentConfirm = lazy(() => import("./pages/PaymentConfirm.jsx"));
-// ✅ Only AWS liveness kept
-const AwsLiveness = lazy(() => import("./pages/AwsLiveness.jsx"));
+const AwsLiveness = lazy(() => import("./pages/AwsLiveness.jsx")); // only AWS liveness
 
-/* ---------- Chatbase (verified user embedding) ---------- */
+/* ---------- Chatbase (same as before) ---------- */
 function useChatbase() {
   useEffect(() => {
     const CHATBOT_ID = import.meta.env.VITE_CHATBASE_ID;
@@ -59,13 +46,17 @@ function useChatbase() {
 
     (async () => {
       const cfg = { chatbotId: CHATBOT_ID };
+
       try {
         const r = await api.get("/api/chatbase/userhash");
         if (r?.data?.userId && r?.data?.userHash) {
           cfg.userId = r.data.userId;
           cfg.userHash = r.data.userHash;
         }
-      } catch {}
+      } catch {
+        // anonymous ok
+      }
+
       window.chatbaseConfig = cfg;
 
       if (!document.getElementById(CHATBOT_ID)) {
@@ -80,87 +71,35 @@ function useChatbase() {
   }, []);
 }
 
-/* ---------- /api/me central store ---------- */
-const MeContext = createContext(null);
-
-function MeProvider({ children }) {
-  const [version, setVersion] = useState(0);
-  const [state, setState] = useState({ loading: true, me: null, error: null });
-
-  useEffect(() => {
-    const unsub = onIdTokenChanged(auth, async (user) => {
-      try {
-        const token = user ? await user.getIdToken() : null;
-        setAuthToken(token);
-      } finally {
-        setVersion((v) => v + 1);
-      }
-    });
-    return () => unsub();
-  }, []);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const u = auth.currentUser;
-        const token = u ? await u.getIdToken() : null;
-        setAuthToken(token);
-      } catch {
-        setAuthToken(null);
-      }
-    })();
-  }, []);
-
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      setState((s) => ({ ...s, loading: true, error: null }));
-      try {
-        const { data } = await api.get("/api/me");
-        if (!alive) return;
-        setState({ loading: false, me: data || null, error: null });
-      } catch (e) {
-        if (!alive) return;
-        setState({ loading: false, me: null, error: e });
-      }
-    })();
-    return () => { alive = false; };
-  }, [version]);
-
-  const value = useMemo(() => {
-    const isPro = !!state?.me?.isPro;
-    const isAdmin = !!state?.me?.isAdmin;
-    return { ...state, isPro, isAdmin, refresh: () => setVersion((v) => v + 1) };
-  }, [state]);
-
-  return <MeContext.Provider value={value}>{children}</MeContext.Provider>;
-}
-
-function useMe() {
-  const ctx = useContext(MeContext);
-  return ctx || { loading: true, me: null, isPro: false, isAdmin: false, error: null, refresh: () => {} };
-}
-
-/* ---------- Role guard (admin / pro) ---------- */
+/* ---------- role guards (reuse MeContext) ---------- */
 function RequireRole({ role, children }) {
   const { loading, isAdmin, isPro } = useMe();
   const loc = useLocation();
-  const allowed = role === "admin" ? isAdmin : role === "pro" ? isPro : true;
-  if (loading) return <div className="p-6">Loading…</div>;
-  return allowed ? children : <Navigate to="/" replace state={{ from: loc }} />;
+
+  const allowed =
+    role === "admin" ? isAdmin : role === "pro" ? isPro : true;
+
+  if (loading) return <RouteLoader />;
+  return allowed ? (
+    children
+  ) : (
+    <Navigate to="/" replace state={{ from: loc }} />
+  );
 }
 
-/* ---------- Smart pages ---------- */
 function WalletSmart() {
   const { loading, isPro } = useMe();
-  if (loading) return <div className="p-6">Loading…</div>;
+  if (loading) return <RouteLoader />;
   return isPro ? <Wallet /> : <ClientWallet />;
 }
+
 function SettingsSmart() {
   const { loading, isPro } = useMe();
-  if (loading) return <div className="p-6">Loading…</div>;
+  if (loading) return <RouteLoader />;
   return isPro ? <Settings /> : <ClientSettings />;
 }
+
+// choose browse vs register
 function FindProSmart() {
   const navigate = useNavigate();
   const loc = useLocation();
@@ -169,24 +108,32 @@ function FindProSmart() {
   useEffect(() => {
     let alive = true;
     (async () => {
+      // not logged in -> go login
       if (!me && !loading) {
         navigate("/login", { replace: true, state: { from: loc } });
         return;
       }
       if (loading) return;
+
+      // logged in -> check if client profile exists
       try {
         const { data } = await api.get("/api/profile/client/me");
         if (!alive) return;
-        if (!data) navigate("/client/register", { replace: true });
-        else navigate("/browse", { replace: true });
+        if (!data) {
+          navigate("/client/register", { replace: true });
+        } else {
+          navigate("/browse", { replace: true });
+        }
       } catch {
         navigate("/client/register", { replace: true });
       }
     })();
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
   }, [loading, me, navigate, loc]);
 
-  return <div className="p-6">Loading…</div>;
+  return <RouteLoader />;
 }
 
 /* ---------- App ---------- */
@@ -194,7 +141,13 @@ export default function App() {
   useChatbase();
   const location = useLocation();
 
-  // Hide chrome only on AWS liveness route
+  // prefetch very common routes once
+  useEffect(() => {
+    // don’t await — just fire
+    import("./pages/Browse.jsx");
+    import("./pages/Profile.jsx");
+  }, []);
+
   const hideChrome = location.pathname.startsWith("/aws-liveness");
 
   return (
@@ -202,166 +155,140 @@ export default function App() {
       {!hideChrome && <Navbar />}
 
       <main className={hideChrome ? "flex-1 bg-black" : "flex-1"}>
-        <Suspense fallback={<div className="p-6">Loading…</div>}>
-          <MeProvider>
-            <ErrorBoundary>
-              <Routes>
-                {/* Public */}
-                <Route path="/" element={<Home />} />
-                <Route path="/browse" element={<Browse />} />
-                <Route path="/find" element={<FindProSmart />} />
+        <MeProvider>
+          <Suspense fallback={<RouteLoader full />}>
+            <Routes>
+              {/* public */}
+              <Route path="/" element={<Home />} />
+              <Route path="/browse" element={<Browse />} />
+              <Route path="/find" element={<FindProSmart />} />
+              <Route path="/book/:barberId" element={<BookService />} />
+              <Route path="/login" element={<Login />} />
+              <Route path="/signup" element={<Signup />} />
+              <Route path="/legal" element={<Legal />} />
+              <Route path="/legal/*" element={<Legal />} />
 
-                <Route path="/book/:barberId" element={<BookService />} />
+              {/* booking details require auth */}
+              <Route
+                path="/bookings/:id"
+                element={
+                  <RequireAuth>
+                    <BookingDetails />
+                  </RequireAuth>
+                }
+              />
 
-                {/* Booking details require auth */}
-                <Route
-                  path="/bookings/:id"
-                  element={
-                    <RequireAuth>
-                      <BookingDetails />
-                    </RequireAuth>
-                  }
-                />
+              {/* profile */}
+              <Route
+                path="/profile"
+                element={
+                  <RequireAuth>
+                    <Profile />
+                  </RequireAuth>
+                }
+              />
 
-                {/* Profile */}
-                <Route
-                  path="/profile"
-                  element={
-                    <RequireAuth>
-                      <Profile />
-                    </RequireAuth>
-                  }
-                />
+              {/* wallet */}
+              <Route
+                path="/wallet"
+                element={
+                  <RequireAuth>
+                    <WalletSmart />
+                  </RequireAuth>
+                }
+              />
 
-                {/* Auth */}
-                <Route path="/login" element={<Login />} />
-                <Route path="/signup" element={<Signup />} />
+              {/* settings */}
+              <Route
+                path="/settings"
+                element={
+                  <RequireAuth>
+                    <SettingsSmart />
+                  </RequireAuth>
+                }
+              />
 
-                {/* Legal */}
-                <Route path="/legal" element={<Legal />} />
-                <Route path="/legal/*" element={<Legal />} />
-                <Route path="/terms" element={<Navigate to="/legal#terms" replace />} />
-                <Route path="/privacy" element={<Navigate to="/legal#privacy" replace />} />
-                <Route path="/cookies" element={<Navigate to="/legal#cookies" replace />} />
-                <Route path="/refunds" element={<Navigate to="/legal#refunds" replace />} />
+              {/* become */}
+              <Route
+                path="/become"
+                element={
+                  <RequireAuth>
+                    <BecomePro />
+                  </RequireAuth>
+                }
+              />
 
-                {/* Application / payments */}
-                <Route path="/apply/thanks" element={<ApplyThanks />} />
-                <Route path="/payment/confirm" element={<PaymentConfirm />} />
+              {/* ONLY AWS LIVENESS */}
+              <Route
+                path="/aws-liveness"
+                element={
+                  <RequireAuth>
+                    <AwsLiveness />
+                  </RequireAuth>
+                }
+              />
 
-                {/* Wallet */}
-                <Route
-                  path="/wallet"
-                  element={
-                    <RequireAuth>
-                      <WalletSmart />
-                    </RequireAuth>
-                  }
-                />
+              {/* client register */}
+              <Route
+                path="/client/register"
+                element={
+                  <RequireAuth>
+                    <ClientRegister />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/register"
+                element={<Navigate to="/client/register" replace />}
+              />
 
-                {/* Settings */}
-                <Route
-                  path="/settings"
-                  element={
-                    <RequireAuth>
-                      <SettingsSmart />
-                    </RequireAuth>
-                  }
-                />
-                <Route
-                  path="/settings/pro"
-                  element={
-                    <RequireRole role="pro">
-                      <Settings />
-                    </RequireRole>
-                  }
-                />
-                <Route
-                  path="/settings/client"
-                  element={
-                    <RequireAuth>
-                      <ClientSettings />
-                    </RequireAuth>
-                  }
-                />
+              {/* deactivate */}
+              <Route
+                path="/deactivate"
+                element={
+                  <RequireAuth>
+                    <DeactivateAccount />
+                  </RequireAuth>
+                }
+              />
 
-                {/* Become a Pro */}
-                <Route
-                  path="/become"
-                  element={
-                    <RequireAuth>
-                      <BecomePro />
-                    </RequireAuth>
-                  }
-                />
+              {/* pro dashboard */}
+              <Route
+                path="/pro-dashboard"
+                element={
+                  <RequireRole role="pro">
+                    <ProDashboard />
+                  </RequireRole>
+                }
+              />
 
-                {/* ✅ ONLY AWS LIVENESS */}
-                <Route
-                  path="/aws-liveness"
-                  element={
-                    <RequireAuth>
-                      <AwsLiveness />
-                    </RequireAuth>
-                  }
-                />
+              {/* admin */}
+              <Route
+                path="/admin"
+                element={
+                  <RequireRole role="admin">
+                    <Admin />
+                  </RequireRole>
+                }
+              />
+              <Route
+                path="/admin/decline/:id"
+                element={
+                  <RequireRole role="admin">
+                    <AdminDecline />
+                  </RequireRole>
+                }
+              />
 
-                {/* Client register canonical */}
-                <Route
-                  path="/client/register"
-                  element={
-                    <RequireAuth>
-                      <ClientRegister />
-                    </RequireAuth>
-                  }
-                />
-                <Route path="/register" element={<Navigate to="/client/register" replace />} />
-                <Route path="/client-register" element={<Navigate to="/client/register" replace />} />
+              {/* payments & misc */}
+              <Route path="/apply/thanks" element={<ApplyThanks />} />
+              <Route path="/payment/confirm" element={<PaymentConfirm />} />
 
-                {/* Account deactivation */}
-                <Route
-                  path="/deactivate"
-                  element={
-                    <RequireAuth>
-                      <DeactivateAccount />
-                    </RequireAuth>
-                  }
-                />
-
-                {/* Pro dashboard */}
-                <Route
-                  path="/pro-dashboard"
-                  element={
-                    <RequireRole role="pro">
-                      <ProDashboard />
-                    </RequireRole>
-                  }
-                />
-                <Route path="/pro" element={<Navigate to="/pro-dashboard" replace />} />
-
-                {/* Admin */}
-                <Route
-                  path="/admin"
-                  element={
-                    <RequireRole role="admin">
-                      <Admin />
-                    </RequireRole>
-                  }
-                />
-                <Route
-                  path="/admin/decline/:id"
-                  element={
-                    <RequireRole role="admin">
-                      <AdminDecline />
-                    </RequireRole>
-                  }
-                />
-
-                {/* Fallback */}
-                <Route path="*" element={<Navigate to="/" replace />} />
-              </Routes>
-            </ErrorBoundary>
-          </MeProvider>
-        </Suspense>
+              {/* fallback */}
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </Suspense>
+        </MeProvider>
       </main>
 
       {!hideChrome && <Footer />}

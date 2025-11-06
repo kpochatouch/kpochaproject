@@ -45,11 +45,15 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
 
   // ---- VIDEO AUTOPLAY CONTROL (on-screen & hover) ----
   const videoRef = useRef(null);
-  const hasCountedViewRef = useRef(false);
   const observerRef = useRef(null);
   const [inView, setInView] = useState(false);
 
-  const media = Array.isArray(post.media) && post.media.length ? post.media[0] : null;
+  // view counting control
+  const hasSentViewRef = useRef(false);
+  const playTriggeredByObserverRef = useRef(false);
+
+  const media =
+    Array.isArray(post.media) && post.media.length ? post.media[0] : null;
   const isVideo = media?.type === "video";
 
   useEffect(() => {
@@ -68,7 +72,22 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
     };
   }, [postId]);
 
-  // Intersection observer to play/pause when on screen
+  // helper: send view once
+  async function sendViewOnce() {
+    if (hasSentViewRef.current || !postId) return;
+    hasSentViewRef.current = true;
+    try {
+      const res = await api.post(`/api/posts/${postId}/view`);
+      setStats((s) => ({
+        ...s,
+        viewsCount: res?.data?.viewsCount ?? s.viewsCount + 1,
+      }));
+    } catch {
+      // if it fails, don't spam; we already marked it sent
+    }
+  }
+
+  // Intersection observer: ONLY play/pause, NO view counting here
   useEffect(() => {
     if (!isVideo || !videoRef.current) return;
 
@@ -78,21 +97,14 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
     observerRef.current = new IntersectionObserver(
       async (entries) => {
         const entry = entries[0];
-        const nowInView = entry.isIntersecting && entry.intersectionRatio >= 0.6;
+        const nowInView =
+          entry.isIntersecting && entry.intersectionRatio >= 0.6;
         setInView(nowInView);
 
         try {
           if (nowInView) {
-            // count a view first time it becomes visible
-            if (!hasCountedViewRef.current) {
-              hasCountedViewRef.current = true;
-              api.post(`/api/posts/${postId}/view`).then((res) => {
-                setStats((s) => ({
-                  ...s,
-                  viewsCount: res?.data?.viewsCount ?? s.viewsCount + 1,
-                }));
-              }).catch(() => {});
-            }
+            // this play was triggered by scroll, we don't count view here
+            playTriggeredByObserverRef.current = true;
             await el.play().catch(() => {});
           } else {
             el.pause();
@@ -106,7 +118,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
     return () => observerRef.current?.disconnect();
   }, [postId, isVideo]);
 
-  // Hover plays (desktop), leaving hover pauses only if not in view
+  // Desktop hover: just play, no counting
   function onMouseEnterVideo() {
     if (!videoRef.current) return;
     videoRef.current.play().catch(() => {});
@@ -115,10 +127,26 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
     if (!videoRef.current) return;
     if (!inView) videoRef.current.pause();
   }
+
+  // Click = user intent → play/pause + count view if first time
   function onClickVideo() {
     if (!videoRef.current) return;
-    if (videoRef.current.paused) videoRef.current.play().catch(() => {});
-    else videoRef.current.pause();
+    const vid = videoRef.current;
+    if (vid.paused) {
+      // mark that this is user-triggered, so onPlay will count
+      playTriggeredByObserverRef.current = false;
+      vid.play().catch(() => {});
+    } else {
+      vid.pause();
+    }
+  }
+
+  // when the video actually starts playing
+  function onVideoPlay() {
+    // if it was auto-played by scroll, we skip counting here
+    if (playTriggeredByObserverRef.current) return;
+    // user-triggered play → count view once
+    sendViewOnce();
   }
 
   // ---- ACTIONS ----
@@ -149,7 +177,9 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
       setStats((s) => ({
         ...s,
         likedByMe: liked,
-        likesCount: liked ? s.likesCount + 1 : Math.max(0, s.likesCount - 1),
+        likesCount: liked
+          ? s.likesCount + 1
+          : Math.max(0, s.likesCount - 1),
       }));
     } finally {
       setLoadingLike(false);
@@ -182,7 +212,9 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
       setStats((s) => ({
         ...s,
         savedByMe: saved,
-        savesCount: saved ? s.savesCount + 1 : Math.max(0, s.savesCount - 1),
+        savesCount: saved
+          ? s.savesCount + 1
+          : Math.max(0, s.savesCount - 1),
       }));
     } finally {
       setLoadingSave(false);
@@ -243,7 +275,8 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
       _id: tmpId,
       postId,
       text: txt,
-      authorName: currentUser.displayName || currentUser.fullName || "You",
+      authorName:
+        currentUser.displayName || currentUser.fullName || "You",
       authorAvatar: currentUser.photoUrl || currentUser.photoURL || "",
       ownerUid: currentUser.uid,
       createdAt: new Date().toISOString(),
@@ -253,7 +286,9 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
     setStats((s) => ({ ...s, commentsCount: s.commentsCount + 1 }));
 
     try {
-      const res = await api.post(`/api/posts/${postId}/comments`, { text: txt });
+      const res = await api.post(`/api/posts/${postId}/comments`, {
+        text: txt,
+      });
       const real = res.data?.comment;
       setComments((c) => [real, ...c.filter((cm) => cm._id !== tmpId)]);
       setStats((s) => ({
@@ -262,7 +297,10 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
       }));
     } catch {
       setComments((c) => c.filter((cm) => cm._id !== tmpId));
-      setStats((s) => ({ ...s, commentsCount: Math.max(0, s.commentsCount - 1) }));
+      setStats((s) => ({
+        ...s,
+        commentsCount: Math.max(0, s.commentsCount - 1),
+      }));
     }
   }
 
@@ -272,7 +310,10 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
     try {
       await api.delete(`/api/comments/${commentId}`);
       setComments((c) => c.filter((cm) => cm._id !== commentId));
-      setStats((s) => ({ ...s, commentsCount: Math.max(0, s.commentsCount - 1) }));
+      setStats((s) => ({
+        ...s,
+        commentsCount: Math.max(0, s.commentsCount - 1),
+      }));
     } catch {
       alert("Failed to delete comment");
     }
@@ -283,9 +324,11 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
     if (!window.confirm("Delete / hide this post?")) return;
     setDeleting(true);
     try {
-      await api.delete(`/api/posts/${postId}`).catch(async () => {
-        await api.patch(`/api/posts/${postId}/hide`);
-      });
+      await api
+        .delete(`/api/posts/${postId}`)
+        .catch(async () => {
+          await api.patch(`/api/posts/${postId}/hide`);
+        });
       onDeleted?.(postId);
     } catch {
       alert("Failed to delete/hide post");
@@ -353,7 +396,11 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
         <div className="flex gap-3">
           <div className="w-10 h-10 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center">
             {avatar ? (
-              <img src={avatar} alt={proName} className="w-full h-full object-cover" />
+              <img
+                src={avatar}
+                alt={proName}
+                className="w-full h-full object-cover"
+              />
             ) : (
               <span className="text-sm text-white">
                 {proName.slice(0, 1).toUpperCase()}
@@ -361,7 +408,9 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
             )}
           </div>
           <div>
-            <div className="text-sm font-semibold text-white">{proName}</div>
+            <div className="text-sm font-semibold text-white">
+              {proName}
+            </div>
             <div className="text-xs text-gray-400">
               {lga || "Nigeria"} • {timeAgo(post.createdAt)}
             </div>
@@ -389,7 +438,9 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
                   onClick={toggleSave}
                   className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
                 >
-                  {stats.savedByMe ? "Unsave post" : "Save post / Add to collection"}
+                  {stats.savedByMe
+                    ? "Unsave post"
+                    : "Save post / Add to collection"}
                 </button>
                 <button
                   onClick={handleCopyLink}
@@ -407,7 +458,9 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
                   </button>
                 ) : (
                   <button
-                    onClick={() => alert("You can only hide your own post")}
+                    onClick={() =>
+                      alert("You can only hide your own post")
+                    }
                     className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
                   >
                     Hide Post
@@ -457,7 +510,9 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
       </div>
 
       {/* text */}
-      {post.text && <div className="px-4 pb-3 text-sm text-white">{post.text}</div>}
+      {post.text && (
+        <div className="px-4 pb-3 text-sm text-white">{post.text}</div>
+      )}
 
       {/* media */}
       {media && (
@@ -471,13 +526,18 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
               loop
               playsInline
               preload="metadata"
+              controls
               onMouseEnter={onMouseEnterVideo}
               onMouseLeave={onMouseLeaveVideo}
               onClick={onClickVideo}
-              // NOTE: no controls, no 10s loop — plays while visible, loops until you click
+              onPlay={onVideoPlay}
             />
           ) : (
-            <img src={media.url} alt="" className="w-full max-h-[420px] object-cover" />
+            <img
+              src={media.url}
+              alt=""
+              className="w-full max-h-[420px] object-cover"
+            />
           )}
         </div>
       )}
@@ -486,11 +546,15 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
       <div className="flex items-center justify-between px-4 py-2 text-xs text-gray-400 border-t border-[#1F1F1F]">
         <div className="flex gap-4">
           <div>{stats.likesCount} likes</div>
-          <button onClick={handleToggleComments}>{stats.commentsCount} comments</button>
+          <button onClick={handleToggleComments}>
+            {stats.commentsCount} comments
+          </button>
           <div>{stats.sharesCount} shares</div>
         </div>
         <div className="flex items-center gap-1">
-          <span role="img" aria-label="views">👁</span>
+          <span role="img" aria-label="views">
+            👁
+          </span>
           <span>View</span>
           <span>{stats.viewsCount}</span>
         </div>
@@ -519,7 +583,9 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
           ↗ Share
         </button>
         <button
-          onClick={() => alert("Follow / Unfollow will be available soon.")}
+          onClick={() =>
+            alert("Follow / Unfollow will be available soon.")
+          }
           className="flex-1 py-2 text-sm flex items-center justify-center gap-1 text-gray-200"
         >
           ➕ Follow
@@ -542,47 +608,76 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
               </button>
             </form>
           ) : (
-            <div className="text-xs text-red-400 mb-3">Comments are disabled for this post.</div>
+            <div className="text-xs text-red-400 mb-3">
+              Comments are disabled for this post.
+            </div>
           )}
           <div className="space-y-3">
             {comments.map((c) => (
               <div key={c._id} className="flex gap-2">
                 <div className="w-8 h-8 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center text-xs text-white">
                   {c.authorAvatar ? (
-                    <img src={c.authorAvatar} alt={c.authorName} className="w-full h-full object-cover" />
+                    <img
+                      src={c.authorAvatar}
+                      alt={c.authorName}
+                      className="w-full h-full object-cover"
+                    />
                   ) : (
                     (c.authorName || "U").slice(0, 1).toUpperCase()
                   )}
                 </div>
                 <div className="flex-1">
                   <div className="bg-[#141414] rounded-2xl px-3 py-2">
-                    <div className="text-xs text-white font-semibold">{c.authorName || "User"}</div>
+                    <div className="text-xs text-white font-semibold">
+                      {c.authorName || "User"}
+                    </div>
                     <div className="text-sm text-gray-200">{c.text}</div>
                   </div>
                   <div className="flex gap-3 items-center text-[10px] text-gray-500 mt-1">
-                    <span>{new Date(c.createdAt).toLocaleString()}</span>
-                    <button type="button" onClick={() => alert("Comment like coming soon")} className="hover:text-gray-200">Like</button>
+                    <span>
+                      {new Date(c.createdAt).toLocaleString()}
+                    </span>
                     <button
                       type="button"
-                      onClick={() => setCommentText((v) => (v ? v + ` @${c.authorName} ` : `@${c.authorName} `))}
+                      onClick={() =>
+                        alert("Comment like coming soon")
+                      }
+                      className="hover:text-gray-200"
+                    >
+                      Like
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setCommentText((v) =>
+                          v
+                            ? v + ` @${c.authorName} `
+                            : `@${c.authorName} `
+                        )
+                      }
                       className="hover:text-gray-200"
                     >
                       Reply
                     </button>
-                    {currentUser?.uid && currentUser.uid === c.ownerUid && (
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteComment(c._id)}
-                        className="text-red-300 hover:text-red-100"
-                      >
-                        Delete
-                      </button>
-                    )}
+                    {currentUser?.uid &&
+                      currentUser.uid === c.ownerUid && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteComment(c._id)}
+                          className="text-red-300 hover:text-red-100"
+                        >
+                          Delete
+                        </button>
+                      )}
                   </div>
                 </div>
               </div>
             ))}
-            {comments.length === 0 && <div className="text-xs text-gray-500">No comments yet.</div>}
+            {comments.length === 0 && (
+              <div className="text-xs text-gray-500">
+                No comments yet.
+              </div>
+            )}
           </div>
         </div>
       )}

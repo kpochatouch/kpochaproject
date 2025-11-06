@@ -8,12 +8,12 @@ import {
 } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { api } from "../lib/api";
+import { useMe } from "../context/MeContext.jsx";
 import BarberCard from "../components/BarberCard";
 import ServicePicker from "../components/ServicePicker";
 import ProDrawer from "../components/ProDrawer";
 import FeedCard from "../components/FeedCard";
 import ErrorBoundary from "../components/ErrorBoundary";
-import SideMenu from "../components/SideMenu";
 
 /* ---------------- Feed composer ---------------- */
 function FeedComposer({ lga, onPosted }) {
@@ -191,12 +191,13 @@ function FeedComposer({ lga, onPosted }) {
 export default function Browse() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { me, isAdmin, isPro } = useMe();
 
-  // FEED FIRST
+  // feed first
   const [tab, setTab] = useState("feed");
 
   const [pros, setPros] = useState([]);
-  const [loadingPros, setLoadingPros] = useState(true);
+  const [loadingPros, setLoadingPros] = useState(false);
   const [errPros, setErrPros] = useState("");
 
   const [q, setQ] = useState("");
@@ -207,7 +208,6 @@ export default function Browse() {
   const [states, setStates] = useState([]);
   const [lgasByState, setLgasByState] = useState({});
 
-  const [me, setMe] = useState(null);
   const [openPro, setOpenPro] = useState(null);
 
   const [feed, setFeed] = useState([]);
@@ -220,41 +220,28 @@ export default function Browse() {
 
   const didPrefillFromProfileRef = useRef(false);
 
-  // load me
+  // prefill state/LGA from profile once
   useEffect(() => {
     let alive = true;
-    const token =
-      localStorage.getItem("authToken") || localStorage.getItem("token");
-    if (!token) {
-      setMe(null);
-      return;
-    }
+    if (didPrefillFromProfileRef.current) return;
     (async () => {
       try {
-        const [meRes, profileRes] = await Promise.all([
-          api.get("/api/me"),
-          api.get("/api/profile/me").catch(() => ({ data: null })),
-        ]);
+        const profileRes = await api
+          .get("/api/profile/me")
+          .catch(() => ({ data: null }));
         if (!alive) return;
-        const meData = meRes.data || null;
         const prof = profileRes?.data || null;
-        setMe(meData);
-
-        // prefill geo from profile
-        if (!didPrefillFromProfileRef.current) {
-          const st = (prof?.identity?.state || prof?.state || "")
-            .toString()
-            .toUpperCase();
-          const lg = (prof?.identity?.city || prof?.lga || "")
-            .toString()
-            .toUpperCase();
-          if (st) setStateName(st);
-          if (lg) setLga(lg);
-          didPrefillFromProfileRef.current = true;
-        }
+        const st = (prof?.identity?.state || prof?.state || "")
+          .toString()
+          .toUpperCase();
+        const lg = (prof?.identity?.city || prof?.lga || "")
+          .toString()
+          .toUpperCase();
+        if (st) setStateName(st);
+        if (lg) setLga(lg);
+        didPrefillFromProfileRef.current = true;
       } catch {
-        if (!alive) return;
-        setMe(null);
+        // ignore
       }
     })();
     return () => {
@@ -282,8 +269,9 @@ export default function Browse() {
     };
   }, []);
 
-  // load pros
+  // fetch pros ONLY when tab = 'pros'
   useEffect(() => {
+    if (tab !== "pros") return;
     let on = true;
     setLoadingPros(true);
     setErrPros("");
@@ -310,7 +298,7 @@ export default function Browse() {
     return () => {
       on = false;
     };
-  }, [lga, stateName]);
+  }, [tab, lga, stateName]);
 
   function svcArray(p) {
     const raw = p?.services;
@@ -344,12 +332,8 @@ export default function Browse() {
           .toUpperCase();
         const servicesLC = svcArray(p);
 
-        const matchName = term
-          ? name.includes(term) || desc.includes(term)
-          : true;
-        const matchSvc = service
-          ? servicesLC.includes(service.toLowerCase())
-          : true;
+        const matchName = term ? name.includes(term) || desc.includes(term) : true;
+        const matchSvc = service ? servicesLC.includes(service.toLowerCase()) : true;
         const matchState = selectedState ? proState === selectedState : true;
         const matchLga = selectedLga ? proLga === selectedLga : true;
 
@@ -427,7 +411,8 @@ export default function Browse() {
       state: {
         proId,
         serviceName: svcName || undefined,
-        amountNaira: typeof svcPrice !== "undefined" ? svcPrice : undefined,
+        amountNaira:
+          typeof svcPrice !== "undefined" ? svcPrice : undefined,
         country: "Nigeria",
         state: (stateName || "").toUpperCase(),
         lga: (lga || "").toUpperCase(),
@@ -435,9 +420,24 @@ export default function Browse() {
     });
   }
 
+  // token only used to allow posting
   const token =
-    localStorage.getItem("authToken") || localStorage.getItem("token");
+    typeof window !== "undefined"
+      ? localStorage.getItem("authToken") ||
+        localStorage.getItem("token")
+      : null;
   const canPostOnFeed = !!token;
+
+  const leftMenu = [
+    { label: "Feed", to: "/browse" },
+    { label: "Browse Pros", to: "/browse?tab=pros" },
+    me ? { label: "Profile", to: "/profile" } : null,
+    me ? { label: "Wallet", to: "/wallet" } : null,
+    me ? { label: "Settings", to: "/settings" } : null,
+    me ? { label: "Become a Pro", to: "/become" } : null,
+    isPro ? { label: "Pro Dashboard", to: "/pro-dashboard" } : null,
+    isAdmin ? { label: "Admin", to: "/admin" } : null,
+  ].filter(Boolean);
 
   // Advert rail actions
   function previewAd() {
@@ -457,7 +457,9 @@ export default function Browse() {
         media: [
           {
             url: adminAdUrl.trim(),
-            type: /\.(mp4|mov|webm)$/i.test(adminAdUrl) ? "video" : "image",
+            type: /\.(mp4|mov|webm)$/i.test(adminAdUrl)
+              ? "video"
+              : "image",
           },
         ],
         isPublic: true,
@@ -478,7 +480,7 @@ export default function Browse() {
           <h1 className="text-2xl font-semibold">Discover</h1>
           <div className="inline-flex rounded-xl border border-zinc-800 overflow-hidden">
             <button
-              className={`px-4 py-2 text-sm border-r border-zinc-800 ${
+              className={`px-4 py-2 text-sm border-right border-zinc-800 ${
                 tab === "feed"
                   ? "bg-gold text-black font-semibold"
                   : "hover:bg-zinc-900"
@@ -508,7 +510,6 @@ export default function Browse() {
             placeholder="Search by name or description…"
             className="bg-black border border-zinc-800 rounded-lg px-3 py-2 w-56"
           />
-
           <div className="w-56">
             <ServicePicker
               value={service}
@@ -517,7 +518,6 @@ export default function Browse() {
               allowCustom={false}
             />
           </div>
-
           <select
             value={stateName}
             onChange={(e) => {
@@ -534,7 +534,6 @@ export default function Browse() {
               </option>
             ))}
           </select>
-
           <select
             value={lga}
             onChange={(e) => setLga(e.target.value.toUpperCase())}
@@ -548,7 +547,6 @@ export default function Browse() {
               </option>
             ))}
           </select>
-
           <button
             onClick={clearFilters}
             className="rounded-lg border border-zinc-700 px-3 py-2 text-sm"
@@ -565,7 +563,6 @@ export default function Browse() {
                 {errPros}
               </div>
             )}
-
             {loadingPros ? (
               <p className="text-zinc-400">Loading…</p>
             ) : filteredAndRanked.length ? (
@@ -587,10 +584,19 @@ export default function Browse() {
           </>
         ) : (
           <div className="flex gap-4">
-            {/* LEFT MENU (real sidebar like Facebook) */}
+            {/* LEFT MENU */}
             <div className="hidden lg:block w-56 pt-1">
-              <div className="sticky top-20">
-                <SideMenu me={me} />
+              <div className="sticky top-20 space-y-2">
+                {leftMenu.map((item) => (
+                  <button
+                    key={item.label}
+                    onClick={() => navigate(item.to)}
+                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-zinc-900 text-sm text-left"
+                  >
+                    <span className="inline-block w-6 text-center">•</span>
+                    <span>{item.label}</span>
+                  </button>
+                ))}
               </div>
             </div>
 
@@ -599,26 +605,21 @@ export default function Browse() {
               {canPostOnFeed && (
                 <FeedComposer lga={lga} onPosted={fetchFeed} />
               )}
-
               {errFeed && (
                 <div className="mb-4 rounded border border-red-800 bg-red-900/30 text-red-100 px-3 py-2">
                   {errFeed}
                 </div>
               )}
-
               {loadingFeed ? (
                 <p className="text-zinc-400">Loading feed…</p>
               ) : feed.length ? (
                 <div className="space-y-4">
-                  {feed.map((post) => (
+                  {feed.slice(0, 8).map((post) => (
                     <FeedCard
                       key={post._id || post.id}
                       post={post}
-                      currentUser={
-                        me ? { uid: me.uid || me.id, ...me } : null
-                      }
+                      currentUser={me ? { uid: me.uid || me.id, ...me } : null}
                       onDeleted={fetchFeed}
-                      autoPlayMode="viewport"
                     />
                   ))}
                 </div>
@@ -632,8 +633,7 @@ export default function Browse() {
             {/* RIGHT ADS */}
             <div className="hidden lg:block w-64 pt-1">
               <div className="sticky top-20 space-y-4">
-                {/* admin ad input */}
-                {me?.isAdmin ? (
+                {isAdmin ? (
                   <div className="rounded-lg border border-zinc-800 bg-black/40 p-3 space-y-2">
                     <div className="text-xs text-zinc-300 mb-1">
                       Advert (admin only)
@@ -661,24 +661,23 @@ export default function Browse() {
                         Publish
                       </button>
                     </div>
-                    {adMsg ? (
+                    {adMsg && (
                       <p className="text-[10px] text-zinc-500 mt-1">
                         {adMsg}
                       </p>
-                    ) : null}
+                    )}
                   </div>
                 ) : null}
 
-                {/* show advert preview if admin set it */}
                 {adminAdUrl ? (
                   <div className="rounded-lg border border-zinc-800 overflow-hidden bg-black/40 h-40 flex items-center justify-center">
                     {adminAdUrl.match(/\.(mp4|mov|webm)$/i) ? (
                       <video
                         src={adminAdUrl}
                         muted
+                        loop
                         playsInline
                         autoPlay
-                        loop
                         className="w-full h-full object-cover"
                       />
                     ) : (
@@ -694,7 +693,7 @@ export default function Browse() {
                     <div className="h-40 rounded-lg border border-zinc-800 bg-black/20 flex items-center justify-center text-xs text-zinc-500">
                       Advert space
                     </div>
-                    <div className="h-40 rounded-lg border border-zinc-800 bg-black/20" />
+                    <div className="h-40 rounded-lg border border-zinc-800 bg-black/20"></div>
                   </>
                 )}
               </div>
