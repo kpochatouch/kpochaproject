@@ -1,3 +1,4 @@
+// apps/web/src/pages/Browse.jsx
 import {
   useEffect,
   useMemo,
@@ -12,6 +13,7 @@ import ServicePicker from "../components/ServicePicker";
 import ProDrawer from "../components/ProDrawer";
 import FeedCard from "../components/FeedCard";
 import ErrorBoundary from "../components/ErrorBoundary";
+import SideMenu from "../components/SideMenu";
 
 /* ---------------- Feed composer ---------------- */
 function FeedComposer({ lga, onPosted }) {
@@ -66,11 +68,7 @@ function FeedComposer({ lga, onPosted }) {
       const uploaded = await uploadRes.json();
 
       setMediaUrl(uploaded.secure_url || uploaded.url || "");
-      if (file.type.startsWith("video/")) {
-        setMediaType("video");
-      } else {
-        setMediaType("image");
-      }
+      setMediaType(file.type.startsWith("video/") ? "video" : "image");
       setMsg("Media uploaded ✔");
     } catch (err) {
       console.error("upload error:", err);
@@ -174,7 +172,9 @@ function FeedComposer({ lga, onPosted }) {
       ) : null}
 
       <div className="flex items-center justify-between">
-        <p className="text-xs text-zinc-500">You can paste a URL or upload directly.</p>
+        <p className="text-xs text-zinc-500">
+          You can paste a URL or upload directly.
+        </p>
         <button
           onClick={submit}
           disabled={posting || uploading}
@@ -214,8 +214,9 @@ export default function Browse() {
   const [loadingFeed, setLoadingFeed] = useState(true);
   const [errFeed, setErrFeed] = useState("");
 
-  // admin advert state (shown on right rail)
+  // right-rail advert
   const [adminAdUrl, setAdminAdUrl] = useState("");
+  const [adMsg, setAdMsg] = useState("");
 
   const didPrefillFromProfileRef = useRef(false);
 
@@ -239,6 +240,7 @@ export default function Browse() {
         const prof = profileRes?.data || null;
         setMe(meData);
 
+        // prefill geo from profile
         if (!didPrefillFromProfileRef.current) {
           const st = (prof?.identity?.state || prof?.state || "")
             .toString()
@@ -342,8 +344,12 @@ export default function Browse() {
           .toUpperCase();
         const servicesLC = svcArray(p);
 
-        const matchName = term ? name.includes(term) || desc.includes(term) : true;
-        const matchSvc = service ? servicesLC.includes(service.toLowerCase()) : true;
+        const matchName = term
+          ? name.includes(term) || desc.includes(term)
+          : true;
+        const matchSvc = service
+          ? servicesLC.includes(service.toLowerCase())
+          : true;
         const matchState = selectedState ? proState === selectedState : true;
         const matchLga = selectedLga ? proLga === selectedLga : true;
 
@@ -396,9 +402,7 @@ export default function Browse() {
   }, [lga]);
 
   useEffect(() => {
-    (async () => {
-      await fetchFeed();
-    })();
+    fetchFeed();
   }, [fetchFeed, tab]);
 
   // force feed tab if ?post= is present
@@ -431,8 +435,40 @@ export default function Browse() {
     });
   }
 
-  const token = localStorage.getItem("authToken") || localStorage.getItem("token");
+  const token =
+    localStorage.getItem("authToken") || localStorage.getItem("token");
   const canPostOnFeed = !!token;
+
+  // Advert rail actions
+  function previewAd() {
+    if (!adminAdUrl.trim())
+      return setAdMsg("Paste a media URL first.");
+    setAdMsg("Previewing…");
+    setTimeout(() => setAdMsg("Preview ready"), 300);
+  }
+
+  async function publishAd() {
+    if (!adminAdUrl.trim())
+      return setAdMsg("Paste a media URL first.");
+    try {
+      setAdMsg("Publishing…");
+      await api.post("/api/posts", {
+        text: "Sponsored",
+        media: [
+          {
+            url: adminAdUrl.trim(),
+            type: /\.(mp4|mov|webm)$/i.test(adminAdUrl) ? "video" : "image",
+          },
+        ],
+        isPublic: true,
+        tags: ["AD"],
+      });
+      setAdMsg("Published to feed ✔");
+      await fetchFeed();
+    } catch (e) {
+      setAdMsg(e?.response?.data?.error || "Failed to publish ad");
+    }
+  }
 
   return (
     <ErrorBoundary>
@@ -544,24 +580,25 @@ export default function Browse() {
                 ))}
               </div>
             ) : (
-              <div className="text-zinc-400">No professionals match your filters.</div>
+              <div className="text-zinc-400">
+                No professionals match your filters.
+              </div>
             )}
           </>
         ) : (
           <div className="flex gap-4">
-            {/* left = advert space */}
-            <div className="hidden lg:block w-64 pt-1">
-              <div className="sticky top-20 space-y-4">
-                <div className="h-40 rounded-lg border border-zinc-800 bg-black/20 flex items-center justify-center text-xs text-zinc-500">
-                  Advert space
-                </div>
-                <div className="h-40 rounded-lg border border-zinc-800 bg-black/20" />
+            {/* LEFT MENU (real sidebar like Facebook) */}
+            <div className="hidden lg:block w-56 pt-1">
+              <div className="sticky top-20">
+                <SideMenu me={me} />
               </div>
             </div>
 
-            {/* center = feed */}
+            {/* FEED */}
             <div className="flex-1 max-w-2xl mx-auto">
-              {canPostOnFeed && <FeedComposer lga={lga} onPosted={fetchFeed} />}
+              {canPostOnFeed && (
+                <FeedComposer lga={lga} onPosted={fetchFeed} />
+              )}
 
               {errFeed && (
                 <div className="mb-4 rounded border border-red-800 bg-red-900/30 text-red-100 px-3 py-2">
@@ -577,8 +614,11 @@ export default function Browse() {
                     <FeedCard
                       key={post._id || post.id}
                       post={post}
-                      currentUser={me ? { uid: me.uid || me.id, ...me } : null}
+                      currentUser={
+                        me ? { uid: me.uid || me.id, ...me } : null
+                      }
                       onDeleted={fetchFeed}
+                      autoPlayMode="viewport"
                     />
                   ))}
                 </div>
@@ -589,22 +629,43 @@ export default function Browse() {
               )}
             </div>
 
-            {/* right = menu / admin advert input */}
+            {/* RIGHT ADS */}
             <div className="hidden lg:block w-64 pt-1">
               <div className="sticky top-20 space-y-4">
                 {/* admin ad input */}
                 {me?.isAdmin ? (
                   <div className="rounded-lg border border-zinc-800 bg-black/40 p-3 space-y-2">
-                    <div className="text-xs text-zinc-300 mb-1">Advert (admin only)</div>
+                    <div className="text-xs text-zinc-300 mb-1">
+                      Advert (admin only)
+                    </div>
                     <input
                       value={adminAdUrl}
-                      onChange={(e) => setAdminAdUrl(e.target.value)}
+                      onChange={(e) => {
+                        setAdminAdUrl(e.target.value);
+                        setAdMsg("");
+                      }}
                       placeholder="Image / video URL"
                       className="w-full bg-black border border-zinc-700 rounded px-2 py-1 text-xs"
                     />
-                    <p className="text-[10px] text-zinc-500">
-                      Paste your Cloudinary/URL to show below.
-                    </p>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={previewAd}
+                        className="flex-1 rounded-md border border-zinc-700 px-2 py-1 text-xs hover:bg-zinc-900"
+                      >
+                        Preview
+                      </button>
+                      <button
+                        onClick={publishAd}
+                        className="flex-1 rounded-md bg-gold text-black px-2 py-1 text-xs font-semibold"
+                      >
+                        Publish
+                      </button>
+                    </div>
+                    {adMsg ? (
+                      <p className="text-[10px] text-zinc-500 mt-1">
+                        {adMsg}
+                      </p>
+                    ) : null}
                   </div>
                 ) : null}
 
@@ -612,51 +673,30 @@ export default function Browse() {
                 {adminAdUrl ? (
                   <div className="rounded-lg border border-zinc-800 overflow-hidden bg-black/40 h-40 flex items-center justify-center">
                     {adminAdUrl.match(/\.(mp4|mov|webm)$/i) ? (
-                      <video src={adminAdUrl} controls className="w-full h-full object-cover" />
+                      <video
+                        src={adminAdUrl}
+                        muted
+                        playsInline
+                        autoPlay
+                        loop
+                        className="w-full h-full object-cover"
+                      />
                     ) : (
-                      <img src={adminAdUrl} alt="ad" className="w-full h-full object-cover" />
+                      <img
+                        src={adminAdUrl}
+                        alt="ad"
+                        className="w-full h-full object-cover"
+                      />
                     )}
                   </div>
-                ) : null}
-
-                {/* quick nav menu */}
-                <div className="rounded-lg border border-zinc-800 bg-black/40 p-3 space-y-2 text-sm">
-                  <div className="text-xs text-zinc-400 uppercase">Quick links</div>
-                  <button
-                    onClick={() => navigate("/browse")}
-                    className="block w-full text-left hover:text-gold"
-                  >
-                    Browse
-                  </button>
-                  <button
-                    onClick={() => navigate("/profile")}
-                    className="block w-full text-left hover:text-gold"
-                  >
-                    Profile
-                  </button>
-                  <button
-                    onClick={() => navigate("/settings")}
-                    className="block w-full text-left hover:text-gold"
-                  >
-                    Settings
-                  </button>
-                  {me?.isPro && (
-                    <button
-                      onClick={() => navigate("/pro-dashboard")}
-                      className="block w-full text-left hover:text-gold"
-                    >
-                      Pro Dashboard
-                    </button>
-                  )}
-                  {me?.isAdmin && (
-                    <button
-                      onClick={() => navigate("/admin")}
-                      className="block w-full text-left hover:text-gold"
-                    >
-                      Admin
-                    </button>
-                  )}
-                </div>
+                ) : (
+                  <>
+                    <div className="h-40 rounded-lg border border-zinc-800 bg-black/20 flex items-center justify-center text-xs text-zinc-500">
+                      Advert space
+                    </div>
+                    <div className="h-40 rounded-lg border border-zinc-800 bg-black/20" />
+                  </>
+                )}
               </div>
             </div>
           </div>

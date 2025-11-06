@@ -1,8 +1,8 @@
+// apps/web/src/components/FeedCard.jsx
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 
-/* ---------------- helpers ---------------- */
 function timeAgo(ts) {
   if (!ts) return "";
   const d = new Date(ts);
@@ -15,17 +15,15 @@ function timeAgo(ts) {
   const days = Math.floor(hrs / 24);
   return `${days}d`;
 }
-function num(n) {
-  const x = Number(n || 0);
-  if (x >= 1_000_000) return (x / 1_000_000).toFixed(1).replace(/\.0$/, "") + "m";
-  if (x >= 1_000) return (x / 1_000).toFixed(1).replace(/\.0$/, "") + "k";
-  return String(x);
-}
 
 export default function FeedCard({ post, currentUser, onDeleted }) {
   const postId = post._id || post.id;
+
   const isOwner =
-    currentUser?.uid && post.proOwnerUid && currentUser.uid === post.proOwnerUid;
+    currentUser?.uid &&
+    (post.proOwnerUid === currentUser.uid ||
+      post.ownerUid === currentUser.uid ||
+      post.createdBy === currentUser.uid);
 
   const [stats, setStats] = useState({
     viewsCount: 0,
@@ -36,128 +34,199 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
     likedByMe: false,
     savedByMe: false,
   });
+
   const [comments, setComments] = useState([]);
   const [showComments, setShowComments] = useState(false);
   const [commentText, setCommentText] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
-  const [busy, setBusy] = useState({ like: false, save: false, share: false });
-  const menuRef = useRef(null);
+  const [loadingLike, setLoadingLike] = useState(false);
+  const [loadingSave, setLoadingSave] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
-  // for video preview
+  // ---- VIDEO AUTOPLAY CONTROL (on-screen & hover) ----
   const videoRef = useRef(null);
+  const hasCountedViewRef = useRef(false);
+  const observerRef = useRef(null);
+  const [inView, setInView] = useState(false);
 
-  /* ---------------- load stats + view ---------------- */
+  const media = Array.isArray(post.media) && post.media.length ? post.media[0] : null;
+  const isVideo = media?.type === "video";
+
   useEffect(() => {
-    if (!postId) return;
-    let alive = true;
+    let stopped = false;
 
+    // load stats
     (async () => {
       try {
         const res = await api.get(`/api/posts/${postId}/stats`);
-        if (alive && res?.data) setStats(res.data);
+        if (!stopped) setStats((s) => ({ ...s, ...res.data }));
       } catch {}
     })();
 
-    (async () => {
-      try {
-        const r = await api.post(`/api/posts/${postId}/view`);
-        if (r?.data && r.data.viewsCount != null) {
-          setStats((s) => ({ ...s, viewsCount: r.data.viewsCount }));
-        }
-      } catch {}
-    })();
-
-    function onDocClick(e) {
-      if (menuRef.current && !menuRef.current.contains(e.target)) {
-        setMenuOpen(false);
-      }
-    }
-    document.addEventListener("click", onDocClick, true);
     return () => {
-      alive = false;
-      document.removeEventListener("click", onDocClick, true);
+      stopped = true;
     };
   }, [postId]);
 
-  /* ---------------- actions ---------------- */
-  async function doLike() {
+  // Intersection observer to play/pause when on screen
+  useEffect(() => {
+    if (!isVideo || !videoRef.current) return;
+
+    const el = videoRef.current;
+    observerRef.current?.disconnect();
+
+    observerRef.current = new IntersectionObserver(
+      async (entries) => {
+        const entry = entries[0];
+        const nowInView = entry.isIntersecting && entry.intersectionRatio >= 0.6;
+        setInView(nowInView);
+
+        try {
+          if (nowInView) {
+            // count a view first time it becomes visible
+            if (!hasCountedViewRef.current) {
+              hasCountedViewRef.current = true;
+              api.post(`/api/posts/${postId}/view`).then((res) => {
+                setStats((s) => ({
+                  ...s,
+                  viewsCount: res?.data?.viewsCount ?? s.viewsCount + 1,
+                }));
+              }).catch(() => {});
+            }
+            await el.play().catch(() => {});
+          } else {
+            el.pause();
+          }
+        } catch {}
+      },
+      { threshold: [0, 0.25, 0.6, 0.75, 1] }
+    );
+
+    observerRef.current.observe(el);
+    return () => observerRef.current?.disconnect();
+  }, [postId, isVideo]);
+
+  // Hover plays (desktop), leaving hover pauses only if not in view
+  function onMouseEnterVideo() {
+    if (!videoRef.current) return;
+    videoRef.current.play().catch(() => {});
+  }
+  function onMouseLeaveVideo() {
+    if (!videoRef.current) return;
+    if (!inView) videoRef.current.pause();
+  }
+  function onClickVideo() {
+    if (!videoRef.current) return;
+    if (videoRef.current.paused) videoRef.current.play().catch(() => {});
+    else videoRef.current.pause();
+  }
+
+  // ---- ACTIONS ----
+  async function toggleLike() {
     if (!currentUser) return alert("Login to like");
-    if (!postId || busy.like) return;
-    setBusy((b) => ({ ...b, like: true }));
+    if (!postId) return;
+    if (loadingLike) return;
+    setLoadingLike(true);
+
+    const liked = stats.likedByMe;
+    setStats((s) => ({
+      ...s,
+      likedByMe: !liked,
+      likesCount: liked ? Math.max(0, s.likesCount - 1) : s.likesCount + 1,
+    }));
+
     try {
-      const already = !!stats.likedByMe;
-      const r = already
+      const res = liked
         ? await api.delete(`/api/posts/${postId}/like`)
         : await api.post(`/api/posts/${postId}/like`);
-      if (r?.data) {
-        setStats((s) => ({
-          ...s,
-          likesCount: r.data.likesCount ?? s.likesCount,
-          likedByMe: !already,
-        }));
-      }
-    } catch {}
-    setBusy((b) => ({ ...b, like: false }));
+      setStats((s) => ({
+        ...s,
+        likesCount: res.data?.likesCount ?? s.likesCount,
+        likedByMe: !liked,
+      }));
+    } catch {
+      // revert
+      setStats((s) => ({
+        ...s,
+        likedByMe: liked,
+        likesCount: liked ? s.likesCount + 1 : Math.max(0, s.likesCount - 1),
+      }));
+    } finally {
+      setLoadingLike(false);
+    }
   }
 
-  async function doSave() {
+  async function toggleSave() {
     if (!currentUser) return alert("Login to save");
-    if (!postId || busy.save) return;
-    setBusy((b) => ({ ...b, save: true }));
+    if (!postId) return;
+    if (loadingSave) return;
+    setLoadingSave(true);
+    const saved = stats.savedByMe;
+
+    setStats((s) => ({
+      ...s,
+      savedByMe: !saved,
+      savesCount: saved ? Math.max(0, s.savesCount - 1) : s.savesCount + 1,
+    }));
+
     try {
-      const already = !!stats.savedByMe;
-      const r = already
+      const res = saved
         ? await api.delete(`/api/posts/${postId}/save`)
         : await api.post(`/api/posts/${postId}/save`);
-      if (r?.data) {
-        setStats((s) => ({
-          ...s,
-          savesCount: r.data.savesCount ?? s.savesCount,
-          savedByMe: !already,
-        }));
-      }
-    } catch {}
-    setBusy((b) => ({ ...b, save: false }));
+      setStats((s) => ({
+        ...s,
+        savesCount: res.data?.savesCount ?? s.savesCount,
+        savedByMe: !saved,
+      }));
+    } catch {
+      setStats((s) => ({
+        ...s,
+        savedByMe: saved,
+        savesCount: saved ? s.savesCount + 1 : Math.max(0, s.savesCount - 1),
+      }));
+    } finally {
+      setLoadingSave(false);
+    }
   }
 
-  async function doShare() {
-    if (!postId || busy.share) return;
-    setBusy((b) => ({ ...b, share: true }));
+  async function handleShare() {
+    if (!postId) return;
     const base = window.location.origin;
     const url = `${base}/browse?post=${postId}`;
 
     try {
-      const r = await api.post(`/api/posts/${postId}/share`);
-      if (r?.data && r.data.sharesCount != null) {
-        setStats((s) => ({ ...s, sharesCount: r.data.sharesCount }));
-      }
+      const res = await api.post(`/api/posts/${postId}/share`);
+      setStats((s) => ({
+        ...s,
+        sharesCount: res.data?.sharesCount ?? s.sharesCount + 1,
+      }));
     } catch {}
 
-    try {
-      if (navigator.share) {
+    if (navigator.share) {
+      try {
         await navigator.share({
-          title: post.pro?.name || post.authorName || "Kpocha Touch",
+          title: post.pro?.name || post.authorName || "Post",
           text: post.text || "",
           url,
         });
-      } else {
-        await navigator.clipboard.writeText(url);
-        alert("Link copied. Paste to share.");
-      }
+        return;
+      } catch {}
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      alert("Link copied. You can paste it to share.");
     } catch {
-      // ignore
-    } finally {
-      setBusy((b) => ({ ...b, share: false }));
+      alert("Share link: " + url);
     }
   }
 
-  async function toggleComments() {
-    const next = !showComments;
-    setShowComments(next);
-    if (next && comments.length === 0 && postId) {
+  async function handleToggleComments() {
+    const to = !showComments;
+    setShowComments(to);
+    if (to && comments.length === 0 && postId) {
       try {
         const res = await api.get(`/api/posts/${postId}/comments`);
-        setComments(Array.isArray(res.data) ? res.data : []);
+        setComments(res.data || []);
       } catch {}
     }
   }
@@ -165,80 +234,117 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
   async function submitComment(e) {
     e?.preventDefault();
     if (!currentUser) return alert("Login to comment");
+    if (!postId) return;
     const txt = commentText.trim();
     if (!txt) return;
+
+    const tmpId = "tmp-" + Date.now();
+    const optimistic = {
+      _id: tmpId,
+      postId,
+      text: txt,
+      authorName: currentUser.displayName || currentUser.fullName || "You",
+      authorAvatar: currentUser.photoUrl || currentUser.photoURL || "",
+      ownerUid: currentUser.uid,
+      createdAt: new Date().toISOString(),
+    };
+    setComments((c) => [optimistic, ...c]);
+    setCommentText("");
+    setStats((s) => ({ ...s, commentsCount: s.commentsCount + 1 }));
+
     try {
-      const r = await api.post(`/api/posts/${postId}/comments`, { text: txt });
-      const newC = r?.data?.comment;
-      if (newC) setComments((c) => [newC, ...c]);
-      const cnt = r?.data?.commentsCount;
-      if (typeof cnt === "number")
-        setStats((s) => ({ ...s, commentsCount: cnt }));
-      setCommentText("");
-    } catch (err) {
-      if (err?.response?.data?.error === "comments_disabled") {
-        alert("Comments are turned off for this post.");
-      }
+      const res = await api.post(`/api/posts/${postId}/comments`, { text: txt });
+      const real = res.data?.comment;
+      setComments((c) => [real, ...c.filter((cm) => cm._id !== tmpId)]);
+      setStats((s) => ({
+        ...s,
+        commentsCount: res.data?.commentsCount ?? s.commentsCount,
+      }));
+    } catch {
+      setComments((c) => c.filter((cm) => cm._id !== tmpId));
+      setStats((s) => ({ ...s, commentsCount: Math.max(0, s.commentsCount - 1) }));
     }
   }
 
-  async function deleteComment(id) {
+  async function handleDeleteComment(commentId) {
+    if (!commentId) return;
     if (!window.confirm("Delete this comment?")) return;
     try {
-      const r = await api.delete(`/api/comments/${id}`);
-      setComments((c) => c.filter((x) => x._id !== id));
-      const cnt = r?.data?.commentsCount;
-      if (typeof cnt === "number")
-        setStats((s) => ({ ...s, commentsCount: cnt }));
-    } catch {}
-  }
-
-  async function hidePost() {
-    if (!window.confirm("Hide this post from your feed?")) return;
-    try {
-      await api.patch(`/api/posts/${postId}/hide`);
-      onDeleted?.(postId);
+      await api.delete(`/api/comments/${commentId}`);
+      setComments((c) => c.filter((cm) => cm._id !== commentId));
+      setStats((s) => ({ ...s, commentsCount: Math.max(0, s.commentsCount - 1) }));
     } catch {
-      alert("Failed to hide");
+      alert("Failed to delete comment");
     }
   }
 
-  async function deletePost() {
-    if (!window.confirm("Delete this post permanently?")) return;
+  async function handleHideOrDeletePost() {
+    if (!postId) return;
+    if (!window.confirm("Delete / hide this post?")) return;
+    setDeleting(true);
     try {
-      await api.delete(`/api/posts/${postId}`);
+      await api.delete(`/api/posts/${postId}`).catch(async () => {
+        await api.patch(`/api/posts/${postId}/hide`);
+      });
       onDeleted?.(postId);
     } catch {
-      alert("Delete failed");
+      alert("Failed to delete/hide post");
+    } finally {
+      setDeleting(false);
+      setMenuOpen(false);
     }
   }
 
-  function copyLink() {
+  function handleCopyLink() {
+    if (!postId) return;
     const base = window.location.origin;
     const url = `${base}/browse?post=${postId}`;
     navigator.clipboard?.writeText(url);
+    alert("Link copied");
     setMenuOpen(false);
   }
 
-  function toggleFollow() {
-    // no backend yet
-    alert("Follow / Unfollow coming soon");
-  }
-
-  /* --------------- video preview logic (5s) --------------- */
-  function handleVideoTimeUpdate() {
-    const v = videoRef.current;
-    if (v && v.currentTime > 5) {
-      v.pause();
+  async function handleDisableComments() {
+    if (!postId) return;
+    try {
+      await api.patch(`/api/posts/${postId}/comments/disable`);
+      post.commentsDisabled = true;
+      setShowComments(false);
+      setMenuOpen(false);
+    } catch {
+      alert("Failed to disable comments");
     }
   }
 
-  /* --------------- render --------------- */
+  async function handleEnableComments() {
+    if (!postId) return;
+    try {
+      await api.patch(`/api/posts/${postId}/comments/enable`);
+      post.commentsDisabled = false;
+      setMenuOpen(false);
+    } catch {
+      alert("Failed to enable comments");
+    }
+  }
+
+  // stubs
+  function handleFollowToggle() {
+    alert("Follow / Unfollow will be available soon.");
+    setMenuOpen(false);
+  }
+  function handleReport() {
+    alert("Report received. Admin will review.");
+    setMenuOpen(false);
+  }
+  function handleBlockUser() {
+    alert("Block user coming soon.");
+    setMenuOpen(false);
+  }
+
   const pro = post.pro || {};
   const avatar = pro.photoUrl || post.authorAvatar || "";
   const proName = pro.name || post.authorName || "Professional";
-  const lga = pro.lga || post.lga || "Nigeria";
-  const media = Array.isArray(post.media) && post.media.length ? post.media[0] : null;
+  const lga = pro.lga || post.lga || "";
 
   return (
     <div className="bg-[#0F0F0F] border border-[#1F1F1F] rounded-xl overflow-hidden">
@@ -257,11 +363,10 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
           <div>
             <div className="text-sm font-semibold text-white">{proName}</div>
             <div className="text-xs text-gray-400">
-              {lga} • {timeAgo(post.createdAt)}
+              {lga || "Nigeria"} • {timeAgo(post.createdAt)}
             </div>
           </div>
         </div>
-
         <div className="flex items-center gap-2">
           {post.proId && (
             <Link
@@ -271,92 +376,80 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
               Book
             </Link>
           )}
-          <div className="relative" ref={menuRef}>
+          <div className="relative">
             <button
               onClick={() => setMenuOpen((v) => !v)}
               className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-800 text-white"
-              aria-label="More"
             >
               ⋯
             </button>
             {menuOpen && (
-              <div className="absolute right-0 mt-2 w-56 bg-[#141414] border border-[#2a2a2a] rounded-lg shadow-lg z-30 overflow-hidden">
+              <div className="absolute right-0 mt-2 w-56 bg-[#141414] border border-[#2a2a2a] rounded-lg shadow-lg z-30">
                 <button
-                  onClick={doSave}
+                  onClick={toggleSave}
                   className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
                 >
                   {stats.savedByMe ? "Unsave post" : "Save post / Add to collection"}
                 </button>
                 <button
-                  onClick={copyLink}
+                  onClick={handleCopyLink}
                   className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
                 >
                   Copy link
                 </button>
-
                 {isOwner ? (
-                  <>
-                    <button
-                      onClick={hidePost}
-                      className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
-                    >
-                      Hide post
-                    </button>
-                    <button
-                      onClick={deletePost}
-                      className="w-full text-left px-3 py-2 text-sm text-red-400 hover:bg-[#1b1b1b]"
-                    >
-                      Delete post
-                    </button>
-                  </>
+                  <button
+                    onClick={handleHideOrDeletePost}
+                    disabled={deleting}
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b] text-red-300 disabled:opacity-50"
+                  >
+                    {deleting ? "Deleting…" : "Delete / Hide Post"}
+                  </button>
                 ) : (
                   <button
-                    onClick={hidePost}
+                    onClick={() => alert("You can only hide your own post")}
                     className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
                   >
-                    Hide post
+                    Hide Post
                   </button>
                 )}
-
                 <button
-                  onClick={() => alert("Report post: coming soon")}
+                  onClick={handleReport}
                   className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
                 >
-                  Report post
+                  Report Post
                 </button>
                 <button
-                  onClick={() => alert("Follow / Unfollow: coming soon")}
+                  onClick={handleFollowToggle}
                   className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
                 >
                   Follow / Unfollow
                 </button>
                 <button
-                  onClick={() => alert("Block user: coming soon")}
+                  onClick={handleBlockUser}
                   className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
                 >
-                  Block user
+                  Block User
                 </button>
-
-                {/* quick nav */}
-                <div className="border-t border-[#2a2a2a] my-1" />
-                <Link
-                  to="/browse"
-                  className="block px-3 py-2 text-sm hover:bg-[#1b1b1b]"
-                >
-                  Browse
-                </Link>
-                <Link
-                  to="/profile"
-                  className="block px-3 py-2 text-sm hover:bg-[#1b1b1b]"
-                >
-                  Profile
-                </Link>
-                <Link
-                  to="/settings"
-                  className="block px-3 py-2 text-sm hover:bg-[#1b1b1b]"
-                >
-                  Settings
-                </Link>
+                {isOwner && (
+                  <>
+                    {post.commentsDisabled ? (
+                      <button
+                        onClick={handleEnableComments}
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
+                      >
+                        Enable comments
+                      </button>
+                    ) : (
+                      <button
+                        onClick={handleDisableComments}
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
+                      >
+                        Disable comments
+                      </button>
+                    )}
+                  </>
+                )}
               </div>
             )}
           </div>
@@ -369,70 +462,67 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
       {/* media */}
       {media && (
         <div className="bg-black">
-          {media.type === "video" ? (
+          {isVideo ? (
             <video
               ref={videoRef}
               src={media.url}
+              className="w-full max-h-[420px] object-cover"
               muted
-              autoPlay
+              loop
               playsInline
-              controls
-              onTimeUpdate={handleVideoTimeUpdate}
-              className="w-full max-h-[520px] object-cover"
+              preload="metadata"
+              onMouseEnter={onMouseEnterVideo}
+              onMouseLeave={onMouseLeaveVideo}
+              onClick={onClickVideo}
+              // NOTE: no controls, no 10s loop — plays while visible, loops until you click
             />
           ) : (
-            <img src={media.url} alt="" className="w-full max-h-[520px] object-cover" />
+            <img src={media.url} alt="" className="w-full max-h-[420px] object-cover" />
           )}
         </div>
       )}
 
-      {/* upper counts */}
-      <div className="flex items-center justify-between px-4 py-2 text-xs text-gray-400">
-        <div className="flex items-center gap-3">
-          <div title="Likes">❤️ {num(stats.likesCount)}</div>
-          <button onClick={toggleComments} className="hover:text-gray-200" title="Comments">
-            💬 {num(stats.commentsCount)}
-          </button>
-          <div title="Shares">↗ {num(stats.sharesCount)}</div>
+      {/* counts row */}
+      <div className="flex items-center justify-between px-4 py-2 text-xs text-gray-400 border-t border-[#1F1F1F]">
+        <div className="flex gap-4">
+          <div>{stats.likesCount} likes</div>
+          <button onClick={handleToggleComments}>{stats.commentsCount} comments</button>
+          <div>{stats.sharesCount} shares</div>
         </div>
-        <div title="Views">
-          👁 {num(stats.viewsCount)} <span className="ml-1">views</span>
+        <div className="flex items-center gap-1">
+          <span role="img" aria-label="views">👁</span>
+          <span>View</span>
+          <span>{stats.viewsCount}</span>
         </div>
       </div>
 
-      {/* lower action bar */}
+      {/* actions */}
       <div className="flex border-t border-[#1F1F1F]">
         <button
-          onClick={doLike}
+          onClick={toggleLike}
           className={`flex-1 py-2 text-sm flex items-center justify-center gap-1 ${
             stats.likedByMe ? "text-[#F5C542]" : "text-gray-200"
           }`}
-          disabled={busy.like}
         >
-          👍 Like
+          👍 {stats.likedByMe ? "Liked" : "Like"}
         </button>
         <button
-          onClick={toggleComments}
+          onClick={handleToggleComments}
           className="flex-1 py-2 text-sm flex items-center justify-center gap-1 text-gray-200"
         >
           💬 Comment
         </button>
         <button
-          onClick={doShare}
+          onClick={handleShare}
           className="flex-1 py-2 text-sm flex items-center justify-center gap-1 text-gray-200"
-          disabled={busy.share}
         >
           ↗ Share
         </button>
-      </div>
-
-      {/* follow / unfollow line */}
-      <div className="px-4 py-2 border-t border-[#1F1F1F]">
         <button
-          onClick={toggleFollow}
-          className="text-xs bg-gray-800 hover:bg-gray-700 text-white px-3 py-1 rounded-full"
+          onClick={() => alert("Follow / Unfollow will be available soon.")}
+          className="flex-1 py-2 text-sm flex items-center justify-center gap-1 text-gray-200"
         >
-          Follow / Unfollow
+          ➕ Follow
         </button>
       </div>
 
@@ -454,75 +544,45 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
           ) : (
             <div className="text-xs text-red-400 mb-3">Comments are disabled for this post.</div>
           )}
-
           <div className="space-y-3">
-            {comments.map((c) => {
-              const mine = currentUser?.uid && c.ownerUid === currentUser.uid;
-              return (
-                <div key={c._id} className="flex gap-2">
-                  <div className="w-8 h-8 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center text-xs text-white">
-                    {c.authorAvatar ? (
-                      <img
-                        src={c.authorAvatar}
-                        alt={c.authorName}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      (c.authorName || "U").slice(0, 1).toUpperCase()
+            {comments.map((c) => (
+              <div key={c._id} className="flex gap-2">
+                <div className="w-8 h-8 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center text-xs text-white">
+                  {c.authorAvatar ? (
+                    <img src={c.authorAvatar} alt={c.authorName} className="w-full h-full object-cover" />
+                  ) : (
+                    (c.authorName || "U").slice(0, 1).toUpperCase()
+                  )}
+                </div>
+                <div className="flex-1">
+                  <div className="bg-[#141414] rounded-2xl px-3 py-2">
+                    <div className="text-xs text-white font-semibold">{c.authorName || "User"}</div>
+                    <div className="text-sm text-gray-200">{c.text}</div>
+                  </div>
+                  <div className="flex gap-3 items-center text-[10px] text-gray-500 mt-1">
+                    <span>{new Date(c.createdAt).toLocaleString()}</span>
+                    <button type="button" onClick={() => alert("Comment like coming soon")} className="hover:text-gray-200">Like</button>
+                    <button
+                      type="button"
+                      onClick={() => setCommentText((v) => (v ? v + ` @${c.authorName} ` : `@${c.authorName} `))}
+                      className="hover:text-gray-200"
+                    >
+                      Reply
+                    </button>
+                    {currentUser?.uid && currentUser.uid === c.ownerUid && (
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteComment(c._id)}
+                        className="text-red-300 hover:text-red-100"
+                      >
+                        Delete
+                      </button>
                     )}
                   </div>
-                  <div className="bg-[#141414] rounded-2xl px-3 py-2 flex-1">
-                    <div className="flex items-center justify-between">
-                      <div className="text-xs text-white font-semibold">
-                        {c.authorName || "User"}
-                      </div>
-                      <div className="text-[10px] text-gray-500">
-                        {new Date(c.createdAt).toLocaleString()}
-                      </div>
-                    </div>
-                    <div className="text-sm text-gray-200 whitespace-pre-wrap">{c.text}</div>
-
-                    {/* comment actions */}
-                    <div className="mt-1 text-[11px] text-gray-400 flex gap-3">
-                      <button
-                        onClick={() => alert("Like comment: coming soon")}
-                        className="hover:text-gray-100"
-                        type="button"
-                      >
-                        Like
-                      </button>
-                      <button
-                        onClick={() => alert("Reply: coming soon")}
-                        className="hover:text-gray-100"
-                        type="button"
-                      >
-                        Reply
-                      </button>
-                      {mine ? (
-                        <button
-                          onClick={() => deleteComment(c._id)}
-                          className="hover:text-red-400"
-                          type="button"
-                        >
-                          Delete
-                        </button>
-                      ) : (
-                        <button
-                          onClick={() => alert("Report comment: coming soon")}
-                          className="hover:text-gray-200"
-                          type="button"
-                        >
-                          Report
-                        </button>
-                      )}
-                    </div>
-                  </div>
                 </div>
-              );
-            })}
-            {comments.length === 0 && (
-              <div className="text-xs text-gray-500">No comments yet.</div>
-            )}
+              </div>
+            ))}
+            {comments.length === 0 && <div className="text-xs text-gray-500">No comments yet.</div>}
           </div>
         </div>
       )}
