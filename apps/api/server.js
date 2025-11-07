@@ -528,23 +528,10 @@ function scrubPublicPro(p = {}) {
   return rest;
 }
 
-/* ------------------- Current user profile summary ------------------- */
-/**
- * ★ this is the important fix
- * we return:
- * - photoUrl
- * - isPro
- * - pro: { id, name, status, photoUrl }
- */
+/* ------------------- Unified current user profile summary ------------------- */
 app.get("/api/me", requireAuth, async (req, res) => {
   try {
-    let proDoc = null;
-    try {
-      proDoc = await Pro.findOne({ ownerUid: req.user.uid })
-        .select("_id name photoUrl status")
-        .lean();
-    } catch {}
-
+    // 1) canonical user/profile doc
     let profileDoc = null;
     try {
       const col = mongoose.connection.db.collection("profiles");
@@ -560,20 +547,34 @@ app.get("/api/me", requireAuth, async (req, res) => {
             hasPro: 1,
             proId: 1,
             proStatus: 1,
+            phone: 1,
+            state: 1,
+            lga: 1,
           },
         }
       );
     } catch {}
 
+    // 2) pro doc (may add status/id/photo)
+    let proDoc = null;
+    try {
+      proDoc = await Pro.findOne({ ownerUid: req.user.uid })
+        .select("_id name photoUrl status")
+        .lean();
+    } catch {}
+
+    // pick best name (profile first, then pro, then identity, then email)
     const identity = profileDoc?.identity || {};
     const displayName =
       profileDoc?.displayName ||
-      profileDoc?.name ||
       profileDoc?.fullName ||
+      profileDoc?.name ||
+      proDoc?.name ||
       [identity?.firstName, identity?.lastName].filter(Boolean).join(" ").trim() ||
+      req.user.email ||
       "";
 
-    // choose best photo
+    // pick best photo
     const photoUrl =
       profileDoc?.photoUrl ||
       identity?.photoUrl ||
@@ -608,9 +609,11 @@ app.get("/api/me", requireAuth, async (req, res) => {
         : null,
     });
   } catch (e) {
+    console.error("[/api/me] error:", e?.message || e);
     res.status(500).json({ error: "failed_me" });
   }
 });
+
 
 /* ------------------- Pro private endpoint (owner sees full pro) ------------------- */
 app.get("/api/pros/me", requireAuth, async (req, res) => {
@@ -625,7 +628,7 @@ app.get("/api/pros/me", requireAuth, async (req, res) => {
   }
 });
 
-// same place, just below your existing GET /api/pros/me
+/* ------------------- Pro private update (owner updates own pro) ------------------- */
 app.put("/api/pros/me", requireAuth, async (req, res) => {
   try {
     const uid = req.user.uid;
@@ -634,19 +637,57 @@ app.put("/api/pros/me", requireAuth, async (req, res) => {
     const pro = await Pro.findOne({ ownerUid: uid });
     if (!pro) return res.status(404).json({ error: "pro_not_found" });
 
-    // only allow editable fields
+    // only allow editable fields from the frontend
     const updatable = {};
     if (body.professional) updatable.professional = body.professional;
     if (body.availability) updatable.availability = body.availability;
     if (body.bank) updatable.bank = body.bank;
     if (typeof body.bio === "string") updatable.bio = body.bio;
     if (typeof body.photoUrl === "string") updatable.photoUrl = body.photoUrl;
+    // if frontend sends status, keep it, otherwise preserve current
+    if (typeof body.status === "string") updatable.status = body.status;
+    else updatable.status = pro.status || "approved";
 
     const updated = await Pro.findOneAndUpdate(
       { ownerUid: uid },
       { $set: updatable },
       { new: true }
     );
+
+    // 🔁 keep the unified "profiles" collection in sync
+    try {
+      const col = mongoose.connection.db.collection("profiles");
+      const toSet = {
+        uid,
+        ownerUid: uid,
+      };
+
+      // take public-facing pro stuff and mirror it
+      if (typeof body.photoUrl === "string") {
+        toSet.photoUrl = body.photoUrl;
+        toSet["identity.photoUrl"] = body.photoUrl;
+      }
+
+      if (body.professional && Array.isArray(body.professional.services)) {
+        // optional: you can store it if you want
+        toSet.proServices = body.professional.services;
+      }
+
+      // availability → statesCovered
+      if (body.availability && Array.isArray(body.availability.statesCovered)) {
+        toSet.statesCovered = body.availability.statesCovered.map((s) =>
+          s.toString().toUpperCase()
+        );
+      }
+
+      await col.updateOne(
+        { uid },
+        { $set: toSet, $setOnInsert: { hasPro: true, proStatus: updated.status, proId: updated._id } },
+        { upsert: true }
+      );
+    } catch (syncErr) {
+      console.warn("[/api/pros/me PUT] profiles sync skipped:", syncErr?.message || syncErr);
+    }
 
     return res.json({ ok: true, item: updated });
   } catch (err) {

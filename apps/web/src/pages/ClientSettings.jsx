@@ -7,12 +7,15 @@ export default function ClientSettings() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [ok, setOk] = useState("");
+
   const [me, setMe] = useState(null);
   const [client, setClient] = useState(null);
   const [pro, setPro] = useState(null);
 
-  // geo (single load, same shape as NgGeoPicker)
+  // geo
   const [geo, setGeo] = useState({ states: [], lgas: {} });
+
+  // form state
   const [form, setForm] = useState({
     displayName: "",
     phone: "",
@@ -20,9 +23,16 @@ export default function ClientSettings() {
     lga: "",
     address: "",
     photoUrl: "",
+    // new:
+    agreeTerms: false,
+    agreePrivacy: false,
+    kycEnabled: false,
+    kycIdType: "",
+    kycIdUrl: "",
+    kycSelfieUrl: "",
   });
 
-  // ✅ Load user data (single UID) + client + pro + geo
+  // load
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -36,12 +46,15 @@ export default function ClientSettings() {
           api.get("/api/profile/me").catch(() => null),
           api.get("/api/pros/me").catch(() => null),
         ]);
+
         if (!alive) return;
 
         const meData = meRes?.data || null;
         const clientData = clientRes?.data || null;
         const proData = proRes?.data || null;
-        const statesRaw = Array.isArray(geoRes?.data?.states) ? geoRes.data.states : [];
+        const statesRaw = Array.isArray(geoRes?.data?.states)
+          ? geoRes.data.states
+          : [];
         const lgasRaw = geoRes?.data?.lgas || {};
 
         setMe(meData);
@@ -49,35 +62,41 @@ export default function ClientSettings() {
         setPro(proData);
         setGeo({ states: statesRaw, lgas: lgasRaw });
 
-        // 2️⃣ Auto-fill with priority: client → pro → me → fallback
+        // pick best source (client → pro → me)
         const base = clientData || proData || meData || {};
 
-        const baseStateRaw =
+        const baseState =
           clientData?.state ||
           clientData?.identity?.state ||
           proData?.identity?.state ||
           meData?.identity?.state ||
           "";
-        const baseLgaRaw =
+        const baseLga =
           clientData?.lga ||
           clientData?.identity?.city ||
           proData?.identity?.city ||
           meData?.identity?.city ||
           "";
 
-        // match incoming state to the actual list (ignoring case)
         const normalizedState =
-          statesRaw.find((s) => s.toUpperCase() === String(baseStateRaw).toUpperCase()) ||
-          String(baseStateRaw);
-
-        // same for LGA if we have a state
+          statesRaw.find(
+            (s) => s.toUpperCase() === String(baseState).toUpperCase()
+          ) || String(baseState);
         const lgasForState =
           normalizedState && lgasRaw[normalizedState]
             ? lgasRaw[normalizedState]
             : [];
         const normalizedLga =
-          lgasForState.find((x) => x.toUpperCase() === String(baseLgaRaw).toUpperCase()) ||
-          String(baseLgaRaw);
+          lgasForState.find(
+            (x) => x.toUpperCase() === String(baseLga).toUpperCase()
+          ) || String(baseLga);
+
+        // agreements / kyc from client, if any
+        const alreadyTerms =
+          !!clientData?.acceptedTerms || !!clientData?.agreements?.terms;
+        const alreadyPrivacy =
+          !!clientData?.acceptedPrivacy || !!clientData?.agreements?.privacy;
+        const kyc = clientData?.kyc || {};
 
         setForm((cur) => ({
           ...cur,
@@ -105,8 +124,14 @@ export default function ClientSettings() {
             proData?.identity?.photoUrl ||
             meData?.identity?.photoUrl ||
             "",
+          agreeTerms: alreadyTerms,
+          agreePrivacy: alreadyPrivacy,
+          kycEnabled: !!(kyc?.idType || kyc?.idUrl || kyc?.selfieWithIdUrl),
+          kycIdType: kyc?.idType || "",
+          kycIdUrl: kyc?.idUrl || "",
+          kycSelfieUrl: kyc?.selfieWithIdUrl || "",
         }));
-      } catch {
+      } catch (e) {
         if (alive) setError("Failed to load your settings.");
       } finally {
         if (alive) setLoading(false);
@@ -117,18 +142,15 @@ export default function ClientSettings() {
     };
   }, []);
 
-  // derived lgas for selected state
   const lgaOptions = useMemo(() => {
     if (!form.state) return [];
     return geo.lgas[form.state] || [];
   }, [form.state, geo.lgas]);
 
-  // ✅ Change state → clear LGA and show local options
-  function onChangeState(nextState) {
-    setForm((f) => ({ ...f, state: nextState, lga: "" }));
+  function onChangeField(key, val) {
+    setForm((f) => ({ ...f, [key]: val }));
   }
 
-  // ✅ Save profile (keeps same UID, upserts)
   async function onSave(e) {
     e?.preventDefault?.();
     try {
@@ -136,7 +158,6 @@ export default function ClientSettings() {
       setError("");
       setOk("");
 
-      // store in uppercase to match API + Pro layer
       const stateUP = (form.state || "").toUpperCase();
       const lgaUP = (form.lga || "").toUpperCase();
 
@@ -148,6 +169,12 @@ export default function ClientSettings() {
         lga: lgaUP,
         address: form.address?.trim(),
         photoUrl: form.photoUrl || "",
+        acceptedTerms: !!form.agreeTerms,
+        acceptedPrivacy: !!form.agreePrivacy,
+        agreements: {
+          terms: !!form.agreeTerms,
+          privacy: !!form.agreePrivacy,
+        },
         identity: {
           phone: form.phone?.trim(),
           state: stateUP,
@@ -156,27 +183,35 @@ export default function ClientSettings() {
         },
       };
 
+      // optional KYC
+      if (form.kycEnabled) {
+        payload.kyc = {
+          idType: form.kycIdType,
+          idUrl: form.kycIdUrl,
+          selfieWithIdUrl: form.kycSelfieUrl,
+          status: "pending",
+        };
+      }
+
       let res;
       if (client) {
-        // ✅ client exists → write to client profile
         res = await api.put("/api/profile/me", payload);
         setClient(res?.data || payload);
       } else if (pro?._id) {
-        // ✅ no client but pro exists → write to pro doc
+        // no client doc, but user is pro – update pro + let backend sync profiles
         res = await api.put("/api/pros/me", {
-          ...pro,
+          identity: payload.identity,
           displayName: payload.displayName,
           phone: payload.phone,
-          identity: payload.identity,
         });
         setPro(res?.data?.item || { ...pro, ...payload });
       } else {
-        // ✅ no client, no pro → create client profile
+        // create/update client doc
         res = await api.put("/api/profile/me", payload);
         setClient(res?.data || payload);
       }
 
-      // keep /api/me in sync in UI
+      // update in-memory me
       setMe((prev) => ({
         ...(prev || {}),
         displayName: payload.displayName,
@@ -190,31 +225,27 @@ export default function ClientSettings() {
       }));
 
       setOk("Saved!");
-    } catch {
-      setError("Could not save your changes. Please try again.");
+      setTimeout(() => setOk(""), 2000);
+    } catch (e) {
+      setError(e?.response?.data?.error || "Could not save your changes.");
     } finally {
       setSaving(false);
-      setTimeout(() => setOk(""), 1800);
     }
   }
 
-  const stateOpts = useMemo(
-    () => ["", ...geo.states].map((s) => ({ v: s, t: s || "Select state…" })),
-    [geo.states]
-  );
-
   return (
     <div className="max-w-5xl mx-auto px-4 py-10">
-      <h1 className="text-2xl font-semibold mb-2">Settings</h1>
+      <h1 className="text-2xl font-semibold mb-2">Client Settings</h1>
       <p className="text-zinc-400 mb-6">
-        Update your personal details used for fast booking.
+        Complete or update your personal profile.
       </p>
 
-      {loading && <div className="text-zinc-400">Loading…</div>}
-      {!loading && (
+      {loading ? (
+        <div className="text-zinc-400">Loading…</div>
+      ) : (
         <form
-          className="rounded-lg border border-zinc-800 p-4 bg-black/40 space-y-6"
           onSubmit={onSave}
+          className="rounded-lg border border-zinc-800 p-4 bg-black/40 space-y-6"
         >
           {error && (
             <div className="rounded-md border border-red-800 bg-red-900/30 text-red-100 px-3 py-2">
@@ -227,17 +258,45 @@ export default function ClientSettings() {
             </div>
           )}
 
-          {/* GENERAL */}
+          {/* Photo */}
+          <section>
+            <h2 className="text-lg font-semibold mb-3">Photo</h2>
+            <div className="flex items-center gap-3">
+              <div className="w-14 h-14 rounded-full overflow-hidden border border-zinc-700 bg-zinc-900">
+                {form.photoUrl ? (
+                  <img
+                    src={form.photoUrl}
+                    alt="avatar"
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-xs text-zinc-500">
+                    No photo
+                  </div>
+                )}
+              </div>
+              <input
+                className="flex-1 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm"
+                placeholder="Photo URL"
+                value={form.photoUrl}
+                onChange={(e) => onChangeField("photoUrl", e.target.value)}
+              />
+            </div>
+            <p className="text-xs text-zinc-500 mt-1">
+              (You already have Cloudinary on other pages — you can swap this to
+              your upload button if you want.)
+            </p>
+          </section>
+
+          {/* General */}
           <section>
             <h2 className="text-lg font-semibold mb-3">General</h2>
             <div className="grid sm:grid-cols-2 gap-4">
-              <Field label="Display Name *">
+              <Field label="Full / Display Name *">
                 <input
                   className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2"
                   value={form.displayName}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, displayName: e.target.value }))
-                  }
+                  onChange={(e) => onChangeField("displayName", e.target.value)}
                   required
                 />
               </Field>
@@ -245,9 +304,7 @@ export default function ClientSettings() {
                 <input
                   className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2"
                   value={form.phone}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, phone: e.target.value }))
-                  }
+                  onChange={(e) => onChangeField("phone", e.target.value)}
                   required
                 />
               </Field>
@@ -255,12 +312,16 @@ export default function ClientSettings() {
                 <select
                   className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2"
                   value={form.state}
-                  onChange={(e) => onChangeState(e.target.value)}
+                  onChange={(e) => {
+                    onChangeField("state", e.target.value);
+                    onChangeField("lga", "");
+                  }}
                   required
                 >
-                  {stateOpts.map(({ v, t }) => (
-                    <option key={v} value={v}>
-                      {t}
+                  <option value="">Select state…</option>
+                  {geo.states.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
                     </option>
                   ))}
                 </select>
@@ -269,10 +330,8 @@ export default function ClientSettings() {
                 <select
                   className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2"
                   value={form.lga}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, lga: e.target.value }))
-                  }
-                  disabled={!lgaOptions?.length}
+                  onChange={(e) => onChangeField("lga", e.target.value)}
+                  disabled={!lgaOptions.length}
                   required
                 >
                   <option value="">
@@ -289,9 +348,7 @@ export default function ClientSettings() {
                 <input
                   className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2"
                   value={form.address}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, address: e.target.value }))
-                  }
+                  onChange={(e) => onChangeField("address", e.target.value)}
                 />
               </Field>
               <Field label="User ID">
@@ -302,31 +359,91 @@ export default function ClientSettings() {
             </div>
           </section>
 
-          {/* PAYMENTS */}
+          {/* Agreements */}
           <section>
-            <h2 className="text-lg font-semibold mb-3">Payments</h2>
-            <p className="text-sm text-zinc-400">
-              You’ll add payment only when you book. No card is saved here.
+            <h2 className="text-lg font-semibold mb-3">Agreements</h2>
+            <label className="flex items-center gap-2 text-sm text-zinc-200">
+              <input
+                type="checkbox"
+                checked={form.agreeTerms}
+                onChange={(e) => onChangeField("agreeTerms", e.target.checked)}
+              />
+              I agree to the Terms &amp; Conditions
+            </label>
+            <label className="flex items-center gap-2 text-sm text-zinc-200 mt-2">
+              <input
+                type="checkbox"
+                checked={form.agreePrivacy}
+                onChange={(e) =>
+                  onChangeField("agreePrivacy", e.target.checked)
+                }
+              />
+              I agree to the Privacy Policy
+            </label>
+            <p className="text-xs text-zinc-500 mt-1">
+              This lets people who registered before these fields existed to
+              complete them now.
             </p>
           </section>
 
-          {/* ADVANCED */}
+          {/* Optional KYC */}
           <section>
-            <h2 className="text-lg font-semibold mb-3">Advanced</h2>
-            <div className="flex gap-2">
-              <a
-                href="/deactivate"
-                className="text-sm px-3 py-2 rounded-lg border border-red-900 hover:bg-red-900/20"
-              >
-                Request account deactivation
-              </a>
-            </div>
+            <h2 className="text-lg font-semibold mb-3">
+              Optional Identity / KYC
+            </h2>
+            <label className="flex items-center gap-2 text-sm text-zinc-200 mb-3">
+              <input
+                type="checkbox"
+                checked={form.kycEnabled}
+                onChange={(e) => onChangeField("kycEnabled", e.target.checked)}
+              />
+              Add / update my ID details now
+            </label>
+            {form.kycEnabled && (
+              <div className="grid sm:grid-cols-2 gap-4">
+                <Field label="ID Type">
+                  <select
+                    className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2"
+                    value={form.kycIdType}
+                    onChange={(e) =>
+                      onChangeField("kycIdType", e.target.value)
+                    }
+                  >
+                    <option value="">Select…</option>
+                    <option value="National ID">National ID</option>
+                    <option value="Voter’s Card">Voter’s Card</option>
+                    <option value="Driver’s License">Driver’s License</option>
+                    <option value="International Passport">
+                      International Passport
+                    </option>
+                  </select>
+                </Field>
+                <Field label="ID Image URL">
+                  <input
+                    className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2"
+                    value={form.kycIdUrl}
+                    onChange={(e) => onChangeField("kycIdUrl", e.target.value)}
+                    placeholder="https://…"
+                  />
+                </Field>
+                <Field label="Selfie with ID URL">
+                  <input
+                    className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2"
+                    value={form.kycSelfieUrl}
+                    onChange={(e) =>
+                      onChangeField("kycSelfieUrl", e.target.value)
+                    }
+                    placeholder="https://…"
+                  />
+                </Field>
+              </div>
+            )}
           </section>
 
-          <div className="flex gap-2 pt-2">
+          <div className="pt-2">
             <button
               type="submit"
-              className="rounded-lg bg-gold text-black font-semibold px-4 py-2 disabled:opacity-60"
+              className="rounded-lg bg-zinc-200 text-black font-semibold px-4 py-2 disabled:opacity-60"
               disabled={saving}
             >
               {saving ? "Saving…" : "Save changes"}
