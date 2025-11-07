@@ -199,9 +199,13 @@ export default function Browse() {
 
   const [openPro, setOpenPro] = useState(null);
 
+  // feed states with pagination
   const [feed, setFeed] = useState([]);
   const [loadingFeed, setLoadingFeed] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [errFeed, setErrFeed] = useState("");
+  const [hasMore, setHasMore] = useState(true);
+  const pageSize = 8; // items per request
 
   // right-rail advert
   const [adminAdUrl, setAdminAdUrl] = useState("");
@@ -351,38 +355,80 @@ export default function Browse() {
     setLga("");
   }
 
-  // feed fetch
-  const fetchFeed = useCallback(async () => {
-    try {
-      setLoadingFeed(true);
-      setErrFeed("");
-      const params = {};
-      if (lga) params.lga = lga.toUpperCase();
-      const r = await api
-        .get("/api/feed/public", { params })
-        .catch(() => ({ data: [] }));
-      const list = Array.isArray(r.data)
-        ? r.data
-        : Array.isArray(r.data?.items)
-        ? r.data.items
-        : [];
-      setFeed(list);
-    } catch {
-      setErrFeed("Could not load feed.");
-    } finally {
-      setLoadingFeed(false);
-    }
-  }, [lga]);
+  // fetch feed (supports append via `before` cursor)
+  const fetchFeed = useCallback(
+    async ({ append = false, before = null } = {}) => {
+      try {
+        if (append) setLoadingMore(true);
+        else setLoadingFeed(true);
 
+        setErrFeed("");
+        const params = { limit: pageSize };
+        if (lga) params.lga = lga.toUpperCase();
+
+        // prefer cursor-based 'before' param (commonly supported). We fall back to page-style behavior naturally.
+        if (before) params.before = before;
+
+        const r = await api.get("/api/feed/public", { params }).catch(() => ({
+          data: [],
+        }));
+
+        // Normalize response
+        const list = Array.isArray(r.data)
+          ? r.data
+          : Array.isArray(r.data?.items)
+          ? r.data.items
+          : [];
+
+        if (append) {
+          // Avoid duplicates (by id)
+          const existingIds = new Set(feed.map((f) => f._id || f.id));
+          const newItems = list.filter((it) => !existingIds.has(it._id || it.id));
+          setFeed((prev) => [...prev, ...newItems]);
+        } else {
+          setFeed(list);
+        }
+
+        // if fewer than requested, assume no more
+        if (!list.length || list.length < pageSize) {
+          setHasMore(false);
+        } else {
+          setHasMore(true);
+        }
+      } catch (err) {
+        console.error("fetchFeed error:", err);
+        setErrFeed("Could not load feed.");
+      } finally {
+        setLoadingFeed(false);
+        setLoadingMore(false);
+      }
+    },
+    [lga, pageSize, feed]
+  );
+
+  // initial load & when lga or tab changes
   useEffect(() => {
-    fetchFeed();
-  }, [fetchFeed, tab]);
+    // only fetch when on feed tab
+    if (tab !== "feed") return;
+    // reset pagination state
+    setHasMore(true);
+    fetchFeed({ append: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fetchFeed, tab, lga]);
 
   // force feed tab if ?post= is present
   useEffect(() => {
     const qs = new URLSearchParams(location.search);
     if (qs.get("post")) setTab("feed");
   }, [location.search]);
+
+  async function loadMore() {
+    if (!hasMore || loadingMore) return;
+    // determine cursor: prefer last item's createdAt or _id
+    const last = feed[feed.length - 1];
+    const cursor = last ? last._id || last.id || last.createdAt : null;
+    await fetchFeed({ append: true, before: cursor });
+  }
 
   function goBook(pro, chosenService) {
     const svcName = chosenService || service || null;
@@ -535,15 +581,16 @@ export default function Browse() {
           </>
         ) : (
           // make layout stack on small screens to avoid horizontal overflow when zooming
-          <div className="flex flex-col lg:flex-row gap-4">
+          // use items-start so sidebars don't stretch the feed column vertically
+          <div className="flex flex-col lg:flex-row gap-4 items-start">
             {/* LEFT MENU - now actual component (mobile handled inside) */}
-            <div className="lg:w-56 w-full pt-1 flex-shrink-0 min-w-0">
+            <div className="lg:w-56 w-full pt-1 flex-shrink-0 min-w-0 self-start">
               <SideMenu me={me} />
             </div>
 
             {/* FEED */}
             <div className="flex-1 w-full max-w-2xl lg:mx-0 mx-auto">
-              {canPostOnFeed && <FeedComposer lga={lga} onPosted={fetchFeed} />}
+              {canPostOnFeed && <FeedComposer lga={lga} onPosted={() => fetchFeed({ append: false })} />}
               {errFeed && (
                 <div className="mb-4 rounded border border-red-800 bg-red-900/30 text-red-100 px-3 py-2">
                   {errFeed}
@@ -552,16 +599,50 @@ export default function Browse() {
               {loadingFeed ? (
                 <p className="text-zinc-400">Loading feed…</p>
               ) : feed.length ? (
-                <div className="space-y-4">
-                  {feed.slice(0, 8).map((post) => (
-                    <FeedCard
-                      key={post._id || post.id}
-                      post={post}
-                      currentUser={me ? { uid: me.uid || me.id, ...me } : null}
-                      onDeleted={fetchFeed}
-                    />
-                  ))}
-                </div>
+                <>
+                  <div className="space-y-4">
+                    {feed.map((post) => (
+                      <FeedCard
+                        key={post._id || post.id}
+                        post={post}
+                        currentUser={me ? { uid: me.uid || me.id, ...me } : null}
+                        onDeleted={() => fetchFeed({ append: false })}
+                      />
+                    ))}
+                  </div>
+
+                  {/* Load more button */}
+                  <div className="mt-6 flex justify-center">
+                    {hasMore ? (
+                      <button
+                        onClick={loadMore}
+                        disabled={loadingMore}
+                        className="flex items-center gap-2 px-4 py-2 rounded-md border border-zinc-700 hover:bg-zinc-900"
+                        aria-label="Load more posts"
+                      >
+                        {loadingMore ? (
+                          <span className="text-sm text-zinc-400">Loading…</span>
+                        ) : (
+                          <>
+                            <svg
+                              xmlns="http://www.w3.org/2000/svg"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              className="w-5 h-5"
+                              aria-hidden
+                            >
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                            </svg>
+                            <span className="text-sm">Load more</span>
+                          </>
+                        )}
+                      </button>
+                    ) : (
+                      <div className="text-xs text-zinc-500">No more posts</div>
+                    )}
+                  </div>
+                </>
               ) : (
                 <div className="rounded-lg border border-zinc-800 p-6 text-zinc-400">
                   No updates yet.
@@ -570,7 +651,7 @@ export default function Browse() {
             </div>
 
             {/* RIGHT ADS (narrower) */}
-            <div className="hidden lg:block w-56 pt-1 flex-shrink-0 min-w-0">
+            <div className="hidden lg:block w-56 pt-1 flex-shrink-0 min-w-0 self-start">
               <div className="sticky top-20 space-y-4">
                 {isAdmin ? (
                   <div className="rounded-lg border border-zinc-800 bg-black/40 p-3 space-y-2">
@@ -626,7 +707,7 @@ export default function Browse() {
                               tags: ["AD"],
                             });
                             setAdMsg("Published to feed ✔");
-                            await fetchFeed();
+                            await fetchFeed({ append: false });
                           } catch (e) {
                             setAdMsg(e?.response?.data?.error || "Failed to publish ad");
                           }
