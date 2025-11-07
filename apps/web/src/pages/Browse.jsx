@@ -431,7 +431,7 @@ export default function Browse() {
 
   // setup IntersectionObserver for infinite scroll
   useEffect(() => {
-    // disconnect previous observer (if any)
+    // clean up any previous observer
     if (observerRef.current) {
       observerRef.current.disconnect();
       observerRef.current = null;
@@ -466,7 +466,7 @@ export default function Browse() {
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, hasMore, loadingMore, loadingFeed, sentinelRef.current]);
+  }, [tab, hasMore, loadingMore, loadingFeed]);
 
   function goBook(pro, chosenService) {
     const svcName = chosenService || service || null;
@@ -498,6 +498,7 @@ export default function Browse() {
 
   return (
     <ErrorBoundary>
+      {/* NOTE: keep only overflow-x-hidden here; avoid overflow on Y/parent elements to preserve sticky */}
       <div className="max-w-6xl mx-auto px-4 py-10 overflow-x-hidden">
         {/* header + tabs */}
         <div className="mb-6 flex items-center justify-between gap-3 flex-wrap">
@@ -586,11 +587,9 @@ export default function Browse() {
           </>
         ) : (
           <div className="flex flex-col lg:flex-row gap-4 items-start">
-            {/* LEFT MENU - sticky */}
-            <div className="lg:w-56 w-full pt-1 flex-shrink-0 min-w-0 self-start">
-              <div className="sticky top-20">
-                <SideMenu me={me} />
-              </div>
+            {/* LEFT MENU - sticky on the column wrapper */}
+            <div className="lg:w-56 w-full pt-1 flex-shrink-0 min-w-0 self-start sticky top-20">
+              <SideMenu me={me} />
             </div>
 
             {/* FEED */}
@@ -640,9 +639,9 @@ export default function Browse() {
               )}
             </div>
 
-            {/* RIGHT ADS - sticky */}
-            <div className="hidden lg:block w-56 pt-1 flex-shrink-0 min-w-0 self-start">
-              <div className="sticky top-20 space-y-4">
+            {/* RIGHT ADS - sticky on the column wrapper */}
+            <div className="hidden lg:block w-56 pt-1 flex-shrink-0 min-w-0 self-start sticky top-20">
+              <div className="space-y-4">
                 {isAdmin ? (
                   <div className="rounded-lg border border-zinc-800 bg-black/40 p-3 space-y-2">
                     <div className="text-xs text-zinc-300 mb-1">Advert (admin only)</div>
