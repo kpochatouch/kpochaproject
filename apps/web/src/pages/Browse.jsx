@@ -199,13 +199,14 @@ export default function Browse() {
 
   const [openPro, setOpenPro] = useState(null);
 
-  // feed states with pagination
+  // feed states with pagination (page style)
   const [feed, setFeed] = useState([]);
   const [loadingFeed, setLoadingFeed] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [errFeed, setErrFeed] = useState("");
   const [hasMore, setHasMore] = useState(true);
   const pageSize = 8; // items per request
+  const pageRef = useRef(1); // current page tracker (not a state to avoid re-renders)
 
   // right-rail advert
   const [adminAdUrl, setAdminAdUrl] = useState("");
@@ -355,25 +356,26 @@ export default function Browse() {
     setLga("");
   }
 
-  // fetch feed (supports append via `before` cursor)
+  // fetch feed (page-based pagination)
   const fetchFeed = useCallback(
-    async ({ append = false, before = null } = {}) => {
+    async ({ append = false } = {}) => {
       try {
-        if (append) setLoadingMore(true);
-        else setLoadingFeed(true);
+        if (append) {
+          setLoadingMore(true);
+          pageRef.current = Math.max(1, pageRef.current + 1); // next page
+        } else {
+          setLoadingFeed(true);
+          pageRef.current = 1; // reset to first page
+        }
 
         setErrFeed("");
-        const params = { limit: pageSize };
+        const params = { limit: pageSize, page: pageRef.current };
         if (lga) params.lga = lga.toUpperCase();
-
-        // prefer cursor-based 'before' param (commonly supported). We fall back to page-style behavior naturally.
-        if (before) params.before = before;
 
         const r = await api.get("/api/feed/public", { params }).catch(() => ({
           data: [],
         }));
 
-        // Normalize response
         const list = Array.isArray(r.data)
           ? r.data
           : Array.isArray(r.data?.items)
@@ -381,15 +383,16 @@ export default function Browse() {
           : [];
 
         if (append) {
-          // Avoid duplicates (by id)
-          const existingIds = new Set(feed.map((f) => f._id || f.id));
-          const newItems = list.filter((it) => !existingIds.has(it._id || it.id));
-          setFeed((prev) => [...prev, ...newItems]);
+          setFeed((prev) => {
+            const existingIds = new Set(prev.map((f) => f._id || f.id));
+            const newItems = list.filter((it) => !existingIds.has(it._id || it.id));
+            return newItems.length ? [...prev, ...newItems] : prev;
+          });
         } else {
           setFeed(list);
         }
 
-        // if fewer than requested, assume no more
+        // Determine hasMore: if we received less than pageSize, assume end
         if (!list.length || list.length < pageSize) {
           setHasMore(false);
         } else {
@@ -403,17 +406,14 @@ export default function Browse() {
         setLoadingMore(false);
       }
     },
-    [lga, pageSize, feed]
+    [lga, pageSize]
   );
 
   // initial load & when lga or tab changes
   useEffect(() => {
-    // only fetch when on feed tab
     if (tab !== "feed") return;
-    // reset pagination state
     setHasMore(true);
     fetchFeed({ append: false });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchFeed, tab, lga]);
 
   // force feed tab if ?post= is present
@@ -424,10 +424,7 @@ export default function Browse() {
 
   async function loadMore() {
     if (!hasMore || loadingMore) return;
-    // determine cursor: prefer last item's createdAt or _id
-    const last = feed[feed.length - 1];
-    const cursor = last ? last._id || last.id || last.createdAt : null;
-    await fetchFeed({ append: true, before: cursor });
+    await fetchFeed({ append: true });
   }
 
   function goBook(pro, chosenService) {
@@ -707,6 +704,7 @@ export default function Browse() {
                               tags: ["AD"],
                             });
                             setAdMsg("Published to feed ✔");
+                            // refresh feed from page 1
                             await fetchFeed({ append: false });
                           } catch (e) {
                             setAdMsg(e?.response?.data?.error || "Failed to publish ad");
