@@ -110,6 +110,7 @@ export default function BarberCard({ barber = {}, onOpen, onBook }) {
   const rating = Math.max(0, Math.min(5, rawRating));
 
   function handleAvatarClick() {
+    // still allow old behavior (drawer) if parent passed it
     onOpen?.(barber);
   }
 
@@ -271,13 +272,14 @@ export default function BarberCard({ barber = {}, onOpen, onBook }) {
 
       {/* Bottom action bar */}
       <div className="absolute inset-x-5 bottom-3 z-10 flex items-center justify-between">
-        <button
-          onClick={() => onOpen?.(barber)}
+        <Link
+          to={id ? `/profile/${id}` : "#"}
           className="px-4 py-2 rounded-lg bg-black text-white font-bold text-sm shadow-md hover:opacity-90"
-          title="View full profile"
+          onClick={(e) => !id && e.preventDefault()}
+          title="View public profile"
         >
-          View now
-        </button>
+          View profile
+        </Link>
         {onBook ? (
           <button
             onClick={() => onBook(null)}

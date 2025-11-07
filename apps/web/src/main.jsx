@@ -5,20 +5,19 @@ import { BrowserRouter } from "react-router-dom";
 import App from "./App.jsx";
 import "./styles/global.css";
 import { AuthProvider } from "./context/AuthContext.jsx";
+import { MeProvider } from "./context/MeContext.jsx"; // ✅ add this
 
-// 🔐 Firebase token sync (your existing code)
+// 🔐 Firebase token sync
 import { getAuth, onIdTokenChanged } from "firebase/auth";
 
 // 🟡 AWS (added earlier)
 import { Amplify } from "aws-amplify";
 import awsconfig from "./aws-exports.js";
 
-// ✅ configure AWS safely (so missing envs won't break the app)
+// ✅ configure AWS safely
 if (typeof window !== "undefined") {
-  // avoid double-config on HMR
   if (!window.__KPOCHA_AWS_CONFIGURED__) {
     try {
-      // only configure if we actually have an identity pool or region
       if (
         awsconfig &&
         (awsconfig.aws_cognito_identity_pool_id || awsconfig.aws_project_region)
@@ -26,15 +25,13 @@ if (typeof window !== "undefined") {
         Amplify.configure(awsconfig);
       }
     } catch (e) {
-      // don't crash UI if AWS is not ready — liveness page will handle it
       console.warn("[kpocha] AWS Amplify config skipped:", e?.message);
     }
     window.__KPOCHA_AWS_CONFIGURED__ = true;
   }
 }
 
-// ✅ Keep Firebase ID token in sync with localStorage for API calls
-// (Prevents sign-out → instant sign-in loops and stale tokens)
+// ✅ Keep Firebase ID token in sync with localStorage
 function installAuthTokenSync() {
   const auth = getAuth();
   onIdTokenChanged(auth, async (user) => {
@@ -46,19 +43,19 @@ function installAuthTokenSync() {
         localStorage.removeItem("token");
       }
     } catch {
-      // best effort — don't crash the app
       localStorage.removeItem("token");
     }
   });
 }
-
-// Install listener once before rendering the app
 installAuthTokenSync();
 
+// ✅ Correct Provider order: AuthProvider → MeProvider → App
 createRoot(document.getElementById("root")).render(
   <BrowserRouter>
     <AuthProvider>
-      <App />
+      <MeProvider>
+        <App />
+      </MeProvider>
     </AuthProvider>
   </BrowserRouter>
 );

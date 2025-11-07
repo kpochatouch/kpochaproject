@@ -13,7 +13,7 @@ import Navbar from "./components/Navbar.jsx";
 import Footer from "./components/Footer.jsx";
 import RequireAuth from "./components/RequireAuth.jsx";
 import RouteLoader from "./components/RouteLoader.jsx";
-import { MeProvider, useMe } from "./context/MeContext.jsx";
+import { useMe } from "./context/MeContext.jsx";
 
 // ---------- pages (lazy) ----------
 const Home = lazy(() => import("./pages/Home.jsx"));
@@ -37,10 +37,11 @@ const DeactivateAccount = lazy(() => import("./pages/DeactivateAccount.jsx"));
 const ApplyThanks = lazy(() => import("./pages/ApplyThanks.jsx"));
 const PaymentConfirm = lazy(() => import("./pages/PaymentConfirm.jsx"));
 const AwsLiveness = lazy(() => import("./pages/AwsLiveness.jsx"));
-
-// new pages you added
 const RiskLogs = lazy(() => import("./pages/RiskLogs.jsx"));
 const Chat = lazy(() => import("./pages/Chat.jsx"));
+
+// ✅ new public profile page (facebook-like)
+const PublicProfile = lazy(() => import("./pages/PublicProfile.jsx"));
 
 /* ---------- Chatbase hook ---------- */
 function useChatbase() {
@@ -112,14 +113,12 @@ function FindProSmart() {
   useEffect(() => {
     let alive = true;
     (async () => {
-      // not logged in -> go login
       if (!me && !loading) {
         navigate("/login", { replace: true, state: { from: loc } });
         return;
       }
       if (loading) return;
 
-      // logged in -> check if client profile exists
       try {
         const { data } = await api.get("/api/profile/client/me");
         if (!alive) return;
@@ -149,6 +148,8 @@ export default function App() {
   useEffect(() => {
     import("./pages/Browse.jsx");
     import("./pages/Profile.jsx");
+    // ✅ prefetch the public profile too
+    import("./pages/PublicProfile.jsx");
   }, []);
 
   // hide chrome for aws-liveness
@@ -159,160 +160,161 @@ export default function App() {
       {!hideChrome && <Navbar />}
 
       <main className={hideChrome ? "flex-1 bg-black" : "flex-1"}>
-        <MeProvider>
-          <Suspense fallback={<RouteLoader full />}>
-            <Routes>
-              {/* public */}
-              <Route path="/" element={<Home />} />
-              <Route path="/browse" element={<Browse />} />
-              <Route path="/find" element={<FindProSmart />} />
-              <Route path="/book/:barberId" element={<BookService />} />
-              <Route path="/login" element={<Login />} />
-              <Route path="/signup" element={<Signup />} />
-              <Route path="/legal" element={<Legal />} />
-              <Route path="/legal/*" element={<Legal />} />
+        <Suspense fallback={<RouteLoader full />}>
+          <Routes>
+            {/* public */}
+            <Route path="/" element={<Home />} />
+            <Route path="/browse" element={<Browse />} />
+            <Route path="/find" element={<FindProSmart />} />
+            <Route path="/book/:barberId" element={<BookService />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/signup" element={<Signup />} />
+            <Route path="/legal" element={<Legal />} />
+            <Route path="/legal/*" element={<Legal />} />
 
-              {/* booking details require auth */}
-              <Route
-                path="/bookings/:id"
-                element={
-                  <RequireAuth>
-                    <BookingDetails />
-                  </RequireAuth>
-                }
-              />
+            {/* ✅ public profile for pros/barbers */}
+            <Route path="/profile/:id" element={<PublicProfile />} />
 
-              {/* profile */}
-              <Route
-                path="/profile"
-                element={
-                  <RequireAuth>
-                    <Profile />
-                  </RequireAuth>
-                }
-              />
+            {/* booking details require auth */}
+            <Route
+              path="/bookings/:id"
+              element={
+                <RequireAuth>
+                  <BookingDetails />
+                </RequireAuth>
+              }
+            />
 
-              {/* wallet */}
-              <Route
-                path="/wallet"
-                element={
-                  <RequireAuth>
-                    <WalletSmart />
-                  </RequireAuth>
-                }
-              />
+            {/* user's own profile (private) */}
+            <Route
+              path="/profile"
+              element={
+                <RequireAuth>
+                  <Profile />
+                </RequireAuth>
+              }
+            />
 
-              {/* settings */}
-              <Route
-                path="/settings"
-                element={
-                  <RequireAuth>
-                    <SettingsSmart />
-                  </RequireAuth>
-                }
-              />
+            {/* wallet */}
+            <Route
+              path="/wallet"
+              element={
+                <RequireAuth>
+                  <WalletSmart />
+                </RequireAuth>
+              }
+            />
 
-              {/* become */}
-              <Route
-                path="/become"
-                element={
-                  <RequireAuth>
-                    <BecomePro />
-                  </RequireAuth>
-                }
-              />
+            {/* settings */}
+            <Route
+              path="/settings"
+              element={
+                <RequireAuth>
+                  <SettingsSmart />
+                </RequireAuth>
+              }
+            />
 
-              {/* ONLY AWS LIVENESS */}
-              <Route
-                path="/aws-liveness"
-                element={
-                  <RequireAuth>
-                    <AwsLiveness />
-                  </RequireAuth>
-                }
-              />
+            {/* become */}
+            <Route
+              path="/become"
+              element={
+                <RequireAuth>
+                  <BecomePro />
+                </RequireAuth>
+              }
+            />
 
-              {/* client register */}
-              <Route
-                path="/client/register"
-                element={
-                  <RequireAuth>
-                    <ClientRegister />
-                  </RequireAuth>
-                }
-              />
-              <Route
-                path="/register"
-                element={<Navigate to="/client/register" replace />}
-              />
+            {/* ONLY AWS LIVENESS */}
+            <Route
+              path="/aws-liveness"
+              element={
+                <RequireAuth>
+                  <AwsLiveness />
+                </RequireAuth>
+              }
+            />
 
-              {/* deactivate */}
-              <Route
-                path="/deactivate"
-                element={
-                  <RequireAuth>
-                    <DeactivateAccount />
-                  </RequireAuth>
-                }
-              />
+            {/* client register */}
+            <Route
+              path="/client/register"
+              element={
+                <RequireAuth>
+                  <ClientRegister />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/register"
+              element={<Navigate to="/client/register" replace />}
+            />
 
-              {/* pro dashboard */}
-              <Route
-                path="/pro-dashboard"
-                element={
-                  <RequireRole role="pro">
-                    <ProDashboard />
-                  </RequireRole>
-                }
-              />
+            {/* deactivate */}
+            <Route
+              path="/deactivate"
+              element={
+                <RequireAuth>
+                  <DeactivateAccount />
+                </RequireAuth>
+              }
+            />
 
-              {/* admin */}
-              <Route
-                path="/admin"
-                element={
-                  <RequireRole role="admin">
-                    <Admin />
-                  </RequireRole>
-                }
-              />
-              <Route
-                path="/admin/decline/:id"
-                element={
-                  <RequireRole role="admin">
-                    <AdminDecline />
-                  </RequireRole>
-                }
-              />
+            {/* pro dashboard */}
+            <Route
+              path="/pro-dashboard"
+              element={
+                <RequireRole role="pro">
+                  <ProDashboard />
+                </RequireRole>
+              }
+            />
 
-              {/* admin - risk logs */}
-              <Route
-                path="/risk-logs"
-                element={
-                  <RequireRole role="admin">
-                    <RiskLogs />
-                  </RequireRole>
-                }
-              />
+            {/* admin */}
+            <Route
+              path="/admin"
+              element={
+                <RequireRole role="admin">
+                  <Admin />
+                </RequireRole>
+              }
+            />
+            <Route
+              path="/admin/decline/:id"
+              element={
+                <RequireRole role="admin">
+                  <AdminDecline />
+                </RequireRole>
+              }
+            />
 
-              {/* chat */}
-              <Route
-                path="/chat"
-                element={
-                  <RequireAuth>
-                    <Chat />
-                  </RequireAuth>
-                }
-              />
+            {/* admin - risk logs */}
+            <Route
+              path="/risk-logs"
+              element={
+                <RequireRole role="admin">
+                  <RiskLogs />
+                </RequireRole>
+              }
+            />
 
-              {/* payments & misc */}
-              <Route path="/apply/thanks" element={<ApplyThanks />} />
-              <Route path="/payment/confirm" element={<PaymentConfirm />} />
+            {/* chat */}
+            <Route
+              path="/chat"
+              element={
+                <RequireAuth>
+                  <Chat />
+                </RequireAuth>
+              }
+            />
 
-              {/* fallback */}
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
-          </Suspense>
-        </MeProvider>
+            {/* payments & misc */}
+            <Route path="/apply/thanks" element={<ApplyThanks />} />
+            <Route path="/payment/confirm" element={<PaymentConfirm />} />
+
+            {/* fallback */}
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Suspense>
       </main>
 
       {!hideChrome && <Footer />}

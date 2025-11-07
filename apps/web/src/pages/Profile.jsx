@@ -4,9 +4,16 @@ import { api } from "../lib/api";
 
 export default function Profile() {
   const [loading, setLoading] = useState(true);
-  const [me, setMe] = useState(null);
-  const [clientProfile, setClientProfile] = useState(null);
   const [error, setError] = useState("");
+
+  // basic user
+  const [me, setMe] = useState(null);
+  // client profile (old collection)
+  const [clientProfile, setClientProfile] = useState(null);
+  // private pro (from /api/pros/me) → owner-only, includes contact
+  const [proPrivate, setProPrivate] = useState(null);
+  // public pro (from /api/barbers/:id) → what cards show
+  const [proPublic, setProPublic] = useState(null);
 
   useEffect(() => {
     let mounted = true;
@@ -15,16 +22,39 @@ export default function Profile() {
         setLoading(true);
         setError("");
 
+        // 1) /api/me → tells us if user is pro
         const { data: meData } = await api.get("/api/me");
         if (!mounted) return;
         setMe(meData);
 
-        // Optional: profile router may not exist in all envs
+        // 2) client profile (may fail if route missing)
         try {
           const { data: profData } = await api.get("/api/profile/me");
           if (mounted) setClientProfile(profData || null);
         } catch {
           if (mounted) setClientProfile(null);
+        }
+
+        // 3) if user is pro, get their private pro
+        if (meData?.pro?.id || meData?.isPro) {
+          // private
+          try {
+            const { data: proData } = await api.get("/api/pros/me");
+            if (mounted) setProPrivate(proData || null);
+          } catch {
+            if (mounted) setProPrivate(null);
+          }
+
+          // public (card shape)
+          const proId = meData?.pro?.id;
+          if (proId) {
+            try {
+              const { data: pubData } = await api.get(`/api/barbers/${proId}`);
+              if (mounted) setProPublic(pubData || null);
+            } catch {
+              if (mounted) setProPublic(null);
+            }
+          }
         }
       } catch {
         if (mounted) setError("Please sign in to view your profile.");
@@ -43,19 +73,21 @@ export default function Profile() {
     return `${"*".repeat(Math.max(0, s.length - 4))}${s.slice(-4)}`;
   }
 
+  // unified display name
   const displayName =
     clientProfile?.fullName ||
     me?.displayName ||
     me?.email ||
     "Your Account";
 
-  // add identity.photoUrl fallback to stay in sync with Settings/Become
+  // unified avatar
   const avatarUrl =
     clientProfile?.photoUrl ||
     me?.photoUrl ||
     me?.identity?.photoUrl ||
     "";
 
+  // unified phone (user's own phone — this page is private to the owner)
   const phone =
     clientProfile?.phone ||
     clientProfile?.identity?.phone ||
@@ -76,6 +108,8 @@ export default function Profile() {
     me?.identity?.city ||
     "";
 
+  const isPro = !!(me?.isPro || me?.pro);
+
   return (
     <div className="max-w-5xl mx-auto px-4 py-10">
       {/* Header */}
@@ -85,7 +119,7 @@ export default function Profile() {
           <div>
             <h1 className="text-2xl font-semibold">{displayName}</h1>
             <p className="text-zinc-400 text-sm">
-              Personal profile • Manage your account and booking details
+              Personal profile • Manage what you and others can see
             </p>
           </div>
         </div>
@@ -122,7 +156,7 @@ export default function Profile() {
 
       {!loading && me && (
         <div className="space-y-6">
-          {/* Account details */}
+          {/* Account details (always) */}
           <Section title="Account Details">
             <div className="grid sm:grid-cols-2 gap-4">
               <ReadOnly label="Email" value={me.email || "—"} />
@@ -132,19 +166,19 @@ export default function Profile() {
               <ReadOnly label="User ID" value={me.uid} mono />
             </div>
 
-            {/* (Optional) Deactivation status surfaced from /api/me */}
+            {/* Optional deactivation */}
             {typeof me.deactivationStatus !== "undefined" && (
               <div className="mt-3 grid sm:grid-cols-2 gap-4">
                 <ReadOnly
-                    label="Account Deactivation"
-                    value={
-                      me.deactivationStatus
-                        ? me.deactivationStatus === "pending"
-                          ? "Pending"
-                          : me.deactivationStatus
-                        : "—"
-                    }
-                  />
+                  label="Account Deactivation"
+                  value={
+                    me.deactivationStatus
+                      ? me.deactivationStatus === "pending"
+                        ? "Pending"
+                        : me.deactivationStatus
+                      : "—"
+                  }
+                />
                 <div className="flex items-end">
                   <a
                     href="/deactivate"
@@ -157,57 +191,65 @@ export default function Profile() {
             )}
           </Section>
 
-          {/* Private client info */}
+          {/* Client private block */}
           <Section
             title="Private Client Info"
-            hint="Only visible to admins and to a professional who has accepted your booking. Never shown publicly."
+            hint="Only you, admin, or a professional involved in your booking can see this. Not shown to the public."
           >
             <div className="grid sm:grid-cols-2 gap-4">
-              {/* your client settings saves `address`, not `houseAddress` */}
-              <ReadOnly label="House Address" value={clientProfile?.address || "—"} />
+              <ReadOnly
+                label="House Address"
+                value={clientProfile?.address || "—"}
+              />
               <ReadOnly
                 label="Means of ID"
                 value={
                   clientProfile?.idType
                     ? `${clientProfile.idType}${
-                        clientProfile.idNumber ? ` (${maskId(clientProfile.idNumber)})` : ""
+                        clientProfile.idNumber
+                          ? ` (${maskId(clientProfile.idNumber)})`
+                          : ""
                       }`
                     : "—"
                 }
               />
               <ReadOnly
                 label="ID Verified"
-                value={clientProfile ? (clientProfile.idVerified ? "Yes" : "Not verified") : "—"}
+                value={
+                  clientProfile
+                    ? clientProfile.idVerified
+                      ? "Yes"
+                      : "Not verified"
+                    : "—"
+                }
               />
             </div>
           </Section>
 
-          {/* Professional block */}
-          <Section title="Professional">
-            {me.isPro ? (
-              <>
-                <div className="flex items-center justify-between mb-3">
-                  <div className="text-sm text-zinc-300">
-                    ✅ Approved
-                    {me.proName ? ` — ${me.proName}` : ""}
-                    {me.lga ? ` (${me.lga})` : ""}
-                  </div>
-                  <a
-                    href="/pro"
-                    className="rounded-lg bg-gold text-black px-3 py-1.5 text-sm font-semibold hover:opacity-90"
-                  >
-                    Open Pro Dashboard
-                  </a>
+          {/* Pro sections */}
+          <Section title="Professional Status">
+            {isPro ? (
+              <div className="flex items-center justify-between">
+                <div className="text-sm text-zinc-300 flex flex-wrap gap-2">
+                  <span>✅ You are an approved professional.</span>
+                  {me?.pro?.status && (
+                    <span className="text-zinc-500">
+                      Status: {me.pro.status}
+                    </span>
+                  )}
                 </div>
-                <div className="grid sm:grid-cols-2 gap-4">
-                  {me.proId && <ReadOnly label="Pro ID" value={me.proId} mono />}
-                  <ReadOnly label="Public Name" value={me.proName || "—"} />
-                </div>
-              </>
+                <a
+                  href="/pro"
+                  className="rounded-lg bg-gold text-black px-3 py-1.5 text-sm font-semibold hover:opacity-90"
+                >
+                  Open Pro Dashboard
+                </a>
+              </div>
             ) : (
               <div className="flex items-center justify-between">
-                <div className="text-sm text-zinc-300">You’re not a professional yet.</div>
-                {/* make consistent with other pages -> /become */}
+                <div className="text-sm text-zinc-300">
+                  You’re not a professional yet.
+                </div>
                 <a
                   href="/become"
                   className="rounded-lg border border-gold px-3 py-1.5 text-sm hover:bg-gold hover:text-black"
@@ -218,10 +260,134 @@ export default function Profile() {
             )}
           </Section>
 
+          {/* What the public sees about your pro */}
+          {isPro && (
+            <Section
+              title="Your Pro Profile (Public View)"
+              hint="This is the safe data shown on cards/browse. Contact details are NOT exposed here."
+            >
+              {proPublic ? (
+                <div className="space-y-3">
+                  <div className="grid sm:grid-cols-2 gap-4">
+                    <ReadOnly label="Name" value={proPublic.name || "—"} />
+                    <ReadOnly
+                      label="Location"
+                      value={
+                        [proPublic.state, proPublic.lga]
+                          .filter(Boolean)
+                          .join(", ") || "—"
+                      }
+                    />
+                    <ReadOnly
+                      label="Availability"
+                      value={
+                        typeof proPublic.availability === "string"
+                          ? proPublic.availability
+                          : "Available"
+                      }
+                    />
+                    <ReadOnly
+                      label="Rating (if any)"
+                      value={
+                        proPublic.rating && proPublic.rating > 0
+                          ? `${proPublic.rating.toFixed(1)} / 5`
+                          : "No reviews yet"
+                      }
+                    />
+                  </div>
+
+                  {/* top services */}
+                  {Array.isArray(proPublic.services) &&
+                    proPublic.services.length > 0 && (
+                      <div>
+                        <p className="text-xs text-zinc-500 mb-1">
+                          Services (public):
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          {proPublic.services.slice(0, 5).map((s, i) => (
+                            <span
+                              key={i}
+                              className="inline-flex px-3 py-1 text-xs rounded-full bg-zinc-900 border border-zinc-800"
+                            >
+                              {s.name}
+                              {typeof s.price === "number" &&
+                                s.price > 0 &&
+                                ` • ₦${s.price.toLocaleString()}`}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                  {/* gallery/badges omitted here for brevity, but they can be listed */}
+                </div>
+              ) : (
+                <p className="text-sm text-zinc-500">
+                  We couldn’t load your public pro profile yet.
+                </p>
+              )}
+            </Section>
+          )}
+
+          {/* Private pro details – only owner/admin should see */}
+          {isPro && (
+            <Section
+              title="Pro Contact (Private)"
+              hint="Only you, admin, or booking counterpart should use these. We don’t show these on public cards."
+            >
+              {proPrivate ? (
+                <div className="grid sm:grid-cols-2 gap-4">
+                  <ReadOnly
+                    label="Public Phone"
+                    value={
+                      proPrivate?.contactPublic?.phone ||
+                      proPrivate?.phone ||
+                      "—"
+                    }
+                  />
+                  <ReadOnly
+                    label="Shop Address"
+                    value={
+                      proPrivate?.contactPublic?.shopAddress ||
+                      proPrivate?.business?.shopAddress ||
+                      "—"
+                    }
+                  />
+                  <ReadOnly
+                    label="WhatsApp"
+                    value={proPrivate?.contactPublic?.whatsapp || "—"}
+                  />
+                  <ReadOnly
+                    label="Private Alt Phone"
+                    value={proPrivate?.contactPrivate?.altPhone || "—"}
+                  />
+                  <ReadOnly
+                    label="Pro ID"
+                    value={proPrivate?._id || me?.pro?.id || "—"}
+                    mono
+                  />
+                  <ReadOnly
+                    label="Owner UID"
+                    value={proPrivate?.ownerUid || "—"}
+                    mono
+                  />
+                </div>
+              ) : (
+                <p className="text-sm text-zinc-500">
+                  You are a pro, but we couldn’t load your private contact
+                  details.
+                </p>
+              )}
+            </Section>
+          )}
+
           {/* Security overview */}
           <Section title="Security & Wallet">
             <div className="grid sm:grid-cols-2 gap-4">
-              <ReadOnly label="Wallet PIN" value={me.hasPin ? "Set" : "Not set"} />
+              <ReadOnly
+                label="Wallet PIN"
+                value={me.hasPin ? "Set" : "Not set"}
+              />
               <ReadOnly label="Admin" value={me.isAdmin ? "Yes" : "No"} />
             </div>
             <div className="flex gap-2 mt-4">

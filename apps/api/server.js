@@ -520,6 +520,14 @@ async function getVerifiedClientIdentity(uid) {
   }
 }
 
+// PUBLIC SANITIZER for pro/barber response
+// we call this in server.js so even if proToBarber starts returning phone,
+// public endpoints will not leak it.
+function scrubPublicPro(p = {}) {
+  const { phone, shopAddress, whatsapp, ...rest } = p;
+  return rest;
+}
+
 /* ------------------- Current user profile summary ------------------- */
 /**
  * ★ this is the important fix
@@ -601,6 +609,19 @@ app.get("/api/me", requireAuth, async (req, res) => {
     });
   } catch (e) {
     res.status(500).json({ error: "failed_me" });
+  }
+});
+
+/* ------------------- Pro private endpoint (owner sees full pro) ------------------- */
+app.get("/api/pros/me", requireAuth, async (req, res) => {
+  try {
+    const pro = await Pro.findOne({ ownerUid: req.user.uid }).lean();
+    if (!pro) return res.status(404).json({ error: "pro_not_found" });
+    // owner can see everything
+    return res.json(pro);
+  } catch (e) {
+    console.error("[/api/pros/me] error:", e?.message || e);
+    return res.status(500).json({ error: "failed" });
   }
 });
 
@@ -1011,7 +1032,9 @@ app.get("/api/barbers", async (req, res) => {
     const query = and.length ? { $and: and } : {};
 
     const docs = await Pro.find(query).lean();
-    return res.json(docs.map(proToBarber));
+    // scrub public so phone/address don't leak
+    const shaped = docs.map((d) => scrubPublicPro(proToBarber(d)));
+    return res.json(shaped);
   } catch (err) {
     console.error("[barbers] DB error:", err);
     res.status(500).json({ error: "Failed to load barbers" });
@@ -1028,12 +1051,60 @@ app.get("/api/barbers/:id", async (req, res) => {
       return res.status(503).json({ error: "Database not connected" });
     const doc = await Pro.findById(req.params.id).lean();
     if (!doc) return res.status(404).json({ error: "Not found" });
-    return res.json(proToBarber(doc));
+    // scrub public
+    return res.json(scrubPublicPro(proToBarber(doc)));
   } catch (err) {
     console.error("[barbers:id] DB error:", err);
     res.status(500).json({ error: "Failed to load barber" });
   }
 });
+
+/* ------------------- Contact for booking (restricted) ------------------- */
+app.get(
+  "/api/pros/:id/contact-for-booking/:bookingId",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const pro = await Pro.findById(req.params.id).lean();
+      if (!pro) return res.status(404).json({ error: "pro_not_found" });
+
+      const booking = await Booking.findById(req.params.bookingId).lean();
+      if (!booking) return res.status(404).json({ error: "booking_not_found" });
+
+      const isAdmin = isAdminUid(req.user.uid);
+      const isClient = booking.clientUid === req.user.uid;
+      const isProOwner = pro.ownerUid === req.user.uid;
+
+      if (!isAdmin && !isClient && !isProOwner) {
+        return res.status(403).json({ error: "not_allowed" });
+      }
+
+      const phone =
+        pro?.contactPublic?.phone ||
+        pro?.phone ||
+        pro?.identity?.phone ||
+        "";
+
+      const shopAddress =
+        pro?.contactPublic?.shopAddress ||
+        pro?.business?.shopAddress ||
+        "";
+
+      return res.json({
+        ok: true,
+        phone,
+        shopAddress,
+        whatsapp: pro?.contactPublic?.whatsapp || "",
+      });
+    } catch (e) {
+      console.error(
+        "[/api/pros/:id/contact-for-booking] error:",
+        e?.message || e
+      );
+      return res.status(500).json({ error: "failed" });
+    }
+  }
+);
 
 /* ------------------- Barbers Nearby ------------------- */
 const GEOAPIFY_KEY = process.env.GEOAPIFY_KEY || "";
@@ -1104,7 +1175,7 @@ app.get("/api/barbers/nearby", async (req, res) => {
         { $limit: 100 },
       ]);
       items = agg.map((d) => {
-        const shaped = proToBarber(d);
+        const shaped = scrubPublicPro(proToBarber(d));
         return { ...shaped, distanceKm: Math.round((d.dist / 1000) * 10) / 10 };
       });
     } catch {
@@ -1118,7 +1189,7 @@ app.get("/api/barbers/nearby", async (req, res) => {
       if (lga) q.lga = lga;
 
       const docs = await Pro.find(q).limit(100).lean();
-      items = docs.map((d) => ({ ...proToBarber(d), distanceKm: null }));
+      items = docs.map((d) => ({ ...scrubPublicPro(proToBarber(d)), distanceKm: null }));
     }
 
     return res.json({ mode: used, radiusKm, count: items.length, items });

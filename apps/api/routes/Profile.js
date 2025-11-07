@@ -8,7 +8,9 @@ import mongoose from "mongoose";
 
 const router = express.Router();
 
-/* --------- Auth & Admin helpers --------- */
+/* ------------------------------------------------------------------
+   AUTH HELPERS
+   ------------------------------------------------------------------ */
 async function requireAuth(req, res, next) {
   try {
     const h = req.headers.authorization || "";
@@ -47,8 +49,10 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-/* -------------------- Utils -------------------- */
-function maskClientProfileForClientView(p, { includeEmail = false } = {}) {
+/* ------------------------------------------------------------------
+   UTILS
+   ------------------------------------------------------------------ */
+function maskClientProfileForClientView(p) {
   if (!p) return null;
   const obj = { ...p };
   delete obj.ownerUid;
@@ -91,22 +95,84 @@ function buildProfilesSetFromPayload(payload = {}) {
   return set;
 }
 
-/* ============================================================
-   CLIENT PROFILE
-   ============================================================ */
+/* ------------------------------------------------------------------
+   1) ENSURE PROFILE (this is the ONLY one allowed to CREATE)
+   ------------------------------------------------------------------ */
+router.post("/profile/ensure", requireAuth, async (req, res) => {
+  try {
+    const uid = req.user.uid;
+    if (!uid) return res.status(400).json({ error: "missing_uid" });
 
+    // see if we already have a client profile (old code may have used uid OR ownerUid)
+    const existing = await ClientProfile.findOne({
+      $or: [{ ownerUid: uid }, { uid }],
+    }).lean();
+
+    if (!existing) {
+      // create minimal doc
+      const base = {
+        uid,
+        ownerUid: uid,
+        fullName: (req.user.email || "").split("@")[0] || "",
+      };
+      await ClientProfile.create(base);
+
+      // also update raw "profiles" collection used by server.js/admin
+      try {
+        const col = mongoose.connection.db.collection("profiles");
+        await col.updateOne({ uid }, { $set: base }, { upsert: true });
+      } catch (e) {
+        console.warn("[profile:ensure] raw sync skipped:", e?.message || e);
+      }
+
+      return res.json({ ok: true, created: true });
+    }
+
+    // profile exists → make sure raw collection also has it
+    try {
+      const col = mongoose.connection.db.collection("profiles");
+      await col.updateOne(
+        { uid },
+        {
+          $set: {
+            uid,
+            ownerUid: uid,
+            fullName: existing.fullName || "",
+            phone: existing.phone || "",
+            state: existing.state || "",
+            lga: existing.lga || "",
+            address: existing.address || "",
+            photoUrl: existing.photoUrl || "",
+            ...(existing.identity ? { identity: existing.identity } : {}),
+          },
+        },
+        { upsert: true }
+      );
+    } catch (e) {
+      console.warn("[profile:ensure-existing] raw sync skipped:", e?.message || e);
+    }
+
+    return res.json({ ok: true, created: false });
+  } catch (e) {
+    console.warn("[profile:ensure] error", e?.message || e);
+    return res.status(500).json({ error: "ensure_failed" });
+  }
+});
+
+/* ------------------------------------------------------------------
+   2) CLIENT PROFILE - GET
+   ------------------------------------------------------------------ */
 async function handleGetClientMe(req, res) {
   try {
     const p = await ClientProfile.findOne({ ownerUid: req.user.uid }).lean();
 
-    // also tell the UI whether this user is a pro, and the pro photo
+    // also expose pro info (some frontend bits show if user is pro)
     const pro = await Pro.findOne({ ownerUid: req.user.uid })
       .select("_id name photoUrl status")
       .lean()
       .catch(() => null);
 
-    const masked =
-      maskClientProfileForClientView(p, { includeEmail: true }) || {};
+    const masked = maskClientProfileForClientView(p) || {};
 
     return res.json({
       ...masked,
@@ -126,27 +192,34 @@ async function handleGetClientMe(req, res) {
   }
 }
 
+/* ------------------------------------------------------------------
+   3) CLIENT PROFILE - UPDATE ONLY (no create here)
+   ------------------------------------------------------------------ */
 async function handlePutClientMe(req, res) {
   try {
     const payload = req.body || {};
     if (payload.lga) payload.lga = String(payload.lga).toUpperCase();
     if (payload.state) payload.state = String(payload.state).toUpperCase();
 
-    // 1) save / upsert client profile in the mongoose model
+    // IMPORTANT: do NOT create here — if missing, frontend must call /profile/ensure first
     const updated = await ClientProfile.findOneAndUpdate(
       { ownerUid: req.user.uid },
-      { $set: { ...payload, ownerUid: req.user.uid } },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
+      { $set: { ...payload, ownerUid: req.user.uid, uid: req.user.uid } },
+      { new: true } // ← no upsert
     ).lean();
 
-    // 1b) also keep the raw "profiles" collection in sync
+    if (!updated) {
+      return res.status(404).json({ error: "profile_not_found" });
+    }
+
+    // keep raw "profiles" collection in sync — server.js/admin depends on it
     try {
       const col = mongoose.connection.db.collection("profiles");
       const $set = buildProfilesSetFromPayload(payload);
       if (Object.keys($set).length > 0) {
         await col.updateOne(
           { uid: req.user.uid },
-          { $set: $set },
+          { $set: { ...$set, uid: req.user.uid, ownerUid: req.user.uid } },
           { upsert: true }
         );
       }
@@ -154,7 +227,7 @@ async function handlePutClientMe(req, res) {
       console.warn("[profile->profiles col sync] skipped:", e?.message || e);
     }
 
-    // 2) mirror to Pro if user already has a Pro
+    // if user is already a pro, mirror important fields to Pro
     try {
       const pro = await Pro.findOne({ ownerUid: req.user.uid }).lean();
       if (pro) {
@@ -167,10 +240,7 @@ async function handlePutClientMe(req, res) {
           fresh?.fullName ||
           fresh?.displayName ||
           fresh?.name ||
-          [
-            fresh?.identity?.firstName,
-            fresh?.identity?.lastName,
-          ]
+          [fresh?.identity?.firstName, fresh?.identity?.lastName]
             .filter(Boolean)
             .join(" ")
             .trim() ||
@@ -179,10 +249,7 @@ async function handlePutClientMe(req, res) {
         const nameFromPayload =
           payload.fullName ||
           (payload.identity &&
-            [
-              payload.identity.firstName,
-              payload.identity.lastName,
-            ]
+            [payload.identity.firstName, payload.identity.lastName]
               .filter(Boolean)
               .join(" ")
               .trim()) ||
@@ -200,7 +267,8 @@ async function handlePutClientMe(req, res) {
         if (phone) mirror.phone = phone;
 
         const lga =
-          (payload.lga ||
+          (
+            payload.lga ||
             payload.state ||
             payload.identity?.lga ||
             payload.identity?.state ||
@@ -208,7 +276,8 @@ async function handlePutClientMe(req, res) {
             fresh?.state ||
             fresh?.identity?.lga ||
             fresh?.identity?.state ||
-            "")
+            ""
+          )
             .toString()
             .toUpperCase();
         if (lga) mirror.lga = lga;
@@ -233,8 +302,7 @@ async function handlePutClientMe(req, res) {
       console.warn("[profile->pro sync] skipped:", e?.message || e);
     }
 
-    const masked =
-      maskClientProfileForClientView(updated, { includeEmail: true }) || {};
+    const masked = maskClientProfileForClientView(updated) || {};
     return res.json({ ...masked, email: req.user.email || "" });
   } catch (e) {
     console.warn("[profile:put/me] error", e?.message || e);
@@ -242,15 +310,19 @@ async function handlePutClientMe(req, res) {
   }
 }
 
-// Canonical paths
+/* ------------------------------------------------------------------
+   REGISTER ROUTES (same paths as before, so other code stays working)
+   ------------------------------------------------------------------ */
 router.get("/profile/client/me", requireAuth, handleGetClientMe);
 router.put("/profile/client/me", requireAuth, handlePutClientMe);
 
-// Aliases
+// aliases kept for old frontend code
 router.get("/profile/me", requireAuth, handleGetClientMe);
 router.put("/profile/me", requireAuth, handlePutClientMe);
 
-// Admin read
+/* ------------------------------------------------------------------
+   ADMIN READ (kept exactly as before)
+   ------------------------------------------------------------------ */
 router.get(
   "/profile/client/:uid/admin",
   requireAuth,
@@ -267,7 +339,9 @@ router.get(
   }
 );
 
-// Pro can view client for a booking (safe version)
+/* ------------------------------------------------------------------
+   PRO CAN VIEW CLIENT FOR A BOOKING (kept)
+   ------------------------------------------------------------------ */
 router.get(
   "/profile/client/:uid/for-booking/:bookingId",
   requireAuth,
@@ -278,11 +352,9 @@ router.get(
 
       let isProOwner = false;
 
-      // old way: booking saved proOwnerUid
       if (b.proOwnerUid && b.proOwnerUid === req.user.uid) {
         isProOwner = true;
       } else if (b.proId) {
-        // also allow if this user owns the pro in the booking
         const pro = await Pro.findOne({
           _id: b.proId,
           ownerUid: req.user.uid,
@@ -306,9 +378,7 @@ router.get(
       }
 
       if (b.clientUid !== req.params.uid) {
-        return res
-          .status(400)
-          .json({ error: "Client UID does not match booking" });
+        return res.status(400).json({ error: "Client UID does not match booking" });
       }
 
       const p = await ClientProfile.findOne({
@@ -324,9 +394,9 @@ router.get(
   }
 );
 
-/* ============================================================
-   PRO PROFILE (EXTRAS)
-   ============================================================ */
+/* ------------------------------------------------------------------
+   PRO PROFILE (extras) — kept exactly
+   ------------------------------------------------------------------ */
 router.get("/profile/pro/:proId", async (req, res) => {
   try {
     const p = await ProProfile.findOne({
@@ -342,10 +412,9 @@ router.get("/profile/pro/:proId", async (req, res) => {
 router.put("/profile/pro/me", requireAuth, async (req, res) => {
   try {
     const pro = await Pro.findOne({ ownerUid: req.user.uid }).lean();
-    if (!pro)
-      return res
-        .status(403)
-        .json({ error: "You are not an approved professional" });
+    if (!pro) {
+      return res.status(403).json({ error: "You are not an approved professional" });
+    }
 
     const payload = req.body || {};
     const toSet = { ...payload, ownerUid: req.user.uid, proId: pro._id };

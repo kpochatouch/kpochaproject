@@ -32,9 +32,9 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
 
   // MAIN docs
-  const [me, setMe] = useState(null);          // /api/me
-  const [client, setClient] = useState(null);  // /api/profile/me (may be null)
-  const [appDoc, setAppDoc] = useState(null);  // /api/pros/me (may be null)
+  const [me, setMe] = useState(null); // /api/me
+  const [client, setClient] = useState(null); // /api/profile/me
+  const [appDoc, setAppDoc] = useState(null); // /api/pros/me
 
   const [err, setErr] = useState("");
   const [ok, setOk] = useState("");
@@ -43,8 +43,9 @@ export default function SettingsPage() {
   const [displayName, setDisplayName] = useState("");
   const [phone, setPhone] = useState("");
   const [avatarUrl, setAvatarUrl] = useState("");
+  const [clientBio, setClientBio] = useState(""); // NEW: user bio
 
-  // Location (user-level) — keep uppercase to match backend
+  // Location (user-level)
   const [stateVal, setStateVal] = useState("");
   const [lga, setLga] = useState("");
 
@@ -58,6 +59,10 @@ export default function SettingsPage() {
   const [years, setYears] = useState("");
   const [hasCert, setHasCert] = useState("no");
   const [certUrl, setCertUrl] = useState("");
+
+  // NEW: real pro-facing display fields
+  const [proBio, setProBio] = useState(""); // public pro description
+  const [proPhotoUrl, setProPhotoUrl] = useState(""); // public pro avatar
 
   // Gallery
   const [workPhotos, setWorkPhotos] = useState([""]);
@@ -99,7 +104,6 @@ export default function SettingsPage() {
       try {
         const { data } = await api.get("/api/geo/ng");
         if (!alive) return;
-        // ensure uppercase here too
         const states = Array.isArray(data?.states)
           ? data.states.map((s) => s.toString().toUpperCase())
           : [];
@@ -167,7 +171,7 @@ export default function SettingsPage() {
         return window.cloudinary.createUploadWidget(
           {
             cloudName: CLOUD_NAME,
-            uploadPreset: UPLOAD_PRESET, // unsigned
+            uploadPreset: UPLOAD_PRESET,
             multiple: false,
             maxFiles: 1,
             clientAllowedFormats: ["jpg", "jpeg", "png", "webp"],
@@ -210,14 +214,9 @@ export default function SettingsPage() {
         setClient(clientData);
         setAppDoc(proData);
 
-        // pick base → client → pro → me
-        const base =
-          clientData ||
-          proData ||
-          meData ||
-          {};
+        // base priority: client → pro → me
+        const base = clientData || proData || meData || {};
 
-        // GENERAL fields
         setDisplayName(
           base.displayName ||
             base.fullName ||
@@ -246,8 +245,6 @@ export default function SettingsPage() {
           proData?.identity?.city ||
           meData?.identity?.city ||
           "";
-
-        // ensure uppercase to match NgGeoPicker + backend
         setStateVal(String(st || "").toUpperCase());
         setLga(String(lg || "").toUpperCase());
 
@@ -259,10 +256,13 @@ export default function SettingsPage() {
             ""
         );
 
-        // PRO details (only if pro exists)
+        // NEW: client bio (user-level)
+        setClientBio(clientData?.bio || "");
+
+        // PRO details
         if (proData) {
           setProfileVisible(
-            Boolean(proData?.professional?.profileVisible ?? true)
+            Boolean(proData?.professional?.profileVisible ?? proData?.profileVisible ?? true)
           );
           setNationwide(
             Boolean(proData?.professional?.nationwide ?? false)
@@ -277,6 +277,10 @@ export default function SettingsPage() {
           setServices(
             Array.isArray(proData?.professional?.services)
               ? proData.professional.services
+              : Array.isArray(proData?.services)
+              ? proData.services.map((s) =>
+                  typeof s === "string" ? s : s.name
+                )
               : []
           );
           setYears(proData?.professional?.years || "");
@@ -287,17 +291,26 @@ export default function SettingsPage() {
             Array.isArray(proData?.professional?.workPhotos) &&
               proData.professional.workPhotos.length
               ? proData.professional.workPhotos
+              : Array.isArray(proData?.gallery) && proData.gallery.length
+              ? proData.gallery
               : [""]
           );
 
-          // bank
+          // NEW: public pro-facing fields
+          setProBio(proData?.bio || proData?.description || "");
+          setProPhotoUrl(
+            proData?.photoUrl ||
+              proData?.identity?.photoUrl ||
+              proData?.contactPublic?.shopPhoto ||
+              ""
+          );
+
           const bk = proData?.bank || {};
           setBankName(bk.bankName || "");
           setAccountName(bk.accountName || "");
           setAccountNumber(String(bk.accountNumber || ""));
           setBvn(String(bk.bvn || ""));
         } else {
-          // no pro -> clear pro-only fields
           setProfileVisible(true);
           setNationwide(false);
           setStatesCovered([]);
@@ -306,6 +319,8 @@ export default function SettingsPage() {
           setHasCert("no");
           setCertUrl("");
           setWorkPhotos([""]);
+          setProBio("");
+          setProPhotoUrl("");
           setBankName("");
           setAccountName("");
           setAccountNumber("");
@@ -325,7 +340,7 @@ export default function SettingsPage() {
   }, []);
 
   /* ---------- Flags & validation ---------- */
-  const hasPro = !!appDoc?._id; // gate for pro-only updates — prevents creation from Settings
+  const hasPro = !!appDoc?._id;
   const canSaveProfile = useMemo(
     () => !!displayName && !!phone && (!!lga || !!stateVal),
     [displayName, phone, lga, stateVal]
@@ -333,11 +348,15 @@ export default function SettingsPage() {
   const canSavePro = useMemo(
     () =>
       hasPro &&
-      (services.length > 0 ||
+      (
+        services.length > 0 ||
         years ||
         hasCert === "yes" ||
-        workPhotos.filter(Boolean).length > 0),
-    [hasPro, services, years, hasCert, workPhotos]
+        workPhotos.filter(Boolean).length > 0 ||
+        proBio ||
+        proPhotoUrl
+      ),
+    [hasPro, services, years, hasCert, workPhotos, proBio, proPhotoUrl]
   );
   const canSaveBank = useMemo(
     () =>
@@ -363,6 +382,7 @@ export default function SettingsPage() {
         state: stateVal.toUpperCase(),
         lga: lga.toUpperCase(),
         avatarUrl,
+        bio: clientBio,
         identity: {
           ...(client?.identity || me?.identity || {}),
           phone,
@@ -373,27 +393,23 @@ export default function SettingsPage() {
       };
 
       let res;
-
       if (client) {
-        // client exists → client is source of truth
         res = await api.put("/api/profile/me", payload);
         setClient(res?.data || payload);
       } else if (appDoc?._id) {
-        // pro-only user → write to pro
         res = await api.put("/api/pros/me", {
           ...appDoc,
           identity: payload.identity,
           displayName: payload.displayName,
           phone: payload.phone,
+          bio: payload.bio,
         });
         setAppDoc(res?.data?.item || { ...appDoc, ...payload });
       } else {
-        // fallback → create client profile
         res = await api.put("/api/profile/me", payload);
         setClient(res?.data || payload);
       }
 
-      // keep /api/me in sync
       setMe((prev) => ({
         ...(prev || {}),
         displayName,
@@ -420,12 +436,13 @@ export default function SettingsPage() {
     stateVal,
     lga,
     avatarUrl,
+    clientBio,
     client,
     appDoc,
     me,
   ]);
 
-  // 2) Save PRO DETAILS to /api/pros/me — ONLY if pro exists
+  // 2) Save PRO DETAILS
   const saveProDetails = useCallback(async () => {
     if (!canSavePro || savingPro) return;
     clearMsg();
@@ -450,6 +467,9 @@ export default function SettingsPage() {
           ...(appDoc?.availability || {}),
           statesCovered: nationwide ? stateList : statesCovered.map((x) => x.toUpperCase()),
         },
+        // NEW: public-facing fields
+        bio: proBio,
+        photoUrl: proPhotoUrl,
         status: appDoc?.status || "submitted",
       };
 
@@ -475,9 +495,11 @@ export default function SettingsPage() {
     stateList,
     statesCovered,
     hasPro,
+    proBio,
+    proPhotoUrl,
   ]);
 
-  // 3) Save BANK to /api/pros/me — ONLY if pro exists
+  // 3) Save BANK
   const saveBank = useCallback(async () => {
     if (!canSaveBank || savingBank) return;
     clearMsg();
@@ -523,7 +545,7 @@ export default function SettingsPage() {
         <div>
           <h1 className="text-2xl font-semibold mb-1">Settings</h1>
           <p className="text-zinc-400">
-            Manage your profile and professional details.
+            Manage your profile, bio, and professional details.
           </p>
         </div>
         {me?.isAdmin && (
@@ -565,26 +587,22 @@ export default function SettingsPage() {
 
           {/* Content */}
           <div className="lg:col-span-2 space-y-8">
-            {/* Banner if no pro profile */}
             {!appDoc && (
               <div className="rounded-lg border border-yellow-700 bg-yellow-900/20 text-yellow-200 px-4 py-3">
                 You don’t have a professional profile yet. You can browse & book
                 as a client, but to create or edit a professional profile please{" "}
                 <Link to="/become" className="underline text-gold">
-                  apply here
+                    apply here
                 </Link>
                 .
               </div>
             )}
 
             {/* General */}
-            <section
-              id="general"
-              className="rounded-lg border border-zinc-800 p-4"
-            >
+            <section id="general" className="rounded-lg border border-zinc-800 p-4">
               <h2 className="text-lg font-semibold mb-3">General</h2>
 
-              {/* Avatar + name/phone */}
+              {/* Avatar */}
               <div className="flex items-center gap-4 mb-3">
                 <Avatar
                   url={avatarUrl}
@@ -627,6 +645,20 @@ export default function SettingsPage() {
                 <ReadOnly label="Email" value={me?.email || ""} />
               </div>
 
+              {/* NEW: client bio */}
+              <div className="mt-3">
+                <Label>Short bio / about you</Label>
+                <textarea
+                  className="w-full bg-black border border-zinc-800 rounded-lg px-3 py-2 min-h-[80px]"
+                  placeholder="Tell others about yourself…"
+                  value={clientBio}
+                  onChange={(e) => setClientBio(e.target.value)}
+                />
+                <p className="text-xs text-zinc-500 mt-1">
+                  This is your personal bio. We can show this on your profile page or in bookings.
+                </p>
+              </div>
+
               <div className="mt-3">
                 <Label>State & LGA</Label>
                 <NgGeoPicker
@@ -663,9 +695,7 @@ export default function SettingsPage() {
 
             {/* Professional Profile */}
             <section id="pro" className="rounded-lg border border-zinc-800 p-4">
-              <h2 className="text-lg font-semibold mb-3">
-                Professional Profile
-              </h2>
+              <h2 className="text-lg font-semibold mb-3">Professional Profile</h2>
 
               {!appDoc && (
                 <div className="text-sm text-zinc-400 mb-3">
@@ -675,6 +705,47 @@ export default function SettingsPage() {
                   </Link>
                 </div>
               )}
+
+              {/* pro avatar (public) */}
+              <div className="mb-4">
+                <Label>Pro profile picture (public)</Label>
+                <div className="flex items-center gap-3">
+                  <Avatar
+                    url={proPhotoUrl}
+                    onClick={() => proPhotoUrl && setLightboxUrl(proPhotoUrl)}
+                  />
+                  <UploadButton
+                    title={widgetReady ? "Upload Pro Photo" : "Upload (loading…)"}
+                    widgetFactory={widgetFactory}
+                    onUploaded={setProPhotoUrl}
+                    disabled={!widgetReady || !hasPro}
+                  />
+                  {proPhotoUrl && (
+                    <button
+                      className="text-xs text-red-300 border border-red-800 rounded px-2 py-1"
+                      onClick={() => setProPhotoUrl("")}
+                      disabled={!hasPro}
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+                <p className="text-xs text-zinc-500 mt-1">
+                  This is the picture shown on cards / browse for your professional profile.
+                </p>
+              </div>
+
+              {/* public bio */}
+              <div className="mb-4">
+                <Label>Public bio / description (shown on your pro profile)</Label>
+                <textarea
+                  className="w-full bg-black border border-zinc-800 rounded-lg px-3 py-2 min-h-[90px]"
+                  placeholder="E.g. ‘I specialise in male grooming, hair colouring and locs. 5+ years experience.’"
+                  value={proBio}
+                  onChange={(e) => setProBio(e.target.value)}
+                  disabled={!hasPro}
+                />
+              </div>
 
               <div className="flex items-center justify-between mb-2">
                 <Label>What services do you offer?</Label>
@@ -805,9 +876,7 @@ export default function SettingsPage() {
                         type="button"
                         className="text-sm text-red-400"
                         onClick={() =>
-                          setWorkPhotos(
-                            workPhotos.filter((_, i) => i !== idx)
-                          )
+                          setWorkPhotos(workPhotos.filter((_, i) => i !== idx))
                         }
                         disabled={!hasPro}
                       >
@@ -838,10 +907,7 @@ export default function SettingsPage() {
             </section>
 
             {/* Payments */}
-            <section
-              id="payments"
-              className="rounded-lg border border-zinc-800 p-4"
-            >
+            <section id="payments" className="rounded-lg border border-zinc-800 p-4">
               <h2 className="text-lg font-semibold mb-3">Payments</h2>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <Input
@@ -906,13 +972,8 @@ export default function SettingsPage() {
             )}
 
             {/* Advanced */}
-            <section
-              id="advanced"
-              className="rounded-lg border border-zinc-800 p-4"
-            >
+            <section id="advanced" className="rounded-lg border border-zinc-800 p-4">
               <h2 className="text-lg font-semibold mb-3">Advanced</h2>
-
-              {/* Deactivate link */}
               <div className="flex flex-col gap-2">
                 <Link
                   to="/deactivate"
@@ -922,8 +983,7 @@ export default function SettingsPage() {
                   Deactivate Account
                 </Link>
                 <div className="text-xs text-zinc-500">
-                  This won’t delete your data immediately. You’ll submit a
-                  request and our team will review it.
+                  This won’t delete your data immediately. You’ll submit a request and our team will review it.
                 </div>
               </div>
             </section>
@@ -931,7 +991,6 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {/* Avatar Lightbox */}
       {lightboxUrl && (
         <ImageLightbox src={lightboxUrl} onClose={() => setLightboxUrl("")} />
       )}

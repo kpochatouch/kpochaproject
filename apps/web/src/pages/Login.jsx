@@ -11,7 +11,7 @@ import {
 import { auth, googleProvider } from "../lib/firebase";
 import { useAuth } from "../context/AuthContext";
 import PasswordInput from "../components/PasswordInput";
-import { setAuthToken } from "../lib/api";
+import { api, setAuthToken } from "../lib/api";
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -28,8 +28,13 @@ export default function Login() {
 
   useEffect(() => {
     setPersistence(auth, browserLocalPersistence).catch(() => {});
-    try { sessionStorage.removeItem("g_state"); } catch {}
-    try { localStorage.removeItem("g_state"); } catch {}
+    // clear google state (some browsers cache this)
+    try {
+      sessionStorage.removeItem("g_state");
+    } catch {}
+    try {
+      localStorage.removeItem("g_state");
+    } catch {}
   }, []);
 
   useEffect(() => {
@@ -39,10 +44,20 @@ export default function Login() {
   }, [user, nav, qs]);
 
   async function afterSignInRedirect() {
+    // 1) get fresh firebase token and store it so axios sends it
     try {
       const tok = await auth.currentUser.getIdToken(true);
       setAuthToken(tok);
     } catch {}
+
+    // 2) ensure profile exists on the backend (this is our single source of truth)
+    try {
+      await api.post("/api/profile/ensure");
+    } catch {
+      // don't block login if this fails (network, etc.)
+    }
+
+    // 3) go where user was headed
     const next = qs.get("next") || "/browse";
     nav(next, { replace: true });
   }
@@ -53,11 +68,17 @@ export default function Login() {
     setOk("");
     setBusy(true);
     try {
-      const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
+      const cred = await signInWithEmailAndPassword(
+        auth,
+        email.trim(),
+        password
+      );
 
       // ✅ block if email not verified
       if (!cred.user.emailVerified) {
-        setErr("Please verify your email before signing in. Check your inbox for the link.");
+        setErr(
+          "Please verify your email before signing in. Check your inbox for the link."
+        );
         await auth.signOut();
         setBusy(false);
         return;
@@ -72,17 +93,21 @@ export default function Login() {
   }
 
   async function google() {
-    setErr(""); setOk("");
+    setErr("");
+    setOk("");
     setBusy(true);
     try {
       googleProvider.setCustomParameters({ prompt: "select_account" });
       const cred = await signInWithPopup(auth, googleProvider);
+
+      // we still enforce verification — for Google this is usually true
       if (!cred.user.emailVerified) {
         setErr("Please verify your email with Google before continuing.");
         await auth.signOut();
         setBusy(false);
         return;
       }
+
       await afterSignInRedirect();
     } catch (e) {
       setErr(e?.message || "Google sign in failed");
@@ -92,8 +117,10 @@ export default function Login() {
   }
 
   async function doReset() {
-    setErr(""); setOk("");
-    if (!email.trim()) return setErr("Enter your email first to reset password.");
+    setErr("");
+    setOk("");
+    if (!email.trim())
+      return setErr("Enter your email first to reset password.");
     setBusy(true);
     try {
       await sendPasswordResetEmail(auth, email.trim());
@@ -112,7 +139,9 @@ export default function Login() {
     <div className="max-w-sm mx-auto px-4 py-10">
       <h2 className="text-2xl font-semibold mb-1">Sign in</h2>
       <p className="text-sm text-zinc-400 mb-4">
-        {signedOut ? "You’ve been signed out." : "Use your email or Google account."}
+        {signedOut
+          ? "You’ve been signed out."
+          : "Use your email or Google account."}
       </p>
 
       {err && <div className="text-red-400 text-sm mb-3">{err}</div>}
@@ -166,13 +195,19 @@ export default function Login() {
 
       <p className="text-sm text-zinc-400 mt-4">
         No account?{" "}
-        <Link to="/signup" className="text-[#d4af37] underline">Create one</Link>
+        <Link to="/signup" className="text-[#d4af37] underline">
+          Create one
+        </Link>
       </p>
 
       {resetting && (
         <div className="mt-6 rounded-lg border border-zinc-800 p-3 bg-zinc-950">
           <p className="text-sm text-zinc-300 mb-2">
-            We’ll send a reset link to <span className="text-white">{email || "(your email)"}</span>.
+            We’ll send a reset link to{" "}
+            <span className="text-white">
+              {email || "(your email)"}
+            </span>
+            .
           </p>
           <div className="flex gap-2">
             <button
