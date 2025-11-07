@@ -127,13 +127,13 @@ function FeedComposer({ lga, onPosted }) {
             <video
               src={mediaUrl}
               controls
-              className="w-full max-h-52 rounded-lg border border-zinc-800 object-cover"
+              className="w-full max-h-52 rounded-lg border border-zinc-800 object-cover max-w-full"
             />
           ) : (
             <img
               src={mediaUrl}
               alt="uploaded"
-              className="w-full max-h-52 rounded-lg border border-zinc-800 object-cover"
+              className="w-full max-h-52 rounded-lg border border-zinc-800 object-cover max-w-full"
             />
           )}
         </div>
@@ -417,20 +417,21 @@ export default function Browse() {
 
   return (
     <ErrorBoundary>
-      <div className="max-w-6xl mx-auto px-4 py-10">
+      {/* added overflow-x-hidden to avoid small horizontal scroll/extra space on mobile zoom */}
+      <div className="max-w-6xl mx-auto px-4 py-10 overflow-x-hidden">
         {/* header + tabs */}
         <div className="mb-6 flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2">
             <img
               src="/discovery.png"
               alt="Discover"
-              className="w-6 h-6 object-contain"
+              className="w-6 h-6 object-contain max-w-full"
             />
             <h1 className="text-2xl font-semibold">Discover</h1>
           </div>
           <div className="inline-flex rounded-xl border border-zinc-800 overflow-hidden">
             <button
-              className={`px-4 py-2 text-sm border-right border-zinc-800 ${
+              className={`px-4 py-2 text-sm border-r border-zinc-800 ${
                 tab === "feed"
                   ? "bg-gold text-black font-semibold"
                   : "hover:bg-zinc-900"
@@ -458,9 +459,9 @@ export default function Browse() {
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search by name or description…"
-            className="bg-black border border-zinc-800 rounded-lg px-3 py-2 w-56"
+            className="bg-black border border-zinc-800 rounded-lg px-3 py-2 w-56 max-w-full"
           />
-          <div className="w-56">
+          <div className="w-56 max-w-full">
             <ServicePicker
               value={service}
               onChange={setService}
@@ -533,17 +534,16 @@ export default function Browse() {
             )}
           </>
         ) : (
-          <div className="flex gap-4">
+          // make layout stack on small screens to avoid horizontal overflow when zooming
+          <div className="flex flex-col lg:flex-row gap-4">
             {/* LEFT MENU - now actual component (mobile handled inside) */}
-            <div className="lg:w-56 pt-1">
+            <div className="lg:w-56 w-full pt-1 flex-shrink-0 min-w-0">
               <SideMenu me={me} />
             </div>
 
             {/* FEED */}
-            <div className="flex-1 max-w-2xl mx-auto">
-              {canPostOnFeed && (
-                <FeedComposer lga={lga} onPosted={fetchFeed} />
-              )}
+            <div className="flex-1 w-full max-w-2xl lg:mx-0 mx-auto">
+              {canPostOnFeed && <FeedComposer lga={lga} onPosted={fetchFeed} />}
               {errFeed && (
                 <div className="mb-4 rounded border border-red-800 bg-red-900/30 text-red-100 px-3 py-2">
                   {errFeed}
@@ -570,13 +570,11 @@ export default function Browse() {
             </div>
 
             {/* RIGHT ADS (narrower) */}
-            <div className="hidden lg:block w-56 pt-1">
+            <div className="hidden lg:block w-56 pt-1 flex-shrink-0 min-w-0">
               <div className="sticky top-20 space-y-4">
                 {isAdmin ? (
                   <div className="rounded-lg border border-zinc-800 bg-black/40 p-3 space-y-2">
-                    <div className="text-xs text-zinc-300 mb-1">
-                      Advert (admin only)
-                    </div>
+                    <div className="text-xs text-zinc-300 mb-1">Advert (admin only)</div>
                     <input
                       value={adminAdUrl}
                       onChange={(e) => {
@@ -601,8 +599,7 @@ export default function Browse() {
                     <div className="flex gap-2">
                       <button
                         onClick={() => {
-                          if (!adminAdUrl.trim())
-                            return setAdMsg("Paste a media URL first.");
+                          if (!adminAdUrl.trim()) return setAdMsg("Paste a media URL first.");
                           setAdMsg("Previewing…");
                           setTimeout(() => setAdMsg("Preview ready"), 300);
                         }}
@@ -612,8 +609,7 @@ export default function Browse() {
                       </button>
                       <button
                         onClick={async () => {
-                          if (!adminAdUrl.trim())
-                            return setAdMsg("Paste a media URL first.");
+                          if (!adminAdUrl.trim()) return setAdMsg("Paste a media URL first.");
                           try {
                             setAdMsg("Publishing…");
                             await api.post("/api/posts", {
@@ -632,9 +628,7 @@ export default function Browse() {
                             setAdMsg("Published to feed ✔");
                             await fetchFeed();
                           } catch (e) {
-                            setAdMsg(
-                              e?.response?.data?.error || "Failed to publish ad"
-                            );
+                            setAdMsg(e?.response?.data?.error || "Failed to publish ad");
                           }
                         }}
                         className="flex-1 rounded-md bg-gold text-black px-2 py-1 text-xs font-semibold"
@@ -642,11 +636,7 @@ export default function Browse() {
                         Publish
                       </button>
                     </div>
-                    {adMsg && (
-                      <p className="text-[10px] text-zinc-500 mt-1">
-                        {adMsg}
-                      </p>
-                    )}
+                    {adMsg && <p className="text-[10px] text-zinc-500 mt-1">{adMsg}</p>}
                   </div>
                 ) : null}
 
@@ -659,14 +649,10 @@ export default function Browse() {
                         loop
                         playsInline
                         autoPlay
-                        className="w-full h-full object-cover"
+                        className="w-full h-full object-cover max-w-full"
                       />
                     ) : (
-                      <img
-                        src={adminAdUrl}
-                        alt="ad"
-                        className="w-full h-full object-cover"
-                      />
+                      <img src={adminAdUrl} alt="ad" className="w-full h-full object-cover max-w-full" />
                     )}
                   </div>
                 ) : (
