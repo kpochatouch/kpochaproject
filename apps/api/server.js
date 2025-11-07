@@ -625,6 +625,37 @@ app.get("/api/pros/me", requireAuth, async (req, res) => {
   }
 });
 
+// same place, just below your existing GET /api/pros/me
+app.put("/api/pros/me", requireAuth, async (req, res) => {
+  try {
+    const uid = req.user.uid;
+    const body = req.body || {};
+
+    const pro = await Pro.findOne({ ownerUid: uid });
+    if (!pro) return res.status(404).json({ error: "pro_not_found" });
+
+    // only allow editable fields
+    const updatable = {};
+    if (body.professional) updatable.professional = body.professional;
+    if (body.availability) updatable.availability = body.availability;
+    if (body.bank) updatable.bank = body.bank;
+    if (typeof body.bio === "string") updatable.bio = body.bio;
+    if (typeof body.photoUrl === "string") updatable.photoUrl = body.photoUrl;
+
+    const updated = await Pro.findOneAndUpdate(
+      { ownerUid: uid },
+      { $set: updatable },
+      { new: true }
+    );
+
+    return res.json({ ok: true, item: updated });
+  } catch (err) {
+    console.error("[/api/pros/me PUT] error:", err?.message || err);
+    return res.status(500).json({ error: "pro_update_failed" });
+  }
+});
+
+
 /** Enforce verified name/phone on bookings POST */
 app.use("/api/bookings", requireAuth, async (req, _res, next) => {
   try {
