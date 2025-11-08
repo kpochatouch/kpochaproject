@@ -6,8 +6,8 @@ import ReactDOM from "react-dom/client";
  * If these are set, the component uploads to Cloudinary automatically.
  * Otherwise it will return data URLs / blob URLs and still resolve.
  */
-const CLOUD_NAME   = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || "";
-const UPLOAD_PRESET= import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET || "";
+const CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || "";
+const UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET || "";
 
 /** Small helper: load a remote <script> once by id */
 function loadScriptOnce(src, id) {
@@ -15,8 +15,10 @@ function loadScriptOnce(src, id) {
     if (id && document.getElementById(id)) return resolve();
     const s = document.createElement("script");
     if (id) s.id = id;
-    s.src = src; s.async = true;
-    s.onload = resolve; s.onerror = reject;
+    s.src = src;
+    s.async = true;
+    s.onload = resolve;
+    s.onerror = reject;
     document.head.appendChild(s);
   });
 }
@@ -24,14 +26,16 @@ function loadScriptOnce(src, id) {
 /** Upload helpers (safe even if Cloudinary env not set) */
 async function uploadImageOrReturn(dataUrl, folder) {
   if (!CLOUD_NAME || !UPLOAD_PRESET) {
-    // Return the original data URL (works without Cloudinary)
     return { url: dataUrl, via: "data-url" };
   }
   const form = new FormData();
   form.append("file", dataUrl);
   form.append("upload_preset", UPLOAD_PRESET);
   if (folder) form.append("folder", folder);
-  const r = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`, { method: "POST", body: form });
+  const r = await fetch(
+    `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`,
+    { method: "POST", body: form }
+  );
   if (!r.ok) throw new Error("Image upload failed");
   const j = await r.json();
   return { url: j.secure_url, via: "cloudinary" };
@@ -40,7 +44,6 @@ async function uploadImageOrReturn(dataUrl, folder) {
 async function uploadVideoOrReturn(blob, folder) {
   if (!blob || !blob.size) return { url: "", via: "none" };
   if (!CLOUD_NAME || !UPLOAD_PRESET) {
-    // Create a temporary object URL as fallback
     const url = URL.createObjectURL(blob);
     return { url, via: "blob-url" };
   }
@@ -48,23 +51,16 @@ async function uploadVideoOrReturn(blob, folder) {
   form.append("file", blob);
   form.append("upload_preset", UPLOAD_PRESET);
   if (folder) form.append("folder", folder);
-  const r = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/video/upload`, { method: "POST", body: form });
+  const r = await fetch(
+    `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/video/upload`,
+    { method: "POST", body: form }
+  );
   if (!r.ok) throw new Error("Video upload failed");
   const j = await r.json();
   return { url: j.secure_url, via: "cloudinary" };
 }
 
-/** ======= LivenessCheck (reusable modal) =======
- * Props:
- * - open: boolean (controlled)
- * - onClose(): void
- * - onPass({selfieUrl, videoUrl, metrics}): void
- * - challenges?: string[] (subset of: blink,left,right,smile,open)
- * - count?: number (how many randomized prompts; default 3)
- * - recordVideo?: boolean (default true)
- * - deadlineMsPerStep?: number (default 6000)
- * - uploadFolder?: string (default "kpocha/liveness")
- */
+/** ======= LivenessCheck (reusable modal) ======= */
 export default function LivenessCheck({
   open = true,
   onClose,
@@ -84,7 +80,7 @@ export default function LivenessCheck({
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
-  // Randomize N challenges from the provided list
+  // Randomize N challenges
   const steps = useMemo(() => {
     const pool = challenges.filter(Boolean);
     const out = [];
@@ -99,80 +95,112 @@ export default function LivenessCheck({
   const [okMap, setOkMap] = useState({});
   const [deadline, setDeadline] = useState(null);
 
-  /** Landmark-based heuristics */
+  // landmark metrics
   function analyze(face) {
     const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
-
-    // Eyes (blink): average eye openness normalized by eye width
-    const lOpen = dist(face[159], face[145]) / (dist(face[33], face[133]) || 1e-6);
-    const rOpen = dist(face[386], face[374]) / (dist(face[362], face[263]) || 1e-6);
+    const lOpen =
+      dist(face[159], face[145]) / (dist(face[33], face[133]) || 1e-6);
+    const rOpen =
+      dist(face[386], face[374]) / (dist(face[362], face[263]) || 1e-6);
     const eyeOpen = (lOpen + rOpen) / 2;
 
-    // Yaw (left/right): nose vs cheeks center normalized by face width
-    const L = face[234], R = face[454], nose = face[1];
+    const L = face[234],
+      R = face[454],
+      nose = face[1];
     const faceW = dist(L, R) || 1e-6;
-    const yaw = (nose.x - ((L.x + R.x) / 2)) / faceW; // - left, + right
+    const yaw = (nose.x - (L.x + R.x) / 2) / faceW;
 
-    // Mouth open (lip gap / mouth width)
-    const mouthOpen = dist(face[13], face[14]) / (dist(face[78], face[308]) || 1e-6);
-
-    // Smile proxy (mouth corners width vs neutral width)
-    const smile = dist(face[61], face[291]) / (dist(face[78], face[308]) || 1e-6);
+    const mouthOpen =
+      dist(face[13], face[14]) / (dist(face[78], face[308]) || 1e-6);
+    const smile =
+      dist(face[61], face[291]) / (dist(face[78], face[308]) || 1e-6);
 
     return { eyeOpen, yaw, mouthOpen, smile };
   }
 
   function passFor(key, m) {
     switch (key) {
-      case "blink": return m.eyeOpen < 0.18;              // blink closed moment
-      case "left":  return m.yaw < -0.06;                 // turn left
-      case "right": return m.yaw >  0.06;                 // turn right
-      case "open":  return m.mouthOpen > 0.08;            // open mouth
-      case "smile": return m.smile > 0.90;                // smile
-      default: return false;
+      case "blink":
+        return m.eyeOpen < 0.18;
+      case "left":
+        return m.yaw < -0.06;
+      case "right":
+        return m.yaw > 0.06;
+      case "open":
+        return m.mouthOpen > 0.08;
+      case "smile":
+        return m.smile > 0.9;
+      default:
+        return false;
     }
   }
 
-  // UI strings only inside the session (no permanent page inscriptions)
   function labelFor(key) {
-    return ({
-      blink: "Blink twice",
-      left:  "Turn your head LEFT",
-      right: "Turn your head RIGHT",
-      open:  "Open your mouth",
-      smile: "Smile slightly"
-    })[key] || key;
+    return (
+      {
+        blink: "Blink twice",
+        left: "Turn your head LEFT",
+        right: "Turn your head RIGHT",
+        open: "Open your mouth",
+        smile: "Smile slightly",
+      }[key] || key
+    );
   }
 
-  // Start camera + FaceMesh + optional recorder
+  // start camera
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
 
     (async () => {
       try {
-        await loadScriptOnce("https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.min.js", "mp-face-mesh");
-        await loadScriptOnce("https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js", "mp-cam-utils");
+        await loadScriptOnce(
+          "https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.min.js",
+          "mp-face-mesh"
+        );
+        await loadScriptOnce(
+          "https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js",
+          "mp-cam-utils"
+        );
 
         const v = videoRef.current;
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: 640, height: 480 } });
-        if (cancelled) { stream.getTracks().forEach(t => t.stop()); return; }
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "user", width: 640, height: 480 },
+        });
+        if (cancelled) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
         streamRef.current = stream;
         v.srcObject = stream;
         await v.play();
 
         if (recordVideo) {
           try {
-            const mr = new MediaRecorder(stream, { mimeType: "video/webm;codecs=vp8" });
-            recRef.current = mr; chunksRef.current = [];
-            mr.ondataavailable = e => e.data?.size && chunksRef.current.push(e.data);
-            mr.start(); // stop when session finishes
-          } catch (_) { /* recorder optional */ }
+            const mr = new MediaRecorder(stream, {
+              mimeType: "video/webm;codecs=vp8",
+            });
+            recRef.current = mr;
+            chunksRef.current = [];
+            mr.ondataavailable = (e) =>
+              e.data?.size && chunksRef.current.push(e.data);
+            mr.start();
+          } catch (_) {
+            /* optional */
+          }
         }
 
         const FaceMesh = window.faceMesh || window;
-        const fm = new FaceMesh.FaceMesh({ locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}` });
-        fm.setOptions({ maxNumFaces: 1, refineLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+        const fm = new FaceMesh.FaceMesh({
+          locateFile: (f) =>
+            `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`,
+        });
+        fm.setOptions({
+          maxNumFaces: 1,
+          refineLandmarks: true,
+          minDetectionConfidence: 0.5,
+          minTrackingConfidence: 0.5,
+        });
         faceMeshRef.current = fm;
 
         fm.onResults((results) => {
@@ -181,8 +209,11 @@ export default function LivenessCheck({
         });
 
         const cam = new window.Camera(videoRef.current, {
-          onFrame: async () => { await faceMeshRef.current.send({ image: videoRef.current }); },
-          width: 640, height: 480,
+          onFrame: async () => {
+            await faceMeshRef.current.send({ image: videoRef.current });
+          },
+          width: 640,
+          height: 480,
         });
         cam.start();
 
@@ -191,62 +222,99 @@ export default function LivenessCheck({
         setDeadline(Date.now() + deadlineMsPerStep);
       } catch (e) {
         console.error(e);
-        setError("Camera permission or model loading failed. Please allow camera access or try again.");
+        setError(
+          "Camera permission or model loading failed. Please allow camera access or try again."
+        );
       }
     })();
 
     return () => {
       cancelled = true;
-      try { recRef.current?.state !== "inactive" && recRef.current?.stop(); } catch {}
-      try { streamRef.current?.getTracks().forEach(t => t.stop()); } catch {}
+      try {
+        recRef.current?.state !== "inactive" && recRef.current?.stop();
+      } catch {}
+      try {
+        streamRef.current?.getTracks().forEach((t) => t.stop());
+      } catch {}
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   function drawAndCheck(results) {
-    const canvas = canvasRef.current, video = videoRef.current;
+    const canvas = canvasRef.current,
+      video = videoRef.current;
     if (!canvas || !video) return;
 
-    // Draw mirrored video frame
     canvas.width = video.videoWidth || 640;
     canvas.height = video.videoHeight || 480;
     const ctx = canvas.getContext("2d");
-    ctx.save(); ctx.scale(-1, 1);
+
+    // mirrored video
+    ctx.save();
+    ctx.scale(-1, 1);
     ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
     ctx.restore();
 
-    // Evaluate current step
+    // evaluate face
     const face = results.multiFaceLandmarks?.[0];
     if (!face) return;
 
     const metrics = analyze(face);
     const key = steps[curIdx];
     if (key && passFor(key, metrics)) {
-      setOkMap(prev => ({ ...prev, [key]: true }));
+      setOkMap((prev) => ({ ...prev, [key]: true }));
       const next = curIdx + 1;
       if (next < steps.length) {
         setCurIdx(next);
         setDeadline(Date.now() + deadlineMsPerStep);
       } else {
-        // All passed — enable Finish button
         setDeadline(null);
       }
     }
 
-    // Session-only instruction panel (not “inscribed” in your app UI)
-    ctx.fillStyle = "rgba(0,0,0,0.55)";
-    ctx.fillRect(0, 0, canvas.width, 38);
-    ctx.fillStyle = "#fff";
-    ctx.font = "14px system-ui, sans-serif";
-    const msg = key ? `Do this: ${labelFor(key)}` : "Checks passed ✓  Click Finish";
-    ctx.fillText(msg, 12, 24);
+    // ===== overlay with STANDING OVAL =====
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2;
+    const rx = canvas.width * 0.18;  // narrow → not sleeping
+    const ry = canvas.height * 0.34; // tall → standing egg
 
-    // Timer bar
+    ctx.save();
+    ctx.fillStyle = "rgba(0,0,0,0.55)";
+    ctx.beginPath();
+    ctx.rect(0, 0, canvas.width, canvas.height);
+    ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2, true);
+    ctx.fill("evenodd");
+    ctx.restore();
+
+    // white border
+    ctx.save();
+    ctx.strokeStyle = "rgba(255,255,255,0.95)";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+
+    // instruction
+    ctx.save();
+    ctx.fillStyle = "#fff";
+    ctx.font = "16px system-ui, sans-serif";
+    const msg = key ? `Do this: ${labelFor(key)}` : "Good ✓ Click Finish";
+    const textW = ctx.measureText(msg).width;
+    ctx.fillText(msg, cx - textW / 2, cy - ry + 30);
+    ctx.restore();
+
+    // timer
     if (deadline) {
       const remain = Math.max(0, deadline - Date.now());
       const pct = Math.min(1, remain / deadlineMsPerStep);
       ctx.fillStyle = "rgba(255,255,255,0.85)";
-      ctx.fillRect(canvas.width - Math.floor(pct * canvas.width), canvas.height - 6, Math.floor(pct * canvas.width), 6);
+      ctx.fillRect(
+        canvas.width - Math.floor(pct * canvas.width),
+        canvas.height - 6,
+        Math.floor(pct * canvas.width),
+        6
+      );
     }
   }
 
@@ -254,27 +322,27 @@ export default function LivenessCheck({
     try {
       setBusy(true);
 
-      // Stop recording if any
       let videoBlob = null;
       if (recRef.current && recRef.current.state !== "inactive") {
-        const wait = new Promise(res => { recRef.current.onstop = res; });
+        const wait = new Promise((res) => {
+          recRef.current.onstop = res;
+        });
         recRef.current.stop();
         await wait;
         videoBlob = new Blob(chunksRef.current, { type: "video/webm" });
       }
 
-      // Best-frame selfie (current canvas)
       const dataUrl = canvasRef.current.toDataURL("image/jpeg", 0.92);
 
       const [{ url: selfieUrl }, { url: videoUrl }] = await Promise.all([
         uploadImageOrReturn(dataUrl, `${uploadFolder}/selfies`),
-        uploadVideoOrReturn(videoBlob, `${uploadFolder}/videos`)
+        uploadVideoOrReturn(videoBlob, `${uploadFolder}/videos`),
       ]);
 
       const metrics = {
         steps,
         passed: Object.keys(okMap),
-        cloudinary: Boolean(CLOUD_NAME && UPLOAD_PRESET)
+        cloudinary: Boolean(CLOUD_NAME && UPLOAD_PRESET),
       };
 
       onPass?.({ selfieUrl, videoUrl, metrics });
@@ -307,20 +375,29 @@ export default function LivenessCheck({
           {error && <div className="text-sm text-red-400">{error}</div>}
 
           <div className="rounded-lg overflow-hidden border border-zinc-800">
-            <video ref={videoRef} autoPlay playsInline muted style={{ display: "none" }} />
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              style={{ display: "none" }}
+            />
             <canvas ref={canvasRef} className="w-full h-auto block" />
           </div>
 
           <ul className="text-sm grid grid-cols-1 sm:grid-cols-3 gap-1">
             {steps.map((k, i) => (
-              <li key={k}>{okMap[k] ? "✅" : (i === curIdx ? "⏳" : "•")} {labelFor(k)}</li>
+              <li key={k}>
+                {okMap[k] ? "✅" : i === curIdx ? "⏳" : "•"} {labelFor(k)}
+              </li>
             ))}
           </ul>
 
           {!CLOUD_NAME || !UPLOAD_PRESET ? (
             <div className="text-xs text-amber-400">
               Cloudinary env not set. Will return data/Blob URLs (still usable).
-              Set <code>VITE_CLOUDINARY_CLOUD_NAME</code> and <code>VITE_CLOUDINARY_UPLOAD_PRESET</code> to enable uploads.
+              Set <code>VITE_CLOUDINARY_CLOUD_NAME</code> and{" "}
+              <code>VITE_CLOUDINARY_UPLOAD_PRESET</code> to enable uploads.
             </div>
           ) : null}
 
@@ -329,9 +406,17 @@ export default function LivenessCheck({
               onClick={finish}
               disabled={busy || Object.keys(okMap).length < steps.length}
               className="px-3 py-2 rounded-lg border border-emerald-700 text-sm hover:bg-emerald-900/30 disabled:opacity-50"
-              title={Object.keys(okMap).length < steps.length ? "Complete prompts first" : "Finish & upload"}
+              title={
+                Object.keys(okMap).length < steps.length
+                  ? "Complete prompts first"
+                  : "Finish & upload"
+              }
             >
-              {busy ? "Processing…" : (Object.keys(okMap).length < steps.length ? "Complete steps to continue" : "Finish")}
+              {busy
+                ? "Processing…"
+                : Object.keys(okMap).length < steps.length
+                ? "Complete steps to continue"
+                : "Finish"}
             </button>
           </div>
         </div>
@@ -340,11 +425,7 @@ export default function LivenessCheck({
   );
 }
 
-/** ======= Imperative opener =======
- * Example:
- *   const res = await openLiveness({ count: 3 });
- *   // res => { selfieUrl, videoUrl, metrics }
- */
+/** ======= Imperative opener ======= */
 export function openLiveness(opts = {}) {
   return new Promise((resolve, reject) => {
     const host = document.createElement("div");
@@ -353,13 +434,22 @@ export function openLiveness(opts = {}) {
 
     function cleanup() {
       setTimeout(() => {
-        try { root.unmount(); } catch {}
+        try {
+          root.unmount();
+        } catch {}
         host.remove();
       }, 0);
     }
 
-    function handleClose() { cleanup(); reject(new Error("closed")); }
-    function handlePass(payload) { cleanup(); resolve(payload); }
+    function handleClose() {
+      cleanup();
+      reject(new Error("closed"));
+    }
+
+    function handlePass(payload) {
+      cleanup();
+      resolve(payload);
+    }
 
     root.render(
       <LivenessCheck

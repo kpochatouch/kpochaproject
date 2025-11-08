@@ -1,6 +1,6 @@
 # Kpocha Touch — Starter Monorepo
 
-This is a **minimal, deployable skeleton** for the Kpocha Touch Unisex Salon app.
+This is a **minimal, deployable skeleton** for the Kpocha Touch app.
 
 - Frontend: React (Vite), TailwindCSS, React Router, Axios
 - Backend: Node.js (Express), CORS, (Mongo-ready but optional), Paystack-ready placeholders

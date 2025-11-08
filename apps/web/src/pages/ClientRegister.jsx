@@ -572,7 +572,7 @@ export default function ClientRegister() {
           <Section title="Professionals near you">
             <div className="flex items-center justify-between gap-3">
               <p className="text-sm text-zinc-200">
-                Find stylists/barbers within 25km.
+                Find Professionals within 25km.
               </p>
               <button
                 type="button"

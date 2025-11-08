@@ -190,8 +190,8 @@ const NotificationsSchema = new mongoose.Schema(
 
 const SettingsSchema = new mongoose.Schema(
   {
-    appName: { type: String, default: "Kpocha Touch Unisex Salon" },
-    tagline: { type: String, default: "Connecting You To Top Barbers and Stylists" },
+    appName: { type: String, default: "Kpocha Touch" },
+    tagline: { type: String, default: "Connecting You To Top Professionals" },
     commissionSplit: { type: CommissionSplitSchema, default: () => ({}) },
     payouts: { type: PayoutsSchema, default: () => ({}) },
     bookingRules: { type: BookingRulesSchema, default: () => ({}) },

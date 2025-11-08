@@ -130,7 +130,7 @@ export default function Signup() {
       </p>
 
       <p className="text-sm text-zinc-400 mt-2">
-        Want to book a stylist or barber?{" "}
+        Want to book a professional?{" "}
         <a href="/client/register" className="text-[#d4af37] underline">Register as client</a>
       </p>
     </div>

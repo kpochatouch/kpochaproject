@@ -138,7 +138,7 @@ export default function Home() {
             Kpocha Touch</h1>
 
           <p className="text-zinc-300 max-w-2xl mx-auto mb-8 leading-relaxed text-sm sm:text-base">
-            Connecting you to top barbers and stylists across{" "}
+            Connecting you to top Professionals across{" "}
             <span className="text-gold">Nigeria</span>. Book home or in-salon
             services in minutes.
           </p>
@@ -201,7 +201,7 @@ export default function Home() {
           className="text-zinc-300 text-center max-w-3xl mx-auto"
         >
           Kpocha Touch connects clients to{" "}
-          <span className="text-gold">verified</span> barbers and stylists
+          <span className="text-gold">verified</span> professionals jn all fields
           across Nigeria. Discover trusted pros, book instantly, pay securely,
           and enjoy premium service at home or in-salon.
         </motion.p>

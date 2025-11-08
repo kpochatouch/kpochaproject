@@ -23,7 +23,7 @@ By registering on the KPOCHA TOUCH UNISEX SALON platform, the Professional agree
 2. DEFINITIONS
 
 For the purpose of this Agreement:
-	•	“Platform” refers to the KPOCHA TOUCH UNISEX SALON web and mobile application.
+	•	“Platform” refers to the KPOCHA TOUCH web and mobile application.
 	•	“Company” refers to KPOCHA TOUCH NIG LTD.
 	•	“Professional” refers to any barber, stylist, beautician, or grooming service provider registered on the Platform.
 	•	“Client” refers to any user who books or receives services through the Platform.
