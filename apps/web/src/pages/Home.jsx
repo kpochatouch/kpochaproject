@@ -106,7 +106,7 @@ export default function Home() {
         <div
           className="absolute inset-0 bg-gradient-to-b from-black/70 via-black/60 to-black/80"
           style={{
-            backgroundImage: "url(/hero-video.mp4)",
+            backgroundImage: "url(/bg-alt.jpg)",
             backgroundSize: "cover",
             backgroundPosition: "center",
             mixBlendMode: "normal",
