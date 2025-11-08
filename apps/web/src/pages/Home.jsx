@@ -135,8 +135,7 @@ export default function Home() {
 
           {/* Heading */}
           <h1 className="text-3xl sm:text-5xl md:text-6xl font-bold tracking-tight mb-3">
-            Kpocha Touch <span className="text-gold">Unisex Salon</span>
-          </h1>
+            Kpocha Touch</h1>
 
           <p className="text-zinc-300 max-w-2xl mx-auto mb-8 leading-relaxed text-sm sm:text-base">
             Connecting you to top barbers and stylists across{" "}
@@ -201,7 +200,7 @@ export default function Home() {
           {...fadeUp}
           className="text-zinc-300 text-center max-w-3xl mx-auto"
         >
-          Kpocha Touch Unisex Salon connects clients to{" "}
+          Kpocha Touch connects clients to{" "}
           <span className="text-gold">verified</span> barbers and stylists
           across Nigeria. Discover trusted pros, book instantly, pay securely,
           and enjoy premium service at home or in-salon.
