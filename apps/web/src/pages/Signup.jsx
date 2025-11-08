@@ -9,6 +9,7 @@ import {
 import { auth } from "../lib/firebase";
 import { useAuth } from "../context/AuthContext";
 import PasswordInput from "../components/PasswordInput";
+import { friendlyFirebaseError } from "../lib/friendlyFirebaseError"; // 👈 added
 
 export default function Signup() {
   const [name, setName] = useState("");
@@ -45,12 +46,17 @@ export default function Signup() {
     setOk("");
 
     if (!email.trim()) return setErr("Email is required.");
-    if (password.length < 6) return setErr("Password must be at least 6 characters.");
+    if (password.length < 6)
+      return setErr("Password must be at least 6 characters.");
     if (password !== confirm) return setErr("Passwords do not match.");
 
     setBusy(true);
     try {
-      const cred = await createUserWithEmailAndPassword(auth, email.trim(), password);
+      const cred = await createUserWithEmailAndPassword(
+        auth,
+        email.trim(),
+        password
+      );
 
       if (name.trim()) {
         await updateProfile(cred.user, { displayName: name.trim() });
@@ -62,7 +68,7 @@ export default function Signup() {
       cacheDraft({});
       await auth.signOut(); // logout immediately until verified
     } catch (e) {
-      setErr(e?.message || "Sign up failed");
+      setErr(friendlyFirebaseError(e)); // 👈 use friendly message
     } finally {
       setBusy(false);
     }
@@ -78,7 +84,10 @@ export default function Signup() {
         <input
           placeholder="Full name"
           value={name}
-          onChange={(e) => { setName(e.target.value); cacheDraft({ name: e.target.value }); }}
+          onChange={(e) => {
+            setName(e.target.value);
+            cacheDraft({ name: e.target.value });
+          }}
           className="w-full bg-black border border-zinc-800 rounded-lg px-3 py-2"
           autoComplete="name"
         />
@@ -86,7 +95,10 @@ export default function Signup() {
         <input
           placeholder="Phone (optional)"
           value={phone}
-          onChange={(e) => { setPhone(e.target.value); cacheDraft({ phone: e.target.value }); }}
+          onChange={(e) => {
+            setPhone(e.target.value);
+            cacheDraft({ phone: e.target.value });
+          }}
           className="w-full bg-black border border-zinc-800 rounded-lg px-3 py-2"
           autoComplete="tel"
           inputMode="tel"
@@ -96,7 +108,10 @@ export default function Signup() {
           placeholder="Email"
           type="email"
           value={email}
-          onChange={(e) => { setEmail(e.target.value); cacheDraft({ email: e.target.value }); }}
+          onChange={(e) => {
+            setEmail(e.target.value);
+            cacheDraft({ email: e.target.value });
+          }}
           className="w-full bg-black border border-zinc-800 rounded-lg px-3 py-2"
           autoComplete="email"
           required
@@ -126,12 +141,16 @@ export default function Signup() {
 
       <p className="text-sm text-zinc-400 mt-4">
         Already have an account?{" "}
-        <Link to="/login" className="text-[#d4af37] underline">Sign in</Link>
+        <Link to="/login" className="text-[#d4af37] underline">
+          Sign in
+        </Link>
       </p>
 
       <p className="text-sm text-zinc-400 mt-2">
         Want to book a professional?{" "}
-        <a href="/client/register" className="text-[#d4af37] underline">Register as client</a>
+        <a href="/client/register" className="text-[#d4af37] underline">
+          Register as client
+        </a>
       </p>
     </div>
   );

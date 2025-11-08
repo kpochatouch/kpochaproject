@@ -198,13 +198,52 @@ async function handleGetClientMe(req, res) {
 async function handlePutClientMe(req, res) {
   try {
     const payload = req.body || {};
+
+    // normalize casing only if present
     if (payload.lga) payload.lga = String(payload.lga).toUpperCase();
     if (payload.state) payload.state = String(payload.state).toUpperCase();
 
-    // IMPORTANT: do NOT create here — if missing, frontend must call /profile/ensure first
+    // build a selective $set — only non-empty fields overwrite
+    const clientSet = {
+      ownerUid: req.user.uid,
+      uid: req.user.uid,
+    };
+
+    if (payload.fullName && payload.fullName.trim()) {
+      clientSet.fullName = payload.fullName.trim();
+    }
+    if (payload.phone && payload.phone.trim()) {
+      clientSet.phone = payload.phone.trim();
+    }
+    if (payload.state) {
+      clientSet.state = payload.state;
+    }
+    if (payload.lga) {
+      clientSet.lga = payload.lga;
+    }
+    if (typeof payload.address === "string" && payload.address.trim()) {
+      clientSet.address = payload.address.trim();
+    }
+    if (payload.photoUrl && payload.photoUrl.trim()) {
+      clientSet.photoUrl = payload.photoUrl.trim();
+    }
+    if (payload.identity && typeof payload.identity === "object") {
+      clientSet.identity = payload.identity;
+      if (payload.identity.photoUrl && payload.identity.photoUrl.trim()) {
+        clientSet.photoUrl = payload.identity.photoUrl.trim();
+      }
+    }
+    if (payload.kyc) clientSet.kyc = payload.kyc;
+    if (typeof payload.acceptedTerms === "boolean")
+      clientSet.acceptedTerms = payload.acceptedTerms;
+    if (typeof payload.acceptedPrivacy === "boolean")
+      clientSet.acceptedPrivacy = payload.acceptedPrivacy;
+    if (payload.agreements) clientSet.agreements = payload.agreements;
+
+    // IMPORTANT: do NOT create here — frontend must have called /profile/ensure first
     const updated = await ClientProfile.findOneAndUpdate(
       { ownerUid: req.user.uid },
-      { $set: { ...payload, ownerUid: req.user.uid, uid: req.user.uid } },
+      { $set: clientSet },
       { new: true } // ← no upsert
     ).lean();
 
@@ -212,95 +251,29 @@ async function handlePutClientMe(req, res) {
       return res.status(404).json({ error: "profile_not_found" });
     }
 
-    // keep raw "profiles" collection in sync — server.js/admin depends on it
+    // keep the shared "profiles" collection in sync (this is your single source)
     try {
       const col = mongoose.connection.db.collection("profiles");
-      const $set = buildProfilesSetFromPayload(payload);
-      if (Object.keys($set).length > 0) {
-        await col.updateOne(
-          { uid: req.user.uid },
-          { $set: { ...$set, uid: req.user.uid, ownerUid: req.user.uid } },
-          { upsert: true }
-        );
-      }
+      const $set = {
+        uid: req.user.uid,
+        ownerUid: req.user.uid,
+      };
+
+      // reuse your helper to only pick present fields
+      const fromPayload = buildProfilesSetFromPayload(payload);
+      Object.assign($set, fromPayload);
+
+      await col.updateOne(
+        { uid: req.user.uid },
+        { $set },
+        { upsert: true }
+      );
     } catch (e) {
       console.warn("[profile->profiles col sync] skipped:", e?.message || e);
     }
 
-    // if user is already a pro, mirror important fields to Pro
-    try {
-      const pro = await Pro.findOne({ ownerUid: req.user.uid }).lean();
-      if (pro) {
-        const col = mongoose.connection.db.collection("profiles");
-        const fresh = await col.findOne({ uid: req.user.uid }).catch(() => null);
-
-        const mirror = {};
-
-        const nameFromFresh =
-          fresh?.fullName ||
-          fresh?.displayName ||
-          fresh?.name ||
-          [fresh?.identity?.firstName, fresh?.identity?.lastName]
-            .filter(Boolean)
-            .join(" ")
-            .trim() ||
-          "";
-
-        const nameFromPayload =
-          payload.fullName ||
-          (payload.identity &&
-            [payload.identity.firstName, payload.identity.lastName]
-              .filter(Boolean)
-              .join(" ")
-              .trim()) ||
-          "";
-
-        const name = nameFromPayload || nameFromFresh;
-        if (name) mirror.name = name;
-
-        const phone =
-          payload.phone ||
-          payload.identity?.phone ||
-          fresh?.phone ||
-          fresh?.identity?.phone ||
-          "";
-        if (phone) mirror.phone = phone;
-
-        const lga =
-          (
-            payload.lga ||
-            payload.state ||
-            payload.identity?.lga ||
-            payload.identity?.state ||
-            fresh?.lga ||
-            fresh?.state ||
-            fresh?.identity?.lga ||
-            fresh?.identity?.state ||
-            ""
-          )
-            .toString()
-            .toUpperCase();
-        if (lga) mirror.lga = lga;
-
-        const photoUrl =
-          payload.photoUrl ||
-          payload.identity?.photoUrl ||
-          fresh?.photoUrl ||
-          fresh?.identity?.photoUrl ||
-          "";
-        if (photoUrl) mirror.photoUrl = photoUrl;
-
-        mirror.identity = {
-          ...(pro.identity || {}),
-          ...(fresh?.identity || {}),
-          ...(payload.identity || {}),
-        };
-
-        await Pro.updateOne({ ownerUid: req.user.uid }, { $set: mirror });
-      }
-    } catch (e) {
-      console.warn("[profile->pro sync] skipped:", e?.message || e);
-    }
+    // ✨ NOTE: we removed the part that was mirroring client → Pro
+    // so client saves will no longer overwrite pro name/photo/etc.
 
     const masked = maskClientProfileForClientView(updated) || {};
     return res.json({ ...masked, email: req.user.email || "" });

@@ -12,6 +12,7 @@ import { auth, googleProvider } from "../lib/firebase";
 import { useAuth } from "../context/AuthContext";
 import PasswordInput from "../components/PasswordInput";
 import { api, setAuthToken } from "../lib/api";
+import { friendlyFirebaseError } from "../lib/friendlyFirebaseError"; // 👈 added
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -77,7 +78,7 @@ export default function Login() {
       // ✅ block if email not verified
       if (!cred.user.emailVerified) {
         setErr(
-          "Please verify your email before signing in. Check your inbox for the link."
+          "Please verify your email before signing in. Check your inbox/spam folder for the link."
         );
         await auth.signOut();
         setBusy(false);
@@ -86,7 +87,7 @@ export default function Login() {
 
       await afterSignInRedirect();
     } catch (e) {
-      setErr(e?.message || "Sign in failed");
+      setErr(friendlyFirebaseError(e)); // 👈 use friendly text
     } finally {
       setBusy(false);
     }
@@ -110,7 +111,7 @@ export default function Login() {
 
       await afterSignInRedirect();
     } catch (e) {
-      setErr(e?.message || "Google sign in failed");
+      setErr(friendlyFirebaseError(e) || "Google sign in failed"); // 👈
     } finally {
       setBusy(false);
     }
@@ -124,10 +125,10 @@ export default function Login() {
     setBusy(true);
     try {
       await sendPasswordResetEmail(auth, email.trim());
-      setOk("Password reset email sent. Check your inbox.");
+      setOk("Password reset email sent. Check your inbox/spam folder.");
       setResetting(false);
     } catch (e) {
-      setErr(e?.message || "Failed to send reset email");
+      setErr(friendlyFirebaseError(e) || "Failed to send reset email"); // 👈
     } finally {
       setBusy(false);
     }
@@ -204,10 +205,7 @@ export default function Login() {
         <div className="mt-6 rounded-lg border border-zinc-800 p-3 bg-zinc-950">
           <p className="text-sm text-zinc-300 mb-2">
             We’ll send a reset link to{" "}
-            <span className="text-white">
-              {email || "(your email)"}
-            </span>
-            .
+            <span className="text-white">{email || "(your email)"}</span>.
           </p>
           <div className="flex gap-2">
             <button

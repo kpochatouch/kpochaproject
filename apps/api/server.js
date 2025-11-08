@@ -637,44 +637,71 @@ app.put("/api/pros/me", requireAuth, async (req, res) => {
     const pro = await Pro.findOne({ ownerUid: uid });
     if (!pro) return res.status(404).json({ error: "pro_not_found" });
 
-    // only allow editable fields from the frontend
+    // build a selective update
     const updatable = {};
-    if (body.professional) updatable.professional = body.professional;
-    if (body.availability) updatable.availability = body.availability;
-    if (body.bank) updatable.bank = body.bank;
-    if (typeof body.bio === "string") updatable.bio = body.bio;
-    if (typeof body.photoUrl === "string") updatable.photoUrl = body.photoUrl;
+
+    // allow pro to set display name for their pro card
+    if (typeof body.name === "string" && body.name.trim()) {
+      updatable.name = body.name.trim();
+    }
+
+    if (body.professional) {
+      updatable.professional = body.professional;
+    }
+    if (body.availability) {
+      updatable.availability = body.availability;
+    }
+    if (body.bank) {
+      updatable.bank = body.bank;
+    }
+    if (typeof body.bio === "string") {
+      updatable.bio = body.bio;
+    }
+    if (typeof body.photoUrl === "string" && body.photoUrl.trim()) {
+      updatable.photoUrl = body.photoUrl.trim();
+    }
+
     // if frontend sends status, keep it, otherwise preserve current
-    if (typeof body.status === "string") updatable.status = body.status;
-    else updatable.status = pro.status || "approved";
+    if (typeof body.status === "string") {
+      updatable.status = body.status;
+    } else {
+      updatable.status = pro.status || "approved";
+    }
 
     const updated = await Pro.findOneAndUpdate(
       { ownerUid: uid },
       { $set: updatable },
       { new: true }
-    );
+    ).lean();
 
-    // 🔁 keep the unified "profiles" collection in sync
+    // 🔁 keep the unified "profiles" collection in sync — but also selective
     try {
       const col = mongoose.connection.db.collection("profiles");
       const toSet = {
         uid,
         ownerUid: uid,
+        hasPro: true,
+        proStatus: updated.status,
+        proId: updated._id,
       };
 
-      // take public-facing pro stuff and mirror it
-      if (typeof body.photoUrl === "string") {
-        toSet.photoUrl = body.photoUrl;
-        toSet["identity.photoUrl"] = body.photoUrl;
+      // mirror name/photo only if pro actually sent them
+      if (typeof body.name === "string" && body.name.trim()) {
+        toSet.displayName = body.name.trim();
+        toSet.fullName = body.name.trim();
+        toSet.name = body.name.trim();
       }
 
-      if (body.professional && Array.isArray(body.professional.services)) {
-        // optional: you can store it if you want
-        toSet.proServices = body.professional.services;
+      if (typeof body.photoUrl === "string" && body.photoUrl.trim()) {
+        toSet.photoUrl = body.photoUrl.trim();
+        toSet["identity.photoUrl"] = body.photoUrl.trim();
       }
 
-      // availability → statesCovered
-      if (body.availability && Array.isArray(body.availability.statesCovered)) {
+      // availability → statesCovered (only if sent)
+      if (
+        body.availability &&
+        Array.isArray(body.availability.statesCovered)
+      ) {
         toSet.statesCovered = body.availability.statesCovered.map((s) =>
           s.toString().toUpperCase()
         );
@@ -682,11 +709,14 @@ app.put("/api/pros/me", requireAuth, async (req, res) => {
 
       await col.updateOne(
         { uid },
-        { $set: toSet, $setOnInsert: { hasPro: true, proStatus: updated.status, proId: updated._id } },
+        { $set: toSet },
         { upsert: true }
       );
     } catch (syncErr) {
-      console.warn("[/api/pros/me PUT] profiles sync skipped:", syncErr?.message || syncErr);
+      console.warn(
+        "[/api/pros/me PUT] profiles sync skipped:",
+        syncErr?.message || syncErr
+      );
     }
 
     return res.json({ ok: true, item: updated });
