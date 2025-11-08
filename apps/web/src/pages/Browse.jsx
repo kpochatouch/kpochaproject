@@ -16,8 +16,9 @@ import FeedCard from "../components/FeedCard";
 import ErrorBoundary from "../components/ErrorBoundary";
 import SideMenu from "../components/SideMenu.jsx";
 
-/* ---------------- Feed composer (slimmer) ---------------- */
+/* ---------------- Feed composer (small) ---------------- */
 function FeedComposer({ lga, onPosted }) {
+  const navigate = useNavigate();
   const [text, setText] = useState("");
   const [mediaUrl, setMediaUrl] = useState("");
   const [mediaType, setMediaType] = useState("image");
@@ -113,11 +114,13 @@ function FeedComposer({ lga, onPosted }) {
         {msg ? <span className="text-[10px] text-zinc-400">{msg}</span> : null}
       </div>
 
+      {/* when user clicks this, go to /compose */}
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}
-        placeholder="What are you working on today?"
-        className="w-full bg-black border border-zinc-800 rounded-lg px-3 py-2 mb-2 outline-none focus:border-gold text-sm min-h-[60px]"
+        onFocus={() => navigate("/compose")}
+        placeholder="Tap to write a longer post…"
+        className="w-full bg-black border border-zinc-800 rounded-lg px-3 py-2 mb-2 outline-none focus:border-gold text-sm min-h-[50px]"
       />
 
       {mediaUrl ? (
@@ -166,13 +169,22 @@ function FeedComposer({ lga, onPosted }) {
             onChange={handleFileChange}
           />
         </div>
-        <button
-          onClick={submit}
-          disabled={posting || uploading}
-          className="rounded-lg bg-gold text-black px-4 py-1.5 text-sm font-semibold disabled:opacity-50"
-        >
-          {posting ? "Posting…" : "Post"}
-        </button>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => navigate("/compose")}
+            className="rounded-lg border border-zinc-600 px-3 py-1.5 text-xs text-white hover:bg-zinc-900"
+          >
+            Write long post
+          </button>
+          <button
+            onClick={submit}
+            disabled={posting || uploading}
+            className="rounded-lg bg-gold text-black px-4 py-1.5 text-sm font-semibold disabled:opacity-50"
+          >
+            {posting ? "Posting…" : "Post"}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -182,7 +194,7 @@ function FeedComposer({ lga, onPosted }) {
 export default function Browse() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { me, isAdmin, isPro } = useMe();
+  const { me, isAdmin } = useMe();
 
   const [tab, setTab] = useState("feed");
 
@@ -206,13 +218,13 @@ export default function Browse() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [errFeed, setErrFeed] = useState("");
   const [hasMore, setHasMore] = useState(true);
-  const pageSize = 8; // items per request
+  const pageSize = 8;
 
   // right-rail advert
   const [adminAdUrl, setAdminAdUrl] = useState("");
   const [adMsg, setAdMsg] = useState("");
 
-  // sentinel + latest state refs for stable observer
+  // sentinel + latest state refs
   const sentinelRef = useRef(null);
   const observerRef = useRef(null);
   const hasMoreRef = useRef(hasMore);
@@ -229,7 +241,7 @@ export default function Browse() {
     loadingFeedRef.current = loadingFeed;
   }, [loadingFeed]);
 
-  // load geo (keep, but no more auto-prefill from profile)
+  // load geo
   useEffect(() => {
     let on = true;
     (async () => {
@@ -342,7 +354,7 @@ export default function Browse() {
     setLga("");
   }
 
-  // fetch feed (cursor-based using 'before' = createdAt)
+  // fetch feed (cursor-based)
   const fetchFeed = useCallback(
     async ({ append = false, before = null } = {}) => {
       try {
@@ -422,7 +434,7 @@ export default function Browse() {
     await fetchFeed({ append: true, before });
   }, [feed, fetchFeed]);
 
-  // setup IntersectionObserver for infinite scroll (stable, like TikTok)
+  // setup IntersectionObserver
   useEffect(() => {
     const sentinel = sentinelRef.current;
     if (!sentinel) return;
@@ -437,7 +449,6 @@ export default function Browse() {
       (entries) => {
         for (const entry of entries) {
           if (entry.isIntersecting) {
-            // use refs, not stale closure
             if (
               hasMoreRef.current &&
               !loadingMoreRef.current &&
@@ -450,8 +461,8 @@ export default function Browse() {
       },
       {
         root: null,
-        rootMargin: "400px",
-        threshold: 0.01,
+        rootMargin: "800px",
+        threshold: 0,
       }
     );
 
@@ -495,7 +506,6 @@ export default function Browse() {
 
   return (
     <ErrorBoundary>
-      {/* no overflow here so sticky works */}
       <div className="max-w-6xl mx-auto px-4 py-10">
         {/* header + tabs */}
         <div className="mb-6 flex items-center justify-between gap-3 flex-wrap">
@@ -531,7 +541,7 @@ export default function Browse() {
           </div>
         </div>
 
-        {/* filters (keep for Pros) */}
+        {/* filters */}
         <div className="flex flex-wrap items-center gap-2 mb-6">
           <input
             value={q}
@@ -612,9 +622,8 @@ export default function Browse() {
             )}
           </>
         ) : (
-          // FEED LAYOUT (TikTok-ish: center column + sticky sides)
           <div className="flex flex-col lg:flex-row gap-4 items-start">
-            {/* LEFT MENU - sticky */}
+            {/* LEFT MENU */}
             <div className="lg:w-56 w-full self-start lg:sticky lg:top-20">
               <SideMenu me={me} />
             </div>
@@ -623,9 +632,9 @@ export default function Browse() {
             <div className="flex-1 w-full max-w-2xl lg:mx-0 mx-auto">
               {canPostOnFeed && (
                 <FeedComposer
-                  lga={lga}
-                  onPosted={() => fetchFeed({ append: false, before: null })}
-                />
+                    lga={lga}
+                    onPosted={() => fetchFeed({ append: false, before: null })}
+                  />
               )}
               {errFeed && (
                 <div className="mb-4 rounded border border-red-800 bg-red-900/30 text-red-100 px-3 py-2">
@@ -651,38 +660,35 @@ export default function Browse() {
                     ))}
                   </div>
 
-                  {/* visible sentinel for infinite scroll */}
-                  <div className="mt-6 flex justify-center" aria-hidden>
+                  {/* invisible sentinel */}
+                  <div ref={sentinelRef} className="h-1 w-full" aria-hidden />
+
+                  <div className="mt-6 flex justify-center">
                     {loadingMore ? (
                       <div className="text-sm text-zinc-400">Loading…</div>
                     ) : hasMore ? (
-                      <div
-                        ref={sentinelRef}
-                        className="w-full flex items-center justify-center py-6"
+                      <button
+                        onClick={loadMore}
+                        className="flex items-center gap-2 px-4 py-2 rounded-md border border-zinc-700 hover:bg-zinc-900"
+                        aria-label="Load more posts"
                       >
-                        <button
-                          onClick={loadMore}
-                          className="flex items-center gap-2 px-4 py-2 rounded-md border border-zinc-700 hover:bg-zinc-900"
-                          aria-label="Load more posts"
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          className="w-5 h-5"
+                          aria-hidden
                         >
-                          <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            className="w-5 h-5"
-                            aria-hidden
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth="2"
-                              d="M19 9l-7 7-7-7"
-                            />
-                          </svg>
-                          <span className="text-sm">Load more</span>
-                        </button>
-                      </div>
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth="2"
+                            d="M19 9l-7 7-7-7"
+                          />
+                        </svg>
+                        <span className="text-sm">Load more</span>
+                      </button>
                     ) : (
                       <div className="text-xs text-zinc-500">
                         No more posts
@@ -697,7 +703,7 @@ export default function Browse() {
               )}
             </div>
 
-            {/* RIGHT ADS - sticky */}
+            {/* RIGHT ADS */}
             <div className="hidden lg:block w-56 self-start lg:sticky lg:top-20">
               <div className="space-y-4">
                 {isAdmin ? (

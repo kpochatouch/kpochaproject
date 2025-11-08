@@ -1,6 +1,6 @@
 // apps/web/src/components/FeedCard.jsx
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 
 function timeAgo(ts) {
@@ -17,6 +17,7 @@ function timeAgo(ts) {
 }
 
 export default function FeedCard({ post, currentUser, onDeleted }) {
+  const navigate = useNavigate();
   const postId = post._id || post.id;
 
   const isOwner =
@@ -25,7 +26,6 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
       post.ownerUid === currentUser.uid ||
       post.createdBy === currentUser.uid);
 
-  // keep everything in one place
   const [stats, setStats] = useState({
     viewsCount: 0,
     likesCount: 0,
@@ -44,18 +44,32 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
   const [loadingSave, setLoadingSave] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  // video + view logic
+  // media / view refs
   const videoRef = useRef(null);
-  const observerRef = useRef(null);
+  const mediaObserverRef = useRef(null);
+  const cardRef = useRef(null);
   const [inView, setInView] = useState(false);
   const hasSentViewRef = useRef(false);
   const playTriggeredByObserverRef = useRef(false);
+
+  // mobile detect (works for iOS + Android)
+  const isMobile =
+    typeof navigator !== "undefined" &&
+    /iPhone|iPad|iPod|Android|Mobi/i.test(navigator.userAgent);
+
+  // video UI
+  const [muted, setMuted] = useState(true);
+  const [userHasInteracted, setUserHasInteracted] = useState(false);
 
   const media =
     Array.isArray(post.media) && post.media.length ? post.media[0] : null;
   const isVideo = media?.type === "video";
 
-  // 1) load stats once, but DO NOT let server lower our counts
+  // text clamp
+  const [showFullText, setShowFullText] = useState(false);
+  const MAX_TEXT = 140;
+
+  // 1) load stats once
   useEffect(() => {
     let stopped = false;
     (async () => {
@@ -65,17 +79,18 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
         if (stopped) return;
         setStats((prev) => ({
           ...prev,
-          // never go backwards
           viewsCount: Math.max(prev.viewsCount, srv.viewsCount ?? 0),
           likesCount: Math.max(prev.likesCount, srv.likesCount ?? 0),
           commentsCount: Math.max(prev.commentsCount, srv.commentsCount ?? 0),
           sharesCount: Math.max(prev.sharesCount, srv.sharesCount ?? 0),
           savesCount: Math.max(prev.savesCount, srv.savesCount ?? 0),
-          likedByMe: typeof srv.likedByMe === "boolean" ? srv.likedByMe : prev.likedByMe,
-          savedByMe: typeof srv.savedByMe === "boolean" ? srv.savedByMe : prev.savedByMe,
+          likedByMe:
+            typeof srv.likedByMe === "boolean" ? srv.likedByMe : prev.likedByMe,
+          savedByMe:
+            typeof srv.savedByMe === "boolean" ? srv.savedByMe : prev.savedByMe,
         }));
       } catch {
-        // ignore, keep optimistic
+        // ignore
       }
     })();
     return () => {
@@ -83,28 +98,43 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
     };
   }, [postId]);
 
-  // helper: safe merge after an action
   function mergeStatsFromServer(partial) {
     setStats((prev) => ({
       ...prev,
-      viewsCount: partial.viewsCount != null ? Math.max(prev.viewsCount, partial.viewsCount) : prev.viewsCount,
-      likesCount: partial.likesCount != null ? Math.max(prev.likesCount, partial.likesCount) : prev.likesCount,
-      commentsCount: partial.commentsCount != null ? Math.max(prev.commentsCount, partial.commentsCount) : prev.commentsCount,
-      sharesCount: partial.sharesCount != null ? Math.max(prev.sharesCount, partial.sharesCount) : prev.sharesCount,
-      savesCount: partial.savesCount != null ? Math.max(prev.savesCount, partial.savesCount) : prev.savesCount,
-      likedByMe: partial.likedByMe != null ? partial.likedByMe : prev.likedByMe,
-      savedByMe: partial.savedByMe != null ? partial.savedByMe : prev.savedByMe,
+      viewsCount:
+        partial.viewsCount != null
+          ? Math.max(prev.viewsCount, partial.viewsCount)
+          : prev.viewsCount,
+      likesCount:
+        partial.likesCount != null
+          ? Math.max(prev.likesCount, partial.likesCount)
+          : prev.likesCount,
+      commentsCount:
+        partial.commentsCount != null
+          ? Math.max(prev.commentsCount, partial.commentsCount)
+          : prev.commentsCount,
+      sharesCount:
+        partial.sharesCount != null
+          ? Math.max(prev.sharesCount, partial.sharesCount)
+          : prev.sharesCount,
+      savesCount:
+        partial.savesCount != null
+          ? Math.max(prev.savesCount, partial.savesCount)
+          : prev.savesCount,
+      likedByMe:
+        partial.likedByMe != null ? partial.likedByMe : prev.likedByMe,
+      savedByMe:
+        partial.savedByMe != null ? partial.savedByMe : prev.savedByMe,
     }));
   }
 
-  // 2) views: once per mount
+  // send view (safe)
   async function sendViewOnce() {
     if (hasSentViewRef.current || !postId) return;
     hasSentViewRef.current = true;
     try {
       const res = await api.post(`/api/posts/${postId}/view`);
       const srv = res?.data || {};
-      // if backend doesn't send number, just +1
       setStats((prev) => ({
         ...prev,
         viewsCount:
@@ -113,17 +143,16 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
             : prev.viewsCount + 1,
       }));
     } catch {
-      // still count locally
       setStats((prev) => ({ ...prev, viewsCount: prev.viewsCount + 1 }));
     }
   }
 
-  // 3) video IntersectionObserver (play/pause only)
+  // 2) observe video for auto play/pause
   useEffect(() => {
     if (!isVideo || !videoRef.current) return;
 
     const el = videoRef.current;
-    observerRef.current?.disconnect();
+    mediaObserverRef.current?.disconnect();
 
     const obs = new IntersectionObserver(
       async (entries) => {
@@ -131,41 +160,60 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
         const nowInView = entry.isIntersecting && entry.intersectionRatio >= 0.6;
         setInView(nowInView);
 
-        try {
-          if (nowInView) {
-            // scroll autoplay, don't count
+        if (nowInView) {
+          try {
             playTriggeredByObserverRef.current = true;
             await el.play().catch(() => {});
-          } else {
-            el.pause();
+          } catch {
+            // ignore
           }
-        } catch {}
+        } else {
+          el.pause();
+        }
       },
-      { threshold: [0, 0.25, 0.6, 0.75, 1] }
+      { threshold: [0, 0.4, 0.6, 0.8, 1] }
     );
 
     obs.observe(el);
-    observerRef.current = obs;
+    mediaObserverRef.current = obs;
 
     return () => {
       obs.disconnect();
     };
   }, [postId, isVideo]);
 
-  function onMouseEnterVideo() {
-    if (!videoRef.current) return;
-    videoRef.current.play().catch(() => {});
-  }
-  function onMouseLeaveVideo() {
-    if (!videoRef.current) return;
-    if (!inView) videoRef.current.pause();
-  }
+  // 3) also send view for NON-video cards (photos / text)
+  useEffect(() => {
+    if (!cardRef.current) return;
+    if (isVideo) return; // video will send when user actually plays
+    const el = cardRef.current;
+    const obs = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (entry.isIntersecting && entry.intersectionRatio >= 0.6) {
+          sendViewOnce();
+          obs.disconnect();
+        }
+      },
+      { threshold: [0, 0.4, 0.6, 0.8, 1] }
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [isVideo]);
 
   function onClickVideo() {
-    if (!videoRef.current) return;
     const vid = videoRef.current;
+    if (!vid) return;
+
+    setUserHasInteracted(true);
+
+    // first user click → unmute
+    if (muted) {
+      setMuted(false);
+      vid.muted = false;
+    }
+
     if (vid.paused) {
-      // user intent → count in onPlay
       playTriggeredByObserverRef.current = false;
       vid.play().catch(() => {});
     } else {
@@ -174,11 +222,25 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
   }
 
   function onVideoPlay() {
+    // only count real user plays, not scroll-autoplay
     if (playTriggeredByObserverRef.current) return;
     sendViewOnce();
   }
 
-  // 4) actions --------------------------------------------------
+  function onToggleMute(e) {
+    e.stopPropagation();
+    const vid = videoRef.current;
+    const next = !muted;
+    setMuted(next);
+    if (vid) vid.muted = next;
+    if (!next && vid?.paused) {
+      // user asked to unmute → also play
+      playTriggeredByObserverRef.current = false;
+      vid.play().catch(() => {});
+    }
+  }
+
+  // likes
   async function toggleLike() {
     if (!currentUser) return alert("Login to like");
     if (!postId) return;
@@ -187,7 +249,6 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
 
     const wasLiked = stats.likedByMe;
 
-    // optimistic
     setStats((prev) => ({
       ...prev,
       likedByMe: !wasLiked,
@@ -223,7 +284,6 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
 
     const wasSaved = stats.savedByMe;
 
-    // optimistic
     setStats((prev) => ({
       ...prev,
       savedByMe: !wasSaved,
@@ -238,7 +298,6 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
         : await api.post(`/api/posts/${postId}/save`);
       mergeStatsFromServer(res?.data || {});
     } catch {
-      // revert
       setStats((prev) => ({
         ...prev,
         savedByMe: wasSaved,
@@ -260,11 +319,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
       const res = await api.post(`/api/posts/${postId}/share`);
       mergeStatsFromServer(res?.data || {});
     } catch {
-      // if server didn't update, at least bump locally
-      setStats((prev) => ({
-        ...prev,
-        sharesCount: prev.sharesCount + 1,
-      }));
+      setStats((prev) => ({ ...prev, sharesCount: prev.sharesCount + 1 }));
     }
 
     if (navigator.share) {
@@ -275,7 +330,9 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
           url,
         });
         return;
-      } catch {}
+      } catch {
+        // fall through
+      }
     }
     try {
       await navigator.clipboard.writeText(url);
@@ -292,7 +349,9 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
       try {
         const res = await api.get(`/api/posts/${postId}/comments`);
         setComments(res.data || []);
-      } catch {}
+      } catch {
+        // ignore
+      }
     }
   }
 
@@ -316,10 +375,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
 
     setComments((c) => [optimistic, ...c]);
     setCommentText("");
-    setStats((prev) => ({
-      ...prev,
-      commentsCount: prev.commentsCount + 1,
-    }));
+    setStats((prev) => ({ ...prev, commentsCount: prev.commentsCount + 1 }));
 
     try {
       const res = await api.post(`/api/posts/${postId}/comments`, {
@@ -329,7 +385,6 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
       setComments((c) => [real, ...c.filter((cm) => cm._id !== tmpId)]);
       mergeStatsFromServer(res?.data || {});
     } catch {
-      // revert
       setComments((c) => c.filter((cm) => cm._id !== tmpId));
       setStats((prev) => ({
         ...prev,
@@ -404,26 +459,28 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
     }
   }
 
-  function handleFollowToggle() {
-    alert("Follow / Unfollow will be available soon.");
-    setMenuOpen(false);
-  }
-  function handleReport() {
-    alert("Report received. Admin will review.");
-    setMenuOpen(false);
-  }
-  function handleBlockUser() {
-    alert("Block user coming soon.");
-    setMenuOpen(false);
-  }
-
   const pro = post.pro || {};
   const avatar = pro.photoUrl || post.authorAvatar || "";
   const proName = pro.name || post.authorName || "Professional";
   const lga = pro.lga || post.lga || "";
 
+  // clicking text → go to post detail (you can change route)
+  function goToPostDetail() {
+    if (!postId) return;
+    navigate(`/post/${postId}`);
+  }
+
+  const textTooLong = post.text && post.text.length > MAX_TEXT;
+  const shownText =
+    post.text && !showFullText
+      ? post.text.slice(0, MAX_TEXT) + (textTooLong ? "..." : "")
+      : post.text;
+
   return (
-    <div className="bg-[#0F0F0F] border border-[#1F1F1F] rounded-xl overflow-hidden">
+    <div
+      ref={cardRef}
+      className="bg-[#0F0F0F] border border-[#1F1F1F] rounded-xl overflow-hidden"
+    >
       {/* header */}
       <div className="flex items-start justify-between px-4 py-3 gap-3">
         <div className="flex gap-3">
@@ -442,9 +499,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
             )}
           </div>
           <div>
-            <div className="text-sm font-semibold text:white text-white">
-              {proName}
-            </div>
+            <div className="text-sm font-semibold text-white">{proName}</div>
             <div className="text-xs text-gray-400">
               {lga || "Nigeria"} • {timeAgo(post.createdAt)}
             </div>
@@ -498,24 +553,6 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
                     Hide Post
                   </button>
                 )}
-                <button
-                  onClick={handleReport}
-                  className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
-                >
-                  Report Post
-                </button>
-                <button
-                  onClick={handleFollowToggle}
-                  className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
-                >
-                  Follow / Unfollow
-                </button>
-                <button
-                  onClick={handleBlockUser}
-                  className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
-                >
-                  Block User
-                </button>
                 {isOwner && (
                   <>
                     {post.commentsDisabled ? (
@@ -541,35 +578,77 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
         </div>
       </div>
 
-      {/* text */}
+      {/* text (with “view more”) */}
       {post.text && (
-        <div className="px-4 pb-3 text-sm text-white">{post.text}</div>
+        <div className="px-4 pb-3 text-sm text-white">
+          <button
+            onClick={goToPostDetail}
+            className="text-left w-full inline-block"
+          >
+            {shownText}
+          </button>
+          {textTooLong && !showFullText && (
+            <button
+              onClick={() => setShowFullText(true)}
+              className="ml-1 text-xs text-gold"
+            >
+              View more
+            </button>
+          )}
+        </div>
       )}
 
-      {/* media */}
+      {/* media: fixed IG-ish aspect ratio so it doesn't overflow */}
       {media && (
-        <div className="bg-black">
+        <div
+          className="w-full bg-black overflow-hidden"
+          style={{ aspectRatio: "4 / 5" }}
+        >
           {isVideo ? (
-            <video
-              ref={videoRef}
-              src={media.url}
-              className="w-full max-h-[420px] object-cover"
-              muted
-              loop
-              playsInline
-              preload="metadata"
-              controls
-              onMouseEnter={onMouseEnterVideo}
-              onMouseLeave={onMouseLeaveVideo}
-              onClick={onClickVideo}
-              onPlay={onVideoPlay}
-            />
+            <div className="relative w-full h-full">
+              <video
+                ref={videoRef}
+                src={media.url}
+                className="w-full h-full object-cover"
+                muted={muted}
+                loop
+                playsInline
+                preload="metadata"
+                // we show our own controls
+                controls={false}
+                onClick={onClickVideo}
+                onPlay={onVideoPlay}
+              />
+              {/* play/pause overlay */}
+              {!userHasInteracted && (
+                <button
+                  onClick={onClickVideo}
+                  className="absolute inset-0 flex items-center justify-center bg-black/0"
+                />
+              )}
+              <div className="absolute bottom-3 left-3 flex gap-2">
+                <button
+                  onClick={onClickVideo}
+                  className="bg-black/50 text-white text-xs px-3 py-1 rounded-full"
+                >
+                  {videoRef.current && !videoRef.current.paused
+                    ? "Pause"
+                    : "Play"}
+                </button>
+                <button
+                  onClick={onToggleMute}
+                  className="bg-black/50 text-white text-xs px-3 py-1 rounded-full"
+                >
+                  {muted ? "Unmute" : "Mute"}
+                </button>
+              </div>
+            </div>
           ) : (
             <img
               src={media.url}
               alt=""
               loading="lazy"
-              className="w-full max-h-[420px] object-cover"
+              className="w-full h-full object-cover"
             />
           )}
         </div>
@@ -659,32 +738,14 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
                   )}
                 </div>
                 <div className="flex-1">
-                  <div className="bg-[#141414] rounded-2xl px-3 py-2">
-                    <div className="text-xs text-white font-semibold">
-                      {c.authorName || "User"}
-                    </div>
-                    <div className="text-sm text-gray-200">{c.text}</div>
+                  <div className="text-xs text-white font-semibold">
+                    {c.authorName || "User"}
+                  </div>
+                  <div className="bg-[#141414] rounded-2xl px-3 py-2 text-sm text-gray-200">
+                    {c.text}
                   </div>
                   <div className="flex gap-3 items-center text-[10px] text-gray-500 mt-1">
                     <span>{new Date(c.createdAt).toLocaleString()}</span>
-                    <button
-                      type="button"
-                      onClick={() => alert("Comment like coming soon")}
-                      className="hover:text-gray-200"
-                    >
-                      Like
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setCommentText((v) =>
-                          v ? v + ` @${c.authorName} ` : `@${c.authorName} `
-                        )
-                      }
-                      className="hover:text-gray-200"
-                    >
-                      Reply
-                    </button>
                     {currentUser?.uid && currentUser.uid === c.ownerUid && (
                       <button
                         type="button"

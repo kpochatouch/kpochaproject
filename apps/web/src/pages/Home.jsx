@@ -92,26 +92,19 @@ export default function Home() {
           pb-20
         `}
       >
-        {/* ✅ video from /public */}
+        {/* ✅ video background with fallback poster */}
         <video
           className="absolute inset-0 w-full h-full object-cover opacity-30"
           src="/hero-video.mp4"
+          poster="/bg-alt.jpg"
           autoPlay
           loop
           muted
           playsInline
         />
 
-        {/* ✅ dark overlay, also use bg-alt as a fallback image */}
-        <div
-          className="absolute inset-0 bg-gradient-to-b from-black/70 via-black/60 to-black/80"
-          style={{
-            backgroundImage: "url(/bg-alt.jpg)",
-            backgroundSize: "cover",
-            backgroundPosition: "center",
-            mixBlendMode: "normal",
-          }}
-        />
+        {/* ✅ dark overlay only (no background image so video is visible) */}
+        <div className="absolute inset-0 bg-gradient-to-b from-black/70 via-black/60 to-black/80 pointer-events-none" />
 
         <motion.div
           className="relative z-10 w-full max-w-5xl mx-auto px-4"
