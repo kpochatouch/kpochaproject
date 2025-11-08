@@ -531,12 +531,14 @@ function scrubPublicPro(p = {}) {
 /* ------------------- Unified current user profile summary ------------------- */
 app.get("/api/me", requireAuth, async (req, res) => {
   try {
-    // 1) canonical user/profile doc
+    const uid = req.user.uid;
+
+    // 1) load main profile (the single source)
     let profileDoc = null;
     try {
       const col = mongoose.connection.db.collection("profiles");
       profileDoc = await col.findOne(
-        { uid: req.user.uid },
+        { uid },
         {
           projection: {
             displayName: 1,
@@ -550,42 +552,70 @@ app.get("/api/me", requireAuth, async (req, res) => {
             phone: 1,
             state: 1,
             lga: 1,
+            updatedAt: 1,
           },
         }
       );
     } catch {}
 
-    // 2) pro doc (may add status/id/photo)
+    // 2) load pro doc (may be newer)
     let proDoc = null;
     try {
-      proDoc = await Pro.findOne({ ownerUid: req.user.uid })
-        .select("_id name photoUrl status")
+      proDoc = await Pro.findOne({ ownerUid: uid })
+        .select("_id name photoUrl status updatedAt")
         .lean();
     } catch {}
 
-    // pick best name (profile first, then pro, then identity, then email)
+    // normalize times for comparison
+    const profileUpdatedAt = profileDoc?.updatedAt
+      ? new Date(profileDoc.updatedAt).getTime()
+      : 0;
+    const proUpdatedAt = proDoc?.updatedAt
+      ? new Date(proDoc.updatedAt).getTime()
+      : 0;
+
+    // helper: pick newest value between profile + pro
+    function pickName() {
+      // if pro is newer and has a name, use pro name
+      if (proUpdatedAt > profileUpdatedAt && proDoc?.name) {
+        return proDoc.name;
+      }
+
+      // otherwise use profile best-name
+      const identity = profileDoc?.identity || {};
+      return (
+        profileDoc?.displayName ||
+        profileDoc?.fullName ||
+        profileDoc?.name ||
+        [identity?.firstName, identity?.lastName].filter(Boolean).join(" ").trim() ||
+        proDoc?.name ||
+        req.user.email ||
+        ""
+      );
+    }
+
+    function pickPhoto() {
+      // if pro is newer and has a photo, use it
+      if (proUpdatedAt > profileUpdatedAt && proDoc?.photoUrl) {
+        return proDoc.photoUrl;
+      }
+      const identity = profileDoc?.identity || {};
+      return (
+        profileDoc?.photoUrl ||
+        identity?.photoUrl ||
+        proDoc?.photoUrl ||
+        ""
+      );
+    }
+
+    const displayName = pickName();
+    const photoUrl = pickPhoto();
     const identity = profileDoc?.identity || {};
-    const displayName =
-      profileDoc?.displayName ||
-      profileDoc?.fullName ||
-      profileDoc?.name ||
-      proDoc?.name ||
-      [identity?.firstName, identity?.lastName].filter(Boolean).join(" ").trim() ||
-      req.user.email ||
-      "";
-
-    // pick best photo
-    const photoUrl =
-      profileDoc?.photoUrl ||
-      identity?.photoUrl ||
-      proDoc?.photoUrl ||
-      "";
-
-    const isAdmin = isAdminUid(req.user.uid);
+    const isAdmin = isAdminUid(uid);
     const isPro = !!proDoc || !!profileDoc?.hasPro;
 
     res.json({
-      uid: req.user.uid,
+      uid,
       email: req.user.email || "",
       displayName,
       identity,
@@ -595,14 +625,14 @@ app.get("/api/me", requireAuth, async (req, res) => {
       pro: proDoc
         ? {
             id: proDoc._id.toString(),
-            name: proDoc.name || displayName || "",
+            name: displayName, // <-- keep it aligned with what we show
             status: proDoc.status || "approved",
-            photoUrl: proDoc.photoUrl || photoUrl || "",
+            photoUrl: photoUrl || "",
           }
         : profileDoc?.proId
         ? {
             id: profileDoc.proId.toString(),
-            name: displayName || "",
+            name: displayName,
             status: profileDoc.proStatus || "approved",
             photoUrl,
           }
