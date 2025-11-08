@@ -25,6 +25,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
       post.ownerUid === currentUser.uid ||
       post.createdBy === currentUser.uid);
 
+  // keep everything in one place
   const [stats, setStats] = useState({
     viewsCount: 0,
     likesCount: 0,
@@ -43,12 +44,10 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
   const [loadingSave, setLoadingSave] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  // ---- VIDEO AUTOPLAY CONTROL (on-screen & hover) ----
+  // video + view logic
   const videoRef = useRef(null);
   const observerRef = useRef(null);
   const [inView, setInView] = useState(false);
-
-  // view counting control
   const hasSentViewRef = useRef(false);
   const playTriggeredByObserverRef = useRef(false);
 
@@ -56,54 +55,85 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
     Array.isArray(post.media) && post.media.length ? post.media[0] : null;
   const isVideo = media?.type === "video";
 
+  // 1) load stats once, but DO NOT let server lower our counts
   useEffect(() => {
     let stopped = false;
-
-    // load stats
     (async () => {
       try {
         const res = await api.get(`/api/posts/${postId}/stats`);
-        if (!stopped) setStats((s) => ({ ...s, ...res.data }));
-      } catch {}
+        const srv = res?.data || {};
+        if (stopped) return;
+        setStats((prev) => ({
+          ...prev,
+          // never go backwards
+          viewsCount: Math.max(prev.viewsCount, srv.viewsCount ?? 0),
+          likesCount: Math.max(prev.likesCount, srv.likesCount ?? 0),
+          commentsCount: Math.max(prev.commentsCount, srv.commentsCount ?? 0),
+          sharesCount: Math.max(prev.sharesCount, srv.sharesCount ?? 0),
+          savesCount: Math.max(prev.savesCount, srv.savesCount ?? 0),
+          likedByMe: typeof srv.likedByMe === "boolean" ? srv.likedByMe : prev.likedByMe,
+          savedByMe: typeof srv.savedByMe === "boolean" ? srv.savedByMe : prev.savedByMe,
+        }));
+      } catch {
+        // ignore, keep optimistic
+      }
     })();
-
     return () => {
       stopped = true;
     };
   }, [postId]);
 
-  // helper: send view once
+  // helper: safe merge after an action
+  function mergeStatsFromServer(partial) {
+    setStats((prev) => ({
+      ...prev,
+      viewsCount: partial.viewsCount != null ? Math.max(prev.viewsCount, partial.viewsCount) : prev.viewsCount,
+      likesCount: partial.likesCount != null ? Math.max(prev.likesCount, partial.likesCount) : prev.likesCount,
+      commentsCount: partial.commentsCount != null ? Math.max(prev.commentsCount, partial.commentsCount) : prev.commentsCount,
+      sharesCount: partial.sharesCount != null ? Math.max(prev.sharesCount, partial.sharesCount) : prev.sharesCount,
+      savesCount: partial.savesCount != null ? Math.max(prev.savesCount, partial.savesCount) : prev.savesCount,
+      likedByMe: partial.likedByMe != null ? partial.likedByMe : prev.likedByMe,
+      savedByMe: partial.savedByMe != null ? partial.savedByMe : prev.savedByMe,
+    }));
+  }
+
+  // 2) views: once per mount
   async function sendViewOnce() {
     if (hasSentViewRef.current || !postId) return;
     hasSentViewRef.current = true;
     try {
       const res = await api.post(`/api/posts/${postId}/view`);
-      setStats((s) => ({
-        ...s,
-        viewsCount: res?.data?.viewsCount ?? s.viewsCount + 1,
+      const srv = res?.data || {};
+      // if backend doesn't send number, just +1
+      setStats((prev) => ({
+        ...prev,
+        viewsCount:
+          srv.viewsCount != null
+            ? Math.max(prev.viewsCount, srv.viewsCount)
+            : prev.viewsCount + 1,
       }));
     } catch {
-      // if it fails, don't spam; we already marked it sent
+      // still count locally
+      setStats((prev) => ({ ...prev, viewsCount: prev.viewsCount + 1 }));
     }
   }
 
-  // Intersection observer: ONLY play/pause, NO view counting here
+  // 3) video IntersectionObserver (play/pause only)
   useEffect(() => {
     if (!isVideo || !videoRef.current) return;
 
     const el = videoRef.current;
     observerRef.current?.disconnect();
 
-    observerRef.current = new IntersectionObserver(
+    const obs = new IntersectionObserver(
       async (entries) => {
         const entry = entries[0];
-        const nowInView =
-          entry.isIntersecting && entry.intersectionRatio >= 0.6;
+        const nowInView = entry.isIntersecting && entry.intersectionRatio >= 0.6;
         setInView(nowInView);
 
         try {
           if (nowInView) {
-            // this play was triggered by scroll, we don't count view here
+            // scroll autoplay, don't count
             playTriggeredByObserverRef.current = true;
             await el.play().catch(() => {});
           } else {
@@ -114,11 +144,14 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
       { threshold: [0, 0.25, 0.6, 0.75, 1] }
     );
 
-    observerRef.current.observe(el);
-    return () => observerRef.current?.disconnect();
+    obs.observe(el);
+    observerRef.current = obs;
+
+    return () => {
+      obs.disconnect();
+    };
   }, [postId, isVideo]);
 
-  // Desktop hover: just play, no counting
   function onMouseEnterVideo() {
     if (!videoRef.current) return;
     videoRef.current.play().catch(() => {});
@@ -128,12 +161,11 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
     if (!inView) videoRef.current.pause();
   }
 
-  // Click = user intent → play/pause + count view if first time
   function onClickVideo() {
     if (!videoRef.current) return;
     const vid = videoRef.current;
     if (vid.paused) {
-      // mark that this is user-triggered, so onPlay will count
+      // user intent → count in onPlay
       playTriggeredByObserverRef.current = false;
       vid.play().catch(() => {});
     } else {
@@ -141,45 +173,42 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
     }
   }
 
-  // when the video actually starts playing
   function onVideoPlay() {
-    // if it was auto-played by scroll, we skip counting here
     if (playTriggeredByObserverRef.current) return;
-    // user-triggered play → count view once
     sendViewOnce();
   }
 
-  // ---- ACTIONS ----
+  // 4) actions --------------------------------------------------
   async function toggleLike() {
     if (!currentUser) return alert("Login to like");
     if (!postId) return;
     if (loadingLike) return;
     setLoadingLike(true);
 
-    const liked = stats.likedByMe;
-    setStats((s) => ({
-      ...s,
-      likedByMe: !liked,
-      likesCount: liked ? Math.max(0, s.likesCount - 1) : s.likesCount + 1,
+    const wasLiked = stats.likedByMe;
+
+    // optimistic
+    setStats((prev) => ({
+      ...prev,
+      likedByMe: !wasLiked,
+      likesCount: wasLiked
+        ? Math.max(0, prev.likesCount - 1)
+        : prev.likesCount + 1,
     }));
 
     try {
-      const res = liked
+      const res = wasLiked
         ? await api.delete(`/api/posts/${postId}/like`)
         : await api.post(`/api/posts/${postId}/like`);
-      setStats((s) => ({
-        ...s,
-        likesCount: res.data?.likesCount ?? s.likesCount,
-        likedByMe: !liked,
-      }));
+      mergeStatsFromServer(res?.data || {});
     } catch {
       // revert
-      setStats((s) => ({
-        ...s,
-        likedByMe: liked,
-        likesCount: liked
-          ? s.likesCount + 1
-          : Math.max(0, s.likesCount - 1),
+      setStats((prev) => ({
+        ...prev,
+        likedByMe: wasLiked,
+        likesCount: wasLiked
+          ? prev.likesCount + 1
+          : Math.max(0, prev.likesCount - 1),
       }));
     } finally {
       setLoadingLike(false);
@@ -191,30 +220,31 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
     if (!postId) return;
     if (loadingSave) return;
     setLoadingSave(true);
-    const saved = stats.savedByMe;
 
-    setStats((s) => ({
-      ...s,
-      savedByMe: !saved,
-      savesCount: saved ? Math.max(0, s.savesCount - 1) : s.savesCount + 1,
+    const wasSaved = stats.savedByMe;
+
+    // optimistic
+    setStats((prev) => ({
+      ...prev,
+      savedByMe: !wasSaved,
+      savesCount: wasSaved
+        ? Math.max(0, prev.savesCount - 1)
+        : prev.savesCount + 1,
     }));
 
     try {
-      const res = saved
+      const res = wasSaved
         ? await api.delete(`/api/posts/${postId}/save`)
         : await api.post(`/api/posts/${postId}/save`);
-      setStats((s) => ({
-        ...s,
-        savesCount: res.data?.savesCount ?? s.savesCount,
-        savedByMe: !saved,
-      }));
+      mergeStatsFromServer(res?.data || {});
     } catch {
-      setStats((s) => ({
-        ...s,
-        savedByMe: saved,
-        savesCount: saved
-          ? s.savesCount + 1
-          : Math.max(0, s.savesCount - 1),
+      // revert
+      setStats((prev) => ({
+        ...prev,
+        savedByMe: wasSaved,
+        savesCount: wasSaved
+          ? prev.savesCount + 1
+          : Math.max(0, prev.savesCount - 1),
       }));
     } finally {
       setLoadingSave(false);
@@ -228,11 +258,14 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
 
     try {
       const res = await api.post(`/api/posts/${postId}/share`);
-      setStats((s) => ({
-        ...s,
-        sharesCount: res.data?.sharesCount ?? s.sharesCount + 1,
+      mergeStatsFromServer(res?.data || {});
+    } catch {
+      // if server didn't update, at least bump locally
+      setStats((prev) => ({
+        ...prev,
+        sharesCount: prev.sharesCount + 1,
       }));
-    } catch {}
+    }
 
     if (navigator.share) {
       try {
@@ -275,31 +308,32 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
       _id: tmpId,
       postId,
       text: txt,
-      authorName:
-        currentUser.displayName || currentUser.fullName || "You",
+      authorName: currentUser.displayName || currentUser.fullName || "You",
       authorAvatar: currentUser.photoUrl || currentUser.photoURL || "",
       ownerUid: currentUser.uid,
       createdAt: new Date().toISOString(),
     };
+
     setComments((c) => [optimistic, ...c]);
     setCommentText("");
-    setStats((s) => ({ ...s, commentsCount: s.commentsCount + 1 }));
+    setStats((prev) => ({
+      ...prev,
+      commentsCount: prev.commentsCount + 1,
+    }));
 
     try {
       const res = await api.post(`/api/posts/${postId}/comments`, {
         text: txt,
       });
-      const real = res.data?.comment;
+      const real = res?.data?.comment;
       setComments((c) => [real, ...c.filter((cm) => cm._id !== tmpId)]);
-      setStats((s) => ({
-        ...s,
-        commentsCount: res.data?.commentsCount ?? s.commentsCount,
-      }));
+      mergeStatsFromServer(res?.data || {});
     } catch {
+      // revert
       setComments((c) => c.filter((cm) => cm._id !== tmpId));
-      setStats((s) => ({
-        ...s,
-        commentsCount: Math.max(0, s.commentsCount - 1),
+      setStats((prev) => ({
+        ...prev,
+        commentsCount: Math.max(0, prev.commentsCount - 1),
       }));
     }
   }
@@ -310,9 +344,9 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
     try {
       await api.delete(`/api/comments/${commentId}`);
       setComments((c) => c.filter((cm) => cm._id !== commentId));
-      setStats((s) => ({
-        ...s,
-        commentsCount: Math.max(0, s.commentsCount - 1),
+      setStats((prev) => ({
+        ...prev,
+        commentsCount: Math.max(0, prev.commentsCount - 1),
       }));
     } catch {
       alert("Failed to delete comment");
@@ -370,7 +404,6 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
     }
   }
 
-  // stubs
   function handleFollowToggle() {
     alert("Follow / Unfollow will be available soon.");
     setMenuOpen(false);
@@ -400,6 +433,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
                 src={avatar}
                 alt={proName}
                 className="w-full h-full object-cover"
+                loading="lazy"
               />
             ) : (
               <span className="text-sm text-white">
@@ -408,7 +442,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
             )}
           </div>
           <div>
-            <div className="text-sm font-semibold text-white">
+            <div className="text-sm font-semibold text:white text-white">
               {proName}
             </div>
             <div className="text-xs text-gray-400">
@@ -458,9 +492,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
                   </button>
                 ) : (
                   <button
-                    onClick={() =>
-                      alert("You can only hide your own post")
-                    }
+                    onClick={() => alert("You can only hide your own post")}
                     className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
                   >
                     Hide Post
@@ -536,6 +568,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
             <img
               src={media.url}
               alt=""
+              loading="lazy"
               className="w-full max-h-[420px] object-cover"
             />
           )}
@@ -583,9 +616,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
           ↗ Share
         </button>
         <button
-          onClick={() =>
-            alert("Follow / Unfollow will be available soon.")
-          }
+          onClick={() => alert("Follow / Unfollow will be available soon.")}
           className="flex-1 py-2 text-sm flex items-center justify-center gap-1 text-gray-200"
         >
           ➕ Follow
@@ -621,6 +652,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
                       src={c.authorAvatar}
                       alt={c.authorName}
                       className="w-full h-full object-cover"
+                      loading="lazy"
                     />
                   ) : (
                     (c.authorName || "U").slice(0, 1).toUpperCase()
@@ -634,14 +666,10 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
                     <div className="text-sm text-gray-200">{c.text}</div>
                   </div>
                   <div className="flex gap-3 items-center text-[10px] text-gray-500 mt-1">
-                    <span>
-                      {new Date(c.createdAt).toLocaleString()}
-                    </span>
+                    <span>{new Date(c.createdAt).toLocaleString()}</span>
                     <button
                       type="button"
-                      onClick={() =>
-                        alert("Comment like coming soon")
-                      }
+                      onClick={() => alert("Comment like coming soon")}
                       className="hover:text-gray-200"
                     >
                       Like
@@ -650,33 +678,28 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
                       type="button"
                       onClick={() =>
                         setCommentText((v) =>
-                          v
-                            ? v + ` @${c.authorName} `
-                            : `@${c.authorName} `
+                          v ? v + ` @${c.authorName} ` : `@${c.authorName} `
                         )
                       }
                       className="hover:text-gray-200"
                     >
                       Reply
                     </button>
-                    {currentUser?.uid &&
-                      currentUser.uid === c.ownerUid && (
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteComment(c._id)}
-                          className="text-red-300 hover:text-red-100"
-                        >
-                          Delete
-                        </button>
-                      )}
+                    {currentUser?.uid && currentUser.uid === c.ownerUid && (
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteComment(c._id)}
+                        className="text-red-300 hover:text-red-100"
+                      >
+                        Delete
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
             ))}
             {comments.length === 0 && (
-              <div className="text-xs text-gray-500">
-                No comments yet.
-              </div>
+              <div className="text-xs text-gray-500">No comments yet.</div>
             )}
           </div>
         </div>

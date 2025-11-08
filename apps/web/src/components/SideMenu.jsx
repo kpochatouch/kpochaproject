@@ -14,22 +14,19 @@ const icons = {
   foryou: "/menu/for-you.png",
   risk: "/menu/risk-logs.png",
   admin: "/menu/admin.png",
-  help: "/menu/settings.png", // fallback
+  help: "/menu/settings.png",
 };
 
 export default function SideMenu({ me }) {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // mobile open/close
   const [open, setOpen] = useState(false);
-  // desktop collapse
   const [collapsed, setCollapsed] = useState(false);
 
   const isAdmin = !!me?.isAdmin;
   const isPro = !!me?.isPro;
 
-  // current path helper (so /browse?tab=pros still highlights browse)
   const pathname = location.pathname;
   const search = location.search || "";
   const isFeed = pathname === "/browse" && !search.includes("tab=pros");
@@ -80,7 +77,6 @@ export default function SideMenu({ me }) {
       key: "chat",
       label: "Chat",
       to: "/chat",
-      // you can flip this to true to enable
       disabled: true,
     },
     {
@@ -127,12 +123,12 @@ export default function SideMenu({ me }) {
 
   function go(path) {
     navigate(path);
-    setOpen(false); // close on mobile
+    setOpen(false);
   }
 
   return (
     <>
-      {/* mobile top button (shows panel) */}
+      {/* mobile toggle */}
       <button
         onClick={() => setOpen((o) => !o)}
         className="lg:hidden mb-3 rounded-lg border border-zinc-700 px-3 py-1 text-sm bg-black/50"
@@ -141,7 +137,6 @@ export default function SideMenu({ me }) {
       </button>
 
       <div className="relative">
-        {/* mobile overlay */}
         {open && (
           <div
             className="fixed inset-0 bg-black/30 backdrop-blur-sm z-30 lg:hidden"
@@ -152,7 +147,7 @@ export default function SideMenu({ me }) {
         <div
           className={`${
             open ? "translate-x-0" : "-translate-x-full"
-          } lg:translate-x-0 transition-transform duration-200
+          } lg:translate-x-0 lg:!transform-none transition-transform duration-200
              fixed lg:sticky top-16 lg:top-20 left-0 z-40
              h-[calc(100vh-4rem)] lg:h-auto
              flex`}
@@ -164,7 +159,7 @@ export default function SideMenu({ me }) {
               rounded-none lg:rounded-xl lg:border lg:bg-black/40
               p-3 space-y-2 overflow-y-auto`}
           >
-            {/* collapse toggle (desktop only) */}
+            {/* collapse toggle */}
             <div className="hidden lg:flex justify-end mb-1">
               <button
                 onClick={() => setCollapsed((c) => !c)}
@@ -279,8 +274,7 @@ function MenuButton({
       className={`w-full flex items-center gap-2 px-2 py-2 rounded-lg text-sm
         ${active ? "bg-zinc-900 text-gold" : "text-zinc-200 hover:bg-zinc-900"}
         ${disabled ? "opacity-50 cursor-not-allowed" : ""}
-        ${collapsed ? "justify-center" : ""}
-      `}
+        ${collapsed ? "justify-center" : ""}`}
     >
       {icon ? (
         <img

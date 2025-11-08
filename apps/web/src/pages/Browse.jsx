@@ -133,6 +133,7 @@ function FeedComposer({ lga, onPosted }) {
             <img
               src={mediaUrl}
               alt="uploaded"
+              loading="lazy"
               className="w-full max-h-52 rounded-lg border border-zinc-800 object-cover max-w-full"
             />
           )}
@@ -211,36 +212,24 @@ export default function Browse() {
   const [adminAdUrl, setAdminAdUrl] = useState("");
   const [adMsg, setAdMsg] = useState("");
 
-  const didPrefillFromProfileRef = useRef(false);
-
-  // sentinel for infinite scroll
+  // sentinel + latest state refs for stable observer
   const sentinelRef = useRef(null);
   const observerRef = useRef(null);
+  const hasMoreRef = useRef(hasMore);
+  const loadingMoreRef = useRef(loadingMore);
+  const loadingFeedRef = useRef(loadingFeed);
 
-  // prefill state/LGA from profile once
   useEffect(() => {
-    let alive = true;
-    if (didPrefillFromProfileRef.current) return;
-    (async () => {
-      try {
-        const profileRes = await api.get("/api/profile/me").catch(() => ({ data: null }));
-        if (!alive) return;
-        const prof = profileRes?.data || null;
-        const st = (prof?.identity?.state || prof?.state || "").toString().toUpperCase();
-        const lg = (prof?.identity?.city || prof?.lga || "").toString().toUpperCase();
-        if (st) setStateName(st);
-        if (lg) setLga(lg);
-        didPrefillFromProfileRef.current = true;
-      } catch {
-        // ignore
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, []);
+    hasMoreRef.current = hasMore;
+  }, [hasMore]);
+  useEffect(() => {
+    loadingMoreRef.current = loadingMore;
+  }, [loadingMore]);
+  useEffect(() => {
+    loadingFeedRef.current = loadingFeed;
+  }, [loadingFeed]);
 
-  // load geo
+  // load geo (keep, but no more auto-prefill from profile)
   useEffect(() => {
     let on = true;
     (async () => {
@@ -273,7 +262,11 @@ export default function Browse() {
         if (stateName) params.state = stateName.toUpperCase();
         const { data } = await api.get("/api/barbers", { params });
         if (!on) return;
-        const list = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : [];
+        const list = Array.isArray(data)
+          ? data
+          : Array.isArray(data?.items)
+            ? data.items
+            : [];
         setPros(list);
       } catch {
         if (!on) return;
@@ -311,8 +304,12 @@ export default function Browse() {
       .map((p) => {
         const name = String(p?.name || "").toLowerCase();
         const desc = String(p?.bio || p?.description || "").toLowerCase();
-        const proState = String(p?.state || p?.identity?.state || "").trim().toUpperCase();
-        const proLga = String(p?.lga || p?.identity?.city || "").trim().toUpperCase();
+        const proState = String(p?.state || p?.identity?.state || "")
+          .trim()
+          .toUpperCase();
+        const proLga = String(p?.lga || p?.identity?.city || "")
+          .trim()
+          .toUpperCase();
         const servicesLC = svcArray(p);
 
         const matchName = term ? name.includes(term) || desc.includes(term) : true;
@@ -356,22 +353,26 @@ export default function Browse() {
         const params = { limit: pageSize };
         if (lga) params.lga = lga.toUpperCase();
 
-        // normalize `before` into ISO date string when possible
         if (before) {
           try {
             const parsed = new Date(before);
             if (!isNaN(parsed.getTime())) {
               params.before = parsed.toISOString();
             }
-            // if parsed is invalid, don't send `before`
           } catch {
-            // ignore invalid before
+            // ignore
           }
         }
 
-        const r = await api.get("/api/feed/public", { params }).catch(() => ({ data: [] }));
+        const r = await api
+          .get("/api/feed/public", { params })
+          .catch(() => ({ data: [] }));
 
-        const list = Array.isArray(r.data) ? r.data : Array.isArray(r.data?.items) ? r.data.items : [];
+        const list = Array.isArray(r.data)
+          ? r.data
+          : Array.isArray(r.data?.items)
+            ? r.data.items
+            : [];
 
         if (append) {
           setFeed((prev) => {
@@ -383,7 +384,6 @@ export default function Browse() {
           setFeed(list);
         }
 
-        // If server returned fewer than requested, assume we've reached the end
         if (!list.length || list.length < pageSize) setHasMore(false);
         else setHasMore(true);
       } catch (err) {
@@ -410,41 +410,39 @@ export default function Browse() {
     if (qs.get("post")) setTab("feed");
   }, [location.search]);
 
-  async function loadMore() {
-    if (!hasMore || loadingMore) return;
+  const loadMore = useCallback(async () => {
+    if (!hasMoreRef.current || loadingMoreRef.current) return;
     const last = feed[feed.length - 1];
     if (!last) return;
-
-    // prefer createdAt cursor — server compares createdAt < new Date(before)
     const rawCursor = last.createdAt || last._id || null;
     if (!rawCursor) return;
-
-    // Try to parse createdAt to ISO; if parsing fails, do not call (server expects a date)
     const d = new Date(rawCursor);
-    if (isNaN(d.getTime())) {
-      // cannot use this cursor (likely an _id); avoid calling server with invalid before
-      return;
-    }
+    if (isNaN(d.getTime())) return;
     const before = d.toISOString();
     await fetchFeed({ append: true, before });
-  }
+  }, [feed, fetchFeed]);
 
-  // setup IntersectionObserver for infinite scroll
+  // setup IntersectionObserver for infinite scroll (stable, like TikTok)
   useEffect(() => {
-    // clean up any previous observer
+    const sentinel = sentinelRef.current;
+    if (!sentinel) return;
+    if (tab !== "feed") return;
+
     if (observerRef.current) {
       observerRef.current.disconnect();
       observerRef.current = null;
     }
-    const sentinel = sentinelRef.current;
-    if (!sentinel) return;
-    if (tab !== "feed") return;
 
     observerRef.current = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {
           if (entry.isIntersecting) {
-            if (hasMore && !loadingMore && !loadingFeed) {
+            // use refs, not stale closure
+            if (
+              hasMoreRef.current &&
+              !loadingMoreRef.current &&
+              !loadingFeedRef.current
+            ) {
               loadMore();
             }
           }
@@ -465,15 +463,16 @@ export default function Browse() {
         observerRef.current = null;
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, hasMore, loadingMore, loadingFeed]);
+  }, [tab, loadMore]);
 
   function goBook(pro, chosenService) {
     const svcName = chosenService || service || null;
     const svcList = Array.isArray(pro?.services)
       ? pro.services.map((s) => (typeof s === "string" ? { name: s } : s))
       : [];
-    const svcPrice = svcName ? svcList.find((s) => s.name === svcName)?.price : undefined;
+    const svcPrice = svcName
+      ? svcList.find((s) => s.name === svcName)?.price
+      : undefined;
 
     const proId = pro?.id || pro?._id;
     if (!proId) return;
@@ -491,32 +490,40 @@ export default function Browse() {
   }
 
   const token =
-    typeof window !== "undefined"
-      ? localStorage.getItem("authToken") || localStorage.getItem("token")
-      : null;
+    typeof window !== "undefined" ? localStorage.getItem("token") : null;
   const canPostOnFeed = !!token;
 
   return (
     <ErrorBoundary>
-      {/* NOTE: keep only overflow-x-hidden here; avoid overflow on Y/parent elements to preserve sticky */}
-      <div className="max-w-6xl mx-auto px-4 py-10 overflow-x-hidden">
+      {/* no overflow here so sticky works */}
+      <div className="max-w-6xl mx-auto px-4 py-10">
         {/* header + tabs */}
         <div className="mb-6 flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2">
-            <img src="/discovery.png" alt="Discover" className="w-6 h-6 object-contain max-w-full" />
+            <img
+              src="/discovery.png"
+              alt="Discover"
+              className="w-6 h-6 object-contain max-w-full"
+            />
             <h1 className="text-2xl font-semibold">Discover</h1>
           </div>
           <div className="inline-flex rounded-xl border border-zinc-800 overflow-hidden">
             <button
               className={`px-4 py-2 text-sm border-r border-zinc-800 ${
-                tab === "feed" ? "bg-gold text-black font-semibold" : "hover:bg-zinc-900"
+                tab === "feed"
+                  ? "bg-gold text-black font-semibold"
+                  : "hover:bg-zinc-900"
               }`}
               onClick={() => setTab("feed")}
             >
               Feed
             </button>
             <button
-              className={`px-4 py-2 text-sm ${tab === "pros" ? "bg-gold text-black font-semibold" : "hover:bg-zinc-900"}`}
+              className={`px-4 py-2 text-sm ${
+                tab === "pros"
+                  ? "bg-gold text-black font-semibold"
+                  : "hover:bg-zinc-900"
+              }`}
               onClick={() => setTab("pros")}
             >
               Pros
@@ -524,7 +531,7 @@ export default function Browse() {
           </div>
         </div>
 
-        {/* filters */}
+        {/* filters (keep for Pros) */}
         <div className="flex flex-wrap items-center gap-2 mb-6">
           <input
             value={q}
@@ -533,7 +540,12 @@ export default function Browse() {
             className="bg-black border border-zinc-800 rounded-lg px-3 py-2 w-56 max-w-full"
           />
           <div className="w-56 max-w-full">
-            <ServicePicker value={service} onChange={setService} placeholder="All services" allowCustom={false} />
+            <ServicePicker
+              value={service}
+              onChange={setService}
+              placeholder="All services"
+              allowCustom={false}
+            />
           </div>
           <select
             value={stateName}
@@ -564,7 +576,10 @@ export default function Browse() {
               </option>
             ))}
           </select>
-          <button onClick={clearFilters} className="rounded-lg border border-zinc-700 px-3 py-2 text-sm">
+          <button
+            onClick={clearFilters}
+            className="rounded-lg border border-zinc-700 px-3 py-2 text-sm"
+          >
             Clear
           </button>
         </div>
@@ -572,30 +587,51 @@ export default function Browse() {
         {/* content */}
         {tab === "pros" ? (
           <>
-            {errPros && <div className="mb-4 rounded border border-red-800 bg-red-900/30 text-red-100 px-3 py-2">{errPros}</div>}
+            {errPros && (
+              <div className="mb-4 rounded border border-red-800 bg-red-900/30 text-red-100 px-3 py-2">
+                {errPros}
+              </div>
+            )}
             {loadingPros ? (
               <p className="text-zinc-400">Loading…</p>
             ) : filteredAndRanked.length ? (
               <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {filteredAndRanked.map((pro) => (
-                  <BarberCard key={pro.id || pro._id} barber={pro} onOpen={setOpenPro} onBook={(svc) => goBook(pro, svc)} />
+                  <BarberCard
+                    key={pro.id || pro._id}
+                    barber={pro}
+                    onOpen={setOpenPro}
+                    onBook={(svc) => goBook(pro, svc)}
+                  />
                 ))}
               </div>
             ) : (
-              <div className="text-zinc-400">No professionals match your filters.</div>
+              <div className="text-zinc-400">
+                No professionals match your filters.
+              </div>
             )}
           </>
         ) : (
+          // FEED LAYOUT (TikTok-ish: center column + sticky sides)
           <div className="flex flex-col lg:flex-row gap-4 items-start">
-            {/* LEFT MENU - sticky on the column wrapper */}
-            <div className="lg:w-56 w-full pt-1 flex-shrink-0 min-w-0 self-start sticky top-20">
+            {/* LEFT MENU - sticky */}
+            <div className="lg:w-56 w-full self-start lg:sticky lg:top-20">
               <SideMenu me={me} />
             </div>
 
             {/* FEED */}
             <div className="flex-1 w-full max-w-2xl lg:mx-0 mx-auto">
-              {canPostOnFeed && <FeedComposer lga={lga} onPosted={() => fetchFeed({ append: false, before: null })} />}
-              {errFeed && <div className="mb-4 rounded border border-red-800 bg-red-900/30 text-red-100 px-3 py-2">{errFeed}</div>}
+              {canPostOnFeed && (
+                <FeedComposer
+                  lga={lga}
+                  onPosted={() => fetchFeed({ append: false, before: null })}
+                />
+              )}
+              {errFeed && (
+                <div className="mb-4 rounded border border-red-800 bg-red-900/30 text-red-100 px-3 py-2">
+                  {errFeed}
+                </div>
+              )}
               {loadingFeed ? (
                 <p className="text-zinc-400">Loading feed…</p>
               ) : feed.length ? (
@@ -605,8 +641,12 @@ export default function Browse() {
                       <FeedCard
                         key={post._id || post.id}
                         post={post}
-                        currentUser={me ? { uid: me.uid || me.id, ...me } : null}
-                        onDeleted={() => fetchFeed({ append: false, before: null })}
+                        currentUser={
+                          me ? { uid: me.uid || me.id, ...me } : null
+                        }
+                        onDeleted={() =>
+                          fetchFeed({ append: false, before: null })
+                        }
                       />
                     ))}
                   </div>
@@ -616,35 +656,55 @@ export default function Browse() {
                     {loadingMore ? (
                       <div className="text-sm text-zinc-400">Loading…</div>
                     ) : hasMore ? (
-                      <div ref={sentinelRef} className="w-full flex items-center justify-center py-6">
-                        {/* clickable fallback (optional) */}
+                      <div
+                        ref={sentinelRef}
+                        className="w-full flex items-center justify-center py-6"
+                      >
                         <button
                           onClick={loadMore}
                           className="flex items-center gap-2 px-4 py-2 rounded-md border border-zinc-700 hover:bg-zinc-900"
                           aria-label="Load more posts"
                         >
-                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" className="w-5 h-5" aria-hidden>
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            className="w-5 h-5"
+                            aria-hidden
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth="2"
+                              d="M19 9l-7 7-7-7"
+                            />
                           </svg>
                           <span className="text-sm">Load more</span>
                         </button>
                       </div>
                     ) : (
-                      <div className="text-xs text-zinc-500">No more posts</div>
+                      <div className="text-xs text-zinc-500">
+                        No more posts
+                      </div>
                     )}
                   </div>
                 </>
               ) : (
-                <div className="rounded-lg border border-zinc-800 p-6 text-zinc-400">No updates yet.</div>
+                <div className="rounded-lg border border-zinc-800 p-6 text-zinc-400">
+                  No updates yet.
+                </div>
               )}
             </div>
 
-            {/* RIGHT ADS - sticky on the column wrapper */}
-            <div className="hidden lg:block w-56 pt-1 flex-shrink-0 min-w-0 self-start sticky top-20">
+            {/* RIGHT ADS - sticky */}
+            <div className="hidden lg:block w-56 self-start lg:sticky lg:top-20">
               <div className="space-y-4">
                 {isAdmin ? (
                   <div className="rounded-lg border border-zinc-800 bg-black/40 p-3 space-y-2">
-                    <div className="text-xs text-zinc-300 mb-1">Advert (admin only)</div>
+                    <div className="text-xs text-zinc-300 mb-1">
+                      Advert (admin only)
+                    </div>
                     <input
                       value={adminAdUrl}
                       onChange={(e) => {
@@ -669,7 +729,8 @@ export default function Browse() {
                     <div className="flex gap-2">
                       <button
                         onClick={() => {
-                          if (!adminAdUrl.trim()) return setAdMsg("Paste a media URL first.");
+                          if (!adminAdUrl.trim())
+                            return setAdMsg("Paste a media URL first.");
                           setAdMsg("Previewing…");
                           setTimeout(() => setAdMsg("Preview ready"), 300);
                         }}
@@ -679,7 +740,8 @@ export default function Browse() {
                       </button>
                       <button
                         onClick={async () => {
-                          if (!adminAdUrl.trim()) return setAdMsg("Paste a media URL first.");
+                          if (!adminAdUrl.trim())
+                            return setAdMsg("Paste a media URL first.");
                           try {
                             setAdMsg("Publishing…");
                             await api.post("/api/posts", {
@@ -687,7 +749,9 @@ export default function Browse() {
                               media: [
                                 {
                                   url: adminAdUrl.trim(),
-                                  type: /\.(mp4|mov|webm)$/i.test(adminAdUrl) ? "video" : "image",
+                                  type: /\.(mp4|mov|webm)$/i.test(adminAdUrl)
+                                    ? "video"
+                                    : "image",
                                 },
                               ],
                               isPublic: true,
@@ -696,7 +760,9 @@ export default function Browse() {
                             setAdMsg("Published to feed ✔");
                             await fetchFeed({ append: false, before: null });
                           } catch (e) {
-                            setAdMsg(e?.response?.data?.error || "Failed to publish ad");
+                            setAdMsg(
+                              e?.response?.data?.error || "Failed to publish ad"
+                            );
                           }
                         }}
                         className="flex-1 rounded-md bg-gold text-black px-2 py-1 text-xs font-semibold"
@@ -704,16 +770,30 @@ export default function Browse() {
                         Publish
                       </button>
                     </div>
-                    {adMsg && <p className="text-[10px] text-zinc-500 mt-1">{adMsg}</p>}
+                    {adMsg && (
+                      <p className="text-[10px] text-zinc-500 mt-1">{adMsg}</p>
+                    )}
                   </div>
                 ) : null}
 
                 {adminAdUrl ? (
                   <div className="rounded-lg border border-zinc-800 overflow-hidden bg-black/40 h-40 flex items-center justify-center">
                     {adminAdUrl.match(/\.(mp4|mov|webm)$/i) ? (
-                      <video src={adminAdUrl} muted loop playsInline autoPlay className="w-full h-full object-cover max-w-full" />
+                      <video
+                        src={adminAdUrl}
+                        muted
+                        loop
+                        playsInline
+                        autoPlay
+                        className="w-full h-full object-cover max-w-full"
+                      />
                     ) : (
-                      <img src={adminAdUrl} alt="ad" className="w-full h-full object-cover max-w-full" />
+                      <img
+                        src={adminAdUrl}
+                        alt="ad"
+                        loading="lazy"
+                        className="w-full h-full object-cover max-w-full"
+                      />
                     )}
                   </div>
                 ) : (
@@ -726,7 +806,12 @@ export default function Browse() {
           </div>
         )}
 
-        <ProDrawer open={!!openPro} pro={openPro} onClose={() => setOpenPro(null)} onBook={(svc) => (openPro ? goBook(openPro, svc) : null)} />
+        <ProDrawer
+          open={!!openPro}
+          pro={openPro}
+          onClose={() => setOpenPro(null)}
+          onBook={(svc) => (openPro ? goBook(openPro, svc) : null)}
+        />
       </div>
     </ErrorBoundary>
   );

@@ -36,28 +36,23 @@ export default function Home() {
     })();
   }, []);
 
-  // ✅ Only check client profile if we have a user
-  useEffect(() => {
-    if (!me?.uid) {
-      setHasClientProfile(false);
-      return;
-    }
-    (async () => {
-      try {
-        const { data } = await api.get("/api/profile/client/me");
-        setHasClientProfile(!!data);
-      } catch {
-        setHasClientProfile(false);
-      }
-    })();
-  }, [me?.uid]);
 
-  // ✅ unified logic you wanted (/client/register first)
-  const onFindProClick = () => {
-    if (!me?.uid) return navigate("/client/register");
-    if (!hasClientProfile) return navigate("/client/register");
-    return navigate("/browse");
+    // ✅ unified logic — check client profile only when button is clicked
+  const onFindProClick = async () => {
+    if (!me?.uid) {
+      return navigate("/client/register");
+    }
+    try {
+      const { data } = await api.get("/api/profile/client/me");
+      if (!data) {
+        return navigate("/client/register");
+      }
+      return navigate("/browse");
+    } catch {
+      return navigate("/client/register");
+    }
   };
+
 
   // ✅ arrow scroll listeners
   useEffect(() => {
@@ -139,7 +134,7 @@ export default function Home() {
 
           <p className="text-zinc-300 max-w-2xl mx-auto mb-8 leading-relaxed text-sm sm:text-base">
             Connecting you to top Professionals across{" "}
-            <span className="text-gold">Nigeria</span>. Book home or in-salon
+            <span className="text-gold">Nigeria</span>. Book home or office
             services in minutes.
           </p>
 
@@ -170,7 +165,7 @@ export default function Home() {
         >
           <div className="whitespace-nowrap px-4">
             ✨ Verified Pros • Secure Paystack Payments • 36 States &amp; FCT •
-            Home &amp; Salon Services ✨
+            Home &amp; office Services ✨
           </div>
         </motion.div>
       </section>
@@ -201,7 +196,7 @@ export default function Home() {
           className="text-zinc-300 text-center max-w-3xl mx-auto"
         >
           Kpocha Touch connects clients to{" "}
-          <span className="text-gold">verified</span> professionals jn all fields
+          <span className="text-gold">verified</span> professionals in all fields
           across Nigeria. Discover trusted pros, book instantly, pay securely,
           and enjoy premium service at home or in-salon.
         </motion.p>
