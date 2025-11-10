@@ -148,7 +148,7 @@ export default function PublicProfile() {
           </div>
           <div className="pb-3 flex gap-2">
             <Link
-              to={`/book/${pro.id}`}
+              to={`/book/${id || pro.id || pro._id}`}
               className="px-4 py-2 bg-gold text-black font-semibold rounded-lg hover:opacity-90"
             >
               Book now
@@ -250,7 +250,7 @@ export default function PublicProfile() {
               from the public to keep your pros & clients safe.
             </p>
             <Link
-              to={`/book/${pro.id}`}
+              to={`/book/${id || pro.id || pro._id}`}
               className="inline-block px-4 py-2 bg-gold text-black font-semibold rounded-lg hover:opacity-90"
             >
               Book this pro →

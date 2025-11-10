@@ -574,38 +574,43 @@ app.get("/api/me", requireAuth, async (req, res) => {
       ? new Date(proDoc.updatedAt).getTime()
       : 0;
 
-    // helper: pick newest value between profile + pro
+    // helper: pick non-empty value, prefer profile
     function pickName() {
-      // if pro is newer and has a name, use pro name
-      if (proUpdatedAt > profileUpdatedAt && proDoc?.name) {
-        return proDoc.name;
-      }
-
-      // otherwise use profile best-name
       const identity = profileDoc?.identity || {};
-      return (
+
+      const profileName =
         profileDoc?.displayName ||
         profileDoc?.fullName ||
         profileDoc?.name ||
-        [identity?.firstName, identity?.lastName].filter(Boolean).join(" ").trim() ||
-        proDoc?.name ||
-        req.user.email ||
-        ""
-      );
+        [identity?.firstName, identity?.lastName].filter(Boolean).join(" ").trim();
+
+      if (profileName && profileName.trim()) {
+        return profileName.trim();
+      }
+
+      if (proDoc?.name && proDoc.name.trim()) {
+        return proDoc.name.trim();
+      }
+
+      return req.user.email || "";
     }
 
     function pickPhoto() {
-      // if pro is newer and has a photo, use it
-      if (proUpdatedAt > profileUpdatedAt && proDoc?.photoUrl) {
-        return proDoc.photoUrl;
-      }
       const identity = profileDoc?.identity || {};
-      return (
+
+      const profilePhoto =
         profileDoc?.photoUrl ||
-        identity?.photoUrl ||
-        proDoc?.photoUrl ||
-        ""
-      );
+        identity?.photoUrl;
+
+      if (profilePhoto && profilePhoto.trim()) {
+        return profilePhoto.trim();
+      }
+
+      if (proDoc?.photoUrl && proDoc.photoUrl.trim()) {
+        return proDoc.photoUrl.trim();
+      }
+
+      return "";
     }
 
     const displayName = pickName();
@@ -614,7 +619,7 @@ app.get("/api/me", requireAuth, async (req, res) => {
     const isAdmin = isAdminUid(uid);
     const isPro = !!proDoc || !!profileDoc?.hasPro;
 
-    res.json({
+    const payload = {
       uid,
       email: req.user.email || "",
       displayName,
@@ -625,7 +630,7 @@ app.get("/api/me", requireAuth, async (req, res) => {
       pro: proDoc
         ? {
             id: proDoc._id.toString(),
-            name: displayName, // <-- keep it aligned with what we show
+            name: displayName,
             status: proDoc.status || "approved",
             photoUrl: photoUrl || "",
           }
@@ -637,7 +642,15 @@ app.get("/api/me", requireAuth, async (req, res) => {
             photoUrl,
           }
         : null,
-    });
+    };
+
+    // make sure we never leak ownerUid
+    if (payload.pro && payload.pro.ownerUid) {
+      delete payload.pro.ownerUid;
+    }
+
+    res.json(payload);
+
   } catch (e) {
     console.error("[/api/me] error:", e?.message || e);
     res.status(500).json({ error: "failed_me" });
@@ -648,10 +661,18 @@ app.get("/api/me", requireAuth, async (req, res) => {
 /* ------------------- Pro private endpoint (owner sees full pro) ------------------- */
 app.get("/api/pros/me", requireAuth, async (req, res) => {
   try {
-    const pro = await Pro.findOne({ ownerUid: req.user.uid }).lean();
+    const uid = req.user.uid;
+    const pro = await Pro.findOne({ ownerUid: uid }).lean();
     if (!pro) return res.status(404).json({ error: "pro_not_found" });
-    // owner can see everything
-    return res.json(pro);
+
+    const safe = { ...pro };
+    // force single-id view
+    safe.uid = uid;
+    if ("ownerUid" in safe) {
+      delete safe.ownerUid;
+    }
+
+    return res.json(safe);
   } catch (e) {
     console.error("[/api/pros/me] error:", e?.message || e);
     return res.status(500).json({ error: "failed" });
@@ -667,67 +688,58 @@ app.put("/api/pros/me", requireAuth, async (req, res) => {
     const pro = await Pro.findOne({ ownerUid: uid });
     if (!pro) return res.status(404).json({ error: "pro_not_found" });
 
-    // build a selective update
-    const updatable = {};
+    // helper → true if value is not empty
+    const hasVal = (v) =>
+      v !== undefined &&
+      v !== null &&
+      (typeof v !== "string" || v.trim() !== "");
 
-    // allow pro to set display name for their pro card
-    if (typeof body.name === "string" && body.name.trim()) {
-      updatable.name = body.name.trim();
-    }
+    // prepare update for pro doc
+    const proSet = {};
 
-    if (body.professional) {
-      updatable.professional = body.professional;
-    }
-    if (body.availability) {
-      updatable.availability = body.availability;
-    }
-    if (body.bank) {
-      updatable.bank = body.bank;
-    }
-    if (typeof body.bio === "string") {
-      updatable.bio = body.bio;
-    }
-    if (typeof body.photoUrl === "string" && body.photoUrl.trim()) {
-      updatable.photoUrl = body.photoUrl.trim();
-    }
+    if (hasVal(body.name)) proSet.name = body.name.trim();
+    if (hasVal(body.photoUrl)) proSet.photoUrl = body.photoUrl.trim();
+    if (hasVal(body.phone)) proSet.phone = body.phone.trim();
+    if (hasVal(body.state)) proSet.state = body.state.toString().toUpperCase();
+    if (hasVal(body.lga)) proSet.lga = body.lga.toString().toUpperCase();
 
-    // if frontend sends status, keep it, otherwise preserve current
-    if (typeof body.status === "string") {
-      updatable.status = body.status;
-    } else {
-      updatable.status = pro.status || "approved";
-    }
+    if (body.professional) proSet.professional = body.professional;
+    if (body.availability) proSet.availability = body.availability;
+    if (body.bank) proSet.bank = body.bank;
+    if (typeof body.bio === "string") proSet.bio = body.bio;
+
+    proSet.status = hasVal(body.status) ? body.status : pro.status || "approved";
 
     const updated = await Pro.findOneAndUpdate(
       { ownerUid: uid },
-      { $set: updatable },
+      { $set: proSet },
       { new: true }
     ).lean();
 
-    // 🔁 keep the unified "profiles" collection in sync — but also selective
+    // 🔁 Sync same non-empty values back to profiles (two-way, last edit wins)
     try {
       const col = mongoose.connection.db.collection("profiles");
       const toSet = {
         uid,
-        ownerUid: uid,
         hasPro: true,
         proStatus: updated.status,
         proId: updated._id,
       };
 
-      // mirror name/photo only if pro actually sent them
-      if (typeof body.name === "string" && body.name.trim()) {
+      if (hasVal(body.name)) {
         toSet.displayName = body.name.trim();
         toSet.fullName = body.name.trim();
         toSet.name = body.name.trim();
       }
-
-      if (typeof body.photoUrl === "string" && body.photoUrl.trim()) {
+      if (hasVal(body.photoUrl)) {
         toSet.photoUrl = body.photoUrl.trim();
-        toSet["identity.photoUrl"] = body.photoUrl.trim();
       }
+      if (hasVal(body.phone)) {
+        toSet.phone = body.phone.trim();
+      }
+      if (hasVal(body.state)) toSet.state = body.state.toString().toUpperCase();
+      if (hasVal(body.lga)) toSet.lga = body.lga.toString().toUpperCase();
 
-      // availability → statesCovered (only if sent)
       if (
         body.availability &&
         Array.isArray(body.availability.statesCovered)
@@ -737,19 +749,18 @@ app.put("/api/pros/me", requireAuth, async (req, res) => {
         );
       }
 
-      await col.updateOne(
-        { uid },
-        { $set: toSet },
-        { upsert: true }
-      );
+      await col.updateOne({ uid }, { $set: toSet }, { upsert: true });
     } catch (syncErr) {
-      console.warn(
-        "[/api/pros/me PUT] profiles sync skipped:",
-        syncErr?.message || syncErr
-      );
+      console.warn("[/api/pros/me PUT] profiles sync skipped:", syncErr?.message || syncErr);
     }
 
-    return res.json({ ok: true, item: updated });
+    const safe = { ...updated };
+    safe.uid = uid;
+    if ("ownerUid" in safe) {
+      delete safe.ownerUid;
+    }
+
+    return res.json({ ok: true, item: safe });
   } catch (err) {
     console.error("[/api/pros/me PUT] error:", err?.message || err);
     return res.status(500).json({ error: "pro_update_failed" });
@@ -1047,30 +1058,72 @@ app.post("/api/pros/approve/:id", requireAuth, requireAdmin, async (req, res) =>
       ...(hasCoords ? { loc: { type: "Point", coordinates: [lon, lat] } } : {}),
     };
 
+    // 🔁 merge profile ONLY to fill blanks – approved application wins
+    const hasVal = (v) =>
+      v !== undefined &&
+      v !== null &&
+      (typeof v !== "string" || v.trim() !== "");
+
+    if (freshProfile) {
+      // name/display
+      if (!hasVal(base.name) && hasVal(freshProfile.fullName)) {
+        base.name = freshProfile.fullName;
+        base.displayName = freshProfile.fullName;
+        base.fullName = freshProfile.fullName;
+      } else if (!hasVal(base.name) && hasVal(freshProfile.displayName)) {
+        base.name = freshProfile.displayName;
+        base.displayName = freshProfile.displayName;
+      } else if (!hasVal(base.name) && hasVal(freshProfile.name)) {
+        base.name = freshProfile.name;
+      }
+
+      // phone
+      if (!hasVal(base.phone) && hasVal(freshProfile.phone)) {
+        base.phone = freshProfile.phone;
+      }
+
+      // photo
+      if (!hasVal(base.photoUrl) && hasVal(freshProfile.photoUrl)) {
+        base.photoUrl = freshProfile.photoUrl;
+      } else if (!hasVal(base.photoUrl) && hasVal(freshProfile.identity?.photoUrl)) {
+        base.photoUrl = freshProfile.identity.photoUrl;
+      }
+
+      // state / lga
+      if (!hasVal(base.state) && hasVal(freshProfile.state)) {
+        base.state = freshProfile.state;
+      }
+      if (!hasVal(base.lga) && hasVal(freshProfile.lga)) {
+        base.lga = freshProfile.lga.toString().toUpperCase();
+      }
+    }
+
     const pro = await Pro.findOneAndUpdate(
       { ownerUid },
       { $set: base },
       { new: true, upsert: true }
     );
 
-    // also mark profile so frontend stops saying "you don't have a professional profile yet"
-    try {
-      const col = mongoose.connection.db.collection("profiles");
-      await col.updateOne(
-        { uid: ownerUid },
-        {
-          $set: {
-            hasPro: true,
-            proId: pro._id,
-            proStatus: "approved",
-            ...(pro.photoUrl ? { photoUrl: pro.photoUrl } : {}),
-          },
-        },
-        { upsert: true }
-      );
-    } catch (e) {
-      console.warn("[approve:profile flag] skipped", e?.message || e);
-    }
+try {
+  const col = mongoose.connection.db.collection("profiles");
+  const userUid = ownerUid; // we got it from the application, but it's the user's UID
+
+  await col.updateOne(
+    { uid: userUid },
+    {
+      $set: {
+        uid: userUid,
+        hasPro: true,
+        proId: pro._id,
+        proStatus: "approved",
+        ...(pro.photoUrl ? { photoUrl: pro.photoUrl } : {}),
+      },
+    },
+    { upsert: true }
+  );
+} catch (e) {
+  console.warn("[approve:profile flag] skipped", e?.message || e);
+}
 
     appDoc.status = "approved";
     appDoc.approvedAt = new Date();

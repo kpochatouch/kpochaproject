@@ -43,95 +43,103 @@ export default function adminProsRoutes({
 
   // POST /api/pros/resync/:ownerUid
   // Forces a Pro to match the latest client profile in "profiles" collection
-  r.post("/pros/resync/:ownerUid", requireAuth, requireAdmin, async (req, res) => {
-    try {
-      if (mongoose.connection.readyState !== 1) {
-        return res.status(503).json({ error: "database_not_connected" });
+  r.post(
+    "/pros/resync/:ownerUid",
+    requireAuth,
+    requireAdmin,
+    async (req, res) => {
+      try {
+        if (mongoose.connection.readyState !== 1) {
+          return res.status(503).json({ error: "database_not_connected" });
+        }
+
+        const ownerUid = String(req.params.ownerUid || "").trim();
+        if (!ownerUid) {
+          return res.status(400).json({ error: "owner_uid_required" });
+        }
+
+        // 1) find the actual Pro doc
+        const pro = await Pro.findOne({ ownerUid }).lean();
+        if (!pro) {
+          return res.status(404).json({ error: "pro_not_found" });
+        }
+
+        // 2) read the latest client profile (raw "profiles" col now keyed ONLY by uid)
+        const col = mongoose.connection.db.collection("profiles");
+        const fresh = await col.findOne({ uid: ownerUid });
+        if (!fresh) {
+          return res.json({ ok: true, message: "no_profile_to_sync" });
+        }
+
+        // 3) build new values from profile → pro
+        const name =
+          fresh.displayName ||
+          fresh.fullName ||
+          fresh.name ||
+          [
+            fresh?.identity?.firstName,
+            fresh?.identity?.lastName,
+          ].filter(Boolean).join(" ").trim() ||
+          pro.name ||
+          "";
+
+        const phone =
+          fresh.phone ||
+          fresh?.identity?.phone ||
+          pro.phone ||
+          "";
+
+        // raw profiles are now uppercase for state/lga in Profile.js, keep that
+        const lga = (fresh.lga || pro.lga || "").toString().toUpperCase();
+        const state = (fresh.state || pro.state || "").toString().toUpperCase();
+
+        const identity = {
+          ...(pro.identity || {}),
+          ...(fresh.identity || {}),
+        };
+
+        // also pull photo if present
+        const photoUrl =
+          fresh.photoUrl ||
+          (fresh.identity && fresh.identity.photoUrl) ||
+          pro.photoUrl ||
+          "";
+
+        const proSet = {};
+        if (name) proSet.name = name;
+        if (phone) proSet.phone = phone;
+        if (lga) proSet.lga = lga;
+        if (state) proSet.state = state;
+        if (photoUrl) proSet.photoUrl = photoUrl;
+        if (Object.keys(identity).length > 0) proSet.identity = identity;
+
+        // 4) update Pro
+        await Pro.updateOne({ ownerUid }, { $set: proSet });
+
+        // 5) also update application docs for this user to keep admin list in sync
+        // some old apps may use clientId, some may use uid – update both
+        const appSet = {};
+        if (name) appSet.displayName = name;
+        if (phone) appSet.phone = phone;
+        if (lga) appSet.lga = lga;
+        if (state) appSet.state = state;
+
+        if (Object.keys(appSet).length > 0) {
+          await Application.updateMany(
+            {
+              $or: [{ uid: ownerUid }, { clientId: ownerUid }],
+            },
+            { $set: appSet }
+          );
+        }
+
+        return res.json({ ok: true });
+      } catch (err) {
+        console.error("[admin:pros:resync] error:", err);
+        return res.status(500).json({ error: "resync_failed" });
       }
-
-      const ownerUid = String(req.params.ownerUid || "").trim();
-      if (!ownerUid) {
-        return res.status(400).json({ error: "owner_uid_required" });
-      }
-
-      // 1) find the actual Pro doc
-      const pro = await Pro.findOne({ ownerUid }).lean();
-      if (!pro) {
-        return res.status(404).json({ error: "pro_not_found" });
-      }
-
-      // 2) read the latest client profile (same collection we used in server.js)
-      const col = mongoose.connection.db.collection("profiles");
-      const fresh = await col.findOne({ uid: ownerUid });
-      if (!fresh) {
-        // no profile to sync, but not an error
-        return res.json({ ok: true, message: "no_profile_to_sync" });
-      }
-
-      // 3) build new values from profile → pro
-      const name =
-        fresh.fullName ||
-        fresh.name ||
-        [fresh?.identity?.firstName, fresh?.identity?.lastName].filter(Boolean).join(" ").trim() ||
-        pro.name ||
-        "";
-
-      const phone =
-        fresh.phone ||
-        fresh?.identity?.phone ||
-        pro.phone ||
-        "";
-
-      // normalize to uppercase — matches server.js, models.js, and web filters
-      const lga = (
-        fresh.lga ||
-        fresh.city || // sometimes city is used
-        fresh.state ||
-        pro.lga ||
-        ""
-      )
-        .toString()
-        .toUpperCase();
-
-      const state = (
-        fresh.state ||
-        pro.state ||
-        ""
-      )
-        .toString()
-        .toUpperCase();
-
-      const identity = {
-        ...(pro.identity || {}),
-        ...(fresh.identity || {}),
-      };
-
-      const proSet = {};
-      if (name) proSet.name = name;
-      if (phone) proSet.phone = phone;
-      if (lga) proSet.lga = lga;
-      if (state) proSet.state = state;
-      proSet.identity = identity;
-
-      // 4) update Pro
-      await Pro.updateOne({ ownerUid }, { $set: proSet });
-
-      // 5) also update application docs for this user to keep admin list in sync
-      const appSet = {};
-      if (name) appSet.displayName = name;
-      if (phone) appSet.phone = phone;
-      if (lga) appSet.lga = lga;
-      if (state) appSet.state = state;
-      if (Object.keys(appSet).length > 0) {
-        await Application.updateMany({ uid: ownerUid }, { $set: appSet });
-      }
-
-      return res.json({ ok: true });
-    } catch (err) {
-      console.error("[admin:pros:resync] error:", err);
-      return res.status(500).json({ error: "resync_failed" });
     }
-  });
+  );
 
   return r;
 }

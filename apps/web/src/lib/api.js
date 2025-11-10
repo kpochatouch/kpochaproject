@@ -431,3 +431,8 @@ export async function getProProfileAdmin(proId) {
   const { data } = await api.get(`/api/profile/pro/${proId}/admin`);
   return data;
 }
+
+export async function ensureClientProfile() {
+  const { data } = await api.post("/api/profile/ensure");
+  return data;
+}

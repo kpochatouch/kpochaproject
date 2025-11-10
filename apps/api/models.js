@@ -105,6 +105,9 @@ const ProSchema = new mongoose.Schema(
 
     name: { type: String, required: true },
 
+    // main display image for barber card
+    photoUrl: { type: String, default: "" },
+
     // geo filters
     lga: { type: String, index: true },
     state: { type: String, default: "" },
@@ -241,7 +244,19 @@ export function proToBarber(doc) {
 
   return {
     id: d._id?.toString?.() || String(d._id || ""),
-    name: d.name || "",
+
+    // name: prefer pro.name, but fall back to identity if pro.name is empty
+    name:
+      d.name ||
+      [d?.identity?.firstName, d?.identity?.lastName].filter(Boolean).join(" ") ||
+      "",
+
+    // avatar for barber card
+    photoUrl:
+      d.photoUrl ||
+      d?.identity?.photoUrl ||
+      "",
+
     lga,
     state,
     availability: d.availability || "Available",

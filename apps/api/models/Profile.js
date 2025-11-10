@@ -10,45 +10,39 @@ const ClientIDSchema = new mongoose.Schema(
 );
 
 /**
- * IMPORTANT:
- * - server.js and some routes read the raw Mongo collection "profiles" with { uid: ... }
- * - some newer code started using { ownerUid: ... }
- * So we support BOTH here, and we force the collection name to "profiles".
+ * Single-source profile:
+ * - keyed by uid only
+ * - lives in "profiles" (because server.js reads that raw collection)
  */
 const ClientProfileSchema = new mongoose.Schema(
   {
-    // support both keys so old and new code see the same document
-    uid: { type: String, index: true },
-    ownerUid: { type: String, index: true },
+    uid: { type: String, index: true, required: true },
 
     fullName: { type: String, default: "" },
+    displayName: { type: String, default: "" },
     phone: { type: String, default: "" },
     state: { type: String, default: "" },
     lga: { type: String, default: "" },
     address: { type: String, default: "" },
     photoUrl: { type: String, default: "" },
+
     id: { type: ClientIDSchema, default: () => ({}) },
+
+    // we keep strict:false so older payloads with identity, kyc, agreements
+    // don’t crash — server.js already reads some of those keys.
   },
   {
     timestamps: true,
     strict: false,
-    collection: "profiles", // must match what server.js reads directly
+    collection: "profiles",
   }
 );
 
-// keep uid/ownerUid in sync so raw queries always find the doc
-ClientProfileSchema.pre("save", function (next) {
-  if (!this.uid && this.ownerUid) {
-    this.uid = this.ownerUid;
-  }
-  if (!this.ownerUid && this.uid) {
-    this.ownerUid = this.uid;
-  }
-  next();
-});
+// ⛔ no pre-save sync between uid/ownerUid anymore
 
 const ProProfileSchema = new mongoose.Schema(
   {
+    // Pro extras stay keyed by ownerUid, that’s fine
     ownerUid: { type: String, required: true, unique: true, index: true },
     proId: { type: mongoose.Schema.Types.ObjectId, ref: "Pro", index: true },
     shopAddress: { type: String, default: "" },
@@ -62,7 +56,6 @@ const ProProfileSchema = new mongoose.Schema(
   {
     timestamps: true,
     strict: false,
-    // default collection is fine here
   }
 );
 

@@ -75,8 +75,8 @@ export default function Profile() {
 
   // unified display name
   const displayName =
-    clientProfile?.fullName ||
     me?.displayName ||
+    clientProfile?.fullName ||
     me?.email ||
     "Your Account";
 
@@ -102,11 +102,11 @@ export default function Profile() {
     "";
 
   const lga =
-    clientProfile?.lga ||
-    clientProfile?.identity?.city ||
-    me?.lga ||
-    me?.identity?.city ||
-    "";
+  clientProfile?.lga ||
+  clientProfile?.identity?.lga ||
+  me?.lga ||
+  "";
+
 
   const isPro = !!(me?.isPro || me?.pro);
 
@@ -201,18 +201,20 @@ export default function Profile() {
                 label="House Address"
                 value={clientProfile?.address || "—"}
               />
+
               <ReadOnly
                 label="Means of ID"
                 value={
-                  clientProfile?.idType
-                    ? `${clientProfile.idType}${
-                        clientProfile.idNumber
-                          ? ` (${maskId(clientProfile.idNumber)})`
+                  clientProfile?.identity?.idType
+                    ? `${clientProfile.identity.idType}${
+                        clientProfile.identity.idNumber
+                          ? ` (${maskId(clientProfile.identity.idNumber)})`
                           : ""
                       }`
                     : "—"
                 }
               />
+
               <ReadOnly
                 label="ID Verified"
                 value={

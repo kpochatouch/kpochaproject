@@ -192,152 +192,160 @@ export default function SettingsPage() {
     };
   }, [widgetReady]);
 
-  /* ---------- Load me (user) + client + pro ---------- */
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      clearMsg();
-      setLoading(true);
-      try {
-        const [meRes, clientRes, proRes] = await Promise.all([
-          api.get("/api/me"),
-          api.get("/api/profile/me").catch(() => null),
-          api.get("/api/pros/me").catch(() => null),
-        ]);
-        if (!alive) return;
+/* ---------- Load me (user) + client + pro ---------- */
+useEffect(() => {
+  let alive = true;
+  (async () => {
+    clearMsg();
+    setLoading(true);
+    try {
+      const [meRes, clientRes, proRes] = await Promise.all([
+        api.get("/api/me"),
+        api.get("/api/profile/me").catch(() => null),
+        api.get("/api/pros/me").catch(() => null),
+      ]);
+      if (!alive) return;
 
-        const meData = meRes?.data || null;
-        const clientData = clientRes?.data || null;
-        const proData = proRes?.data || null;
+      const meData = meRes?.data || null;
+      const clientData = clientRes?.data || null;
+      const proData = proRes?.data || null;
 
-        setMe(meData);
-        setClient(clientData);
-        setAppDoc(proData);
+      setMe(meData);
+      setClient(clientData);
+      setAppDoc(proData);
 
-        // base priority: client → pro → me
-        const base = clientData || proData || meData || {};
+      // base priority: client → pro → me
+      const base = clientData || proData || meData || {};
 
-        setDisplayName(
-          base.displayName ||
-            base.fullName ||
-            base?.identity?.fullName ||
-            meData?.email ||
-            ""
+      setDisplayName(
+        base.displayName ||
+          base.fullName ||
+          base?.identity?.fullName ||
+          meData?.email ||
+          ""
+      );
+      setPhone(
+        clientData?.phone ||
+          clientData?.identity?.phone ||
+          proData?.phone ||
+          proData?.identity?.phone ||
+          meData?.identity?.phone ||
+          ""
+      );
+
+      // ✅ tiny fix: check client → pro → me for state/lga, THEN identity
+      const st =
+        clientData?.state ||
+        proData?.state ||
+        meData?.state ||
+        clientData?.identity?.state ||
+        proData?.identity?.state ||
+        meData?.identity?.state ||
+        "";
+
+      const lg =
+        clientData?.lga ||
+        proData?.lga ||
+        meData?.lga ||
+        clientData?.identity?.city ||
+        proData?.identity?.city ||
+        meData?.identity?.city ||
+        "";
+
+      setStateVal(String(st || "").toUpperCase());
+      setLga(String(lg || "").toUpperCase());
+
+      // ✅ tiny fix: prefer real photo fields in this order
+      setAvatarUrl(
+        clientData?.photoUrl ||
+          clientData?.identity?.photoUrl ||
+          proData?.photoUrl ||
+          proData?.identity?.photoUrl ||
+          meData?.photoUrl ||
+          meData?.identity?.photoUrl ||
+          ""
+      );
+
+      // PRO details
+      if (proData) {
+        setProfileVisible(
+          Boolean(
+            proData?.professional?.profileVisible ??
+              proData?.profileVisible ??
+              true
+          )
         );
-        setPhone(
-          clientData?.phone ||
-            clientData?.identity?.phone ||
-            proData?.phone ||
-            proData?.identity?.phone ||
-            meData?.identity?.phone ||
-            ""
+        setNationwide(Boolean(proData?.professional?.nationwide ?? false));
+        setStatesCovered(
+          Array.isArray(proData?.availability?.statesCovered)
+            ? proData.availability.statesCovered.map((s) =>
+                s.toString().toUpperCase()
+              )
+            : []
+        );
+        setServices(
+          Array.isArray(proData?.professional?.services)
+            ? proData.professional.services
+            : Array.isArray(proData?.services)
+            ? proData.services.map((s) =>
+                typeof s === "string" ? s : s.name
+              )
+            : []
+        );
+        setYears(proData?.professional?.years || "");
+        const hc = String(proData?.professional?.hasCert || "no");
+        setHasCert(hc === "yes" ? "yes" : "no");
+        setCertUrl(proData?.professional?.certUrl || "");
+        setWorkPhotos(
+          Array.isArray(proData?.professional?.workPhotos) &&
+            proData.professional.workPhotos.length
+            ? proData.professional.workPhotos
+            : Array.isArray(proData?.gallery) && proData.gallery.length
+            ? proData.gallery
+            : [""]
         );
 
-        const st =
-          clientData?.state ||
-          clientData?.identity?.state ||
-          proData?.identity?.state ||
-          meData?.identity?.state ||
-          "";
-        const lg =
-          clientData?.lga ||
-          clientData?.identity?.city ||
-          proData?.identity?.city ||
-          meData?.identity?.city ||
-          "";
-        setStateVal(String(st || "").toUpperCase());
-        setLga(String(lg || "").toUpperCase());
-
-        setAvatarUrl(
-          clientData?.photoUrl ||
-            clientData?.identity?.photoUrl ||
+        setProBio(proData?.bio || proData?.description || "");
+        setProPhotoUrl(
+          proData?.photoUrl ||
             proData?.identity?.photoUrl ||
-            meData?.identity?.photoUrl ||
+            proData?.contactPublic?.shopPhoto ||
             ""
         );
 
-        // NEW: client bio (user-level)
-        setClientBio(clientData?.bio || "");
-
-        // PRO details
-        if (proData) {
-          setProfileVisible(
-            Boolean(proData?.professional?.profileVisible ?? proData?.profileVisible ?? true)
-          );
-          setNationwide(
-            Boolean(proData?.professional?.nationwide ?? false)
-          );
-          setStatesCovered(
-            Array.isArray(proData?.availability?.statesCovered)
-              ? proData.availability.statesCovered.map((s) =>
-                  s.toString().toUpperCase()
-                )
-              : []
-          );
-          setServices(
-            Array.isArray(proData?.professional?.services)
-              ? proData.professional.services
-              : Array.isArray(proData?.services)
-              ? proData.services.map((s) =>
-                  typeof s === "string" ? s : s.name
-                )
-              : []
-          );
-          setYears(proData?.professional?.years || "");
-          const hc = String(proData?.professional?.hasCert || "no");
-          setHasCert(hc === "yes" ? "yes" : "no");
-          setCertUrl(proData?.professional?.certUrl || "");
-          setWorkPhotos(
-            Array.isArray(proData?.professional?.workPhotos) &&
-              proData.professional.workPhotos.length
-              ? proData.professional.workPhotos
-              : Array.isArray(proData?.gallery) && proData.gallery.length
-              ? proData.gallery
-              : [""]
-          );
-
-          // NEW: public pro-facing fields
-          setProBio(proData?.bio || proData?.description || "");
-          setProPhotoUrl(
-            proData?.photoUrl ||
-              proData?.identity?.photoUrl ||
-              proData?.contactPublic?.shopPhoto ||
-              ""
-          );
-
-          const bk = proData?.bank || {};
-          setBankName(bk.bankName || "");
-          setAccountName(bk.accountName || "");
-          setAccountNumber(String(bk.accountNumber || ""));
-          setBvn(String(bk.bvn || ""));
-        } else {
-          setProfileVisible(true);
-          setNationwide(false);
-          setStatesCovered([]);
-          setServices([]);
-          setYears("");
-          setHasCert("no");
-          setCertUrl("");
-          setWorkPhotos([""]);
-          setProBio("");
-          setProPhotoUrl("");
-          setBankName("");
-          setAccountName("");
-          setAccountNumber("");
-          setBvn("");
-        }
-      } catch {
-        if (alive) setErr("Failed to load your profile.");
-      } finally {
-        if (alive) setLoading(false);
+        const bk = proData?.bank || {};
+        setBankName(bk.bankName || "");
+        setAccountName(bk.accountName || "");
+        setAccountNumber(String(bk.accountNumber || ""));
+        setBvn(String(bk.bvn || ""));
+      } else {
+        setProfileVisible(true);
+        setNationwide(false);
+        setStatesCovered([]);
+        setServices([]);
+        setYears("");
+        setHasCert("no");
+        setCertUrl("");
+        setWorkPhotos([""]);
+        setProBio("");
+        setProPhotoUrl("");
+        setBankName("");
+        setAccountName("");
+        setAccountNumber("");
+        setBvn("");
       }
-    })();
-    return () => {
-      alive = false;
-      clearTimeout(okTimerRef.current);
-      clearTimeout(errTimerRef.current);
-    };
-  }, []);
+    } catch {
+      if (alive) setErr("Failed to load your profile.");
+    } finally {
+      if (alive) setLoading(false);
+    }
+  })();
+  return () => {
+    alive = false;
+    clearTimeout(okTimerRef.current);
+    clearTimeout(errTimerRef.current);
+  };
+}, []);
 
   /* ---------- Flags & validation ---------- */
   const hasPro = !!appDoc?._id;
@@ -378,10 +386,12 @@ export default function SettingsPage() {
     try {
       const payload = {
         displayName,
+        fullName: displayName,
         phone,
         state: stateVal.toUpperCase(),
         lga: lga.toUpperCase(),
         avatarUrl,
+        photoUrl: avatarUrl,
         bio: clientBio,
         identity: {
           ...(client?.identity || me?.identity || {}),
@@ -391,6 +401,7 @@ export default function SettingsPage() {
           photoUrl: avatarUrl,
         },
       };
+
 
       let res;
       if (client) {

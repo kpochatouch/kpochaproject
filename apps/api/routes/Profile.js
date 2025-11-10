@@ -55,6 +55,7 @@ function requireAdmin(req, res, next) {
 function maskClientProfileForClientView(p) {
   if (!p) return null;
   const obj = { ...p };
+  // we now store only uid on clients, but this is safe to keep
   delete obj.ownerUid;
   delete obj.uid;
   if (obj.id?.numberHash) obj.id.numberHash = "****";
@@ -103,16 +104,13 @@ router.post("/profile/ensure", requireAuth, async (req, res) => {
     const uid = req.user.uid;
     if (!uid) return res.status(400).json({ error: "missing_uid" });
 
-    // see if we already have a client profile (old code may have used uid OR ownerUid)
-    const existing = await ClientProfile.findOne({
-      $or: [{ ownerUid: uid }, { uid }],
-    }).lean();
+    // now we only support uid-based profiles
+    const existing = await ClientProfile.findOne({ uid }).lean();
 
     if (!existing) {
       // create minimal doc
       const base = {
         uid,
-        ownerUid: uid,
         fullName: (req.user.email || "").split("@")[0] || "",
       };
       await ClientProfile.create(base);
@@ -120,7 +118,16 @@ router.post("/profile/ensure", requireAuth, async (req, res) => {
       // also update raw "profiles" collection used by server.js/admin
       try {
         const col = mongoose.connection.db.collection("profiles");
-        await col.updateOne({ uid }, { $set: base }, { upsert: true });
+        await col.updateOne(
+          { uid },
+          {
+            $set: {
+              uid,
+              fullName: base.fullName,
+            },
+          },
+          { upsert: true }
+        );
       } catch (e) {
         console.warn("[profile:ensure] raw sync skipped:", e?.message || e);
       }
@@ -136,7 +143,6 @@ router.post("/profile/ensure", requireAuth, async (req, res) => {
         {
           $set: {
             uid,
-            ownerUid: uid,
             fullName: existing.fullName || "",
             phone: existing.phone || "",
             state: existing.state || "",
@@ -164,7 +170,8 @@ router.post("/profile/ensure", requireAuth, async (req, res) => {
    ------------------------------------------------------------------ */
 async function handleGetClientMe(req, res) {
   try {
-    const p = await ClientProfile.findOne({ ownerUid: req.user.uid }).lean();
+    // uid-only
+    const p = await ClientProfile.findOne({ uid: req.user.uid }).lean();
 
     // also expose pro info (some frontend bits show if user is pro)
     const pro = await Pro.findOne({ ownerUid: req.user.uid })
@@ -205,7 +212,6 @@ async function handlePutClientMe(req, res) {
 
     // build a selective $set — only non-empty fields overwrite
     const clientSet = {
-      ownerUid: req.user.uid,
       uid: req.user.uid,
     };
 
@@ -242,7 +248,7 @@ async function handlePutClientMe(req, res) {
 
     // IMPORTANT: do NOT create here — frontend must have called /profile/ensure first
     const updated = await ClientProfile.findOneAndUpdate(
-      { ownerUid: req.user.uid },
+      { uid: req.user.uid },
       { $set: clientSet },
       { new: true } // ← no upsert
     ).lean();
@@ -251,15 +257,13 @@ async function handlePutClientMe(req, res) {
       return res.status(404).json({ error: "profile_not_found" });
     }
 
-    // keep the shared "profiles" collection in sync (this is your single source)
+    // 1) keep the shared "profiles" collection in sync (central view)
     try {
       const col = mongoose.connection.db.collection("profiles");
       const $set = {
         uid: req.user.uid,
-        ownerUid: req.user.uid,
       };
 
-      // reuse your helper to only pick present fields
       const fromPayload = buildProfilesSetFromPayload(payload);
       Object.assign($set, fromPayload);
 
@@ -272,8 +276,55 @@ async function handlePutClientMe(req, res) {
       console.warn("[profile->profiles col sync] skipped:", e?.message || e);
     }
 
-    // ✨ NOTE: we removed the part that was mirroring client → Pro
-    // so client saves will no longer overwrite pro name/photo/etc.
+    // 2) if this user is also a Pro, push the same non-empty fields to Pro
+    try {
+      const pro = await Pro.findOne({ ownerUid: req.user.uid })
+        .select("_id")
+        .lean();
+
+      if (pro) {
+        const proSet = {};
+
+        // name → barber card
+        if (payload.fullName && payload.fullName.trim()) {
+          proSet.name = payload.fullName.trim();
+        }
+
+        // phone
+        if (payload.phone && payload.phone.trim()) {
+          proSet.phone = payload.phone.trim();
+        }
+
+        // photo
+        if (payload.photoUrl && payload.photoUrl.trim()) {
+          proSet.photoUrl = payload.photoUrl.trim();
+        } else if (
+          payload.identity &&
+          typeof payload.identity === "object" &&
+          payload.identity.photoUrl &&
+          payload.identity.photoUrl.trim()
+        ) {
+          proSet.photoUrl = payload.identity.photoUrl.trim();
+        }
+
+        // location
+        if (payload.state) {
+          proSet.state = payload.state;
+        }
+        if (payload.lga) {
+          proSet.lga = payload.lga;
+        }
+
+        if (Object.keys(proSet).length > 0) {
+          await Pro.updateOne(
+            { ownerUid: req.user.uid },
+            { $set: proSet }
+          );
+        }
+      }
+    } catch (e) {
+      console.warn("[profile->pro sync] skipped:", e?.message || e);
+    }
 
     const masked = maskClientProfileForClientView(updated) || {};
     return res.json({ ...masked, email: req.user.email || "" });
@@ -294,7 +345,7 @@ router.get("/profile/me", requireAuth, handleGetClientMe);
 router.put("/profile/me", requireAuth, handlePutClientMe);
 
 /* ------------------------------------------------------------------
-   ADMIN READ (kept exactly as before)
+   ADMIN READ
    ------------------------------------------------------------------ */
 router.get(
   "/profile/client/:uid/admin",
@@ -303,7 +354,7 @@ router.get(
   async (req, res) => {
     try {
       const p = await ClientProfile.findOne({
-        ownerUid: req.params.uid,
+        uid: req.params.uid,
       }).lean();
       return res.json(p || null);
     } catch {
@@ -313,7 +364,7 @@ router.get(
 );
 
 /* ------------------------------------------------------------------
-   PRO CAN VIEW CLIENT FOR A BOOKING (kept)
+   PRO CAN VIEW CLIENT FOR A BOOKING
    ------------------------------------------------------------------ */
 router.get(
   "/profile/client/:uid/for-booking/:bookingId",
@@ -355,7 +406,7 @@ router.get(
       }
 
       const p = await ClientProfile.findOne({
-        ownerUid: req.params.uid,
+        uid: req.params.uid,
       }).lean();
       const masked = maskClientProfileForClientView(p) || null;
       return res.json(masked);
