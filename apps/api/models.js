@@ -206,21 +206,42 @@ export function proToBarber(doc) {
     }
   }
 
-  // sometimes services were saved as simple strings
+  // 2b) normalize services → always { name, price, ... }
   const normalizedServices = Array.isArray(rawServices)
     ? rawServices
         .filter((s) => (typeof s?.visible === "boolean" ? s.visible : true))
         .map((s) => {
+          // if it's just "Barbering" → turn into an object
           if (typeof s === "string") {
             return { name: s, price: 0 };
           }
+
+          // price might be "3000", "15,000", 3000, or even promoPrice
+          const rawPrice =
+            s?.price !== undefined && s?.price !== null
+              ? s.price
+              : s?.promoPrice || 0;
+
+          const n = Number(String(rawPrice).replace(/,/g, "").trim());
+          const priceNum = Number.isFinite(n) ? n : 0;
+
           return {
             name: s?.name || "",
-            price: Number.isFinite(s?.price) ? s.price : 0,
+            price: priceNum,
+            description: s?.description || "",
+            durationMins: Number.isFinite(Number(s?.durationMins))
+              ? Number(s.durationMins)
+              : 0,
           };
         })
         .filter((s) => s.name)
     : [];
+
+  // 2c) derive a starting price so UI doesn't have to compute
+  const startingPrice =
+    normalizedServices.length > 0
+      ? Math.min(...normalizedServices.map((s) => s.price || 0))
+      : 0;
 
   // 3) rating: show NOTHING unless there is a real review
   const totalReviews = Number(d?.metrics?.totalReviews || 0);
@@ -252,22 +273,25 @@ export function proToBarber(doc) {
       "",
 
     // avatar for barber card
-    photoUrl:
-      d.photoUrl ||
-      d?.identity?.photoUrl ||
-      "",
+    photoUrl: d.photoUrl || d?.identity?.photoUrl || "",
 
     lga,
     state,
     availability: d.availability || "Available",
+
+    // expose status if present (sometimes useful)
+    status: d.status || "approved",
 
     rating: hasRealReviews ? ratingRounded : 0,
     ratingStars: {
       full: fullStars,
       empty: emptyStars,
     },
+    ratingCount: totalReviews,
 
     services: normalizedServices,
+    startingPrice,
+
     shopName: d?.contactPublic?.shopName || "",
     shopAddress: d?.contactPublic?.shopAddress || "",
     phone: d?.contactPublic?.phone || "",
@@ -289,9 +313,11 @@ export const Pro =
 
 /* -------------------------------------------------------------------------- */
 /* SUMMARY
-   - state/lga are now uppercased on save, AND proToBarber also re-derives them
+   - state/lga are uppercased on save, AND proToBarber also re-derives them
      from identity/professional if top-level fields were empty.
    - services are pulled from pro.services OR pro.professional.services OR simple strings.
+   - prices are now parsed from strings like "15,000" so UI stops seeing 0.
+   - startingPrice is derived so cards can show "From ₦..." easily.
    - extra indexes help /api/barbers when Browse.jsx sends ?state=... or ?lga=...
 */
 /* -------------------------------------------------------------------------- */
