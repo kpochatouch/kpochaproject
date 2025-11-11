@@ -658,6 +658,92 @@ app.get("/api/me", requireAuth, async (req, res) => {
 });
 
 
+// 🔐 helpers for liveness + services
+// put this ABOVE the /api/pros/me routes in server.js
+function isSameDay(a, b) {
+  if (!a || !b) return false;
+  const da = new Date(a);
+  const db = new Date(b);
+  return (
+    da.getFullYear() === db.getFullYear() &&
+    da.getMonth() === db.getMonth() &&
+    da.getDate() === db.getDate()
+  );
+}
+
+async function wasLivenessToday(uid) {
+  try {
+    const col = mongoose.connection.db.collection("profiles");
+    const doc = await col.findOne(
+      { uid },
+      { projection: { livenessVerifiedAt: 1 } }
+    );
+    if (!doc?.livenessVerifiedAt) return false;
+    return isSameDay(doc.livenessVerifiedAt, new Date());
+  } catch {
+    return false;
+  }
+}
+
+// allow frontend to tell us “I just did liveness, remember it”
+async function rememberLivenessToday(uid) {
+  try {
+    const col = mongoose.connection.db.collection("profiles");
+    await col.updateOne(
+      { uid },
+      { $set: { livenessVerifiedAt: new Date() } },
+      { upsert: true }
+    );
+  } catch (e) {
+    console.warn("[liveness:remember] skipped:", e?.message || e);
+  }
+}
+
+// what counts as “sensitive” on /api/pros/me
+function bodyTouchesSensitivePro(body = {}) {
+  if (!body || typeof body !== "object") return false;
+  if (body.bank) return true;
+  if (body.identity) return true;
+  if (body.servicesDetailed) return true;
+  if (body.professional) return true; // contains services, certs, etc.
+  if (body.availability) return true;
+  if (body.phone) return true;
+  if (body.state) return true;
+  if (body.lga) return true;
+  return false;
+}
+
+// keep service edits working after your migration
+function normalizeServicesDetailed(arr = []) {
+  if (!Array.isArray(arr)) return [];
+  return arr
+    .map((item) => {
+      if (!item) return null;
+      const name = (item.name || item.id || "").toString().trim();
+      if (!name) return null;
+
+      const priceRaw = (item.price ?? "").toString().replace(/,/g, "").trim();
+      const promoRaw = (item.promoPrice ?? "").toString().replace(/,/g, "").trim();
+      const priceNum = priceRaw === "" ? 0 : Number(priceRaw);
+      const promoNum = promoRaw === "" ? null : Number(promoRaw);
+
+      const out = {
+        id: item.id || name,
+        name,
+        price: Number.isFinite(priceNum) ? priceNum : 0,
+      };
+
+      if (promoNum !== null && Number.isFinite(promoNum)) {
+        out.promoPrice = promoNum;
+      }
+      if (item.description) out.description = item.description;
+      if (item.durationMins) out.durationMins = Number(item.durationMins) || 0;
+
+      return out;
+    })
+    .filter(Boolean);
+}
+
 /* ------------------- Pro private endpoint (owner sees full pro) ------------------- */
 app.get("/api/pros/me", requireAuth, async (req, res) => {
   try {
@@ -665,9 +751,7 @@ app.get("/api/pros/me", requireAuth, async (req, res) => {
     const pro = await Pro.findOne({ ownerUid: uid }).lean();
     if (!pro) return res.status(404).json({ error: "pro_not_found" });
 
-    const safe = { ...pro };
-    // force single-id view
-    safe.uid = uid;
+    const safe = { ...pro, uid };
     if ("ownerUid" in safe) {
       delete safe.ownerUid;
     }
@@ -688,6 +772,19 @@ app.put("/api/pros/me", requireAuth, async (req, res) => {
     const pro = await Pro.findOne({ ownerUid: uid });
     if (!pro) return res.status(404).json({ error: "pro_not_found" });
 
+    // optional: frontend can send { liveness: { remember: true } } right after AWS
+    if (body.liveness && body.liveness.remember === true) {
+      await rememberLivenessToday(uid);
+    }
+
+    // if they are editing sensitive stuff, they must have liveness today
+    if (bodyTouchesSensitivePro(body)) {
+      const okToday = await wasLivenessToday(uid);
+      if (!okToday) {
+        return res.status(403).json({ error: "liveness_required" });
+      }
+    }
+
     // helper → true if value is not empty
     const hasVal = (v) =>
       v !== undefined &&
@@ -703,7 +800,31 @@ app.put("/api/pros/me", requireAuth, async (req, res) => {
     if (hasVal(body.state)) proSet.state = body.state.toString().toUpperCase();
     if (hasVal(body.lga)) proSet.lga = body.lga.toString().toUpperCase();
 
-    if (body.professional) proSet.professional = body.professional;
+    // ✅ handle services/pricing after migration
+    if (Array.isArray(body.servicesDetailed)) {
+      const detailed = normalizeServicesDetailed(body.servicesDetailed);
+      proSet.servicesDetailed = detailed;
+
+      // keep professional.services in sync
+      const names = detailed.map((d) => d.name).filter(Boolean);
+      proSet.professional = {
+        ...(pro.professional || {}),
+        ...(body.professional || {}),
+        services: names,
+      };
+
+      // also keep top-level services list that your browse uses
+      proSet.services = detailed.map((d) => ({
+        name: d.name,
+        price: d.price,
+        description: d.description || "",
+        durationMins: d.durationMins || 0,
+        visible: true,
+      }));
+    } else if (body.professional) {
+      proSet.professional = body.professional;
+    }
+
     if (body.availability) proSet.availability = body.availability;
     if (body.bank) proSet.bank = body.bank;
     if (typeof body.bio === "string") proSet.bio = body.bio;
@@ -749,13 +870,17 @@ app.put("/api/pros/me", requireAuth, async (req, res) => {
         );
       }
 
+      // also persist today’s liveness if they asked us to remember it
+      if (body.liveness && body.liveness.remember === true) {
+        toSet.livenessVerifiedAt = new Date();
+      }
+
       await col.updateOne({ uid }, { $set: toSet }, { upsert: true });
     } catch (syncErr) {
       console.warn("[/api/pros/me PUT] profiles sync skipped:", syncErr?.message || syncErr);
     }
 
-    const safe = { ...updated };
-    safe.uid = uid;
+    const safe = { ...updated, uid };
     if ("ownerUid" in safe) {
       delete safe.ownerUid;
     }
@@ -766,6 +891,7 @@ app.put("/api/pros/me", requireAuth, async (req, res) => {
     return res.status(500).json({ error: "pro_update_failed" });
   }
 });
+
 
 
 /** Enforce verified name/phone on bookings POST */

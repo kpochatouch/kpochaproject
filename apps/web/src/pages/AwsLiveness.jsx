@@ -3,7 +3,6 @@ import React, { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { FaceLivenessDetector } from "@aws-amplify/ui-react-liveness";
 
-// 👉 load AWS UI styles so the overlay looks right
 import "@aws-amplify/ui-react/styles.css";
 import "@aws-amplify/ui-react-liveness/styles.css";
 
@@ -26,12 +25,25 @@ export default function AwsLiveness() {
   useEffect(() => {
     (async () => {
       try {
-        // make sure Amplify knows about your identity pool
+        // make sure Amplify is ready
         ensureAwsConfigured();
         const cfg = getAwsLivenessConfig();
         setCfg({ region: cfg.region });
 
-        // call your backend: POST /api/aws-liveness/session
+        // 1) try the one pushed from App.jsx
+        let existingSession = "";
+        try {
+          existingSession =
+            localStorage.getItem("kpocha:awsLivenessSession") || "";
+        } catch (_) {}
+
+        if (existingSession) {
+          setSessionId(existingSession);
+          setLoading(false);
+          return;
+        }
+
+        // 2) otherwise create a fresh one
         const { data } = await api.post("/api/aws-liveness/session", {});
         if (!data?.ok || !data.sessionId) {
           throw new Error(
@@ -61,6 +73,8 @@ export default function AwsLiveness() {
           score: result?.confidence ?? null,
         })
       );
+      // one-time, so clear it
+      localStorage.removeItem("kpocha:awsLivenessSession");
     } catch (_) {}
     nav(back);
   };
@@ -105,8 +119,6 @@ export default function AwsLiveness() {
   return (
     <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center p-4">
       <h1 className="text-xl font-semibold mb-4">AWS Liveness</h1>
-
-      {/* give AWS enough width, keep centered */}
       <div className="w-full max-w-2xl mx-auto">
         <div className="aws-liveness">
           <FaceLivenessDetector
@@ -117,7 +129,6 @@ export default function AwsLiveness() {
           />
         </div>
       </div>
-
       <button
         onClick={() => nav(back)}
         className="mt-6 px-4 py-2 rounded bg-yellow-400 text-black text-sm"

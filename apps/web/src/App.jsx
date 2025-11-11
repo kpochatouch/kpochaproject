@@ -41,8 +41,7 @@ const RiskLogs = lazy(() => import("./pages/RiskLogs.jsx"));
 const Chat = lazy(() => import("./pages/Chat.jsx"));
 const Compose = lazy(() => import("./pages/Compose.jsx"));
 
-
-// ✅ new public profile page (facebook-like)
+// public profile
 const PublicProfile = lazy(() => import("./pages/PublicProfile.jsx"));
 
 /* ---------- Chatbase hook ---------- */
@@ -61,7 +60,7 @@ function useChatbase() {
           cfg.userHash = r.data.userHash;
         }
       } catch {
-        // anonymous is fine
+        /* ignore */
       }
 
       window.chatbaseConfig = cfg;
@@ -78,7 +77,7 @@ function useChatbase() {
   }, []);
 }
 
-/* ---------- role guards (reuse MeContext) ---------- */
+/* ---------- role guards ---------- */
 function RequireRole({ role, children }) {
   const { loading, isAdmin, isPro } = useMe();
   const loc = useLocation();
@@ -87,11 +86,7 @@ function RequireRole({ role, children }) {
     role === "admin" ? isAdmin : role === "pro" ? isPro : true;
 
   if (loading) return <RouteLoader />;
-  return allowed ? (
-    children
-  ) : (
-    <Navigate to="/" replace state={{ from: loc }} />
-  );
+  return allowed ? children : <Navigate to="/" replace state={{ from: loc }} />;
 }
 
 function WalletSmart() {
@@ -106,7 +101,6 @@ function SettingsSmart() {
   return isPro ? <Settings /> : <ClientSettings />;
 }
 
-// choose browse vs register
 function FindProSmart() {
   const navigate = useNavigate();
   const loc = useLocation();
@@ -145,16 +139,40 @@ function FindProSmart() {
 export default function App() {
   useChatbase();
   const location = useLocation();
+  const navigate = useNavigate();
 
-  // prefetch very common routes once
+  // ✅ this is the listener you need
+  useEffect(() => {
+    function onAwsLivenessStart(e) {
+      const sessionId =
+        e?.detail?.sessionId ||
+        e?.detail?.SessionId ||
+        e?.detail?.sessionID ||
+        "";
+      const back = e?.detail?.back || "/settings";
+
+      if (sessionId) {
+        try {
+          localStorage.setItem("kpocha:awsLivenessSession", sessionId);
+        } catch {}
+      }
+
+      navigate(`/aws-liveness?back=${encodeURIComponent(back)}`);
+    }
+
+    window.addEventListener("aws-liveness:start", onAwsLivenessStart);
+    return () => {
+      window.removeEventListener("aws-liveness:start", onAwsLivenessStart);
+    };
+  }, [navigate]);
+
+  // prefetch common routes
   useEffect(() => {
     import("./pages/Browse.jsx");
     import("./pages/Profile.jsx");
-    // ✅ prefetch the public profile too
     import("./pages/PublicProfile.jsx");
   }, []);
 
-  // hide chrome for aws-liveness
   const hideChrome = location.pathname.startsWith("/aws-liveness");
 
   return (
@@ -164,16 +182,14 @@ export default function App() {
       <main className={hideChrome ? "flex-1 bg-black" : "flex-1"}>
         <Suspense fallback={<RouteLoader full />}>
           <Routes>
-            {/* public */}
             <Route path="/" element={<Home />} />
             <Route path="/browse" element={<Browse />} />
-             <Route
-               path="/compose"
-               element={
-                 <RequireAuth>
-                   <Compose />
-                 </RequireAuth>
-
+            <Route
+              path="/compose"
+              element={
+                <RequireAuth>
+                  <Compose />
+                </RequireAuth>
               }
             />
             <Route path="/find" element={<FindProSmart />} />
@@ -182,11 +198,7 @@ export default function App() {
             <Route path="/signup" element={<Signup />} />
             <Route path="/legal" element={<Legal />} />
             <Route path="/legal/*" element={<Legal />} />
-
-            {/* ✅ public profile for pros/barbers */}
             <Route path="/profile/:id" element={<PublicProfile />} />
-
-            {/* booking details require auth */}
             <Route
               path="/bookings/:id"
               element={
@@ -195,8 +207,6 @@ export default function App() {
                 </RequireAuth>
               }
             />
-
-            {/* user's own profile (private) */}
             <Route
               path="/profile"
               element={
@@ -205,8 +215,6 @@ export default function App() {
                 </RequireAuth>
               }
             />
-
-            {/* wallet */}
             <Route
               path="/wallet"
               element={
@@ -215,8 +223,6 @@ export default function App() {
                 </RequireAuth>
               }
             />
-
-            {/* settings */}
             <Route
               path="/settings"
               element={
@@ -225,8 +231,6 @@ export default function App() {
                 </RequireAuth>
               }
             />
-
-            {/* become */}
             <Route
               path="/become"
               element={
@@ -235,8 +239,6 @@ export default function App() {
                 </RequireAuth>
               }
             />
-
-            {/* ONLY AWS LIVENESS */}
             <Route
               path="/aws-liveness"
               element={
@@ -245,8 +247,6 @@ export default function App() {
                 </RequireAuth>
               }
             />
-
-            {/* client register */}
             <Route
               path="/client/register"
               element={
@@ -259,8 +259,6 @@ export default function App() {
               path="/register"
               element={<Navigate to="/client/register" replace />}
             />
-
-            {/* deactivate */}
             <Route
               path="/deactivate"
               element={
@@ -269,8 +267,6 @@ export default function App() {
                 </RequireAuth>
               }
             />
-
-            {/* pro dashboard */}
             <Route
               path="/pro-dashboard"
               element={
@@ -279,8 +275,6 @@ export default function App() {
                 </RequireRole>
               }
             />
-
-            {/* admin */}
             <Route
               path="/admin"
               element={
@@ -297,8 +291,6 @@ export default function App() {
                 </RequireRole>
               }
             />
-
-            {/* admin - risk logs */}
             <Route
               path="/risk-logs"
               element={
@@ -307,8 +299,6 @@ export default function App() {
                 </RequireRole>
               }
             />
-
-            {/* chat */}
             <Route
               path="/chat"
               element={
@@ -317,12 +307,8 @@ export default function App() {
                 </RequireAuth>
               }
             />
-
-            {/* payments & misc */}
             <Route path="/apply/thanks" element={<ApplyThanks />} />
             <Route path="/payment/confirm" element={<PaymentConfirm />} />
-
-            {/* fallback */}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>

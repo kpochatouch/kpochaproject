@@ -8,10 +8,15 @@ import { Link } from "react-router-dom";
 const APP_LOGO_URL = import.meta.env.VITE_APP_LOGO_URL || "";
 
 /* ------------------------------ Helpers ------------------------------ */
+/**
+ * The backend now sends services as an array of objects like:
+ * { name: "Haircut", price: 15000, ... }
+ * but we'll keep the fallback for strings just in case.
+ */
 function toArrayServices(svcs) {
   if (Array.isArray(svcs)) {
     return svcs
-      .map((s) => (typeof s === "string" ? { name: s } : s))
+      .map((s) => (typeof s === "string" ? { name: s, price: 0 } : s))
       .filter((s) => s && s.name);
   }
   if (typeof svcs === "string") {
@@ -19,16 +24,17 @@ function toArrayServices(svcs) {
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean)
-      .map((name) => ({ name }));
+      .map((name) => ({ name, price: 0 }));
   }
   return [];
 }
 
 function priceTag(s) {
   const name = s?.name || "Service";
-  const price = s?.price;
-  if (price == null || price === "" || Number.isNaN(Number(price))) return name;
-  return `${name} ₦${Number(price).toLocaleString()}`;
+  const raw = s?.price;
+  const priceNum = Number(raw);
+  if (!Number.isFinite(priceNum) || priceNum <= 0) return name;
+  return `${name} ₦${priceNum.toLocaleString()}`;
 }
 
 function availabilityLabel(av) {
@@ -74,6 +80,7 @@ function Avatar({ url, seed, onClick }) {
 /* The actual card shown in the list                                     */
 /* ===================================================================== */
 export default function BarberCard({ barber = {}, onOpen, onBook }) {
+  // backend now guarantees `id` in proToBarber
   const id = barber.id || barber._id || "";
   const name =
     barber.name ||
@@ -89,18 +96,32 @@ export default function BarberCard({ barber = {}, onOpen, onBook }) {
 
   const services = toArrayServices(barber.services);
   const topThree = services.slice(0, 3);
+
+  // If backend sent startingPrice, trust it. Otherwise derive from services.
+  const startingPrice =
+    typeof barber.startingPrice === "number" && barber.startingPrice >= 0
+      ? barber.startingPrice
+      : services.length
+      ? Math.min(
+          ...services
+            .map((s) => Number(s.price) || 0)
+            .filter((n) => Number.isFinite(n))
+        )
+      : 0;
+
   const bio = String(barber.bio || barber.description || "").trim();
   const photoUrl = barber.photoUrl || barber.avatarUrl || "";
 
-  // rating source priority: metrics.avgRating -> rating
+  // rating source priority: backend already gave rating + ratingStars
   const rawRating =
-    Number(
-      barber?.metrics && typeof barber.metrics.avgRating !== "undefined"
-        ? barber.metrics.avgRating
-        : barber.rating
-    ) || 0;
+    typeof barber.rating === "number"
+      ? barber.rating
+      : Number(
+          barber?.metrics && typeof barber.metrics.avgRating !== "undefined"
+            ? barber.metrics.avgRating
+            : 0
+        ) || 0;
 
-  // If backend gave ratingStars.full use it, otherwise compute from rounded rating
   const fullStars =
     Number.isFinite(Number(barber?.ratingStars?.full))
       ? Math.max(0, Math.min(5, Number(barber.ratingStars.full)))
@@ -108,9 +129,9 @@ export default function BarberCard({ barber = {}, onOpen, onBook }) {
 
   const emptyStars = 5 - fullStars;
   const rating = Math.max(0, Math.min(5, rawRating));
+  const ratingCount = Number(barber.ratingCount || 0);
 
   function handleAvatarClick() {
-    // still allow old behavior (drawer) if parent passed it
     onOpen?.(barber);
   }
 
@@ -166,12 +187,18 @@ export default function BarberCard({ barber = {}, onOpen, onBook }) {
         </div>
 
         <div className="min-w-0 flex-1">
-          <div className="leading-tight">
+          <div className="leading-tight flex items-center gap-2">
             <div className="text-[20px] font-extrabold tracking-wide truncate">
               {name}
             </div>
-            {role && <div className="text-sm text-zinc-400">{role}</div>}
+            {/* small "From ₦..." if we have it */}
+            {startingPrice > 0 && (
+              <span className="text-[11px] text-gold bg-gold/10 px-2 py-0.5 rounded-full">
+                From ₦{startingPrice.toLocaleString()}
+              </span>
+            )}
           </div>
+          {role && <div className="text-sm text-zinc-400">{role}</div>}
 
           {/* Rating, location, etc. */}
           <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-zinc-300">
@@ -192,7 +219,14 @@ export default function BarberCard({ barber = {}, onOpen, onBook }) {
                     ★
                   </span>
                 ))}
-                <span className="ml-1 font-semibold">{rating.toFixed(1)}</span>
+                <span className="ml-1 font-semibold">
+                  {rating.toFixed(1)}
+                </span>
+                {ratingCount > 0 && (
+                  <span className="text-zinc-500 ml-1">
+                    ({ratingCount})
+                  </span>
+                )}
               </span>
             )}
 

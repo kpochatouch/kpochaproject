@@ -52,10 +52,20 @@ function requireAdmin(req, res, next) {
 /* ------------------------------------------------------------------
    UTILS
    ------------------------------------------------------------------ */
+function isSameDay(a, b) {
+  if (!a || !b) return false;
+  const da = new Date(a);
+  const db = new Date(b);
+  return (
+    da.getFullYear() === db.getFullYear() &&
+    da.getMonth() === db.getMonth() &&
+    da.getDate() === db.getDate()
+  );
+}
+
 function maskClientProfileForClientView(p) {
   if (!p) return null;
   const obj = { ...p };
-  // we now store only uid on clients, but this is safe to keep
   delete obj.ownerUid;
   delete obj.uid;
   if (obj.id?.numberHash) obj.id.numberHash = "****";
@@ -96,6 +106,33 @@ function buildProfilesSetFromPayload(payload = {}) {
   return set;
 }
 
+// ✅ only these fields should force “verify today”
+function bodyTouchesSensitiveClient(body = {}) {
+  if (!body || typeof body !== "object") return false;
+  if (body.fullName) return true;
+  if (body.phone) return true;
+  if (body.state) return true;
+  if (body.lga) return true;
+  if (body.address) return true;
+  if (body.photoUrl) return true;
+  if (body.identity) return true;
+  return false;
+}
+
+// ✅ allow frontend to tell us “I just did liveness, remember it”
+async function rememberLivenessToday(uid) {
+  try {
+    const col = mongoose.connection.db.collection("profiles");
+    await col.updateOne(
+      { uid },
+      { $set: { livenessVerifiedAt: new Date() } },
+      { upsert: true }
+    );
+  } catch (e) {
+    console.warn("[profile:liveness:remember] skipped:", e?.message || e);
+  }
+}
+
 /* ------------------------------------------------------------------
    1) ENSURE PROFILE (this is the ONLY one allowed to CREATE)
    ------------------------------------------------------------------ */
@@ -104,18 +141,15 @@ router.post("/profile/ensure", requireAuth, async (req, res) => {
     const uid = req.user.uid;
     if (!uid) return res.status(400).json({ error: "missing_uid" });
 
-    // now we only support uid-based profiles
     const existing = await ClientProfile.findOne({ uid }).lean();
 
     if (!existing) {
-      // create minimal doc
       const base = {
         uid,
         fullName: (req.user.email || "").split("@")[0] || "",
       };
       await ClientProfile.create(base);
 
-      // also update raw "profiles" collection used by server.js/admin
       try {
         const col = mongoose.connection.db.collection("profiles");
         await col.updateOne(
@@ -135,7 +169,7 @@ router.post("/profile/ensure", requireAuth, async (req, res) => {
       return res.json({ ok: true, created: true });
     }
 
-    // profile exists → make sure raw collection also has it
+    // sync raw
     try {
       const col = mongoose.connection.db.collection("profiles");
       await col.updateOne(
@@ -150,6 +184,9 @@ router.post("/profile/ensure", requireAuth, async (req, res) => {
             address: existing.address || "",
             photoUrl: existing.photoUrl || "",
             ...(existing.identity ? { identity: existing.identity } : {}),
+            ...(existing.livenessVerifiedAt
+              ? { livenessVerifiedAt: existing.livenessVerifiedAt }
+              : {}),
           },
         },
         { upsert: true }
@@ -170,10 +207,8 @@ router.post("/profile/ensure", requireAuth, async (req, res) => {
    ------------------------------------------------------------------ */
 async function handleGetClientMe(req, res) {
   try {
-    // uid-only
     const p = await ClientProfile.findOne({ uid: req.user.uid }).lean();
 
-    // also expose pro info (some frontend bits show if user is pro)
     const pro = await Pro.findOne({ ownerUid: req.user.uid })
       .select("_id name photoUrl status")
       .lean()
@@ -184,6 +219,8 @@ async function handleGetClientMe(req, res) {
     return res.json({
       ...masked,
       email: req.user.email || "",
+      // expose liveness to frontend so it can decide to reopen AWS
+      livenessVerifiedAt: p?.livenessVerifiedAt || null,
       pro: pro
         ? {
             id: pro._id.toString(),
@@ -204,19 +241,46 @@ async function handleGetClientMe(req, res) {
    ------------------------------------------------------------------ */
 async function handlePutClientMe(req, res) {
   try {
+    const uid = req.user.uid;
     const payload = req.body || {};
+
+    // load current profile to check liveness + existing values
+    const existing = await ClientProfile.findOne({ uid }).lean();
+
+    if (!existing) {
+      return res.status(404).json({ error: "profile_not_found" });
+    }
+
+    // did frontend just tell us to remember?
+    const wantsRemember =
+      payload.liveness && payload.liveness.remember === true;
+
+    if (wantsRemember) {
+      await rememberLivenessToday(uid);
+    }
+
+    // do we need liveness for THIS payload?
+    const touchesSensitive = bodyTouchesSensitiveClient(payload);
+
+    // what do we currently have on record?
+    const verifiedToday = existing.livenessVerifiedAt
+      ? isSameDay(existing.livenessVerifiedAt, new Date())
+      : false;
+
+    // if they touch sensitive AND we don't have today AND they didn't just send remember → block
+    if (touchesSensitive && !verifiedToday && !wantsRemember) {
+      return res.status(403).json({ error: "liveness_required" });
+    }
 
     // normalize casing only if present
     if (payload.lga) payload.lga = String(payload.lga).toUpperCase();
     if (payload.state) payload.state = String(payload.state).toUpperCase();
 
-    // build a selective $set — only non-empty fields overwrite
-    const clientSet = {
-      uid: req.user.uid,
-    };
+    const clientSet = { uid };
 
     if (payload.fullName && payload.fullName.trim()) {
       clientSet.fullName = payload.fullName.trim();
+      clientSet.displayName = payload.fullName.trim();
     }
     if (payload.phone && payload.phone.trim()) {
       clientSet.phone = payload.phone.trim();
@@ -246,56 +310,46 @@ async function handlePutClientMe(req, res) {
       clientSet.acceptedPrivacy = payload.acceptedPrivacy;
     if (payload.agreements) clientSet.agreements = payload.agreements;
 
-    // IMPORTANT: do NOT create here — frontend must have called /profile/ensure first
     const updated = await ClientProfile.findOneAndUpdate(
-      { uid: req.user.uid },
+      { uid },
       { $set: clientSet },
-      { new: true } // ← no upsert
+      { new: true }
     ).lean();
 
-    if (!updated) {
-      return res.status(404).json({ error: "profile_not_found" });
-    }
-
-    // 1) keep the shared "profiles" collection in sync (central view)
+    // sync raw "profiles" collection
     try {
       const col = mongoose.connection.db.collection("profiles");
       const $set = {
-        uid: req.user.uid,
+        uid,
       };
 
       const fromPayload = buildProfilesSetFromPayload(payload);
       Object.assign($set, fromPayload);
 
-      await col.updateOne(
-        { uid: req.user.uid },
-        { $set },
-        { upsert: true }
-      );
+      // keep the old stamp, or write a new one if they said remember
+      if (wantsRemember) {
+        $set.livenessVerifiedAt = new Date();
+      } else if (existing.livenessVerifiedAt) {
+        $set.livenessVerifiedAt = existing.livenessVerifiedAt;
+      }
+
+      await col.updateOne({ uid }, { $set }, { upsert: true });
     } catch (e) {
       console.warn("[profile->profiles col sync] skipped:", e?.message || e);
     }
 
-    // 2) if this user is also a Pro, push the same non-empty fields to Pro
+    // sync to Pro doc too (your original behavior)
     try {
-      const pro = await Pro.findOne({ ownerUid: req.user.uid })
-        .select("_id")
-        .lean();
-
+      const pro = await Pro.findOne({ ownerUid: uid }).select("_id").lean();
       if (pro) {
         const proSet = {};
 
-        // name → barber card
         if (payload.fullName && payload.fullName.trim()) {
           proSet.name = payload.fullName.trim();
         }
-
-        // phone
         if (payload.phone && payload.phone.trim()) {
           proSet.phone = payload.phone.trim();
         }
-
-        // photo
         if (payload.photoUrl && payload.photoUrl.trim()) {
           proSet.photoUrl = payload.photoUrl.trim();
         } else if (
@@ -306,8 +360,6 @@ async function handlePutClientMe(req, res) {
         ) {
           proSet.photoUrl = payload.identity.photoUrl.trim();
         }
-
-        // location
         if (payload.state) {
           proSet.state = payload.state;
         }
@@ -316,10 +368,7 @@ async function handlePutClientMe(req, res) {
         }
 
         if (Object.keys(proSet).length > 0) {
-          await Pro.updateOne(
-            { ownerUid: req.user.uid },
-            { $set: proSet }
-          );
+          await Pro.updateOne({ ownerUid: uid }, { $set: proSet });
         }
       }
     } catch (e) {
@@ -327,7 +376,14 @@ async function handlePutClientMe(req, res) {
     }
 
     const masked = maskClientProfileForClientView(updated) || {};
-    return res.json({ ...masked, email: req.user.email || "" });
+    return res.json({
+      ...masked,
+      email: req.user.email || "",
+      // return the latest known stamp
+      livenessVerifiedAt: wantsRemember
+        ? new Date()
+        : existing.livenessVerifiedAt || null,
+    });
   } catch (e) {
     console.warn("[profile:put/me] error", e?.message || e);
     return res.status(500).json({ error: "Failed to save profile" });
@@ -335,17 +391,16 @@ async function handlePutClientMe(req, res) {
 }
 
 /* ------------------------------------------------------------------
-   REGISTER ROUTES (same paths as before, so other code stays working)
+   REGISTER ROUTES
    ------------------------------------------------------------------ */
 router.get("/profile/client/me", requireAuth, handleGetClientMe);
 router.put("/profile/client/me", requireAuth, handlePutClientMe);
-
-// aliases kept for old frontend code
+// aliases kept
 router.get("/profile/me", requireAuth, handleGetClientMe);
 router.put("/profile/me", requireAuth, handlePutClientMe);
 
 /* ------------------------------------------------------------------
-   ADMIN READ
+   ADMIN READ (now shows livenessVerifiedAt too)
    ------------------------------------------------------------------ */
 router.get(
   "/profile/client/:uid/admin",
@@ -419,7 +474,7 @@ router.get(
 );
 
 /* ------------------------------------------------------------------
-   PRO PROFILE (extras) — kept exactly
+   PRO PROFILE (extras)
    ------------------------------------------------------------------ */
 router.get("/profile/pro/:proId", async (req, res) => {
   try {
