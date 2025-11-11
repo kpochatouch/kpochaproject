@@ -29,6 +29,41 @@ function cleanMoney(v) {
   return v.toString().replace(/,/g, "").trim();
 }
 
+/* ---------- one-shot liveness helper ---------- */
+function takeAwsLivenessProof() {
+  try {
+    const raw = localStorage.getItem("kpocha:livenessMetrics");
+    if (!raw) return null;
+    localStorage.removeItem("kpocha:livenessMetrics"); // one-time use
+    const parsed = JSON.parse(raw);
+    return parsed && parsed.ok ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/* ---------- drafts for when liveness interrupts ---------- */
+function stashSettingsDraft(section, payload) {
+  try {
+    localStorage.setItem(
+      "kpocha:settingsDraft",
+      JSON.stringify({ section, payload, ts: Date.now() })
+    );
+  } catch {
+    /* ignore */
+  }
+}
+function takeSettingsDraft() {
+  try {
+    const raw = localStorage.getItem("kpocha:settingsDraft");
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed || null;
+  } catch {
+    return null;
+  }
+}
+
 export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
 
@@ -437,6 +472,50 @@ export default function SettingsPage() {
             { id: "", name: "", price: "", promoPrice: "", otherText: "" },
           ]);
         }
+
+        // 👇 after loading from server, try to reapply any draft (user was interrupted by liveness)
+        const draft = takeSettingsDraft();
+        if (draft && draft.payload) {
+          if (draft.section === "profile") {
+            setDisplayName(draft.payload.displayName || "");
+            setPhone(draft.payload.phone || "");
+            setStateVal((draft.payload.state || "").toUpperCase());
+            setLga((draft.payload.lga || "").toUpperCase());
+            setAvatarUrl(draft.payload.avatarUrl || "");
+            setClientBio(draft.payload.bio || "");
+          } else if (draft.section === "pro") {
+            // only reapply fields we actually control here
+            setProBio(draft.payload.proBio || "");
+            setProPhotoUrl(draft.payload.proPhotoUrl || "");
+            setProfileVisible(
+              typeof draft.payload.profileVisible === "boolean"
+                ? draft.payload.profileVisible
+                : true
+            );
+            setNationwide(!!draft.payload.nationwide);
+            if (Array.isArray(draft.payload.statesCovered)) {
+              setStatesCovered(
+                draft.payload.statesCovered.map((x) => x.toUpperCase())
+              );
+            }
+            if (Array.isArray(draft.payload.servicesDetailed)) {
+              setServicesDetailed(draft.payload.servicesDetailed);
+            }
+            if (draft.payload.business) {
+              setBusiness((prev) => ({ ...prev, ...draft.payload.business }));
+            }
+            if (draft.payload.availability) {
+              setAvailability((prev) => ({ ...prev, ...draft.payload.availability }));
+            }
+          } else if (draft.section === "bank") {
+            setBankName(draft.payload.bankName || "");
+            setAccountName(draft.payload.accountName || "");
+            setAccountNumber(draft.payload.accountNumber || "");
+            setBvn(draft.payload.bvn || "");
+          }
+          // optional: clear it so we don't keep overriding
+          // localStorage.removeItem("kpocha:settingsDraft");
+        }
       } catch {
         if (alive) setErr("Failed to load your profile.");
       } finally {
@@ -492,7 +571,7 @@ export default function SettingsPage() {
     [hasPro, bankName, accountName, accountNumber, bvn]
   );
 
-  /* ---------- liveness helper ---------- */
+  /* ---------- liveness launcher ---------- */
   async function startAwsLivenessFlow() {
     try {
       const { data } = await api.post("/api/aws-liveness/session");
@@ -500,7 +579,7 @@ export default function SettingsPage() {
       if (sessionId) {
         window.dispatchEvent(
           new CustomEvent("aws-liveness:start", {
-            detail: { sessionId },
+            detail: { sessionId, back: "/settings" }, // <— come back here
           })
         );
       }
@@ -536,6 +615,12 @@ export default function SettingsPage() {
         },
       };
 
+      // attach one-shot liveness proof if present
+      const livenessProof = takeAwsLivenessProof();
+      if (livenessProof) {
+        payload.livenessProof = livenessProof;
+      }
+
       let res;
       if (client) {
         res = await api.put("/api/profile/me", payload);
@@ -550,6 +635,7 @@ export default function SettingsPage() {
           displayName: payload.displayName,
           phone: payload.phone,
           bio: payload.bio,
+          ...(payload.livenessProof ? { livenessProof: payload.livenessProof } : {}),
         });
         setAppDoc(res?.data?.item || { ...appDoc, ...payload });
       } else {
@@ -578,6 +664,15 @@ export default function SettingsPage() {
         e?.response?.status === 403 &&
         e?.response?.data?.error === "liveness_required"
       ) {
+        // stash what the user was trying to save
+        stashSettingsDraft("profile", {
+          displayName,
+          phone,
+          state: stateVal,
+          lga,
+          avatarUrl,
+          bio: clientBio,
+        });
         await startAwsLivenessFlow();
       } else {
         setErr(e?.response?.data?.error || "Failed to save profile.");
@@ -665,6 +760,12 @@ export default function SettingsPage() {
         status: appDoc?.status || "submitted",
       };
 
+      // attach one-shot liveness proof if present
+      const livenessProof = takeAwsLivenessProof();
+      if (livenessProof) {
+        payload.livenessProof = livenessProof;
+      }
+
       const { data } = await api.put("/api/pros/me", payload);
       setAppDoc(data?.item || { ...appDoc, ...payload });
       flashOK("Professional details saved.");
@@ -673,6 +774,17 @@ export default function SettingsPage() {
         e?.response?.status === 403 &&
         e?.response?.data?.error === "liveness_required"
       ) {
+        // stash current pro section
+        stashSettingsDraft("pro", {
+          proBio,
+          proPhotoUrl,
+          profileVisible,
+          nationwide,
+          statesCovered,
+          servicesDetailed,
+          business,
+          availability,
+        });
         await startAwsLivenessFlow();
       } else {
         setErr(e?.response?.data?.error || "Failed to save professional details.");
@@ -721,6 +833,12 @@ export default function SettingsPage() {
         status: appDoc?.status || "submitted",
       };
 
+      // attach one-shot liveness proof if present
+      const livenessProof = takeAwsLivenessProof();
+      if (livenessProof) {
+        payload.livenessProof = livenessProof;
+      }
+
       const { data } = await api.put("/api/pros/me", payload);
       setAppDoc(data?.item || { ...appDoc, ...payload });
       flashOK("Payment details saved.");
@@ -729,6 +847,13 @@ export default function SettingsPage() {
         e?.response?.status === 403 &&
         e?.response?.data?.error === "liveness_required"
       ) {
+        // stash bank section
+        stashSettingsDraft("bank", {
+          bankName,
+          accountName,
+          accountNumber,
+          bvn,
+        });
         await startAwsLivenessFlow();
       } else {
         setErr(e?.response?.data?.error || "Failed to save payment details.");

@@ -6,6 +6,22 @@ import { api } from "../lib/api";
 const CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || "";
 const UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET || "";
 
+/* ---------- localStorage keys ---------- */
+const DRAFT_KEY = "kpocha:clientSettingsDraft";
+
+/* ---------- one-shot liveness helper (same idea as Settings.jsx) ---------- */
+function takeAwsLivenessProof() {
+  try {
+    const raw = localStorage.getItem("kpocha:livenessMetrics");
+    if (!raw) return null;
+    localStorage.removeItem("kpocha:livenessMetrics"); // one-time
+    const parsed = JSON.parse(raw);
+    return parsed && parsed.ok ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 export default function ClientSettings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -15,6 +31,10 @@ export default function ClientSettings() {
   const [me, setMe] = useState(null);
   const [client, setClient] = useState(null);
   const [pro, setPro] = useState(null);
+
+  // liveness
+  const [livenessVerifiedAt, setLivenessVerifiedAt] = useState(null);
+  const [showLivenessNotice, setShowLivenessNotice] = useState(false);
 
   // geo
   const [geo, setGeo] = useState({ states: [], lgas: {} });
@@ -71,6 +91,13 @@ export default function ClientSettings() {
     };
   }, [widgetReady]);
 
+  // helper: save draft
+  function saveDraft(nextForm) {
+    try {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify(nextForm));
+    } catch (_) {}
+  }
+
   // load data
   useEffect(() => {
     let alive = true;
@@ -79,19 +106,17 @@ export default function ClientSettings() {
         setLoading(true);
         setError("");
 
-        // we still fetch pro just as a fallback for display,
-        // but CLIENT is the single source of truth now
         const [meRes, geoRes, clientRes, proRes] = await Promise.all([
           api.get("/api/me"),
           api.get("/api/geo/ng"),
-          api.get("/api/profile/me"), // always exists now
+          api.get("/api/profile/me"), // client profile
           api.get("/api/pros/me").catch(() => null),
         ]);
 
         if (!alive) return;
 
         const meData = meRes?.data || null;
-        const clientData = clientRes?.data || {}; // always exists
+        const clientData = clientRes?.data || {};
         const proData = proRes?.data || null;
 
         const statesRaw = Array.isArray(geoRes?.data?.states)
@@ -104,10 +129,20 @@ export default function ClientSettings() {
         setPro(proData);
         setGeo({ states: statesRaw, lgas: lgasRaw });
 
-        // base is the client – because “last input wins” and every page updates client
+        // keep client-side liveness
+        if (clientData?.livenessVerifiedAt) {
+          setLivenessVerifiedAt(clientData.livenessVerifiedAt);
+        }
+
+        // load any draft we saved before liveness
+        let draft = null;
+        try {
+          const raw = localStorage.getItem(DRAFT_KEY);
+          if (raw) draft = JSON.parse(raw);
+        } catch (_) {}
+
         const base = clientData;
 
-        // state/lga: prefer actual client-level fields, then identity, then (rarely) pro/me identity
         const baseState =
           clientData?.state ||
           clientData?.identity?.state ||
@@ -123,7 +158,6 @@ export default function ClientSettings() {
           meData?.identity?.city ||
           "";
 
-        // normalize to list
         const normalizedState =
           statesRaw.find(
             (s) => s.toUpperCase() === String(baseState).toUpperCase()
@@ -137,15 +171,14 @@ export default function ClientSettings() {
             (x) => x.toUpperCase() === String(baseLga).toUpperCase()
           ) || String(baseLga);
 
-        // agreements / kyc from client, if any
         const alreadyTerms =
           !!clientData?.acceptedTerms || !!clientData?.agreements?.terms;
         const alreadyPrivacy =
           !!clientData?.acceptedPrivacy || !!clientData?.agreements?.privacy;
         const kyc = clientData?.kyc || {};
 
-        setForm((cur) => ({
-          ...cur,
+        // start from server data
+        let nextForm = {
           displayName:
             clientData?.fullName ||
             clientData?.displayName ||
@@ -160,7 +193,6 @@ export default function ClientSettings() {
           state: normalizedState || "",
           lga: normalizedLga || "",
           address: clientData?.address || "",
-          // photo: prefer client photo, then identity photo, then pro, then me
           photoUrl:
             clientData?.photoUrl ||
             clientData?.identity?.photoUrl ||
@@ -175,7 +207,14 @@ export default function ClientSettings() {
           kycIdType: kyc?.idType || "",
           kycIdUrl: kyc?.idUrl || "",
           kycSelfieUrl: kyc?.selfieWithIdUrl || "",
-        }));
+        };
+
+        // if we have draft, overlay it (so user doesn't lose typing)
+        if (draft) {
+          nextForm = { ...nextForm, ...draft };
+        }
+
+        setForm(nextForm);
       } catch (e) {
         if (alive) setError("Failed to load your settings.");
       } finally {
@@ -193,7 +232,10 @@ export default function ClientSettings() {
   }, [form.state, geo.lgas]);
 
   function onChangeField(key, val) {
-    setForm((f) => ({ ...f, [key]: val }));
+    setForm((f) => {
+      const next = { ...f, [key]: val };
+      return next;
+    });
   }
 
   // create a widget on click
@@ -232,17 +274,50 @@ export default function ClientSettings() {
     }
   }
 
+  // ---------- AWS Liveness launcher (auto, but save form first) ----------
+  async function startAwsLivenessFlow() {
+    setError("");
+    setShowLivenessNotice(false);
+    try {
+      // save current form so we can restore after liveness
+      saveDraft(form);
+
+      const { data } = await api.post("/api/aws-liveness/session");
+      const sessionId =
+        data?.sessionId || data?.SessionId || data?.sessionID || "";
+
+      if (sessionId && typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("aws-liveness:start", {
+            detail: {
+              sessionId,
+              back: "/client/settings", // come back here
+            },
+          })
+        );
+        setShowLivenessNotice(true);
+      } else {
+        setError("Could not start face verification. Try again.");
+      }
+    } catch (e) {
+      setError(
+        e?.response?.data?.error ||
+          "Face verification is required before you can save these changes."
+      );
+    }
+  }
+
   async function onSave(e) {
     e?.preventDefault?.();
     try {
       setSaving(true);
       setError("");
       setOk("");
+      setShowLivenessNotice(false);
 
       const stateUP = (form.state || "").toUpperCase();
       const lgaUP = (form.lga || "").toUpperCase();
 
-      // always update the client profile – it's the single source of truth now
       const payload = {
         fullName: form.displayName?.trim(),
         displayName: form.displayName?.trim(),
@@ -257,7 +332,6 @@ export default function ClientSettings() {
           terms: !!form.agreeTerms,
           privacy: !!form.agreePrivacy,
         },
-        // keep identity in sync (so Settings, BecomePro, etc, all see same thing)
         identity: {
           phone: form.phone?.trim(),
           state: stateUP,
@@ -266,7 +340,6 @@ export default function ClientSettings() {
         },
       };
 
-      // optional KYC
       if (form.kycEnabled) {
         payload.kyc = {
           idType: form.kycIdType,
@@ -276,12 +349,25 @@ export default function ClientSettings() {
         };
       }
 
-      // THIS is the key change: always update client
+      // attach liveness proof if user just came back
+      const livenessProof = takeAwsLivenessProof();
+      if (livenessProof) {
+        payload.livenessProof = livenessProof;
+      }
+
       const res = await api.put("/api/profile/me", payload);
       const updated = res?.data || payload;
       setClient(updated);
 
-      // also update in-memory me so navbar etc refreshes
+      // clear draft on successful save
+      try {
+        localStorage.removeItem(DRAFT_KEY);
+      } catch (_) {}
+
+      if (updated?.livenessVerifiedAt) {
+        setLivenessVerifiedAt(updated.livenessVerifiedAt);
+      }
+
       setMe((prev) => ({
         ...(prev || {}),
         displayName: payload.displayName,
@@ -297,6 +383,14 @@ export default function ClientSettings() {
       setOk("Saved!");
       setTimeout(() => setOk(""), 2000);
     } catch (e) {
+      // backend says we need liveness → auto-launch
+      if (
+        e?.response?.status === 403 &&
+        e?.response?.data?.error === "liveness_required"
+      ) {
+        // launch liveness, but make sure form is stored
+        await startAwsLivenessFlow();
+      }
       setError(e?.response?.data?.error || "Could not save your changes.");
     } finally {
       setSaving(false);
@@ -310,6 +404,28 @@ export default function ClientSettings() {
         Complete or update your personal profile.
       </p>
 
+      {error && (
+        <div className="rounded-md border border-red-800 bg-red-900/30 text-red-100 px-3 py-2 mb-4">
+          {error}
+        </div>
+      )}
+      {ok && (
+        <div className="rounded-md border border-emerald-800 bg-emerald-900/20 text-emerald-100 px-3 py-2 mb-4">
+          {ok}
+        </div>
+      )}
+      {showLivenessNotice && (
+        <div className="rounded-md border border-amber-700 bg-amber-900/30 text-amber-100 px-3 py-2 mb-4 text-sm">
+          Please complete face verification in the popup, then click “Save”
+          again.
+        </div>
+      )}
+      {livenessVerifiedAt && (
+        <div className="rounded-md border border-emerald-700 bg-emerald-900/10 text-emerald-100 px-3 py-2 mb-4 text-xs">
+          Face verification on: {new Date(livenessVerifiedAt).toLocaleString()}
+        </div>
+      )}
+
       {loading ? (
         <div className="text-zinc-400">Loading…</div>
       ) : (
@@ -317,18 +433,7 @@ export default function ClientSettings() {
           onSubmit={onSave}
           className="rounded-lg border border-zinc-800 p-4 bg-black/40 space-y-6"
         >
-          {error && (
-            <div className="rounded-md border border-red-800 bg-red-900/30 text-red-100 px-3 py-2">
-              {error}
-            </div>
-          )}
-          {ok && (
-            <div className="rounded-md border border-emerald-800 bg-emerald-900/20 text-emerald-100 px-3 py-2">
-              {ok}
-            </div>
-          )}
-
-          {/* Photo */}
+          {/* Photo (no separate verify button anymore) */}
           <section>
             <h2 className="text-lg font-semibold mb-3">Photo</h2>
             <div className="flex items-center gap-3 flex-wrap">
@@ -382,11 +487,11 @@ export default function ClientSettings() {
             <div className="grid sm:grid-cols-2 gap-4">
               <Field label="Full / Display Name *">
                 <input
-                  className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2"
-                  value={form.displayName}
-                  onChange={(e) => onChangeField("displayName", e.target.value)}
-                  required
-                />
+                    className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2"
+                    value={form.displayName}
+                    onChange={(e) => onChangeField("displayName", e.target.value)}
+                    required
+                  />
               </Field>
               <Field label="Phone *">
                 <input
@@ -509,7 +614,9 @@ export default function ClientSettings() {
                   <input
                     className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2"
                     value={form.kycIdUrl}
-                    onChange={(e) => onChangeField("kycIdUrl", e.target.value)}
+                    onChange={(e) =>
+                      onChangeField("kycIdUrl", e.target.value)
+                    }
                     placeholder="https://…"
                   />
                 </Field>
