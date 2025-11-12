@@ -117,4 +117,69 @@ router.get("/following", requireAuth, async (req, res) => {
   }
 });
 
+/* -------------------- Aliases matching current UI calls -------------------- */
+// GET /api/follow/:uid/status
+router.get("/follow/:uid/status", tryAuth, async (req, res) => {
+  const me = req.user?.uid || null;
+  const targetUid = String(req.params.uid);
+  if (!me || me === targetUid) return res.json({ following: false });
+  const exists = await Follow.exists({ followerUid: me, targetUid });
+  return res.json({ following: !!exists });
+});
+
+// POST /api/follow/:uid
+router.post("/follow/:uid", requireAuth, async (req, res) => {
+  const me = req.user.uid;
+  const targetUid = String(req.params.uid);
+  if (me === targetUid) return res.status(400).json({ error: "cannot_follow_self" });
+  await Follow.updateOne(
+    { followerUid: me, targetUid },
+    { $setOnInsert: { followerUid: me, targetUid } },
+    { upsert: true }
+  );
+  return res.json({ ok: true, following: true });
+});
+
+// DELETE /api/follow/:uid
+router.delete("/follow/:uid", requireAuth, async (req, res) => {
+  const me = req.user.uid;
+  const targetUid = String(req.params.uid);
+  await Follow.deleteOne({ followerUid: me, targetUid });
+  return res.json({ ok: true, following: false });
+});
+
+// GET /api/pros/:proId/follow/status
+router.get("/pros/:proId/follow/status", tryAuth, async (req, res) => {
+  const me = req.user?.uid || null;
+  const pro = await Pro.findById(req.params.proId).lean();
+  const targetUid = pro?.ownerUid || null;
+  if (!me || !targetUid || me === targetUid) return res.json({ following: false });
+  const exists = await Follow.exists({ followerUid: me, targetUid });
+  return res.json({ following: !!exists });
+});
+
+// POST /api/pros/:proId/follow
+router.post("/pros/:proId/follow", requireAuth, async (req, res) => {
+  const me = req.user.uid;
+  const pro = await Pro.findById(req.params.proId).lean();
+  if (!pro?.ownerUid) return res.status(404).json({ error: "pro_not_found" });
+  if (me === pro.ownerUid) return res.status(400).json({ error: "cannot_follow_self" });
+  await Follow.updateOne(
+    { followerUid: me, targetUid: pro.ownerUid },
+    { $setOnInsert: { followerUid: me, targetUid: pro.ownerUid } },
+    { upsert: true }
+  );
+  return res.json({ ok: true, following: true });
+});
+
+// DELETE /api/pros/:proId/follow
+router.delete("/pros/:proId/follow", requireAuth, async (req, res) => {
+  const me = req.user.uid;
+  const pro = await Pro.findById(req.params.proId).lean();
+  if (!pro?.ownerUid) return res.status(404).json({ error: "pro_not_found" });
+  await Follow.deleteOne({ followerUid: me, targetUid: pro.ownerUid });
+  return res.json({ ok: true, following: false });
+});
+
+
 export default router;
