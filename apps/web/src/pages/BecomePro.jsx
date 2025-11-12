@@ -1,7 +1,7 @@
 // apps/web/src/pages/BecomePro.jsx
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, submitProApplication } from "../lib/api";
+import { api, getClientProfile, updateClientProfile, ensureClientProfile } from "../lib/api";
 import NgGeoPicker from "../components/NgGeoPicker.jsx";
 import ServicePicker from "../components/ServicePicker.jsx";
 
@@ -187,6 +187,7 @@ export default function BecomePro() {
     let alive = true;
     (async () => {
       try {
+        await ensureClientProfile(); // ✅ create client profile if missing
         const [meRes, clientRes, proRes, geoRes] = await Promise.all([
           api.get("/api/me"),
           api.get("/api/profile/me").catch(() => null),

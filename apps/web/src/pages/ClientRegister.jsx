@@ -1,7 +1,7 @@
 // apps/web/src/pages/ClientRegister.jsx
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import { api, getClientProfile, updateClientProfile } from "../lib/api";
+import { api, getClientProfile, updateClientProfile, ensureClientProfile } from "../lib/api";
 import NgGeoPicker from "../components/NgGeoPicker.jsx";
 
 // same env as BecomePro
@@ -119,6 +119,7 @@ export default function ClientRegister() {
       setLoading(true);
       setErr("");
       try {
+        await ensureClientProfile(); // ✅ make sure profile exists
         const data = await getClientProfile().catch(() => null);
         if (!alive) return;
 

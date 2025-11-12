@@ -7,12 +7,13 @@ import {
   setPersistence,
   browserLocalPersistence,
   sendPasswordResetEmail,
+  sendEmailVerification, // 👈 added
 } from "firebase/auth";
 import { auth, googleProvider } from "../lib/firebase";
 import { useAuth } from "../context/AuthContext";
 import PasswordInput from "../components/PasswordInput";
 import { api, setAuthToken } from "../lib/api";
-import { friendlyFirebaseError } from "../lib/friendlyFirebaseError"; // 👈 added
+import { friendlyFirebaseError } from "../lib/friendlyFirebaseError";
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -29,7 +30,6 @@ export default function Login() {
 
   useEffect(() => {
     setPersistence(auth, browserLocalPersistence).catch(() => {});
-    // clear google state (some browsers cache this)
     try {
       sessionStorage.removeItem("g_state");
     } catch {}
@@ -45,20 +45,15 @@ export default function Login() {
   }, [user, nav, qs]);
 
   async function afterSignInRedirect() {
-    // 1) get fresh firebase token and store it so axios sends it
     try {
       const tok = await auth.currentUser.getIdToken(true);
       setAuthToken(tok);
     } catch {}
 
-    // 2) ensure profile exists on the backend (this is our single source of truth)
     try {
       await api.post("/api/profile/ensure");
-    } catch {
-      // don't block login if this fails (network, etc.)
-    }
+    } catch {}
 
-    // 3) go where user was headed
     const next = qs.get("next") || "/browse";
     nav(next, { replace: true });
   }
@@ -75,11 +70,18 @@ export default function Login() {
         password
       );
 
-      // ✅ block if email not verified
+      // ⛔ user exists but not verified → send verification that returns to /browse
       if (!cred.user.emailVerified) {
-        setErr(
-          "Please verify your email before signing in. Check your inbox/spam folder for the link."
-        );
+        const appUrl = window.location.origin;
+        try {
+          await sendEmailVerification(cred.user, {
+            url: `${appUrl}/browse`,
+            handleCodeInApp: true,
+          });
+          setOk("Verification email sent. Check your inbox/spam folder and come back.");
+        } catch {
+          setErr("Your email is not verified. Please check your inbox/spam folder.");
+        }
         await auth.signOut();
         setBusy(false);
         return;
@@ -87,7 +89,7 @@ export default function Login() {
 
       await afterSignInRedirect();
     } catch (e) {
-      setErr(friendlyFirebaseError(e)); // 👈 use friendly text
+      setErr(friendlyFirebaseError(e));
     } finally {
       setBusy(false);
     }
@@ -101,9 +103,17 @@ export default function Login() {
       googleProvider.setCustomParameters({ prompt: "select_account" });
       const cred = await signInWithPopup(auth, googleProvider);
 
-      // we still enforce verification — for Google this is usually true
       if (!cred.user.emailVerified) {
-        setErr("Please verify your email with Google before continuing.");
+        const appUrl = window.location.origin;
+        try {
+          await sendEmailVerification(cred.user, {
+            url: `${appUrl}/browse`,
+            handleCodeInApp: true,
+          });
+          setOk("Verification email sent. Check your inbox/spam folder and come back.");
+        } catch {
+          setErr("Your email is not verified. Please check your inbox/spam folder.");
+        }
         await auth.signOut();
         setBusy(false);
         return;
@@ -111,7 +121,7 @@ export default function Login() {
 
       await afterSignInRedirect();
     } catch (e) {
-      setErr(friendlyFirebaseError(e) || "Google sign in failed"); // 👈
+      setErr(friendlyFirebaseError(e) || "Google sign in failed");
     } finally {
       setBusy(false);
     }
@@ -124,11 +134,15 @@ export default function Login() {
       return setErr("Enter your email first to reset password.");
     setBusy(true);
     try {
-      await sendPasswordResetEmail(auth, email.trim());
+      const appUrl = window.location.origin;
+      await sendPasswordResetEmail(auth, email.trim(), {
+        url: `${appUrl}/browse`,
+        handleCodeInApp: true,
+      });
       setOk("Password reset email sent. Check your inbox/spam folder.");
       setResetting(false);
     } catch (e) {
-      setErr(friendlyFirebaseError(e) || "Failed to send reset email"); // 👈
+      setErr(friendlyFirebaseError(e) || "Failed to send reset email");
     } finally {
       setBusy(false);
     }

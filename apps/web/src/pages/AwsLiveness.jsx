@@ -61,23 +61,32 @@ export default function AwsLiveness() {
     })();
   }, []);
 
-  const handleComplete = (result) => {
-    try {
-      localStorage.setItem(
-        "kpocha:livenessMetrics",
-        JSON.stringify({
-          ok: true,
-          ts: Date.now(),
-          sessionId,
-          source: "aws",
-          score: result?.confidence ?? null,
-        })
-      );
-      // one-time, so clear it
-      localStorage.removeItem("kpocha:awsLivenessSession");
-    } catch (_) {}
+  const handleComplete = async (result) => {
+  try {
+    // keep the one-shot local proof (backup for /profile save flows)
+    localStorage.setItem(
+      "kpocha:livenessMetrics",
+      JSON.stringify({
+        ok: true,
+        ts: Date.now(),
+        sessionId,
+        source: "aws",
+        score: result?.confidence ?? null,
+      })
+    );
+    // clear any pending session (we're done)
+    localStorage.removeItem("kpocha:awsLivenessSession");
+
+    // ✅ NEW: tell the backend to persist livenessVerifiedAt = now
+    await api.post("/api/aws-liveness/verify", { sessionId });
+  } catch (e) {
+    console.error("[AwsLiveness] verify POST failed:", e);
+    // even if this fails, the backup (remember flag) on next save will work
+  } finally {
     nav(back);
-  };
+  }
+};
+
 
   const handleError = (e) => {
     console.error("[AwsLiveness] detector error:", e);

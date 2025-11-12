@@ -109,15 +109,14 @@ function buildProfilesSetFromPayload(payload = {}) {
 // ✅ only these fields should force “verify today”
 function bodyTouchesSensitiveClient(body = {}) {
   if (!body || typeof body !== "object") return false;
-  if (body.fullName) return true;
-  if (body.phone) return true;
-  if (body.state) return true;
-  if (body.lga) return true;
-  if (body.address) return true;
-  if (body.photoUrl) return true;
+  // Only truly sensitive on CLIENT profile:
+  // - identity/KYC bundle (IDs, real-name proofs, ID photos, etc.)
+  // If you want address to be sensitive, uncomment the next line.
   if (body.identity) return true;
+  // if (body.address) return true;
   return false;
 }
+
 
 // ✅ allow frontend to tell us “I just did liveness, remember it”
 async function rememberLivenessToday(uid) {

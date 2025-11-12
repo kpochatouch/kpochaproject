@@ -9,11 +9,11 @@ import {
 import { auth } from "../lib/firebase";
 import { useAuth } from "../context/AuthContext";
 import PasswordInput from "../components/PasswordInput";
-import { friendlyFirebaseError } from "../lib/friendlyFirebaseError"; // 👈 added
+import { friendlyFirebaseError } from "../lib/friendlyFirebaseError";
 
 export default function Signup() {
   const [name, setName] = useState("");
-  const [phone, setPhone] = useState(""); // optional, cached locally
+  const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -46,8 +46,7 @@ export default function Signup() {
     setOk("");
 
     if (!email.trim()) return setErr("Email is required.");
-    if (password.length < 6)
-      return setErr("Password must be at least 6 characters.");
+    if (password.length < 6) return setErr("Password must be at least 6 characters.");
     if (password !== confirm) return setErr("Passwords do not match.");
 
     setBusy(true);
@@ -62,13 +61,19 @@ export default function Signup() {
         await updateProfile(cred.user, { displayName: name.trim() });
       }
 
-      // ✅ Force email verification before login
-      await sendEmailVerification(cred.user);
-      setOk("Verification email sent! Please verify your email before logging in.");
+      // send verification email that comes back to client register
+      const appUrl = window.location.origin;
+      await sendEmailVerification(cred.user, {
+        url: `${appUrl}/client/register`,
+        handleCodeInApp: true,
+      });
+
+      setOk("Verification email sent! Click the link in your inbox/spam folder to continue.");
       cacheDraft({});
-      await auth.signOut(); // logout immediately until verified
+      // ❌ don't sign out here – so when they click the link, they're still logged in
+      // await auth.signOut();
     } catch (e) {
-      setErr(friendlyFirebaseError(e)); // 👈 use friendly message
+      setErr(friendlyFirebaseError(e));
     } finally {
       setBusy(false);
     }

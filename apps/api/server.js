@@ -702,14 +702,14 @@ async function rememberLivenessToday(uid) {
 // what counts as “sensitive” on /api/pros/me
 function bodyTouchesSensitivePro(body = {}) {
   if (!body || typeof body !== "object") return false;
+
+  // 1) money / payouts
   if (body.bank) return true;
+
+  // 2) real-person info
   if (body.identity) return true;
-  if (body.servicesDetailed) return true;
-  if (body.professional) return true; // contains services, certs, etc.
-  if (body.availability) return true;
-  if (body.phone) return true;
-  if (body.state) return true;
-  if (body.lga) return true;
+
+  // everything else (phone, state, lga, availability, services) → no liveness
   return false;
 }
 

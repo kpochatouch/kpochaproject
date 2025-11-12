@@ -8,6 +8,7 @@ import {
 } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
+import { ensureClientProfile } from "../lib/api";
 import NgGeoPicker from "../components/NgGeoPicker.jsx";
 import ServicePicker from "../components/ServicePicker.jsx";
 
@@ -266,6 +267,7 @@ export default function SettingsPage() {
       clearMsg();
       setLoading(true);
       try {
+        await ensureClientProfile(); // ✅ create client profile if missing
         const [meRes, clientRes, proRes] = await Promise.all([
           api.get("/api/me"),
           api.get("/api/profile/me").catch(() => null),
@@ -605,21 +607,15 @@ export default function SettingsPage() {
         lga: lga.toUpperCase(),
         avatarUrl,
         photoUrl: avatarUrl,
-        bio: clientBio,
-        identity: {
-          ...(client?.identity || me?.identity || {}),
-          phone,
-          state: stateVal.toUpperCase(),
-          city: lga.toUpperCase(),
-          photoUrl: avatarUrl,
-        },
+        bio: clientBio, 
       };
 
-      // attach one-shot liveness proof if present
-      const livenessProof = takeAwsLivenessProof();
-      if (livenessProof) {
-        payload.livenessProof = livenessProof;
-      }
+      // attach one-shot liveness remember flag if present
+const livenessProof = takeAwsLivenessProof();
+if (livenessProof) {
+  payload.liveness = { remember: true };
+}
+
 
       let res;
       if (client) {
@@ -628,23 +624,14 @@ export default function SettingsPage() {
         if (res?.data?.livenessVerifiedAt) {
           setLivenessVerifiedAt(res.data.livenessVerifiedAt);
         }
-      } else if (appDoc?._id) {
-        res = await api.put("/api/pros/me", {
-          ...appDoc,
-          identity: payload.identity,
-          displayName: payload.displayName,
-          phone: payload.phone,
-          bio: payload.bio,
-          ...(payload.livenessProof ? { livenessProof: payload.livenessProof } : {}),
-        });
-        setAppDoc(res?.data?.item || { ...appDoc, ...payload });
       } else {
-        res = await api.put("/api/profile/me", payload);
-        setClient(res?.data || payload);
-        if (res?.data?.livenessVerifiedAt) {
-          setLivenessVerifiedAt(res.data.livenessVerifiedAt);
-        }
-      }
+  res = await api.put("/api/profile/me", payload);
+  setClient(res?.data || payload);
+  if (res?.data?.livenessVerifiedAt) {
+    setLivenessVerifiedAt(res.data.livenessVerifiedAt);
+  }
+}
+
 
       setMe((prev) => ({
         ...(prev || {}),
@@ -760,11 +747,12 @@ export default function SettingsPage() {
         status: appDoc?.status || "submitted",
       };
 
-      // attach one-shot liveness proof if present
-      const livenessProof = takeAwsLivenessProof();
-      if (livenessProof) {
-        payload.livenessProof = livenessProof;
-      }
+      // attach one-shot liveness remember flag if present
+const livenessProof = takeAwsLivenessProof();
+if (livenessProof) {
+  payload.liveness = { remember: true };
+}
+
 
       const { data } = await api.put("/api/pros/me", payload);
       setAppDoc(data?.item || { ...appDoc, ...payload });
@@ -833,11 +821,12 @@ export default function SettingsPage() {
         status: appDoc?.status || "submitted",
       };
 
-      // attach one-shot liveness proof if present
-      const livenessProof = takeAwsLivenessProof();
-      if (livenessProof) {
-        payload.livenessProof = livenessProof;
-      }
+      // attach one-shot liveness remember flag if present
+const livenessProof = takeAwsLivenessProof();
+if (livenessProof) {
+  payload.liveness = { remember: true };
+}
+
 
       const { data } = await api.put("/api/pros/me", payload);
       setAppDoc(data?.item || { ...appDoc, ...payload });

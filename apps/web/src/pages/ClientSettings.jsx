@@ -1,6 +1,7 @@
 // apps/web/src/pages/ClientSettings.jsx
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api";
+import { ensureClientProfile } from "../lib/api";
 
 /* ---------- Cloudinary config ---------- */
 const CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || "";
@@ -105,7 +106,8 @@ export default function ClientSettings() {
       try {
         setLoading(true);
         setError("");
-
+        await ensureClientProfile(); // ✅ create profile if missing
+        
         const [meRes, geoRes, clientRes, proRes] = await Promise.all([
           api.get("/api/me"),
           api.get("/api/geo/ng"),
@@ -332,12 +334,6 @@ export default function ClientSettings() {
           terms: !!form.agreeTerms,
           privacy: !!form.agreePrivacy,
         },
-        identity: {
-          phone: form.phone?.trim(),
-          state: stateUP,
-          city: lgaUP,
-          photoUrl: form.photoUrl || "",
-        },
       };
 
       if (form.kycEnabled) {
@@ -349,11 +345,12 @@ export default function ClientSettings() {
         };
       }
 
-      // attach liveness proof if user just came back
-      const livenessProof = takeAwsLivenessProof();
-      if (livenessProof) {
-        payload.livenessProof = livenessProof;
-      }
+      // attach the "remember" flag if we just returned from AWS
+const livenessProof = takeAwsLivenessProof();
+if (livenessProof) {
+  payload.liveness = { remember: true };
+}
+
 
       const res = await api.put("/api/profile/me", payload);
       const updated = res?.data || payload;
