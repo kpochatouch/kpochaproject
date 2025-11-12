@@ -21,6 +21,20 @@ async function requireAuth(req, res, next) {
   }
 }
 
+// optional auth – decode token if present, else continue as guest
+async function tryAuth(req, _res, next) {
+  try {
+    const h = req.headers.authorization || "";
+    const token = h.startsWith("Bearer ") ? h.slice(7) : null;
+    if (token) {
+      const decoded = await admin.auth().verifyIdToken(token);
+      req.user = { uid: decoded.uid, email: decoded.email || null };
+    }
+  } catch {}
+  next();
+}
+
+
 /* ------------------------------- Helpers ------------------------------- */
 const isObjId = (v) => typeof v === "string" && /^[0-9a-fA-F]{24}$/.test(v);
 const toUpper = (v) => (typeof v === "string" ? v.trim().toUpperCase() : v);
