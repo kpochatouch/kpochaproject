@@ -189,6 +189,51 @@ router.get("/posts/me", requireAuth, async (req, res) => {
   }
 });
 
+
+// ── READ: single post (public) ─────────────────────────────────────────
+router.get("/posts/:id", tryAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!isObjId(id)) return res.status(400).json({ error: "invalid_id" });
+
+    const p = await Post.findById(id).lean();
+    if (!p || p.hidden || p.deleted) {
+      return res.status(404).json({ error: "not_found" });
+    }
+    return res.json(sanitizePostForClient(p));
+  } catch (err) {
+    console.error("[posts:read] error:", err);
+    return res.status(500).json({ error: "post_load_failed" });
+  }
+});
+
+// ── READ: post stats (public-ish; reflects liked/saved if logged in) ──
+router.get("/posts/:id/stats", tryAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!isObjId(id)) return res.status(400).json({ error: "invalid_id" });
+
+    const s = await PostStats.findOne({
+      postId: new mongoose.Types.ObjectId(id),
+    }).lean();
+
+    const me = req.user?.uid;
+    return res.json({
+      viewsCount: s?.viewsCount || 0,
+      likesCount: s?.likesCount || 0,
+      commentsCount: s?.commentsCount || 0,
+      sharesCount: s?.sharesCount || 0,
+      savesCount: s?.savesCount || 0,
+      likedByMe: me ? (s?.likedBy || []).includes(me) : false,
+      savedByMe: me ? (s?.savedBy || []).includes(me) : false,
+    });
+  } catch (err) {
+    console.error("[posts:stats] error:", err);
+    return res.status(500).json({ error: "stats_load_failed" });
+  }
+});
+
+
 /* -------------------------------------------------------------------- */
 /* OWNER / MODERATION ACTIONS                                           */
 /* -------------------------------------------------------------------- */

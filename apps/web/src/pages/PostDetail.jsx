@@ -461,7 +461,8 @@ export default function PostDetail() {
             )}
           </div>
           <div>
-            <div className="text-sm font-semibold text-white">{proName}</div>
+            <div className="text-sm font-semibold text-white truncate max-w-[120px]">{proName}</div>
+
             <div className="text-xs text-gray-400">
               {lga || "Nigeria"} • {timeAgo(post.createdAt)}
             </div>
@@ -479,11 +480,13 @@ export default function PostDetail() {
           )}
           <div className="relative">
             <button
-              onClick={() => setMenuOpen((v) => !v)}
-              className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-800 text-white"
-            >
-              ⋯
-            </button>
+  onClick={() => setMenuOpen((v) => !v)}
+  aria-label="Open post menu"
+  className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-800 text-white"
+>
+  ⋯
+</button>
+
             {menuOpen && (
               <div className="absolute right-0 mt-2 w-56 bg-[#141414] border border-[#2a2a2a] rounded-lg shadow-lg z-30">
                 {/* Save/Unsave in the menu (your preference) */}

@@ -115,6 +115,13 @@ function formatTime(sec = 0) {
     };
   }, [postId]);
 
+  // Reset internal flags when post changes
+useEffect(() => {
+  hasSentViewRef.current = false;
+  playTriggeredByObserverRef.current = false;
+}, [postId]);
+
+
   function mergeStatsFromServer(partial) {
     setStats((prev) => ({
       ...prev,
@@ -198,6 +205,14 @@ function formatTime(sec = 0) {
       obs.disconnect();
     };
   }, [postId, isVideo]);
+
+  useEffect(() => {
+  if (!isVideo && mediaObserverRef.current) {
+    mediaObserverRef.current.disconnect();
+    mediaObserverRef.current = null;
+  }
+}, [isVideo]);
+
 
   // 3) also send view for NON-video cards (photos / text)
   useEffect(() => {
@@ -593,7 +608,8 @@ const followTargetUid =
             )}
           </div>
           <div>
-            <div className="text-sm font-semibold text-white">{proName}</div>
+            <div className="text-sm font-semibold text-white truncate max-w-[120px]">{proName}</div>
+
             <div className="text-xs text-gray-400">
               {lga || "Nigeria"} • {timeAgo(post.createdAt)}
             </div>
@@ -610,11 +626,13 @@ const followTargetUid =
           )}
           <div className="relative">
             <button
-              onClick={() => setMenuOpen((v) => !v)}
-              className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-800 text-white"
-            >
-              ⋯
-            </button>
+  onClick={() => setMenuOpen((v) => !v)}
+  aria-label="Open post menu"
+  className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-800 text-white"
+>
+  ⋯
+</button>
+
             {menuOpen && (
               <div className="absolute right-0 mt-2 w-56 bg-[#141414] border border-[#2a2a2a] rounded-lg shadow-lg z-30">
                 <button
@@ -691,6 +709,13 @@ const followTargetUid =
           )}
         </div>
       )}
+
+{!media && (
+  <div className="w-full aspect-[4/5] bg-[#1a1a1a] animate-pulse flex items-center justify-center text-gray-600 text-xs">
+    Loading media...
+  </div>
+)}
+
 
 {media && (
   <div className="relative w-full bg-black overflow-hidden aspect-[4/5] sm:aspect-[4/5] lg:aspect-[3/4] xl:aspect-[1/1] max-h-[80vh]">
