@@ -40,6 +40,7 @@ const AwsLiveness = lazy(() => import("./pages/AwsLiveness.jsx"));
 const RiskLogs = lazy(() => import("./pages/RiskLogs.jsx"));
 const Chat = lazy(() => import("./pages/Chat.jsx"));
 const Compose = lazy(() => import("./pages/Compose.jsx"));
+const PostDetail = lazy(() => import("./pages/PostDetail.jsx"));
 
 // public profile
 const PublicProfile = lazy(() => import("./pages/PublicProfile.jsx"));
@@ -184,6 +185,7 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/browse" element={<Browse />} />
+            <Route path="/post/:id" element={<PostDetail />} />
             <Route
               path="/compose"
               element={

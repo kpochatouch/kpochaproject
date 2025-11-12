@@ -2,6 +2,11 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
+import FollowButton from "./FollowButton.jsx";
+import LikeButton from "./LikeButton.jsx";
+import ShareButton from "./ShareButton.jsx";
+import CommentToggle from "./CommentToggle.jsx";
+import ActionButton from "./ActionButton.jsx";
 
 function timeAgo(ts) {
   if (!ts) return "";
@@ -544,6 +549,15 @@ function onSeekCommit(e) {
   const proName = pro.name || post.authorName || "Professional";
   const lga = pro.lga || post.lga || "";
 
+  // who to follow (prefer owner UID)
+const followTargetUid =
+  post.proOwnerUid ||
+  post.pro?.ownerUid ||
+  post.ownerUid ||
+  post.createdBy ||
+  null;
+
+
   // clicking text → go to post detail (you can change route)
   function goToPostDetail() {
     if (!postId) return;
@@ -807,32 +821,14 @@ function onSeekCommit(e) {
 
       {/* actions (raised z to avoid overlap with popovers) */}
 <div className="relative z-[1] flex border-t border-[#1F1F1F]">
-  <button
-    onClick={toggleLike}
-    className={`flex-1 py-2 text-sm flex items-center justify-center gap-1 ${
-      stats.likedByMe ? "text-[#F5C542]" : "text-gray-200"
-    }`}
-  >
-    👍 {stats.likedByMe ? "Liked" : "Like"}
-  </button>
-  <button
-    onClick={handleToggleComments}
-    className="flex-1 py-2 text-sm flex items-center justify-center gap-1 text-gray-200"
-  >
-    💬 Comment
-  </button>
-  <button
-    onClick={handleShare}
-    className="flex-1 py-2 text-sm flex items-center justify-center gap-1 text-gray-200"
-  >
-    ↗ Share
-  </button>
-  <button
-    onClick={() => alert("Follow / Unfollow will be available soon.")}
-    className="flex-1 py-2 text-sm flex items-center justify-center gap-1 text-gray-200"
-  >
-    ➕ Follow
-  </button>
+  <LikeButton active={stats.likedByMe} onClick={toggleLike} />
+  <CommentToggle onClick={handleToggleComments} />
+  <ShareButton onClick={handleShare} />
+  {!isOwner ? (
+    <FollowButton targetUid={followTargetUid} proId={post.proId || null} />
+  ) : (
+    <ActionButton disabled className="text-gray-500 select-none">—</ActionButton>
+  )}
 </div>
 
 

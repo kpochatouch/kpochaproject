@@ -40,6 +40,7 @@ import riskRoutes from "./routes/risk.js";
 import awsLivenessRoutes from "./routes/awsLiveness.js";
 import redis from "./redis.js";
 import postStatsRouter from "./routes/postStats.js";
+import followRoutes from "./routes/follow.js";
 
 dotenv.config();
 
@@ -399,23 +400,47 @@ app.post(
 // JSON after webhooks
 app.use(express.json());
 
-/* ------------------- View identity (for logging) ------------------- */
+/* ------------------- View identity (stable anon cookie) ------------------- */
+function readCookie(header, name) {
+  const m = (header || "").match(new RegExp(`(?:^|; )${name}=([^;]+)`));
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
+function newAnonId() {
+  return (
+    Math.random().toString(36).slice(2, 10) +
+    Date.now().toString(36) +
+    Math.random().toString(36).slice(2, 10)
+  );
+}
+
 app.use((req, res, next) => {
+  let anonId = readCookie(req.headers.cookie || "", "anonId");
+
+  if (!anonId) {
+    anonId = newAnonId();
+
+    const cookieFlags =
+      process.env.NODE_ENV === "production"
+        ? "Path=/; Max-Age=31536000; SameSite=None; Secure"
+        : "Path=/; Max-Age=31536000; SameSite=Lax";
+
+    res.setHeader("Set-Cookie", `anonId=${encodeURIComponent(anonId)}; ${cookieFlags}`);
+  }
+
   const forwarded =
     (req.headers["x-forwarded-for"] &&
       String(req.headers["x-forwarded-for"]).split(",")[0].trim()) ||
     req.socket?.remoteAddress ||
     "";
   const ua = req.headers["user-agent"] || "";
-  const anonId = crypto
-    .createHash("sha1")
-    .update(`${forwarded}|${ua}`)
-    .digest("hex");
+
   req.viewIdentity = {
+    anonId, // <- this is now unique per browser
     ip: forwarded,
     ua,
-    anonId,
   };
+
   next();
 });
 
@@ -935,6 +960,7 @@ app.use("/api", walletWithAuth(requireAuth, requireAdmin));
 app.use("/api", pinRoutes({ requireAuth, Application }));
 app.use("/api", profileRouter);
 app.use("/api", postsRouter);
+app.use("/api", followRoutes);
 app.use("/api", commentsRouter);
 app.use("/api", paymentsRouter({ requireAuth }));
 app.use("/api", postStatsRouter);
