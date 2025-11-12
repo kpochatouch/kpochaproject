@@ -61,6 +61,18 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
   const [muted, setMuted] = useState(true);
   const [userHasInteracted, setUserHasInteracted] = useState(false);
 
+  // ⬇️ add these right under: const [userHasInteracted, setUserHasInteracted] = useState(false);
+const [currentTime, setCurrentTime] = useState(0);
+const [duration, setDuration] = useState(0);
+const [seeking, setSeeking] = useState(false);
+
+function formatTime(sec = 0) {
+  if (!isFinite(sec)) return "0:00";
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}:${s < 10 ? "0" : ""}${s}`;
+}
+
   const media =
     Array.isArray(post.media) && post.media.length ? post.media[0] : null;
   const isVideo = media?.type === "video";
@@ -239,6 +251,74 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
       vid.play().catch(() => {});
     }
   }
+
+  // when metadata loads, capture duration
+function onLoadedMetadata() {
+  const vid = videoRef.current;
+  if (!vid) return;
+  setDuration(vid.duration || 0);
+}
+
+// keep currentTime in sync for the slider + label
+function onTimeUpdate() {
+  if (seeking) return; // don't fight the user's finger while scrubbing
+  const vid = videoRef.current;
+  if (!vid) return;
+  setCurrentTime(vid.currentTime || 0);
+}
+
+// jump helpers
+function jump(seconds) {
+  const vid = videoRef.current;
+  if (!vid) return;
+  const next = Math.min(
+    Math.max((vid.currentTime || 0) + seconds, 0),
+    duration || vid.duration || 0
+  );
+  vid.currentTime = next;
+  setCurrentTime(next);
+}
+
+// fullscreen (desktop + mobile Safari fallback)
+async function toggleFullscreen() {
+  const vid = videoRef.current;
+  if (!vid) return;
+  try {
+    if (document.fullscreenElement) {
+      await document.exitFullscreen().catch(() => {});
+      return;
+    }
+    if (vid.requestFullscreen) return void vid.requestFullscreen();
+    // iOS WebKit fallback
+    const anyVid = /** @type {any} */ (vid);
+    if (anyVid.webkitEnterFullscreen)
+      return void anyVid.webkitEnterFullscreen();
+  } catch {
+    // ignore
+  }
+}
+
+// seek slider handlers
+function onSeekStart() {
+  setSeeking(true);
+}
+
+function onSeekChange(e) {
+  const v = Number(e.target.value || 0);
+  setCurrentTime(v);
+}
+
+function onSeekCommit(e) {
+  const vid = videoRef.current;
+  if (!vid) {
+    setSeeking(false);
+    return;
+  }
+  const v = Number(e.target.value || 0);
+  vid.currentTime = v;
+  setCurrentTime(v);
+  setSeeking(false);
+}
 
   // likes
   async function toggleLike() {
@@ -598,7 +678,6 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
         </div>
       )}
 
-{/* media: mobile 4:5 (same), desktop steps to 3:4 / 1:1 and capped */}
 {media && (
   <div className="relative w-full bg-black overflow-hidden aspect-[4/5] sm:aspect-[4/5] lg:aspect-[3/4] xl:aspect-[1/1] max-h-[80vh]">
     {isVideo ? (
@@ -611,17 +690,23 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
           loop
           playsInline
           preload="metadata"
-          controls={false}      // we show our own controls
+          controls={false}             // custom controls only
           onClick={onClickVideo}
-          onPlay={onVideoPlay}  // ✅ counts only on user action (no autoplay)
+          onPlay={onVideoPlay}
+          onLoadedMetadata={onLoadedMetadata}
+          onTimeUpdate={onTimeUpdate}
         />
+
         {!userHasInteracted && (
           <button
             onClick={onClickVideo}
             className="absolute inset-0 flex items-center justify-center bg-black/0"
+            aria-label="Play video"
           />
         )}
-        <div className="absolute bottom-3 left-3 flex gap-2">
+
+        {/* Top-left quick controls (Play/Pause, Mute) */}
+        <div className="absolute bottom-3 left-3 flex gap-2 z-[2]">
           <button
             onClick={onClickVideo}
             className="bg-black/50 text-white text-xs px-3 py-1 rounded-full"
@@ -635,6 +720,62 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
             {muted ? "Unmute" : "Mute"}
           </button>
         </div>
+
+        {/* Bottom control bar with seek + time + +/- 10s + fullscreen */}
+        <div
+          className="absolute inset-x-0 bottom-0 z-[2] px-3 pb-3 pt-6
+                     bg-gradient-to-t from-black/70 via-black/20 to-transparent"
+          // Bigger hit area at bottom for thumbs on mobile
+        >
+          {/* time + jump + fullscreen row */}
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => jump(-10)}
+                className="rounded-full bg-black/60 text-white text-xs px-3 py-1"
+                aria-label="Seek backward 10 seconds"
+              >
+                ⏪ 10s
+              </button>
+              <button
+                onClick={() => jump(+10)}
+                className="rounded-full bg-black/60 text-white text-xs px-3 py-1"
+                aria-label="Seek forward 10 seconds"
+              >
+                10s ⏩
+              </button>
+            </div>
+
+            <div className="flex items-center gap-2 text-[11px] text-white/90">
+              <span aria-label="Current time">{formatTime(currentTime)}</span>
+              <span className="opacity-70">/</span>
+              <span aria-label="Duration">{formatTime(duration)}</span>
+              <button
+                onClick={toggleFullscreen}
+                className="rounded-md bg-black/60 text-white text-[11px] px-2 py-1 ml-2"
+                aria-label="Toggle full screen"
+              >
+                ⛶
+              </button>
+            </div>
+          </div>
+
+          {/* seek slider */}
+          <input
+            type="range"
+            min={0}
+            max={Math.max(1, duration || 0)}   // avoid 0 max
+            step={0.1}
+            value={Math.min(currentTime, duration || 0)}
+            onMouseDown={onSeekStart}
+            onTouchStart={onSeekStart}
+            onChange={onSeekChange}
+            onMouseUp={onSeekCommit}
+            onTouchEnd={onSeekCommit}
+            className="w-full accent-[#F5C542]"
+            aria-label="Seek"
+          />
+        </div>
       </>
     ) : (
       <img
@@ -646,7 +787,6 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
     )}
   </div>
 )}
-
 
       {/* counts row (wrap on small screens) */}
 <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 text-xs text-gray-400 border-t border-[#1F1F1F]">
