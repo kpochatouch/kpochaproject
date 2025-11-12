@@ -342,7 +342,8 @@ router.delete("/posts/:id/like", requireAuth, async (req, res) => {
 /**
  * VIEW with Redis de-dup
  */
-router.post("/posts/:id/view", async (req, res) => {
+router.post("/posts/:id/view", tryAuth, async (req, res) => {
+
   try {
     const { id } = req.params;
     if (!isObjId(id)) return res.status(400).json({ error: "invalid_id" });
@@ -357,7 +358,7 @@ router.post("/posts/:id/view", async (req, res) => {
       const redisKey = `post:view:${id}:${viewerId}`;
       try {
         const setRes = await redisClient.set(redisKey, "1", {
-          EX: 3600,
+          EX: 600,
           NX: true,
         });
         if (setRes !== "OK") {

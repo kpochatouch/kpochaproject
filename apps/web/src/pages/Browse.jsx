@@ -541,58 +541,102 @@ export default function Browse() {
           </div>
         </div>
 
-        {/* filters */}
-        <div className="flex flex-wrap items-center gap-2 mb-6">
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search by name or description…"
-            className="bg-black border border-zinc-800 rounded-lg px-3 py-2 w-56 max-w-full"
-          />
-          <div className="w-56 max-w-full">
-            <ServicePicker
-              value={service}
-              onChange={setService}
-              placeholder="All services"
-              allowCustom={false}
-            />
-          </div>
-          <select
-            value={stateName}
-            onChange={(e) => {
-              const val = e.target.value.toUpperCase();
-              setStateName(val);
-              setLga("");
-            }}
-            className="bg-black border border-zinc-800 rounded-lg px-3 py-2"
-          >
-            <option value="">All States</option>
-            {states.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-          <select
-            value={lga}
-            onChange={(e) => setLga(e.target.value.toUpperCase())}
-            className="bg-black border border-zinc-800 rounded-lg px-3 py-2"
-            disabled={stateName && !lgasForState.length}
-          >
-            <option value="">All LGAs</option>
-            {(stateName ? lgasForState : []).map((x) => (
-              <option key={x} value={x}>
-                {x}
-              </option>
-            ))}
-          </select>
-          <button
-            onClick={clearFilters}
-            className="rounded-lg border border-zinc-700 px-3 py-2 text-sm"
-          >
-            Clear
-          </button>
-        </div>
+{/* filters – compact on mobile, full on desktop */}
+{/* MOBILE (icon bar) */}
+<div className="md:hidden mb-3">
+  <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
+    <button
+      onClick={() => setService("")}
+      className="shrink-0 rounded-full border border-zinc-800 px-3 py-1.5 text-xs"
+      title="All services"
+      aria-label="All services"
+    >
+      🧰
+    </button>
+    <button
+      onClick={() => setQ("")}
+      className="shrink-0 rounded-full border border-zinc-800 px-3 py-1.5 text-xs"
+      title="Search"
+      aria-label="Search"
+    >
+      🔎
+    </button>
+    <button
+      onClick={() => setStateName("")}
+      className="shrink-0 rounded-full border border-zinc-800 px-3 py-1.5 text-xs"
+      title="State"
+      aria-label="State"
+    >
+      🗺️
+    </button>
+    <button
+      onClick={() => setLga("")}
+      className="shrink-0 rounded-full border border-zinc-800 px-3 py-1.5 text-xs"
+      title="LGA"
+      aria-label="LGA"
+    >
+      📍
+    </button>
+    <button
+      onClick={clearFilters}
+      className="shrink-0 rounded-full border border-zinc-800 px-3 py-1.5 text-xs"
+      title="Clear filters"
+      aria-label="Clear filters"
+    >
+      ✖
+    </button>
+  </div>
+</div>
+
+{/* DESKTOP (full controls) */}
+<div className="hidden md:flex flex-wrap items-center gap-2 mb-6">
+  <input
+    value={q}
+    onChange={(e) => setQ(e.target.value)}
+    placeholder="Search by name or description…"
+    className="bg-black border border-zinc-800 rounded-lg px-3 py-2 w-56 max-w-full"
+  />
+  <div className="w-56 max-w-full">
+    <ServicePicker
+      value={service}
+      onChange={setService}
+      placeholder="All services"
+      allowCustom={false}
+    />
+  </div>
+  <select
+    value={stateName}
+    onChange={(e) => {
+      const val = e.target.value.toUpperCase();
+      setStateName(val);
+      setLga("");
+    }}
+    className="bg-black border border-zinc-800 rounded-lg px-3 py-2"
+  >
+    <option value="">All States</option>
+    {states.map((s) => (
+      <option key={s} value={s}>{s}</option>
+    ))}
+  </select>
+  <select
+    value={lga}
+    onChange={(e) => setLga(e.target.value.toUpperCase())}
+    className="bg-black border border-zinc-800 rounded-lg px-3 py-2"
+    disabled={stateName && !lgasForState.length}
+  >
+    <option value="">All LGAs</option>
+    {(stateName ? lgasForState : []).map((x) => (
+      <option key={x} value={x}>{x}</option>
+    ))}
+  </select>
+  <button
+    onClick={clearFilters}
+    className="rounded-lg border border-zinc-700 px-3 py-2 text-sm"
+  >
+    Clear
+  </button>
+</div>
+
 
         {/* content */}
         {tab === "pros" ? (

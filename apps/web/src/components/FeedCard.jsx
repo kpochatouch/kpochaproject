@@ -598,109 +598,103 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
         </div>
       )}
 
-      {/* media: fixed IG-ish aspect ratio so it doesn't overflow */}
-      {media && (
-        <div
-          className="w-full bg-black overflow-hidden"
-          style={{ aspectRatio: "4 / 5" }}
-        >
-          {isVideo ? (
-            <div className="relative w-full h-full">
-              <video
-                ref={videoRef}
-                src={media.url}
-                className="w-full h-full object-cover"
-                muted={muted}
-                loop
-                playsInline
-                preload="metadata"
-                // we show our own controls
-                controls={false}
-                onClick={onClickVideo}
-                onPlay={onVideoPlay}
-              />
-              {/* play/pause overlay */}
-              {!userHasInteracted && (
-                <button
-                  onClick={onClickVideo}
-                  className="absolute inset-0 flex items-center justify-center bg-black/0"
-                />
-              )}
-              <div className="absolute bottom-3 left-3 flex gap-2">
-                <button
-                  onClick={onClickVideo}
-                  className="bg-black/50 text-white text-xs px-3 py-1 rounded-full"
-                >
-                  {videoRef.current && !videoRef.current.paused
-                    ? "Pause"
-                    : "Play"}
-                </button>
-                <button
-                  onClick={onToggleMute}
-                  className="bg-black/50 text-white text-xs px-3 py-1 rounded-full"
-                >
-                  {muted ? "Unmute" : "Mute"}
-                </button>
-              </div>
-            </div>
-          ) : (
-            <img
-              src={media.url}
-              alt=""
-              loading="lazy"
-              className="w-full h-full object-cover"
-            />
-          )}
-        </div>
-      )}
-
-      {/* counts row */}
-      <div className="flex items-center justify-between px-4 py-2 text-xs text-gray-400 border-t border-[#1F1F1F]">
-        <div className="flex gap-4">
-          <div>{stats.likesCount} likes</div>
-          <button onClick={handleToggleComments}>
-            {stats.commentsCount} comments
+{/* media: mobile 4:5 (same), desktop steps to 3:4 / 1:1 and capped */}
+{media && (
+  <div className="relative w-full bg-black overflow-hidden aspect-[4/5] sm:aspect-[4/5] lg:aspect-[3/4] xl:aspect-[1/1] max-h-[80vh]">
+    {isVideo ? (
+      <>
+        <video
+          ref={videoRef}
+          src={media.url}
+          className="absolute inset-0 w-full h-full object-cover"
+          muted={muted}
+          loop
+          playsInline
+          preload="metadata"
+          controls={false}      // we show our own controls
+          onClick={onClickVideo}
+          onPlay={onVideoPlay}  // ✅ counts only on user action (no autoplay)
+        />
+        {!userHasInteracted && (
+          <button
+            onClick={onClickVideo}
+            className="absolute inset-0 flex items-center justify-center bg-black/0"
+          />
+        )}
+        <div className="absolute bottom-3 left-3 flex gap-2">
+          <button
+            onClick={onClickVideo}
+            className="bg-black/50 text-white text-xs px-3 py-1 rounded-full"
+          >
+            {videoRef.current && !videoRef.current.paused ? "Pause" : "Play"}
           </button>
-          <div>{stats.sharesCount} shares</div>
+          <button
+            onClick={onToggleMute}
+            className="bg-black/50 text-white text-xs px-3 py-1 rounded-full"
+          >
+            {muted ? "Unmute" : "Mute"}
+          </button>
         </div>
-        <div className="flex items-center gap-1">
-          <span role="img" aria-label="views">
-            👁
-          </span>
-          <span>View</span>
-          <span>{stats.viewsCount}</span>
-        </div>
-      </div>
+      </>
+    ) : (
+      <img
+        src={media.url}
+        alt=""
+        loading="lazy"
+        className="absolute inset-0 w-full h-full object-cover"
+      />
+    )}
+  </div>
+)}
 
-      {/* actions */}
-      <div className="flex border-t border-[#1F1F1F]">
-        <button
-          onClick={toggleLike}
-          className={`flex-1 py-2 text-sm flex items-center justify-center gap-1 ${
-            stats.likedByMe ? "text-[#F5C542]" : "text-gray-200"
-          }`}
-        >
-          👍 {stats.likedByMe ? "Liked" : "Like"}
-        </button>
-        <button
-          onClick={handleToggleComments}
-          className="flex-1 py-2 text-sm flex items-center justify-center gap-1 text-gray-200"
-        >
-          💬 Comment
-        </button>
-        <button
-          onClick={handleShare}
-          className="flex-1 py-2 text-sm flex items-center justify-center gap-1 text-gray-200"
-        >
-          ↗ Share
-        </button>
-        <button
-          onClick={() => alert("Follow / Unfollow will be available soon.")}
-          className="flex-1 py-2 text-sm flex items-center justify-center gap-1 text-gray-200"
-        >
-          ➕ Follow
-        </button>
-      </div>
+
+      {/* counts row (wrap on small screens) */}
+<div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 text-xs text-gray-400 border-t border-[#1F1F1F]">
+  <div className="flex flex-wrap gap-4">
+    <div>{stats.likesCount} likes</div>
+    <button onClick={handleToggleComments}>
+      {stats.commentsCount} comments
+    </button>
+    <div>{stats.sharesCount} shares</div>
+  </div>
+  <div className="flex items-center gap-1">
+    <span role="img" aria-label="views">👁</span>
+    <span>View</span>
+    <span>{stats.viewsCount}</span>
+  </div>
+</div>
+
+
+      {/* actions (raised z to avoid overlap with popovers) */}
+<div className="relative z-[1] flex border-t border-[#1F1F1F]">
+  <button
+    onClick={toggleLike}
+    className={`flex-1 py-2 text-sm flex items-center justify-center gap-1 ${
+      stats.likedByMe ? "text-[#F5C542]" : "text-gray-200"
+    }`}
+  >
+    👍 {stats.likedByMe ? "Liked" : "Like"}
+  </button>
+  <button
+    onClick={handleToggleComments}
+    className="flex-1 py-2 text-sm flex items-center justify-center gap-1 text-gray-200"
+  >
+    💬 Comment
+  </button>
+  <button
+    onClick={handleShare}
+    className="flex-1 py-2 text-sm flex items-center justify-center gap-1 text-gray-200"
+  >
+    ↗ Share
+  </button>
+  <button
+    onClick={() => alert("Follow / Unfollow will be available soon.")}
+    className="flex-1 py-2 text-sm flex items-center justify-center gap-1 text-gray-200"
+  >
+    ➕ Follow
+  </button>
+</div>
+
 
       {/* comments */}
       {showComments && (
