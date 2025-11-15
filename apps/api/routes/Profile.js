@@ -549,6 +549,143 @@ const postsRaw = await Post.find({
 
 router.get("/profile/public/:username", handleGetPublicProfile);
 
+// GET public profile by UID (useful when frontend links by uid)
+router.get("/profile/public-by-uid/:uid", async (req, res) => {
+  try {
+    const uid = String(req.params.uid || "").trim();
+    if (!uid) return res.status(400).json({ error: "uid_required" });
+
+    const cacheKey = `public:profile:uid:${uid}`;
+
+    // try redis cache first
+    if (redisClient) {
+      try {
+        const cached = await redisClient.get(cacheKey);
+        if (cached) return res.status(200).json(JSON.parse(cached));
+      } catch (e) {
+        console.warn("[public/profile-by-uid] redis get failed:", e?.message || e);
+      }
+    }
+
+    // 1) client profile by uid
+    const client = await ClientProfile.findOne({ uid }).lean();
+    if (!client) return res.status(404).json({ error: "profile_not_found" });
+
+    const ownerUid = client.uid;
+
+    // 2) pro doc if exists
+    const pro = await Pro.findOne({ ownerUid }).lean().catch(() => null);
+    const publicFromPro = pro ? proToBarber(pro) : null;
+
+    // 3) Merge identity fields (client primary)
+    const profilePublic = {
+      ownerUid,
+      username: client.username || (publicFromPro && publicFromPro.id) || "",
+      displayName: client.displayName || client.fullName || (publicFromPro && publicFromPro.name) || "",
+      avatarUrl: client.photoUrl || (publicFromPro && publicFromPro.photoUrl) || "",
+      coverUrl: client.coverUrl || (pro?.coverUrl || ""),
+      bio: client.bio || (pro?.bio || "") || "",
+      isPro: Boolean(pro),
+      services: (publicFromPro && publicFromPro.services) || [],
+      gallery: (publicFromPro && publicFromPro.gallery) || (client.gallery || []),
+      contactPublic: (pro && pro.contactPublic) || {},
+      badges: (publicFromPro && publicFromPro.badges) || [],
+      metrics: (pro && pro.metrics) || {},
+      followersCount: 0,
+      postsCount: 0,
+      jobsCompleted: 0,
+      ratingAverage: Number((pro && pro.metrics && pro.metrics.avgRating) || 0),
+    };
+
+    // counts & posts (same logic as username route)
+    profilePublic.followersCount = Number(pro?.metrics?.followers || client.followersCount || 0);
+
+    try {
+      profilePublic.postsCount = await Post.countDocuments({
+        proOwnerUid: ownerUid,
+        isPublic: true,
+        hidden: { $ne: true },
+        deleted: { $ne: true },
+      });
+    } catch (e) {
+      profilePublic.postsCount = Number(pro?.metrics?.postsCount || 0);
+    }
+
+    if (pro?.metrics?.jobsCompleted) {
+      profilePublic.jobsCompleted = Number(pro.metrics.jobsCompleted || 0);
+    } else {
+      try {
+        const bookingQueryOr = [{ proOwnerUid: ownerUid }, { proUid: ownerUid }];
+        if (pro && pro._id) {
+          try { bookingQueryOr.push({ proId: new mongoose.Types.ObjectId(pro._id) }); } catch {}
+        }
+        profilePublic.jobsCompleted = await Booking.countDocuments({
+          $and: [{ status: "completed" }, { $or: bookingQueryOr }],
+        });
+      } catch (e) {
+        profilePublic.jobsCompleted = 0;
+      }
+    }
+
+    if (pro?.metrics?.avgRating) profilePublic.ratingAverage = Number(pro.metrics.avgRating);
+
+    const postsRaw = await Post.find({
+      proOwnerUid: ownerUid,
+      isPublic: true,
+      hidden: { $ne: true },
+      deleted: { $ne: true },
+    })
+      .sort({ createdAt: -1 })
+      .limit(10)
+      .lean();
+
+    const pIds = postsRaw.map((p) => p._id?.toString()).filter(Boolean);
+    let statsMap = {};
+    if (pIds.length && PostStats) {
+      const stats = await PostStats.find({ postId: { $in: pIds } }).lean().catch(() => []);
+      statsMap = stats.reduce((acc, s) => {
+        acc[String(s.postId)] = s;
+        return acc;
+      }, {});
+    }
+
+    const publicPosts = postsRaw.map((p) => {
+      const s = statsMap[String(p._id)] || {};
+      return {
+        id: p._id?.toString?.() || String(p._id),
+        proOwnerUid: p.proOwnerUid || "",
+        proId: p.proId ? String(p.proId) : null,
+        text: p.text,
+        media: p.media || [],
+        createdAt: p.createdAt,
+        stats: {
+          likes: Number(s.likesCount || s.likes || 0),
+          comments: Number(s.commentsCount || s.comments || 0),
+          shares: Number(s.sharesCount || s.shares || 0),
+          views: Number(s.viewsCount || s.views || 0),
+        },
+      };
+    });
+
+    const payload = { ok: true, profile: profilePublic, posts: { items: publicPosts, cursor: null } };
+
+    // cache
+    if (redisClient) {
+      try {
+        await redisClient.setEx(cacheKey, PUBLIC_PROFILE_CACHE_SEC, JSON.stringify(payload));
+      } catch (e) {
+        console.warn("[public/profile-by-uid] redis set failed:", e?.message || e);
+      }
+    }
+
+    return res.json(payload);
+  } catch (e) {
+    console.error("[public/profile-by-uid] err:", e?.stack || e);
+    return res.status(500).json({ error: "server_error" });
+  }
+});
+
+
 
 /* ------------------------------------------------------------------
    ADMIN READ (now shows livenessVerifiedAt too)

@@ -148,11 +148,6 @@ function _getAuthHeader() {
   return latestToken ? { Authorization: `Bearer ${latestToken}` } : {};
 }
 
-/**
- * connectSocket(options)
- * - uid (optional) is used by server to join rooms (server should accept token & join user rooms)
- * - onNotification callback gets { id, type, data, createdAt } whenever server emits
- */
 export function connectSocket({ onNotification } = {}) {
   // allow multiple callers and multiple handlers
   if (onNotification) {
@@ -162,36 +157,32 @@ export function connectSocket({ onNotification } = {}) {
     socketListeners.get("notification:received").add(onNotification);
   }
 
+  // if already connected return socket
   if (socketConnected) return socket;
 
   try {
-    // ensure base URL same origin (api base without protocol/domain may be root)
-    const url = ROOT; // points to server root
+    const url = ROOT; // server root
+
+    // opts: use a function for auth so the handshake always reads the latest token
     const opts = {
       autoConnect: false,
       transports: ["websocket", "polling"],
-      // send auth in handshake (server should verify token using Firebase)
-      auth: _getAuthHeader,
+      auth: () => _getAuthHeader(),
     };
 
     socket = io(url, opts);
 
     socket.on("connect", () => {
       socketConnected = true;
-      // let server know which rooms we want (optional)
-      // server can also join based on token, but this is explicit
-      try {
-        const uid = (latestToken && null) || null; // keep minimal here; server should derive from token
-        // join standard rooms: user:<uid> and profile:<uid> — server should handle this if token provided
-        // no-op if server already joined using token
-      } catch {}
+      // server should derive user identity from the token in the handshake.
+      // If you need explicit room joins, emit here (optional).
     });
 
     socket.on("disconnect", () => {
       socketConnected = false;
     });
 
-    // central forwarder that calls any registered handlers
+    // forward notification:received to registered handlers
     socket.on("notification:received", (payload) => {
       const set = socketListeners.get("notification:received");
       if (set && set.size) {
@@ -199,17 +190,24 @@ export function connectSocket({ onNotification } = {}) {
           try {
             fn(payload);
           } catch (e) {
-            // ignore handler errors
             console.warn("notif handler failed", e?.message || e);
           }
         });
       }
     });
 
-    // optional: forward other generic events
+    // forward profile:stats to registered handlers
     socket.on("profile:stats", (payload) => {
       const set = socketListeners.get("profile:stats");
-      if (set) set.forEach((fn) => { try { fn(payload); } catch {} });
+      if (set && set.size) {
+        set.forEach((fn) => {
+          try {
+            fn(payload);
+          } catch (e) {
+            // swallow handler errors
+          }
+        });
+      }
     });
 
     socket.connect();
@@ -225,6 +223,7 @@ export function connectSocket({ onNotification } = {}) {
 
   return socket;
 }
+
 
 /**
  * disconnectSocket() - removes all notification handlers and disconnects socket

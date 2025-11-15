@@ -26,24 +26,45 @@ export default function PublicProfile() {
   const [followPending, setFollowPending] = useState(false);
 
   const fetchProfile = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await getPublicProfile(username);
-      if (res?.profile) {
-        setProfile(res.profile);
-        setPosts(res.posts?.items || []);
+  setLoading(true);
+  try {
+    // heuristic: treat param as UID when it looks long or contains non-alpha (firebase UIDs are long)
+    const isLikelyUid = typeof username === "string" && (username.length > 20 || /^[0-9a-fA-F]{24}$/.test(username));
+
+    let res;
+    if (isLikelyUid) {
+      // try lookup by uid first
+      res = await api.get(`/api/profile/public-by-uid/${encodeURIComponent(username)}`);
+      if (!res?.data?.profile) {
+        // fallback to username lookup
+        res = await api.get(`/api/profile/public/${encodeURIComponent(username)}`);
       } else {
-        setProfile(null);
-        setPosts([]);
+        res = res.data;
       }
-    } catch (err) {
-      console.error("public profile load:", err);
+    } else {
+      const r = await getPublicProfile(username); // existing helper (calls /api/profile/public/:username)
+      res = r;
+    }
+
+    // unify shape whether we used helper or direct api.get
+    const payload = res?.profile ? res : (res?.data ? res.data : null);
+
+    if (payload && payload.profile) {
+      setProfile(payload.profile);
+      setPosts(payload.posts?.items || []);
+    } else {
       setProfile(null);
       setPosts([]);
-    } finally {
-      setLoading(false);
     }
-  }, [username]);
+  } catch (err) {
+    console.error("public profile load:", err);
+    setProfile(null);
+    setPosts([]);
+  } finally {
+    setLoading(false);
+  }
+}, [username]);
+
 
   useEffect(() => {
     fetchProfile();
@@ -137,26 +158,6 @@ export default function PublicProfile() {
     }
   }
 
-  async function unfollow() {
-    if (!profile?.ownerUid) return;
-    setFollowPending(true);
-    try {
-      const { data } = await api.delete(
-        `/api/follow/${encodeURIComponent(profile.ownerUid)}`
-      );
-      setFollowing(false);
-      setProfile((p) => ({
-        ...(p || {}),
-        followersCount:
-          data?.followers ?? p?.followersCount ?? (p?.metrics?.followers || 0),
-        metrics: { ...(p?.metrics || {}), followers: data?.followers ?? p?.metrics?.followers },
-      }));
-    } catch (err) {
-      console.error("unfollow failed", err);
-    } finally {
-      setFollowPending(false);
-    }
-  }
 
   if (loading) return <div>Loading profile…</div>;
   if (!profile) return <div>Profile not found</div>;
