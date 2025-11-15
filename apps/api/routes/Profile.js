@@ -567,11 +567,37 @@ router.get("/profile/public-by-uid/:uid", async (req, res) => {
       }
     }
 
-    // 1) client profile by uid
-    const client = await ClientProfile.findOne({ uid }).lean();
-    if (!client) return res.status(404).json({ error: "profile_not_found" });
+    // 1) client profile by uid (fall back to Pro if no ClientProfile exists)
+let client = await ClientProfile.findOne({ uid }).lean();
 
-    const ownerUid = client.uid;
+if (!client) {
+  // try to build a client-like object from the Pro doc so public profile still works
+  const pro = await Pro.findOne({ ownerUid: uid }).lean().catch(() => null);
+  if (!pro) {
+    // neither client nor pro found — original behaviour
+    return res.status(404).json({ error: "profile_not_found" });
+  }
+
+  // build a client-like object (minimal fields used later)
+  client = {
+    uid: uid,
+    username: pro.username || pro.handle || "",
+    displayName: pro.name || "",
+    photoUrl: pro.photoUrl || pro.avatarUrl || "",
+    coverUrl: pro.coverUrl || "",
+    bio: pro.bio || "",
+    gallery: Array.isArray(pro.gallery) ? pro.gallery : [],
+    followersCount: (pro.metrics && Number(pro.metrics.followers)) || 0,
+  };
+
+  // set `pro` and `publicFromPro` for later merging below
+  const publicFromPro = pro ? proToBarber(pro) : null;
+  // keep the original `pro` variable name used later by the handler:
+  // (we'll overwrite the later 'const pro = await Pro.findOne...' or adapt below)
+  // NOTE: We'll still run the standard merging code below which expects `pro` variable,
+  // so if the code later does `const pro = await Pro.findOne({ ownerUid }).lean()` you can skip that part.
+}
+const ownerUid = client.uid;
 
     // 2) pro doc if exists
     const pro = await Pro.findOne({ ownerUid }).lean().catch(() => null);

@@ -78,7 +78,8 @@ export default function BarberCard({ barber = {}, onOpen, onBook }) {
   // backend now guarantees `id` in proToBarber
   const id = barber.id || barber._id || "";
   // Prefer friendly username for public profile links when available
-  const publicHandle = barber.username || barber.handle || id;
+  const publicHandle = barber.username || barber.handle || barber.ownerUid || id;
+
 
   const name =
     barber.name ||

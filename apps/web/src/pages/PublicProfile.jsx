@@ -28,30 +28,52 @@ export default function PublicProfile() {
   const fetchProfile = useCallback(async () => {
   setLoading(true);
   try {
-    // heuristic: treat param as UID when it looks long or contains non-alpha (firebase UIDs are long)
-    const isLikelyUid = typeof username === "string" && (username.length > 20 || /^[0-9a-fA-F]{24}$/.test(username));
+    const isLikelyUid =
+      typeof username === "string" &&
+      (username.length > 20 || /^[0-9a-fA-F]{24}$/.test(username));
 
-    let res;
-    if (isLikelyUid) {
-      // try lookup by uid first
-      res = await api.get(`/api/profile/public-by-uid/${encodeURIComponent(username)}`);
-      if (!res?.data?.profile) {
-        // fallback to username lookup
-        res = await api.get(`/api/profile/public/${encodeURIComponent(username)}`);
-      } else {
-        res = res.data;
+    // candidate endpoints in preferred order
+    const candidates = isLikelyUid
+      ? [
+          `/api/profile/public-by-uid/${encodeURIComponent(username)}`,
+          `/api/profile/pro/${encodeURIComponent(username)}`,
+          `/api/profile/public/${encodeURIComponent(username)}`,
+        ]
+      : [
+          `/api/profile/public/${encodeURIComponent(username)}`,
+          `/api/profile/pro/${encodeURIComponent(username)}`,
+        ];
+
+    let payload = null;
+    for (const path of candidates) {
+      try {
+        console.debug("[public profile] trying", path);
+        const resp = await api.get(path);
+        const data = resp?.data ?? null;
+
+        // server might return { ok:true, profile, posts } or profile directly
+        if (data && data.profile) {
+          payload = data;
+          break;
+        }
+
+        // also accept if server returned profile object directly
+        if (data && (data.displayName || data.ownerUid || data.username)) {
+          payload = { profile: data, posts: data.posts || { items: [] } };
+          break;
+        }
+      } catch (err) {
+        const status = err?.response?.status;
+        console.warn(`[public profile] ${path} -> ${status || "err"}`, err?.message);
+        // only bail on non-404 errors
+        if (status && status !== 404) throw err;
+        // otherwise try next candidate
       }
-    } else {
-      const r = await getPublicProfile(username); // existing helper (calls /api/profile/public/:username)
-      res = r;
     }
-
-    // unify shape whether we used helper or direct api.get
-    const payload = res?.profile ? res : (res?.data ? res.data : null);
 
     if (payload && payload.profile) {
       setProfile(payload.profile);
-      setPosts(payload.posts?.items || []);
+      setPosts(payload.posts?.items || payload.posts || []);
     } else {
       setProfile(null);
       setPosts([]);
@@ -64,6 +86,7 @@ export default function PublicProfile() {
     setLoading(false);
   }
 }, [username]);
+
 
 
   useEffect(() => {
@@ -157,6 +180,29 @@ export default function PublicProfile() {
       setFollowPending(false);
     }
   }
+
+
+    async function unfollow() {
+    if (!profile?.ownerUid) return;
+    setFollowPending(true);
+    try {
+      const { data } = await api.delete(
+        `/api/follow/${encodeURIComponent(profile.ownerUid)}`
+      );
+      setFollowing(false);
+      setProfile((p) => ({
+        ...(p || {}),
+        followersCount:
+          data?.followers ?? p?.followersCount ?? (p?.metrics?.followers || 0),
+        metrics: { ...(p?.metrics || {}), followers: data?.followers ?? p?.metrics?.followers },
+      }));
+    } catch (err) {
+      console.error("unfollow failed", err);
+    } finally {
+      setFollowPending(false);
+    }
+  }
+
 
 
   if (loading) return <div>Loading profile…</div>;
