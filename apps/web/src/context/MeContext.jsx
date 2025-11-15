@@ -26,17 +26,6 @@ export function MeProvider({ children }) {
       try {
         const token = user ? await user.getIdToken() : null;
         setAuthToken(token);
-
-        // <-- NEW: ensure server-side client profile exists
-        if (token) {
-          try {
-            // safe, idempotent — server will create or sync the profile
-            await api.post("/api/profile/ensure");
-          } catch (err) {
-            // non-fatal; we'll still try to load /api/me below
-            console.warn("profile ensure failed (onIdTokenChanged):", err?.message || err);
-          }
-        }
       } finally {
         setVersion((v) => v + 1);
       }
@@ -51,15 +40,6 @@ export function MeProvider({ children }) {
         const u = auth.currentUser;
         const token = u ? await u.getIdToken() : null;
         setAuthToken(token);
-
-        // <-- NEW: also ensure profile on initial page load / refresh
-        if (token) {
-          try {
-            await api.post("/api/profile/ensure");
-          } catch (err) {
-            console.warn("profile ensure failed (initial):", err?.message || err);
-          }
-        }
       } catch {
         setAuthToken(null);
       }
