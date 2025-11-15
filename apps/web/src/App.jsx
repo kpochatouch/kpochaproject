@@ -200,7 +200,7 @@ export default function App() {
             <Route path="/signup" element={<Signup />} />
             <Route path="/legal" element={<Legal />} />
             <Route path="/legal/*" element={<Legal />} />
-            <Route path="/profile/:username" element={<PublicProfile />} />
+            <Route path="/profile/:id" element={<PublicProfile />} />
             <Route
               path="/bookings/:id"
               element={

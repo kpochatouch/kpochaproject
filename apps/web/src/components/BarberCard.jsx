@@ -8,6 +8,11 @@ import { Link } from "react-router-dom";
 const APP_LOGO_URL = import.meta.env.VITE_APP_LOGO_URL || "";
 
 /* ------------------------------ Helpers ------------------------------ */
+/**
+ * The backend now sends services as an array of objects like:
+ * { name: "Haircut", price: 15000, ... }
+ * but we'll keep the fallback for strings just in case.
+ */
 function toArrayServices(svcs) {
   if (Array.isArray(svcs)) {
     return svcs
@@ -77,10 +82,6 @@ function Avatar({ url, seed, onClick }) {
 export default function BarberCard({ barber = {}, onOpen, onBook }) {
   // backend now guarantees `id` in proToBarber
   const id = barber.id || barber._id || "";
-  // Prefer friendly username for public profile links when available
-  const publicHandle = barber.username || barber.handle || barber.ownerUid || id;
-
-
   const name =
     barber.name ||
     [barber.firstName, barber.lastName].filter(Boolean).join(" ").trim() ||
@@ -222,7 +223,9 @@ export default function BarberCard({ barber = {}, onOpen, onBook }) {
                   {rating.toFixed(1)}
                 </span>
                 {ratingCount > 0 && (
-                  <span className="text-zinc-500 ml-1">({ratingCount})</span>
+                  <span className="text-zinc-500 ml-1">
+                    ({ratingCount})
+                  </span>
                 )}
               </span>
             )}
@@ -261,12 +264,11 @@ export default function BarberCard({ barber = {}, onOpen, onBook }) {
               {topThree.map((s, i) => {
                 const label = priceTag(s);
                 const svcName = s?.name || "";
-                // Pass service object to onBook if handler supplied — preferred
                 return onBook && svcName ? (
                   <button
                     key={`${svcName}-${i}`}
                     type="button"
-                    onClick={() => onBook(s)} // <-- pass whole service
+                    onClick={() => onBook(svcName)}
                     className="rounded-full border border-zinc-700 bg-zinc-900/60 px-3 py-1 text-xs text-zinc-200 hover:bg-zinc-900"
                     title={`Book ${svcName}`}
                   >
@@ -305,15 +307,13 @@ export default function BarberCard({ barber = {}, onOpen, onBook }) {
       {/* Bottom action bar */}
       <div className="absolute inset-x-5 bottom-3 z-10 flex items-center justify-between">
         <Link
-          // prefer username/handle when possible, fall back to id
-          to={publicHandle ? `/profile/${encodeURIComponent(publicHandle)}` : "#"}
+          to={id ? `/profile/${id}` : "#"}
           className="px-4 py-2 rounded-lg bg-black text-white font-bold text-sm shadow-md hover:opacity-90"
-          onClick={(e) => (!publicHandle && e.preventDefault())}
+          onClick={(e) => !id && e.preventDefault()}
           title="View public profile"
         >
           View profile
         </Link>
-
         {onBook ? (
           <button
             onClick={() => onBook(null)}
