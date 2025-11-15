@@ -5,6 +5,10 @@ import mongoose from "mongoose";
 import { Booking } from "../models/Booking.js";
 import { Pro } from "../models.js";
 
+import redisClient from "../redis.js";
+import { getIO } from "../sockets/index.js";
+import { ClientProfile } from "../models/Profile.js";
+
 const router = express.Router();
 
 /* --------------------------- Auth middleware --------------------------- */
@@ -465,6 +469,57 @@ router.put("/bookings/:id/complete", requireAuth, async (req, res) => {
     b.status = "completed";
     b.completedAt = new Date(); // important for auto-release scheduler
     await b.save();
+
+        // --- update Pro jobsCompleted metric, invalidate cache and emit socket update ---
+    try {
+      const updatedPro = await Pro.findOneAndUpdate(
+        { ownerUid: b.proOwnerUid },
+        { $inc: { "metrics.jobsCompleted": 1 } },
+        { new: true }
+      ).lean().catch(() => null);
+
+      // compute fallback jobsCompleted if pro metrics absent
+      let newJobsCompletedCount = updatedPro?.metrics?.jobsCompleted ?? null;
+      if (newJobsCompletedCount === null) {
+        try {
+          newJobsCompletedCount = await Booking.countDocuments({
+            proOwnerUid: b.proOwnerUid,
+            status: "completed",
+          });
+        } catch (e) {
+          newJobsCompletedCount = 0;
+        }
+      }
+
+      // invalidate public profile cache
+      try {
+        const prof = await ClientProfile.findOne({ uid: b.proOwnerUid })
+          .select("username")
+          .lean()
+          .catch(() => null);
+        if (redisClient && prof?.username) {
+          await redisClient.del(`public:profile:${String(prof.username).toLowerCase()}`);
+        }
+      } catch (err) {
+        console.warn("[public/profile] invalidate after booking completion failed:", err?.message || err);
+      }
+
+      // emit socket update
+      try {
+        const io = getIO();
+        io.to(`profile:${b.proOwnerUid}`).emit("profile:stats", {
+          ownerUid: b.proOwnerUid,
+          jobsCompleted: newJobsCompletedCount,
+        });
+      } catch (err) {
+        console.warn("[public/profile] socket emit after booking complete failed:", err?.message || err);
+      }
+    } catch (err) {
+      // non-fatal: log and continue returning booking to client
+      console.warn("[bookings:complete] post-complete update failed:", err?.message || err);
+    }
+    // --- end post-complete block ---
+
 
     res.json({ ok: true, booking: sanitizeBookingFor(req, b) });
   } catch (err) {

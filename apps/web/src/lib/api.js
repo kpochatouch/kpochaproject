@@ -1,7 +1,7 @@
 // apps/web/src/lib/api.js
 import axios from "axios";
 import { getAuth, onAuthStateChanged } from "firebase/auth";
-
+import io from "socket.io-client"; 
 /* =========================================
    BASE URL (normalize, no trailing slash, no /api suffix)
    ========================================= */
@@ -127,6 +127,168 @@ export function setAuthToken(token) {
     latestToken = token;
   }
 }
+
+/* =========================
+   NOTIFICATIONS + SOCKET
+   ========================= */
+
+let socket = null;
+let socketConnected = false;
+let socketListeners = new Map(); // event -> Set(handlers)
+let reconnectDelayMs = 2000;
+
+// Internal: build auth header token getter (reuses latestToken)
+function _getAuthHeader() {
+  if (!latestToken) {
+    try {
+      const t = localStorage.getItem("token");
+      if (t) latestToken = t;
+    } catch {}
+  }
+  return latestToken ? { Authorization: `Bearer ${latestToken}` } : {};
+}
+
+/**
+ * connectSocket(options)
+ * - uid (optional) is used by server to join rooms (server should accept token & join user rooms)
+ * - onNotification callback gets { id, type, data, createdAt } whenever server emits
+ */
+export function connectSocket({ onNotification } = {}) {
+  // allow multiple callers and multiple handlers
+  if (onNotification) {
+    if (!socketListeners.has("notification:received")) {
+      socketListeners.set("notification:received", new Set());
+    }
+    socketListeners.get("notification:received").add(onNotification);
+  }
+
+  if (socketConnected) return socket;
+
+  try {
+    // ensure base URL same origin (api base without protocol/domain may be root)
+    const url = ROOT; // points to server root
+    const opts = {
+      autoConnect: false,
+      transports: ["websocket", "polling"],
+      // send auth in handshake (server should verify token using Firebase)
+      auth: _getAuthHeader,
+    };
+
+    socket = io(url, opts);
+
+    socket.on("connect", () => {
+      socketConnected = true;
+      // let server know which rooms we want (optional)
+      // server can also join based on token, but this is explicit
+      try {
+        const uid = (latestToken && null) || null; // keep minimal here; server should derive from token
+        // join standard rooms: user:<uid> and profile:<uid> — server should handle this if token provided
+        // no-op if server already joined using token
+      } catch {}
+    });
+
+    socket.on("disconnect", () => {
+      socketConnected = false;
+    });
+
+    // central forwarder that calls any registered handlers
+    socket.on("notification:received", (payload) => {
+      const set = socketListeners.get("notification:received");
+      if (set && set.size) {
+        set.forEach((fn) => {
+          try {
+            fn(payload);
+          } catch (e) {
+            // ignore handler errors
+            console.warn("notif handler failed", e?.message || e);
+          }
+        });
+      }
+    });
+
+    // optional: forward other generic events
+    socket.on("profile:stats", (payload) => {
+      const set = socketListeners.get("profile:stats");
+      if (set) set.forEach((fn) => { try { fn(payload); } catch {} });
+    });
+
+    socket.connect();
+  } catch (e) {
+    console.warn("[socket] connect failed:", e?.message || e);
+    // try reconnect later
+    setTimeout(() => {
+      try {
+        if (!socketConnected) connectSocket({ onNotification });
+      } catch {}
+    }, reconnectDelayMs);
+  }
+
+  return socket;
+}
+
+/**
+ * disconnectSocket() - removes all notification handlers and disconnects socket
+ */
+export function disconnectSocket() {
+  try {
+    if (socket) {
+      socket.removeAllListeners();
+      socket.disconnect();
+      socket = null;
+      socketConnected = false;
+    }
+    socketListeners.clear();
+  } catch (e) {
+    console.warn("[socket] disconnect failed:", e?.message || e);
+  }
+}
+
+// registerSocketHandler(event, fn) - returns unregister function
+export function registerSocketHandler(event, fn) {
+  if (typeof event !== "string" || typeof fn !== "function") return () => {};
+  if (!socketListeners.has(event)) socketListeners.set(event, new Set());
+  socketListeners.get(event).add(fn);
+
+  // ensure socket connected so server can send events
+  if (!socketConnected) connectSocket();
+
+  return () => {
+    try {
+      const set = socketListeners.get(event);
+      if (set) set.delete(fn);
+    } catch {}
+  };
+}
+
+
+/* Notification REST API helpers */
+export async function listNotifications({ limit = 50, before = null } = {}) {
+  const params = {};
+  if (limit) params.limit = limit;
+  if (before) params.before = before;
+  const { data } = await api.get("/api/notifications", { params });
+  return data;
+}
+
+export async function getNotificationsCounts() {
+  try {
+    const { data } = await api.get("/api/notifications/counts");
+    return data;
+  } catch (e) {
+    return { unread: 0 };
+  }
+}
+
+export async function markNotificationRead(id) {
+  const { data } = await api.put(`/api/notifications/${encodeURIComponent(id)}/read`);
+  return data;
+}
+
+export async function markAllNotificationsRead() {
+  const { data } = await api.put("/api/notifications/read-all");
+  return data;
+}
+
 
 /* small helper to drop empties */
 function stripEmpty(obj = {}) {
@@ -428,7 +590,15 @@ export async function updateProProfile(payload) {
 export async function getPublicProProfile(proId) {
   const { data } = await api.get(`/api/profile/pro/${proId}`);
   return data;
+
 }
+
+export async function getPublicProfile(username) {
+  if (!username) throw new Error("username required");
+  const { data } = await api.get(`/api/profile/public/${encodeURIComponent(username)}`);
+  return data; // { ok: true, profile, posts: { items, cursor } }
+}
+
 export async function getProProfileAdmin(proId) {
   const { data } = await api.get(`/api/profile/pro/${proId}/admin`);
   return data;
@@ -438,3 +608,4 @@ export async function ensureClientProfile() {
   const { data } = await api.post("/api/profile/ensure");
   return data;
 }
+

@@ -1,39 +1,11 @@
 // apps/api/routes/posts.js
 import express from "express";
 import mongoose from "mongoose";
-import admin from "firebase-admin";
 import { Pro } from "../models.js";
 import Post from "../models/Post.js";
 import PostStats from "../models/PostStats.js";
 import redisClient from "../redis.js";
-
-/* --------------------------- Auth middleware --------------------------- */
-async function requireAuth(req, res, next) {
-  try {
-    const h = req.headers.authorization || "";
-    const token = h.startsWith("Bearer ") ? h.slice(7) : null;
-    if (!token) return res.status(401).json({ error: "Missing token" });
-    const decoded = await admin.auth().verifyIdToken(token);
-    req.user = { uid: decoded.uid, email: decoded.email || null };
-    next();
-  } catch {
-    return res.status(401).json({ error: "Invalid or expired token" });
-  }
-}
-
-// optional auth – decode token if present, else continue as guest
-async function tryAuth(req, _res, next) {
-  try {
-    const h = req.headers.authorization || "";
-    const token = h.startsWith("Bearer ") ? h.slice(7) : null;
-    if (token) {
-      const decoded = await admin.auth().verifyIdToken(token);
-      req.user = { uid: decoded.uid, email: decoded.email || null };
-    }
-  } catch {}
-  next();
-}
-
+import { requireAuth, tryAuth, requireAdmin, isAdminUser } from "../lib/auth.js";
 
 /* ------------------------------- Helpers ------------------------------- */
 const isObjId = (v) => typeof v === "string" && /^[0-9a-fA-F]{24}$/.test(v);

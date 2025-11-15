@@ -4,6 +4,34 @@ import admin from "firebase-admin";
 import Follow from "../models/Follow.js";
 import { Pro } from "../models.js";
 
+import redisClient from "../redis.js";
+import { getIO } from "../sockets/index.js";
+import { ClientProfile } from "../models/Profile.js";
+
+
+// helper: invalidate cache for a username (if present) and emit profile stats
+async function invalidateProfileCacheAndEmit(ownerUid, counts = {}) {
+  try {
+    // resolve username for cache key
+    const prof = await ClientProfile.findOne({ uid: ownerUid }).select("username").lean().catch(()=>null);
+    const uname = prof?.username;
+    if (redisClient && uname) {
+      await redisClient.del(`public:profile:${String(uname).toLowerCase()}`);
+    }
+  } catch (e) {
+    console.warn("[public/profile] invalidate failed:", e?.message || e);
+  }
+
+  try {
+    const io = getIO();
+    io.to(`profile:${ownerUid}`).emit("profile:stats", { ownerUid, ...counts });
+  } catch (e) {
+    console.warn("[public/profile] socket emit failed:", e?.message || e);
+  }
+}
+
+
+
 const router = express.Router();
 
 /* --------------------------- Auth helpers --------------------------- */
@@ -32,6 +60,7 @@ async function tryAuth(req, _res, next) {
   next();
 }
 
+
 /* --------------------------- Helpers --------------------------- */
 async function resolveTargetUid({ targetUid, proId }) {
   if (targetUid) return String(targetUid);
@@ -44,26 +73,51 @@ async function resolveTargetUid({ targetUid, proId }) {
 
 /* ============================== ROUTES ============================== */
 
-// POST /api/follow  body: { targetUid? , proId? }
+/// POST /api/follow  body: { targetUid? , proId? }
 router.post("/follow", requireAuth, async (req, res) => {
   try {
     const followerUid = req.user.uid;
     const targetUid = await resolveTargetUid(req.body || {});
     if (!targetUid) return res.status(400).json({ error: "target_required" });
-    if (targetUid === followerUid)
-      return res.status(400).json({ error: "cannot_follow_self" });
+    if (targetUid === followerUid) return res.status(400).json({ error: "cannot_follow_self" });
 
-    await Follow.findOneAndUpdate(
+    // create follow if not exists
+    await Follow.updateOne(
       { followerUid, targetUid },
       { $setOnInsert: { followerUid, targetUid } },
-      { upsert: true, new: true }
+      { upsert: true }
     );
 
-    return res.json({ ok: true, following: true });
+    // increment pro.metrics.followers if pro exists
+    let newFollowersCount = null;
+    try {
+      const updatedPro = await Pro.findOneAndUpdate(
+        { ownerUid: targetUid },
+        { $inc: { "metrics.followers": 1 } },
+        { new: true }
+      ).lean().catch(()=>null);
+      newFollowersCount = updatedPro?.metrics?.followers ?? null;
+    } catch (e) {
+      newFollowersCount = null;
+    }
+
+    if (newFollowersCount === null) {
+      try {
+        newFollowersCount = await Follow.countDocuments({ targetUid });
+      } catch (e) {
+        newFollowersCount = 0;
+      }
+    }
+
+    await invalidateProfileCacheAndEmit(targetUid, { followersCount: newFollowersCount });
+
+    return res.json({ ok: true, following: true, followers: newFollowersCount });
   } catch (e) {
+    console.error("[follow:post] error", e?.stack || e);
     return res.status(500).json({ error: "follow_failed" });
   }
 });
+
 
 // DELETE /api/follow  body: { targetUid? , proId? }
 router.delete("/follow", requireAuth, async (req, res) => {
@@ -73,11 +127,39 @@ router.delete("/follow", requireAuth, async (req, res) => {
     if (!targetUid) return res.status(400).json({ error: "target_required" });
 
     await Follow.deleteOne({ followerUid, targetUid });
-    return res.json({ ok: true, following: false });
-  } catch {
+
+    // decrement pro.metrics.followers (prevent negative)
+    let newFollowersCount = null;
+    try {
+      const updatedPro = await Pro.findOneAndUpdate(
+        { ownerUid: targetUid },
+        { $inc: { "metrics.followers": -1 } },
+        { new: true }
+      ).lean().catch(()=>null);
+
+      if (updatedPro && updatedPro.metrics && updatedPro.metrics.followers < 0) {
+        await Pro.updateOne({ ownerUid: targetUid }, { $set: { "metrics.followers": 0 } });
+        newFollowersCount = 0;
+      } else {
+        newFollowersCount = updatedPro?.metrics?.followers ?? null;
+      }
+    } catch (e) {
+      newFollowersCount = null;
+    }
+
+    if (newFollowersCount === null) {
+      newFollowersCount = await Follow.countDocuments({ targetUid });
+    }
+
+    await invalidateProfileCacheAndEmit(targetUid, { followersCount: newFollowersCount });
+
+    return res.json({ ok: true, following: false, followers: newFollowersCount });
+  } catch (e) {
+    console.error("[follow:delete] error", e?.stack || e);
     return res.status(500).json({ error: "unfollow_failed" });
   }
 });
+
 
 // GET /api/follow/state?targetUid=...&proId=...
 router.get("/follow/state", requireAuth, async (req, res) => {
@@ -129,24 +211,81 @@ router.get("/follow/:uid/status", tryAuth, async (req, res) => {
 
 // POST /api/follow/:uid
 router.post("/follow/:uid", requireAuth, async (req, res) => {
-  const me = req.user.uid;
-  const targetUid = String(req.params.uid);
-  if (me === targetUid) return res.status(400).json({ error: "cannot_follow_self" });
-  await Follow.updateOne(
-    { followerUid: me, targetUid },
-    { $setOnInsert: { followerUid: me, targetUid } },
-    { upsert: true }
-  );
-  return res.json({ ok: true, following: true });
+  try {
+    const me = req.user.uid;
+    const targetUid = String(req.params.uid);
+    if (me === targetUid) return res.status(400).json({ error: "cannot_follow_self" });
+
+    await Follow.updateOne(
+      { followerUid: me, targetUid },
+      { $setOnInsert: { followerUid: me, targetUid } },
+      { upsert: true }
+    );
+
+    let newFollowersCount = null;
+    try {
+      const updatedPro = await Pro.findOneAndUpdate(
+        { ownerUid: targetUid },
+        { $inc: { "metrics.followers": 1 } },
+        { new: true }
+      ).lean().catch(()=>null);
+      newFollowersCount = updatedPro?.metrics?.followers ?? null;
+    } catch (e) {
+      newFollowersCount = null;
+    }
+
+    if (newFollowersCount === null) {
+      newFollowersCount = await Follow.countDocuments({ targetUid });
+    }
+
+    await invalidateProfileCacheAndEmit(targetUid, { followersCount: newFollowersCount });
+
+    return res.json({ ok: true, following: true, followers: newFollowersCount });
+  } catch (e) {
+    console.error("[follow:post/:uid] error", e?.stack || e);
+    return res.status(500).json({ error: "follow_failed" });
+  }
 });
+
 
 // DELETE /api/follow/:uid
 router.delete("/follow/:uid", requireAuth, async (req, res) => {
-  const me = req.user.uid;
-  const targetUid = String(req.params.uid);
-  await Follow.deleteOne({ followerUid: me, targetUid });
-  return res.json({ ok: true, following: false });
+  try {
+    const me = req.user.uid;
+    const targetUid = String(req.params.uid);
+    await Follow.deleteOne({ followerUid: me, targetUid });
+
+    let newFollowersCount = null;
+    try {
+      const updatedPro = await Pro.findOneAndUpdate(
+        { ownerUid: targetUid },
+        { $inc: { "metrics.followers": -1 } },
+        { new: true }
+      ).lean().catch(()=>null);
+
+      if (updatedPro && updatedPro.metrics && updatedPro.metrics.followers < 0) {
+        await Pro.updateOne({ ownerUid: targetUid }, { $set: { "metrics.followers": 0 } });
+        newFollowersCount = 0;
+      } else {
+        newFollowersCount = updatedPro?.metrics?.followers ?? null;
+      }
+    } catch (e) {
+      newFollowersCount = null;
+    }
+
+    if (newFollowersCount === null) {
+      newFollowersCount = await Follow.countDocuments({ targetUid });
+    }
+
+    await invalidateProfileCacheAndEmit(targetUid, { followersCount: newFollowersCount });
+
+    return res.json({ ok: true, following: false, followers: newFollowersCount });
+  } catch (e) {
+    console.error("[follow:delete/:uid] error", e?.stack || e);
+    return res.status(500).json({ error: "unfollow_failed" });
+  }
 });
+
 
 // GET /api/pros/:proId/follow/status
 router.get("/pros/:proId/follow/status", tryAuth, async (req, res) => {
@@ -158,28 +297,71 @@ router.get("/pros/:proId/follow/status", tryAuth, async (req, res) => {
   return res.json({ following: !!exists });
 });
 
-// POST /api/pros/:proId/follow
 router.post("/pros/:proId/follow", requireAuth, async (req, res) => {
-  const me = req.user.uid;
-  const pro = await Pro.findById(req.params.proId).lean();
-  if (!pro?.ownerUid) return res.status(404).json({ error: "pro_not_found" });
-  if (me === pro.ownerUid) return res.status(400).json({ error: "cannot_follow_self" });
-  await Follow.updateOne(
-    { followerUid: me, targetUid: pro.ownerUid },
-    { $setOnInsert: { followerUid: me, targetUid: pro.ownerUid } },
-    { upsert: true }
-  );
-  return res.json({ ok: true, following: true });
+  try {
+    const me = req.user.uid;
+    const pro = await Pro.findById(req.params.proId).lean();
+    if (!pro?.ownerUid) return res.status(404).json({ error: "pro_not_found" });
+    const targetUid = pro.ownerUid;
+    if (me === targetUid) return res.status(400).json({ error: "cannot_follow_self" });
+
+    await Follow.updateOne(
+      { followerUid: me, targetUid },
+      { $setOnInsert: { followerUid: me, targetUid } },
+      { upsert: true }
+    );
+
+    const updatedPro = await Pro.findOneAndUpdate(
+      { ownerUid: targetUid },
+      { $inc: { "metrics.followers": 1 } },
+      { new: true }
+    ).lean().catch(()=>null);
+
+    const newFollowersCount = updatedPro?.metrics?.followers ?? (await Follow.countDocuments({ targetUid }));
+
+    await invalidateProfileCacheAndEmit(targetUid, { followersCount: newFollowersCount });
+
+    return res.json({ ok: true, following: true, followers: newFollowersCount });
+  } catch (e) {
+    console.error("[pros:post/follow] error", e?.stack || e);
+    return res.status(500).json({ error: "follow_failed" });
+  }
 });
 
-// DELETE /api/pros/:proId/follow
+
 router.delete("/pros/:proId/follow", requireAuth, async (req, res) => {
-  const me = req.user.uid;
-  const pro = await Pro.findById(req.params.proId).lean();
-  if (!pro?.ownerUid) return res.status(404).json({ error: "pro_not_found" });
-  await Follow.deleteOne({ followerUid: me, targetUid: pro.ownerUid });
-  return res.json({ ok: true, following: false });
+  try {
+    const me = req.user.uid;
+    const pro = await Pro.findById(req.params.proId).lean();
+    if (!pro?.ownerUid) return res.status(404).json({ error: "pro_not_found" });
+    const targetUid = pro.ownerUid;
+
+    await Follow.deleteOne({ followerUid: me, targetUid });
+
+    const updatedPro = await Pro.findOneAndUpdate(
+      { ownerUid: targetUid },
+      { $inc: { "metrics.followers": -1 } },
+      { new: true }
+    ).lean().catch(()=>null);
+
+    let newFollowersCount = updatedPro?.metrics?.followers ?? null;
+    if (newFollowersCount !== null && newFollowersCount < 0) {
+      await Pro.updateOne({ ownerUid: targetUid }, { $set: { "metrics.followers": 0 } });
+      newFollowersCount = 0;
+    }
+    if (newFollowersCount === null) {
+      newFollowersCount = await Follow.countDocuments({ targetUid });
+    }
+
+    await invalidateProfileCacheAndEmit(targetUid, { followersCount: newFollowersCount });
+
+    return res.json({ ok: true, following: false, followers: newFollowersCount });
+  } catch (e) {
+    console.error("[pros:delete/follow] error", e?.stack || e);
+    return res.status(500).json({ error: "unfollow_failed" });
+  }
 });
+
 
 
 export default router;

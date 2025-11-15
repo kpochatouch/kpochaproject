@@ -1,4 +1,3 @@
-// apps/api/routes/Profile.js
 import express from "express";
 import admin from "firebase-admin";
 import { ClientProfile, ProProfile } from "../models/Profile.js";
@@ -6,48 +5,17 @@ import { Booking } from "../models/Booking.js";
 import { Pro } from "../models.js";
 import mongoose from "mongoose";
 
+// new helpers for public profile, caching and realtime
+import redisClient from "../redis.js";
+import Post from "../models/Post.js";
+import PostStats from "../models/PostStats.js";
+import { proToBarber } from "../models.js";
+import { getIO } from "../sockets/index.js";
+import { requireAuth, tryAuth, requireAdmin, isAdminUser } from "../lib/auth.js";
+
+
 const router = express.Router();
 
-/* ------------------------------------------------------------------
-   AUTH HELPERS
-   ------------------------------------------------------------------ */
-async function requireAuth(req, res, next) {
-  try {
-    const h = req.headers.authorization || "";
-    const token = h.startsWith("Bearer ") ? h.slice(7) : null;
-    if (!token) return res.status(401).json({ error: "Missing token" });
-
-    const decoded = await admin.auth().verifyIdToken(token);
-    req.user = { uid: decoded.uid, email: decoded.email || null };
-    next();
-  } catch {
-    return res.status(401).json({ error: "Invalid or expired token" });
-  }
-}
-
-const ADMIN_UIDS = (process.env.ADMIN_UIDS || "")
-  .split(",")
-  .map((s) => s.trim())
-  .filter(Boolean);
-
-const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || "")
-  .split(",")
-  .map((s) => s.trim().toLowerCase())
-  .filter(Boolean);
-
-function isAdminUser(user = {}) {
-  const byUid = !!user?.uid && ADMIN_UIDS.includes(user.uid);
-  const byEmail =
-    !!user?.email && ADMIN_EMAILS.includes(String(user.email).toLowerCase());
-  return byUid || byEmail;
-}
-
-function requireAdmin(req, res, next) {
-  if (!isAdminUser(req.user)) {
-    return res.status(403).json({ error: "Admin only" });
-  }
-  next();
-}
 
 /* ------------------------------------------------------------------
    UTILS
@@ -374,6 +342,26 @@ async function handlePutClientMe(req, res) {
       console.warn("[profile->pro sync] skipped:", e?.message || e);
     }
 
+    // invalidate public cache for this username (if profile has username)
+try {
+  const usernameToInvalidate = (updated && updated.username) || (payload && payload.username);
+  if (redisClient && usernameToInvalidate) {
+    const key = `public:profile:${String(usernameToInvalidate).toLowerCase()}`;
+    await redisClient.del(key);
+  }
+} catch (err) {
+  console.warn("[public/profile] invalidate after client update failed:", err?.message || err);
+}
+
+// immediate socket notify (optional but recommended)
+try {
+  const io = getIO();
+  io.to(`profile:${updated.uid}`).emit("profile:stats", { ownerUid: updated.uid });
+} catch (err) {
+  console.warn("[public/profile] socket emit after client update failed:", err?.message || err);
+}
+
+
     const masked = maskClientProfileForClientView(updated) || {};
     return res.json({
       ...masked,
@@ -397,6 +385,170 @@ router.put("/profile/client/me", requireAuth, handlePutClientMe);
 // aliases kept
 router.get("/profile/me", requireAuth, handleGetClientMe);
 router.put("/profile/me", requireAuth, handlePutClientMe);
+
+/* ------------------------------------------------------------------
+   PUBLIC PROFILE - READ-ONLY PROJECTION (public)
+   GET /profile/public/:username
+   ------------------------------------------------------------------ */
+const PUBLIC_PROFILE_CACHE_SEC = Number(process.env.PUBLIC_PROFILE_CACHE_SEC || 60);
+
+async function handleGetPublicProfile(req, res) {
+  try {
+    const username = String(req.params.username || "").trim();
+    if (!username) return res.status(400).json({ error: "username_required" });
+
+    const cacheKey = `public:profile:${username.toLowerCase()}`;
+
+    // Try Redis cache first
+    if (redisClient) {
+      try {
+        const cached = await redisClient.get(cacheKey);
+        if (cached) return res.status(200).json(JSON.parse(cached));
+      } catch (e) {
+        console.warn("[public/profile] redis get failed:", e?.message || e);
+      }
+    }
+
+    // 1) Client profile by username (client profile is canonical for username)
+    const client = await ClientProfile.findOne({ username }).lean();
+    if (!client) return res.status(404).json({ error: "profile_not_found" });
+
+    const ownerUid = client.uid; // your file uses uid for client
+
+    // 2) Pro doc if exists
+    const pro = await Pro.findOne({ ownerUid }).lean().catch(() => null);
+    const publicFromPro = pro ? proToBarber(pro) : null;
+
+    // 3) Merge identity fields (client is primary for identity)
+    const profilePublic = {
+      ownerUid,
+      username: client.username || (publicFromPro && publicFromPro.id) || username,
+      displayName: client.displayName || client.fullName || (publicFromPro && publicFromPro.name) || "",
+      avatarUrl: client.photoUrl || (publicFromPro && publicFromPro.photoUrl) || "",
+      coverUrl: client.coverUrl || (pro?.coverUrl || ""),
+      bio: client.bio || (pro?.bio || "") || "",
+      isPro: Boolean(pro),
+      services: (publicFromPro && publicFromPro.services) || [],
+      gallery: (publicFromPro && publicFromPro.gallery) || (client.gallery || []),
+      contactPublic: (pro && pro.contactPublic) || {},
+      badges: (publicFromPro && publicFromPro.badges) || [],
+      metrics: (pro && pro.metrics) || {},
+      followersCount: 0,
+      postsCount: 0,
+      jobsCompleted: 0,
+      ratingAverage: Number((pro && pro.metrics && pro.metrics.avgRating) || 0),
+    };
+
+    // 4) Counts: prefer pro.metrics, fall back to client or aggregate
+profilePublic.followersCount = Number(pro?.metrics?.followers || client.followersCount || 0);
+
+// POSTS: use proOwnerUid + isPublic (matches models/Post.js)
+try {
+  profilePublic.postsCount = await Post.countDocuments({
+  proOwnerUid: ownerUid,
+  isPublic: true,
+  hidden: { $ne: true },
+  deleted: { $ne: true },
+});
+
+} catch (e) {
+  profilePublic.postsCount = Number(pro?.metrics?.postsCount || 0);
+}
+
+// JOBS COMPLETED: try to use pro.metrics first, else count bookings.
+// we attempt a few common field shapes so this is resilient to schema variations.
+if (pro?.metrics?.jobsCompleted) {
+  profilePublic.jobsCompleted = Number(pro.metrics.jobsCompleted || 0);
+} else {
+  try {
+    const bookingQueryOr = [
+      { proOwnerUid: ownerUid },
+      { proUid: ownerUid },
+    ];
+    // if we have a pro._id (ObjectId) include matching proId clause
+    if (pro && pro._id) {
+      try {
+        bookingQueryOr.push({ proId: new mongoose.Types.ObjectId(pro._id) });
+      } catch {}
+    }
+
+    profilePublic.jobsCompleted = await Booking.countDocuments({
+      $and: [{ status: "completed" }, { $or: bookingQueryOr }],
+    });
+  } catch (e) {
+    profilePublic.jobsCompleted = 0;
+  }
+}
+
+if (pro?.metrics?.avgRating) {
+  profilePublic.ratingAverage = Number(pro.metrics.avgRating);
+}
+
+
+    // 5) Recent public posts (small page)
+// use canonical Post fields: proOwnerUid + isPublic, exclude hidden/deleted
+const postsRaw = await Post.find({
+  proOwnerUid: ownerUid,
+  isPublic: true,
+  hidden: { $ne: true },
+  deleted: { $ne: true },
+})
+  .sort({ createdAt: -1 })
+  .limit(10)
+  .lean();
+
+
+    // Enrich posts with PostStats
+    const pIds = postsRaw.map((p) => p._id?.toString()).filter(Boolean);
+    let statsMap = {};
+    if (pIds.length && PostStats) {
+      const stats = await PostStats.find({ postId: { $in: pIds } }).lean().catch(() => []);
+      statsMap = stats.reduce((acc, s) => {
+        acc[String(s.postId)] = s;
+        return acc;
+      }, {});
+    }
+
+    const publicPosts = postsRaw.map((p) => {
+  const s = statsMap[String(p._id)] || {};
+  return {
+    id: p._id?.toString?.() || String(p._id),
+    proOwnerUid: p.proOwnerUid || "",      // <-- standard field name
+    proId: p.proId ? String(p.proId) : null,
+    text: p.text,
+    media: p.media || [],
+    createdAt: p.createdAt,
+    stats: {
+      likes: Number(s.likesCount || s.likes || 0),
+      comments: Number(s.commentsCount || s.comments || 0),
+      shares: Number(s.sharesCount || s.shares || 0),
+      views: Number(s.viewsCount || s.views || 0),
+    },
+  };
+});
+
+
+
+    const payload = { ok: true, profile: profilePublic, posts: { items: publicPosts, cursor: null } };
+
+    // Cache payload
+    if (redisClient) {
+      try {
+        await redisClient.setEx(cacheKey, PUBLIC_PROFILE_CACHE_SEC, JSON.stringify(payload));
+      } catch (e) {
+        console.warn("[public/profile] redis set failed:", e?.message || e);
+      }
+    }
+
+    return res.json(payload);
+  } catch (e) {
+    console.error("[public/profile] err:", e?.stack || e);
+    return res.status(500).json({ error: "server_error" });
+  }
+}
+
+router.get("/profile/public/:username", handleGetPublicProfile);
+
 
 /* ------------------------------------------------------------------
    ADMIN READ (now shows livenessVerifiedAt too)
