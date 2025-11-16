@@ -1,3 +1,4 @@
+// apps/web/src/components/ChatPane.jsx
 import { useEffect, useRef, useState } from "react";
 
 export default function ChatPane({ socket, room, me }) {

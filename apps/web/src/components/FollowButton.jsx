@@ -1,3 +1,4 @@
+// apps/web/src/components/FollowButton.jsx
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 

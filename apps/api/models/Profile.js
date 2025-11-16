@@ -25,6 +25,8 @@ const ClientProfileSchema = new mongoose.Schema(
     lga: { type: String, default: "" },
     address: { type: String, default: "" },
     photoUrl: { type: String, default: "" },
+    isStub: { type: Boolean, default: false },
+     fieldSources: { type: mongoose.Schema.Types.Mixed, default: () => ({}) },
 
     id: { type: ClientIDSchema, default: () => ({}) },
 

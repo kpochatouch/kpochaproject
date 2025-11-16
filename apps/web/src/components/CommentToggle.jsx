@@ -1,3 +1,4 @@
+// apps/web/src/components/CommentToggle.jsx
 import ActionButton from "./ActionButton.jsx";
 
 export default function CommentToggle({ onClick, className = "" }) {

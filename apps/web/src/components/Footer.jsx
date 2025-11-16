@@ -1,3 +1,4 @@
+// apps/web/src/components/Footer.jsx
 export default function Footer() {
   return (
     <footer className="border-t border-zinc-800 bg-black text-zinc-400 text-sm">

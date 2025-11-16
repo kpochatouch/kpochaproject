@@ -1,11 +1,10 @@
 // apps/web/src/pages/PublicProfile.jsx
 import React, { useEffect, useState, useCallback } from "react";
-import { useParams } from "react-router-dom";
-import {
-  connectSocket,
-  registerSocketHandler,
-  api,
-} from "../lib/api";
+import { useParams, useNavigate } from "react-router-dom";
+import { api, connectSocket, registerSocketHandler } from "../lib/api";
+import FeedCard from "../components/FeedCard.jsx";
+import LiveActivity from "../components/LiveActivity.jsx";
+import NotificationsMenu from "../components/NotificationsMenu.jsx";
 
 function formatDate(d) {
   try {
@@ -17,14 +16,11 @@ function formatDate(d) {
 
 /**
  * Normalize server responses into a single "profile" shape the UI expects.
- * Accepts either a profile doc or a barber/pro doc.
  */
 function normalizeProfile(data) {
   if (!data) return null;
-  // If server already returned a profile wrapper
   if (data.profile) return data.profile;
 
-  // If it's a "profile-like" doc already
   if (data.displayName || data.ownerUid || data.username || data.name || data.photoUrl) {
     return {
       ownerUid: data.ownerUid || data.uid || null,
@@ -43,7 +39,6 @@ function normalizeProfile(data) {
       jobsCompleted: data.metrics?.jobsCompleted ?? data.jobsCompleted ?? 0,
       ratingAverage: data.metrics?.avgRating ?? data.rating ?? 0,
       id: data._id || data.id || undefined,
-      // if server included posts in the doc
       _posts: data.posts || null,
     };
   }
@@ -52,9 +47,9 @@ function normalizeProfile(data) {
 }
 
 export default function PublicProfile() {
-  // route param may be username or id. app routes: /profile/:id or /profile/:username
   const { username: routeParam } = useParams();
   const idOrHandle = routeParam;
+  const navigate = useNavigate();
 
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState(null);
@@ -62,6 +57,24 @@ export default function PublicProfile() {
   const [err, setErr] = useState("");
   const [following, setFollowing] = useState(false);
   const [followPending, setFollowPending] = useState(false);
+
+  // current user (for FeedCard actions / follow permissions)
+  const [currentUser, setCurrentUser] = useState(null);
+
+  // fetch current user (best-effort)
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const res = await api.get("/api/me").catch(() => null);
+        if (!alive) return;
+        setCurrentUser(res?.data || null);
+      } catch {
+        // ignore
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
 
   const fetchProfile = useCallback(async () => {
     setLoading(true);
@@ -93,32 +106,39 @@ export default function PublicProfile() {
           const data = resp?.data ?? null;
           if (!data) continue;
 
-          // If server returned wrapper { profile, posts }
           if (data.profile) {
             payloadProfile = data.profile;
             payloadPosts = data.posts?.items || data.posts || [];
             break;
           }
 
-          // If server returned profile-like object or pro doc, normalize
           const normalized = normalizeProfile(data);
           if (normalized) {
             payloadProfile = normalized;
-            // try collecting posts from doc if present
             if (data.posts) {
               payloadPosts = Array.isArray(data.posts) ? data.posts : data.posts.items || [];
             } else if (data._posts) {
               payloadPosts = Array.isArray(data._posts) ? data._posts : [];
             } else {
+              // try loading posts separately below if none found
               payloadPosts = [];
             }
             break;
           }
         } catch (e) {
           const status = e?.response?.status;
-          // only abort on non-404 errors
           if (status && status !== 404) throw e;
-          // else try next candidate
+        }
+      }
+
+      // fallback: if profile found but posts empty, hit posts endpoint
+      if (payloadProfile && payloadPosts.length === 0) {
+        try {
+          const pid = encodeURIComponent(payloadProfile.ownerUid || payloadProfile.id || idOrHandle);
+          const res = await api.get(`/api/posts?ownerUid=${pid}&limit=20`);
+          payloadPosts = res?.data?.items || res?.data || [];
+        } catch {
+          // ignore
         }
       }
 
@@ -145,16 +165,11 @@ export default function PublicProfile() {
   }, [fetchProfile]);
 
   /* -------------------------
-     socket: live profile stats (followers, metrics)
+     sockets: live profile stats (followers, metrics)
   ------------------------- */
   useEffect(() => {
     if (!profile?.ownerUid) return;
-    // idempotent connect
-    try {
-      connectSocket();
-    } catch (e) {
-      console.warn("connectSocket failed", e?.message || e);
-    }
+    try { connectSocket(); } catch (e) { console.warn("connectSocket failed", e?.message || e); }
 
     const onProfileStats = (payload) => {
       try {
@@ -173,17 +188,11 @@ export default function PublicProfile() {
       ? registerSocketHandler("profile:stats", onProfileStats)
       : null;
 
-    return () => {
-      try {
-        unregister && unregister();
-      } catch (e) {
-        console.warn("unregister failed", e?.message || e);
-      }
-    };
+    return () => { try { unregister && unregister(); } catch {} };
   }, [profile?.ownerUid]);
 
   /* -------------------------
-     initial follow state loader
+     follow / unfollow (optimistic)
   ------------------------- */
   useEffect(() => {
     if (!profile?.ownerUid) return;
@@ -197,18 +206,12 @@ export default function PublicProfile() {
         console.warn("failed to load follow state", e?.message || e);
       }
     })();
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
   }, [profile?.ownerUid]);
 
-  /* -------------------------
-     follow / unfollow actions (optimistic)
-  ------------------------- */
   async function follow() {
     if (!profile?.ownerUid || followPending) return;
     setFollowPending(true);
-    // optimistic update
     setFollowing(true);
     setProfile((p) => ({
       ...(p || {}),
@@ -217,7 +220,6 @@ export default function PublicProfile() {
     }));
     try {
       const { data } = await api.post(`/api/follow/${encodeURIComponent(profile.ownerUid)}`);
-      // reconcile with server response if available
       setProfile((p) => ({
         ...(p || {}),
         followersCount: data?.followers ?? p?.followersCount,
@@ -225,7 +227,6 @@ export default function PublicProfile() {
       }));
     } catch (e) {
       console.error("follow failed", e);
-      // rollback
       setFollowing(false);
       setProfile((p) => ({
         ...(p || {}),
@@ -240,7 +241,6 @@ export default function PublicProfile() {
   async function unfollow() {
     if (!profile?.ownerUid || followPending) return;
     setFollowPending(true);
-    // optimistic update
     setFollowing(false);
     setProfile((p) => ({
       ...(p || {}),
@@ -256,7 +256,6 @@ export default function PublicProfile() {
       }));
     } catch (e) {
       console.error("unfollow failed", e);
-      // rollback
       setFollowing(true);
       setProfile((p) => ({
         ...(p || {}),
@@ -268,6 +267,22 @@ export default function PublicProfile() {
     }
   }
 
+  /* -------------------------
+     message / start chat
+     - navigates to /chat?with=<ownerUid>
+     - you can change this to open a modal or call an API to create a dedicated room
+  ------------------------- */
+  function startMessage() {
+    if (!profile?.ownerUid) {
+      alert("Cannot start chat: missing user id");
+      return;
+    }
+    navigate(`/chat?with=${encodeURIComponent(profile.ownerUid)}`);
+  }
+
+  /* -------------------------
+     helpers
+  ------------------------- */
   if (loading) return <div className="max-w-6xl mx-auto px-4 py-10 text-zinc-200">Loading profile…</div>;
   if (err) return (
     <div className="max-w-6xl mx-auto px-4 py-10 text-zinc-200">
@@ -286,12 +301,20 @@ export default function PublicProfile() {
 
   return (
     <div className="min-h-screen bg-[#0b0c10] text-white">
-      <div className="relative bg-gradient-to-r from-zinc-900 via-zinc-800 to-zinc-900 h-44" />
+      {/* Cover */}
+      <div className="relative bg-gradient-to-r from-zinc-900 via-zinc-800 to-zinc-900 h-44">
+        {/* NotificationsMenu floating top-right */}
+        <div className="absolute right-4 top-3 z-20">
+          <NotificationsMenu />
+        </div>
+      </div>
+
       <div className="max-w-6xl mx-auto px-4 -mt-16">
         <div className="flex gap-6 items-end">
           <div className="w-32 h-32 rounded-full border-4 border-[#0b0c10] bg-zinc-900 overflow-hidden shrink-0">
             {avatar ? <img src={avatar} alt={name} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-3xl">{name.slice(0,1)}</div>}
           </div>
+
           <div className="flex-1 pb-3">
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-2xl font-bold">{name}</h1>
@@ -299,9 +322,18 @@ export default function PublicProfile() {
                 <span key={i} className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-900/40 text-emerald-200 border border-emerald-700">{b}</span>
               ))}
             </div>
+
             <p className="text-sm text-zinc-400 mt-1">{location || "Nigeria"}</p>
-            {rating > 0 && <div className="flex items-center gap-1 mt-2 text-sm">{Array.from({ length: Math.round(rating) }).map((_,i)=> <span key={i} className="text-yellow-400">★</span>)}{Array.from({ length: 5 - Math.round(rating) }).map((_,i)=> <span key={i} className="text-zinc-600">★</span>)}<span className="text-zinc-300 ml-1">{rating.toFixed(1)}</span></div>}
+
+            {rating > 0 && (
+              <div className="flex items-center gap-1 mt-2 text-sm">
+                {Array.from({ length: Math.round(rating) }).map((_,i)=> <span key={i} className="text-yellow-400">★</span>)}
+                {Array.from({ length: 5 - Math.round(rating) }).map((_,i)=> <span key={i} className="text-zinc-600">★</span>)}
+                <span className="text-zinc-300 ml-1">{rating.toFixed(1)}</span>
+              </div>
+            )}
           </div>
+
           <div className="pb-3 flex gap-2">
             <a className="px-4 py-2 bg-gold text-black font-semibold rounded-lg hover:opacity-90" href={`/book/${profile.id || profile.username || idOrHandle}`}>Book now</a>
 
@@ -313,10 +345,20 @@ export default function PublicProfile() {
             >
               {followPending ? "…" : following ? "Unfollow" : "Follow"}
             </button>
+
+            {/* Message button */}
+            <button
+              onClick={startMessage}
+              className="px-4 py-2 rounded-lg border border-zinc-700 bg-zinc-900 hover:bg-zinc-800 text-sm"
+              title="Send message"
+            >
+              Message
+            </button>
           </div>
         </div>
       </div>
 
+      {/* Main grid */}
       <div className="max-w-6xl mx-auto px-4 mt-6 grid grid-cols-1 lg:grid-cols-3 gap-6 pb-10">
         <div className="lg:col-span-2 space-y-6">
           {(profile.bio || profile.description) && (
@@ -360,6 +402,25 @@ export default function PublicProfile() {
               <p className="text-sm text-zinc-400">No photos yet.</p>
             )}
           </section>
+
+          {/* POSTS: use FeedCard for full interactive post UI */}
+          <section>
+            <h3 className="text-lg font-semibold mb-3">Recent posts</h3>
+            {posts.length === 0 ? (
+              <p className="text-sm text-zinc-400">No posts yet.</p>
+            ) : (
+              <div className="space-y-4">
+                {posts.map((p) => (
+                  <FeedCard
+                    key={p.id || p._id}
+                    post={p}
+                    currentUser={currentUser}
+                    onDeleted={(id) => setPosts((ps) => ps.filter((x) => (x._id || x.id) !== id))}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
         </div>
 
         <div className="space-y-6">
@@ -367,7 +428,7 @@ export default function PublicProfile() {
             <h2 className="text-lg font-semibold mb-2">Stats</h2>
             <div className="text-sm text-zinc-200">
               <div><strong>{profile.followersCount ?? profile.metrics?.followers ?? 0}</strong> followers</div>
-              <div><strong>{profile.postsCount ?? 0}</strong> posts</div>
+              <div><strong>{profile.postsCount ?? posts.length ?? 0}</strong> posts</div>
               <div><strong>{profile.jobsCompleted ?? 0}</strong> completed</div>
               <div><strong>{profile.ratingAverage ?? 0}</strong> rating</div>
             </div>
@@ -377,18 +438,13 @@ export default function PublicProfile() {
             <h2 className="text-lg font-semibold mb-2">Location</h2>
             <p className="text-sm text-zinc-200">{location || "Nigeria"}</p>
           </section>
-        </div>
-      </div>
 
-      <div className="max-w-6xl mx-auto px-4 pb-10">
-        <h3 className="text-lg font-semibold mb-3">Recent posts</h3>
-        {posts.length === 0 ? <p className="text-sm text-zinc-400">No posts yet.</p> : posts.map((p) => (
-          <article key={p.id || p._id} className="mb-3 p-3 rounded border border-zinc-800 bg-black/20">
-            <div className="text-sm mb-2">{p.text}</div>
-            {p.media && p.media.length > 0 && <div className="flex gap-2">{p.media.slice(0,4).map((m,i)=>(<img key={i} src={m.url || m} className="w-28 h-20 object-cover rounded" alt="" />))}</div>}
-            <div className="text-xs text-zinc-500 mt-2">{formatDate(p.createdAt)} • {p.stats?.views ?? 0} views • {p.stats?.likes ?? 0} likes</div>
-          </article>
-        ))}
+          {/* Live activity panel for this profile */}
+          <section className="rounded-lg border border-zinc-800 bg-black/40 p-4">
+            <h2 className="text-lg font-semibold mb-2">Live activity</h2>
+            <LiveActivity ownerUid={profile.ownerUid} />
+          </section>
+        </div>
       </div>
     </div>
   );
