@@ -1,7 +1,7 @@
 // apps/api/routes/postStats.js
 import express from "express";
 import mongoose from "mongoose";
-import admin from "firebase-admin";
+import admin from "../lib/firebaseAdmin.js";
 import PostStats from "../models/PostStats.js";
 
 const router = express.Router();

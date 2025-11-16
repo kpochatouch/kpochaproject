@@ -1,4 +1,5 @@
 import express from "express";
+import admin from "../lib/firebaseAdmin.js";
 import { ClientProfile, ProProfile } from "../models/Profile.js";
 import { Booking } from "../models/Booking.js";
 import { Pro } from "../models.js";

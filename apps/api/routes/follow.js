@@ -1,6 +1,6 @@
 // apps/api/routes/follow.js
 import express from "express";
-import admin from "firebase-admin";
+import admin from "../lib/firebaseAdmin.js";
 import Follow from "../models/Follow.js";
 import { Pro } from "../models.js";
 
