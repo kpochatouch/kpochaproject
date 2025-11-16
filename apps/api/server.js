@@ -41,7 +41,7 @@ import awsLivenessRoutes from "./routes/awsLiveness.js";
 import redis from "./redis.js";
 import postStatsRouter from "./routes/postStats.js";
 import followRoutes from "./routes/follow.js";
-import notificationRoutes from "./routes/Notification.js";
+import notificationRoutes from "./routes/notification.js";
 
 
 dotenv.config();
