@@ -5,7 +5,7 @@ import express from "express";
 import cors from "cors";
 import morgan from "morgan";
 import dotenv from "dotenv";
-import admin from "firebase-admin";
+import "./lib/firebaseAdmin.js";
 import crypto from "crypto";
 import mongoose from "mongoose";
 import fs from "fs";

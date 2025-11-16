@@ -1,55 +1,33 @@
 // apps/api/lib/firebaseAdmin.js
+import fs from "fs";
 import admin from "firebase-admin";
 
 let initialized = false;
 
 function tryInit() {
+  if (initialized) return admin;
   try {
-    if (admin.apps && admin.apps.length > 0) {
-      initialized = true;
-      console.log("[firebaseAdmin] already initialized; apps.length =", admin.apps.length);
-      return;
-    }
-
-    if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-      console.log("[firebaseAdmin] using FIREBASE_SERVICE_ACCOUNT env var (len=" + String(process.env.FIREBASE_SERVICE_ACCOUNT?.length) + ")");
-      let raw = process.env.FIREBASE_SERVICE_ACCOUNT;
-      // handle newline-escaped keys
-      if (raw.includes("\\n")) raw = raw.replace(/\\n/g, "\n");
-      const sa = JSON.parse(raw);
-      admin.initializeApp({ credential: admin.credential.cert(sa) });
-      initialized = true;
-      console.log("[firebaseAdmin] initialized from FIREBASE_SERVICE_ACCOUNT");
-      return;
-    }
-
-    if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-      console.log("[firebaseAdmin] using GOOGLE_APPLICATION_CREDENTIALS");
+    const keyPath =
+      process.env.SERVICE_KEY_PATH ||
+      new URL("../serviceAccountKey.json", import.meta.url).pathname;
+    if (fs.existsSync(keyPath)) {
+      const svc = JSON.parse(fs.readFileSync(keyPath, "utf8"));
+      admin.initializeApp({ credential: admin.credential.cert(svc) });
+      console.log("[auth] ✅ Firebase Admin initialized (service account).");
+    } else {
+      // fallback to ADC
       admin.initializeApp();
-      initialized = true;
-      return;
+      console.log("[auth] ✅ Firebase Admin initialized (ADC fallback).");
     }
-
-    console.log("[firebaseAdmin] no service account env found — trying admin.initializeApp()");
-    admin.initializeApp();
     initialized = true;
-    console.log("[firebaseAdmin] default initializeApp() succeeded");
-  } catch (e) {
-    console.warn("[firebaseAdmin] initializeApp() failed:", e?.message || e);
-    initialized = false;
+    return admin;
+  } catch (err) {
+    // bubble error so startup stops and you see the failure
+    console.error("[auth] ❌ Firebase Admin failed to initialize:", err?.message || err);
+    throw err;
   }
 }
 
 tryInit();
 
-function verifyToken(idToken) {
-  if (!initialized) {
-    const err = new Error("Firebase admin not initialized");
-    err.code = "FIREBASE_NOT_INITIALIZED";
-    throw err;
-  }
-  return admin.auth().verifyIdToken(idToken);
-}
-
 export default admin;
-export { initialized as firebaseAdminInitialized, verifyToken };
