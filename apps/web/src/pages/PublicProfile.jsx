@@ -301,25 +301,43 @@ export default function PublicProfile() {
 
   return (
     <div className="min-h-screen bg-[#0b0c10] text-white">
-      {/* Cover */}
-      <div className="relative bg-gradient-to-r from-zinc-900 via-zinc-800 to-zinc-900 h-44">
-        {/* NotificationsMenu floating top-right */}
+            {/* Cover (kept lower z so avatar can overlap) */}
+      <div className="relative bg-gradient-to-r from-zinc-900 via-zinc-800 to-zinc-900 h-44 z-10">
+        {/* NotificationsMenu floating top-right (kept below avatar) */}
         <div className="absolute right-4 top-3 z-20">
           <NotificationsMenu />
         </div>
       </div>
 
-      <div className="max-w-6xl mx-auto px-4 -mt-16">
+      {/* Page container raised above cover so avatar sits on top */}
+      <div className="max-w-6xl mx-auto px-4 -mt-16 relative z-30">
         <div className="flex gap-6 items-end">
-          <div className="w-32 h-32 rounded-full border-4 border-[#0b0c10] bg-zinc-900 overflow-hidden shrink-0">
-            {avatar ? <img src={avatar} alt={name} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-3xl">{name.slice(0,1)}</div>}
+          {/* Avatar wrapper: make sure z is higher than navbar (navbar is z-40).
+              If your navbar still hides it, increase to z-[9999] */}
+          <div className="w-32 h-32 rounded-full border-4 border-[#0b0c10] bg-zinc-900 overflow-hidden shrink-0 relative z-[9999]">
+            {avatar ? (
+              <img
+                src={avatar}
+                alt={name}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-3xl">
+                {name.slice(0, 1)}
+              </div>
+            )}
           </div>
 
           <div className="flex-1 pb-3">
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-2xl font-bold">{name}</h1>
               {badges.map((b, i) => (
-                <span key={i} className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-900/40 text-emerald-200 border border-emerald-700">{b}</span>
+                <span
+                  key={i}
+                  className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-900/40 text-emerald-200 border border-emerald-700"
+                >
+                  {b}
+                </span>
               ))}
             </div>
 
@@ -327,15 +345,28 @@ export default function PublicProfile() {
 
             {rating > 0 && (
               <div className="flex items-center gap-1 mt-2 text-sm">
-                {Array.from({ length: Math.round(rating) }).map((_,i)=> <span key={i} className="text-yellow-400">★</span>)}
-                {Array.from({ length: 5 - Math.round(rating) }).map((_,i)=> <span key={i} className="text-zinc-600">★</span>)}
+                {Array.from({ length: Math.round(rating) }).map((_, i) => (
+                  <span key={i} className="text-yellow-400">
+                    ★
+                  </span>
+                ))}
+                {Array.from({ length: 5 - Math.round(rating) }).map((_, i) => (
+                  <span key={i} className="text-zinc-600">
+                    ★
+                  </span>
+                ))}
                 <span className="text-zinc-300 ml-1">{rating.toFixed(1)}</span>
               </div>
             )}
           </div>
 
           <div className="pb-3 flex gap-2">
-            <a className="px-4 py-2 bg-gold text-black font-semibold rounded-lg hover:opacity-90" href={`/book/${profile.id || profile.username || idOrHandle}`}>Book now</a>
+            <a
+              className="px-4 py-2 bg-gold text-black font-semibold rounded-lg hover:opacity-90"
+              href={`/book/${profile.id || profile.username || idOrHandle}`}
+            >
+              Book now
+            </a>
 
             <button
               className="px-4 py-2 border border-zinc-700 rounded-lg text-sm text-zinc-200"
@@ -357,6 +388,7 @@ export default function PublicProfile() {
           </div>
         </div>
       </div>
+
 
       {/* Main grid */}
       <div className="max-w-6xl mx-auto px-4 mt-6 grid grid-cols-1 lg:grid-cols-3 gap-6 pb-10">

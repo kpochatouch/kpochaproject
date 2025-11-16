@@ -47,6 +47,42 @@ function scoreFrom(stats) {
 /* ============================== ROUTER ============================== */
 const router = express.Router();
 
+
+// GET /posts?ownerUid=...  (compat for public profile pages)
+router.get("/posts", async (req, res) => {
+  try {
+    const { ownerUid = "", limit = 50, before = null } = req.query;
+    if (!ownerUid) return res.status(400).json({ error: "ownerUid_required" });
+
+    const q = {
+      $and: [
+        { hidden: { $ne: true }, deleted: { $ne: true } },
+        {
+          $or: [
+            { proOwnerUid: String(ownerUid) },
+            { ownerUid: String(ownerUid) },
+            { proUid: String(ownerUid) },
+            { createdBy: String(ownerUid) },
+          ],
+        },
+      ],
+    };
+
+    if (before) q.$and.push({ createdAt: { $lt: new Date(before) } });
+
+    const items = await Post.find(q)
+      .sort({ createdAt: -1 })
+      .limit(Math.max(1, Math.min(Number(limit) || 20, 200)))
+      .lean();
+
+    return res.json(items.map(sanitizePostForClient));
+  } catch (err) {
+    console.error("[posts:get?ownerUid] error:", err);
+    return res.status(500).json({ error: "posts_load_failed" });
+  }
+});
+
+
 /* -------------------------------------------------------------------- */
 /* CREATE                                                               */
 /* -------------------------------------------------------------------- */

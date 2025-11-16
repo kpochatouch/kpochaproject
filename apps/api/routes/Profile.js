@@ -441,18 +441,25 @@ async function handleGetPublicProfile(req, res) {
     // 4) Counts: prefer pro.metrics, fall back to client or aggregate
 profilePublic.followersCount = Number(pro?.metrics?.followers || client.followersCount || 0);
 
-// POSTS: use proOwnerUid + isPublic (matches models/Post.js)
+// TOLERANT posts count: accept different historical field shapes
 try {
   profilePublic.postsCount = await Post.countDocuments({
-  proOwnerUid: ownerUid,
-  isPublic: true,
-  hidden: { $ne: true },
-  deleted: { $ne: true },
-});
-
+    $and: [
+      { isPublic: true, hidden: { $ne: true }, deleted: { $ne: true } },
+      {
+        $or: [
+          { proOwnerUid: ownerUid },
+          { ownerUid: ownerUid },
+          { proUid: ownerUid },
+          { createdBy: ownerUid },
+        ],
+      },
+    ],
+  });
 } catch (e) {
   profilePublic.postsCount = Number(pro?.metrics?.postsCount || 0);
 }
+
 
 // JOBS COMPLETED: try to use pro.metrics first, else count bookings.
 // we attempt a few common field shapes so this is resilient to schema variations.
