@@ -1,7 +1,7 @@
 // apps/api/routes/comments.js
 import express from "express";
 import mongoose from "mongoose";
-import admin from "./lib/firebaseAdmin.js";
+import admin from "../lib/firebaseAdmin.js";
 
 import Comment from "../models/Comment.js";
 import PostStats from "../models/PostStats.js";
