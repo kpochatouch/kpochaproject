@@ -1,7 +1,11 @@
 // apps/web/src/pages/PublicProfile.jsx
 import React, { useEffect, useState, useCallback } from "react";
 import { useParams } from "react-router-dom";
-import { api } from "../lib/api";
+import {
+  connectSocket,
+  registerSocketHandler,
+  api,
+} from "../lib/api";
 
 function formatDate(d) {
   try {
@@ -11,98 +15,258 @@ function formatDate(d) {
   }
 }
 
+/**
+ * Normalize server responses into a single "profile" shape the UI expects.
+ * Accepts either a profile doc or a barber/pro doc.
+ */
+function normalizeProfile(data) {
+  if (!data) return null;
+  // If server already returned a profile wrapper
+  if (data.profile) return data.profile;
+
+  // If it's a "profile-like" doc already
+  if (data.displayName || data.ownerUid || data.username || data.name || data.photoUrl) {
+    return {
+      ownerUid: data.ownerUid || data.uid || null,
+      username: data.username || data.id || "",
+      displayName: data.displayName || data.name || data.fullName || "",
+      avatarUrl: data.photoUrl || data.avatarUrl || "",
+      coverUrl: data.coverUrl || "",
+      bio: data.bio || data.description || "",
+      isPro: Boolean(data.proId || data.proOwnerUid || data.services),
+      services: data.services || [],
+      gallery: data.gallery || [],
+      badges: data.badges || [],
+      metrics: data.metrics || {},
+      followersCount: data.metrics?.followers ?? data.followersCount ?? 0,
+      postsCount: data.metrics?.postsCount ?? data.postsCount ?? 0,
+      jobsCompleted: data.metrics?.jobsCompleted ?? data.jobsCompleted ?? 0,
+      ratingAverage: data.metrics?.avgRating ?? data.rating ?? 0,
+      id: data._id || data.id || undefined,
+      // if server included posts in the doc
+      _posts: data.posts || null,
+    };
+  }
+
+  return null;
+}
+
 export default function PublicProfile() {
-  const { id } = useParams(); // route: /profile/:id
+  // route param may be username or id. app routes: /profile/:id or /profile/:username
+  const { username: routeParam } = useParams();
+  const idOrHandle = routeParam;
+
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState(null);
   const [posts, setPosts] = useState([]);
   const [err, setErr] = useState("");
+  const [following, setFollowing] = useState(false);
+  const [followPending, setFollowPending] = useState(false);
 
   const fetchProfile = useCallback(async () => {
     setLoading(true);
     setErr("");
     try {
       const isLikelyUid =
-        typeof id === "string" && (id.length > 20 || /^[0-9a-fA-F]{24}$/.test(id));
+        typeof idOrHandle === "string" &&
+        (idOrHandle.length > 20 || /^[0-9a-fA-F]{24}$/.test(idOrHandle));
 
-      // prefer fast pro-by-id route first
       const candidates = isLikelyUid
         ? [
-            `/api/barbers/${encodeURIComponent(id)}`,
-            `/api/profile/public-by-uid/${encodeURIComponent(id)}`,
-            `/api/profile/pro/${encodeURIComponent(id)}`,
-            `/api/profile/public/${encodeURIComponent(id)}`,
+            `/api/barbers/${encodeURIComponent(idOrHandle)}`,
+            `/api/profile/public-by-uid/${encodeURIComponent(idOrHandle)}`,
+            `/api/profile/pro/${encodeURIComponent(idOrHandle)}`,
+            `/api/profile/public/${encodeURIComponent(idOrHandle)}`,
           ]
         : [
-            `/api/profile/public/${encodeURIComponent(id)}`,
-            `/api/profile/pro/${encodeURIComponent(id)}`,
-            `/api/profile/public-by-uid/${encodeURIComponent(id)}`,
+            `/api/profile/public/${encodeURIComponent(idOrHandle)}`,
+            `/api/profile/pro/${encodeURIComponent(idOrHandle)}`,
+            `/api/profile/public-by-uid/${encodeURIComponent(idOrHandle)}`,
           ];
 
-      let payload = null;
+      let payloadProfile = null;
+      let payloadPosts = [];
+
       for (const path of candidates) {
         try {
           const resp = await api.get(path);
           const data = resp?.data ?? null;
+          if (!data) continue;
 
-          // server might return { ok:true, profile, posts } or profile/pro doc directly
-          if (data && data.profile) {
-            payload = data;
+          // If server returned wrapper { profile, posts }
+          if (data.profile) {
+            payloadProfile = data.profile;
+            payloadPosts = data.posts?.items || data.posts || [];
             break;
           }
-          if (data && (data.displayName || data.ownerUid || data.username || data.name)) {
-            // normalize a pro/doc shape into { profile, posts }
-            // if server returned a pro doc (barber) use it as profile-like doc
-            const profileDoc = {
-              ownerUid: data.ownerUid || data.uid || null,
-              username: data.username || data.id || "",
-              displayName: data.displayName || data.name || data.fullName || "",
-              avatarUrl: data.photoUrl || data.avatarUrl || "",
-              coverUrl: data.coverUrl || "",
-              bio: data.bio || data.description || "",
-              isPro: Boolean(data.proId || data.proOwnerUid || data.services),
-              services: data.services || [],
-              gallery: data.gallery || [],
-              badges: data.badges || [],
-              metrics: data.metrics || {},
-              followersCount: data.metrics?.followers || data.followersCount || 0,
-              postsCount: data.metrics?.postsCount || data.postsCount || 0,
-              jobsCompleted: data.metrics?.jobsCompleted || data.jobsCompleted || 0,
-              ratingAverage: data.metrics?.avgRating || data.rating || 0,
-              id: data._id || data.id || undefined,
-            };
-            payload = { profile: profileDoc, posts: data.posts ? { items: data.posts } : { items: [] } };
+
+          // If server returned profile-like object or pro doc, normalize
+          const normalized = normalizeProfile(data);
+          if (normalized) {
+            payloadProfile = normalized;
+            // try collecting posts from doc if present
+            if (data.posts) {
+              payloadPosts = Array.isArray(data.posts) ? data.posts : data.posts.items || [];
+            } else if (data._posts) {
+              payloadPosts = Array.isArray(data._posts) ? data._posts : [];
+            } else {
+              payloadPosts = [];
+            }
             break;
           }
-        } catch (err) {
-          const status = err?.response?.status;
-          // on non-404 error bubble up
-          if (status && status !== 404) throw err;
-          // otherwise try next candidate
+        } catch (e) {
+          const status = e?.response?.status;
+          // only abort on non-404 errors
+          if (status && status !== 404) throw e;
+          // else try next candidate
         }
       }
 
-      if (payload && payload.profile) {
-        setProfile(payload.profile);
-        setPosts(payload.posts?.items || []);
+      if (payloadProfile) {
+        setProfile(payloadProfile);
+        setPosts(payloadPosts || []);
       } else {
         setProfile(null);
         setPosts([]);
         setErr("Profile not found.");
       }
-    } catch (err) {
-      console.error("public profile load:", err);
+    } catch (e) {
+      console.error("public profile load:", e);
       setProfile(null);
       setPosts([]);
       setErr("Failed to load profile.");
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [idOrHandle]);
 
   useEffect(() => {
     fetchProfile();
   }, [fetchProfile]);
+
+  /* -------------------------
+     socket: live profile stats (followers, metrics)
+  ------------------------- */
+  useEffect(() => {
+    if (!profile?.ownerUid) return;
+    // idempotent connect
+    try {
+      connectSocket();
+    } catch (e) {
+      console.warn("connectSocket failed", e?.message || e);
+    }
+
+    const onProfileStats = (payload) => {
+      try {
+        if (!payload || payload.ownerUid !== profile.ownerUid) return;
+        setProfile((p) => ({
+          ...(p || {}),
+          metrics: { ...(p?.metrics || {}), followers: payload.followersCount ?? p?.metrics?.followers },
+          followersCount: payload.followersCount ?? p?.followersCount ?? p?.metrics?.followers,
+        }));
+      } catch (err) {
+        console.warn("profile:stats handler failed", err?.message || err);
+      }
+    };
+
+    const unregister = typeof registerSocketHandler === "function"
+      ? registerSocketHandler("profile:stats", onProfileStats)
+      : null;
+
+    return () => {
+      try {
+        unregister && unregister();
+      } catch (e) {
+        console.warn("unregister failed", e?.message || e);
+      }
+    };
+  }, [profile?.ownerUid]);
+
+  /* -------------------------
+     initial follow state loader
+  ------------------------- */
+  useEffect(() => {
+    if (!profile?.ownerUid) return;
+    let alive = true;
+    (async () => {
+      try {
+        const { data } = await api.get(`/api/follow/${encodeURIComponent(profile.ownerUid)}/status`);
+        if (!alive) return;
+        setFollowing(Boolean(data?.following));
+      } catch (e) {
+        console.warn("failed to load follow state", e?.message || e);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [profile?.ownerUid]);
+
+  /* -------------------------
+     follow / unfollow actions (optimistic)
+  ------------------------- */
+  async function follow() {
+    if (!profile?.ownerUid || followPending) return;
+    setFollowPending(true);
+    // optimistic update
+    setFollowing(true);
+    setProfile((p) => ({
+      ...(p || {}),
+      followersCount: (p?.followersCount || 0) + 1,
+      metrics: { ...(p?.metrics || {}), followers: (p?.metrics?.followers || 0) + 1 },
+    }));
+    try {
+      const { data } = await api.post(`/api/follow/${encodeURIComponent(profile.ownerUid)}`);
+      // reconcile with server response if available
+      setProfile((p) => ({
+        ...(p || {}),
+        followersCount: data?.followers ?? p?.followersCount,
+        metrics: { ...(p?.metrics || {}), followers: data?.followers ?? p?.metrics?.followers },
+      }));
+    } catch (e) {
+      console.error("follow failed", e);
+      // rollback
+      setFollowing(false);
+      setProfile((p) => ({
+        ...(p || {}),
+        followersCount: Math.max(0, (p?.followersCount || 1) - 1),
+        metrics: { ...(p?.metrics || {}), followers: Math.max(0, (p?.metrics?.followers || 1) - 1) },
+      }));
+    } finally {
+      setFollowPending(false);
+    }
+  }
+
+  async function unfollow() {
+    if (!profile?.ownerUid || followPending) return;
+    setFollowPending(true);
+    // optimistic update
+    setFollowing(false);
+    setProfile((p) => ({
+      ...(p || {}),
+      followersCount: Math.max(0, (p?.followersCount || 1) - 1),
+      metrics: { ...(p?.metrics || {}), followers: Math.max(0, (p?.metrics?.followers || 1) - 1) },
+    }));
+    try {
+      const { data } = await api.delete(`/api/follow/${encodeURIComponent(profile.ownerUid)}`);
+      setProfile((p) => ({
+        ...(p || {}),
+        followersCount: data?.followers ?? p?.followersCount,
+        metrics: { ...(p?.metrics || {}), followers: data?.followers ?? p?.metrics?.followers },
+      }));
+    } catch (e) {
+      console.error("unfollow failed", e);
+      // rollback
+      setFollowing(true);
+      setProfile((p) => ({
+        ...(p || {}),
+        followersCount: (p?.followersCount || 0) + 1,
+        metrics: { ...(p?.metrics || {}), followers: (p?.metrics?.followers || 0) + 1 },
+      }));
+    } finally {
+      setFollowPending(false);
+    }
+  }
 
   if (loading) return <div className="max-w-6xl mx-auto px-4 py-10 text-zinc-200">Loading profile…</div>;
   if (err) return (
@@ -139,8 +303,16 @@ export default function PublicProfile() {
             {rating > 0 && <div className="flex items-center gap-1 mt-2 text-sm">{Array.from({ length: Math.round(rating) }).map((_,i)=> <span key={i} className="text-yellow-400">★</span>)}{Array.from({ length: 5 - Math.round(rating) }).map((_,i)=> <span key={i} className="text-zinc-600">★</span>)}<span className="text-zinc-300 ml-1">{rating.toFixed(1)}</span></div>}
           </div>
           <div className="pb-3 flex gap-2">
-            <a className="px-4 py-2 bg-gold text-black font-semibold rounded-lg hover:opacity-90" href={`/book/${profile.id || id}`}>Book now</a>
-            <button className="px-4 py-2 border border-zinc-700 rounded-lg text-sm text-zinc-200" disabled title="Contact details appear after booking">Contact via booking</button>
+            <a className="px-4 py-2 bg-gold text-black font-semibold rounded-lg hover:opacity-90" href={`/book/${profile.id || profile.username || idOrHandle}`}>Book now</a>
+
+            <button
+              className="px-4 py-2 border border-zinc-700 rounded-lg text-sm text-zinc-200"
+              title="Follow this profile"
+              onClick={following ? unfollow : follow}
+              disabled={followPending}
+            >
+              {followPending ? "…" : following ? "Unfollow" : "Follow"}
+            </button>
           </div>
         </div>
       </div>
@@ -192,9 +364,13 @@ export default function PublicProfile() {
 
         <div className="space-y-6">
           <section className="rounded-lg border border-zinc-800 bg-black/40 p-4">
-            <h2 className="text-lg font-semibold mb-2">Booking</h2>
-            <p className="text-sm text-zinc-400 mb-3">To view contact details, make a booking. We hide private contact from the public to keep your pros & clients safe.</p>
-            <a className="inline-block px-4 py-2 bg-gold text-black font-semibold rounded-lg hover:opacity-90" href={`/book/${profile.id || id}`}>Book this pro →</a>
+            <h2 className="text-lg font-semibold mb-2">Stats</h2>
+            <div className="text-sm text-zinc-200">
+              <div><strong>{profile.followersCount ?? profile.metrics?.followers ?? 0}</strong> followers</div>
+              <div><strong>{profile.postsCount ?? 0}</strong> posts</div>
+              <div><strong>{profile.jobsCompleted ?? 0}</strong> completed</div>
+              <div><strong>{profile.ratingAverage ?? 0}</strong> rating</div>
+            </div>
           </section>
 
           <section className="rounded-lg border border-zinc-800 bg-black/40 p-4">
@@ -207,7 +383,7 @@ export default function PublicProfile() {
       <div className="max-w-6xl mx-auto px-4 pb-10">
         <h3 className="text-lg font-semibold mb-3">Recent posts</h3>
         {posts.length === 0 ? <p className="text-sm text-zinc-400">No posts yet.</p> : posts.map((p) => (
-          <article key={p.id} className="mb-3 p-3 rounded border border-zinc-800 bg-black/20">
+          <article key={p.id || p._id} className="mb-3 p-3 rounded border border-zinc-800 bg-black/20">
             <div className="text-sm mb-2">{p.text}</div>
             {p.media && p.media.length > 0 && <div className="flex gap-2">{p.media.slice(0,4).map((m,i)=>(<img key={i} src={m.url || m} className="w-28 h-20 object-cover rounded" alt="" />))}</div>}
             <div className="text-xs text-zinc-500 mt-2">{formatDate(p.createdAt)} • {p.stats?.views ?? 0} views • {p.stats?.likes ?? 0} likes</div>
