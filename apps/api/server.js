@@ -80,25 +80,6 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-/* ------------------- Firebase Admin ------------------- */
-try {
-  const keyPath =
-    process.env.SERVICE_KEY_PATH ||
-    new URL("./serviceAccountKey.json", import.meta.url).pathname;
-
-  const svc = JSON.parse(fs.readFileSync(keyPath, "utf8"));
-  admin.initializeApp({ credential: admin.credential.cert(svc) });
-  console.log("[auth] ✅ Firebase Admin initialized (service account).");
-} catch (e) {
-  try {
-    admin.initializeApp(); // ADC fallback
-    console.log("[auth] ✅ Firebase Admin initialized (ADC).");
-  } catch (e2) {
-    console.error("[auth] ❌ Firebase Admin failed to initialize:", e2?.message || e2);
-    process.exit(1);
-  }
-}
-
 /* ------------------- MongoDB ------------------- */
 const MONGODB_URI = process.env.MONGODB_URI || "";
 if (!MONGODB_URI) {
