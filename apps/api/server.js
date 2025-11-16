@@ -41,7 +41,10 @@ import awsLivenessRoutes from "./routes/awsLiveness.js";
 import redis from "./redis.js";
 import postStatsRouter from "./routes/postStats.js";
 import followRoutes from "./routes/follow.js";
-import notificationRoutes from "./routes/notification.js";
+// correct (exact filename in your repo)
+import notificationsRoutes from "./routes/notifications.js";
+
+
 
 
 dotenv.config();
@@ -970,7 +973,7 @@ app.use("/api", uploadsRoutes({ requireAuth }));
 app.use("/api", payoutRoutes({ requireAuth, Application }));
 app.use("/api", riskRoutes({ requireAuth, requireAdmin, Application }));
 app.use("/api", awsLivenessRoutes({ requireAuth }));
-app.use("/api", notificationRoutes);
+app.use("/api", notificationsRoutes);
 
 
 // admin pros
