@@ -1,5 +1,5 @@
 // apps/api/lib/auth.js
-import admin from "./firebaseAdmin.js"; // <- import the shared initializer
+import admin from "../lib/firebaseAdmin.js";
 
 const ADMIN_UIDS = (process.env.ADMIN_UIDS || "")
   .split(",")
