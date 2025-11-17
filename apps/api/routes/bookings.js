@@ -121,12 +121,12 @@ router.post("/bookings", requireAuth, async (req, res) => {
       proOwnerUid = pro?.ownerUid || null;
     } catch {}
 
-    const b = await Booking.create({
+        const b = await Booking.create({
       clientUid: req.user.uid,
       clientEmail: req.user.email || "",
       proId: new mongoose.Types.ObjectId(proId),
       proOwnerUid,
-      instant: true, // ← add this line here
+      instant: false, // scheduled booking (not instant)
 
       service: svcSnap,
       amountKobo: svcSnap.priceKobo,
@@ -143,6 +143,7 @@ router.post("/bookings", requireAuth, async (req, res) => {
       paymentStatus: "pending",
       status: "pending_payment",
     });
+
 
     res.json({ ok: true, booking: sanitizeBookingFor(req, b) });
   } catch (err) {
@@ -261,12 +262,26 @@ router.post("/bookings/instant", requireAuth, async (req, res) => {
         address: String(addressText || ""),
       },
 
-      location: coords
-        ? {
-            lat: Number(coords.lat),
-            lng: Number(coords.lng),
-          }
-        : undefined,
+            // Normalize coords coming from the client. Accept either { lat, lng } or { lat, lon }.
+      // If values are not finite numbers, omit `location` to avoid Mongoose casting errors.
+      location: (function () {
+        try {
+          if (!coords || typeof coords !== "object") return undefined;
+          const latNum = Number(coords.lat);
+          // support both `lng` and legacy `lon`
+          const lngNum =
+            typeof coords.lng !== "undefined"
+              ? Number(coords.lng)
+              : typeof coords.lon !== "undefined"
+              ? Number(coords.lon)
+              : NaN;
+          if (!Number.isFinite(latNum) || !Number.isFinite(lngNum)) return undefined;
+          return { lat: latNum, lng: lngNum };
+        } catch {
+          return undefined;
+        }
+      })(),
+
 
       paymentStatus: "pending",
       status: "pending_payment", // becomes scheduled/accepted after payment + pro action

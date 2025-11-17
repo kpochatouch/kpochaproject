@@ -138,17 +138,26 @@ export default function BookService() {
         }
 
         // best-effort GPS → to help the pro
-        if ("geolocation" in navigator) {
-          navigator.geolocation.getCurrentPosition(
-            (pos) => {
-              if (!alive) return;
-              const { latitude: lat, longitude: lon } = pos.coords || {};
-              setCoords({ lat, lon });
-            },
-            () => {},
-            { enableHighAccuracy: true, timeout: 10000 }
-          );
-        }
+if ("geolocation" in navigator) {
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      if (!alive) return;
+      const { latitude: lat, longitude } = pos.coords || {};
+      // use `lng` name to match server expectation (and avoid NaN casts)
+      const lng = typeof longitude !== "undefined" ? Number(longitude) : undefined;
+      const latNum = typeof lat !== "undefined" ? Number(lat) : undefined;
+      if (Number.isFinite(latNum) && Number.isFinite(lng)) {
+        setCoords({ lat: latNum, lng });
+      } else {
+        // fallback to leaving coords null if we couldn't get usable numbers
+        setCoords(null);
+      }
+    },
+    () => {},
+    { enableHighAccuracy: true, timeout: 10000 }
+  );
+}
+
       } catch (err) {
         console.error("[book] protected fetch error:", err?.response?.data || err?.message || err);
         if (alive) setErr("Could not load booking.");
@@ -270,42 +279,60 @@ export default function BookService() {
       return;
     }
 
-    // compute amount in kobo and validate
-    const amountNairaNum = Number(amountNaira || 0);
-    if (!Number.isFinite(amountNairaNum) || amountNairaNum <= 0) {
-      setErr("Invalid price for this service.");
-      return;
-    }
-    const amountKobo = Math.round(amountNairaNum * 100);
-    if (!Number.isFinite(amountKobo) || amountKobo <= 0) {
-      setErr("Invalid price for this service.");
-      return;
-    }
+// compute amount in kobo and validate
+const amountNairaNum = Number(amountNaira || 0);
+if (!Number.isFinite(amountNairaNum) || amountNairaNum <= 0) {
+  setErr("Invalid price for this service.");
+  return;
+}
+const amountKobo = Math.round(amountNairaNum * 100);
+if (!Number.isFinite(amountKobo) || amountKobo <= 0) {
+  setErr("Invalid price for this service.");
+  return;
+}
 
-    if (!address.trim()) {
-      setErr("Please confirm or edit your address/landmark.");
-      return;
-    }
+if (!address.trim()) {
+  setErr("Please confirm or edit your address/landmark.");
+  return;
+}
 
-    const payload = {
-      proId: barberId,
-      serviceName,
-      amountKobo,
-      addressText: address.trim(),
-      client: {
-        name: client.fullName,
-        phone: client.phone,
-      },
-      country: "Nigeria",
-      state: carriedState || client.state || "",
-      lga: carriedLga || client.lga || "",
-      coords,
-      instant: true,
-      paymentMethod: "card",
-    };
+// NORMALIZE COORDS -> ensure we send numeric { lat, lng } or null
+const normalizedCoords =
+  coords && typeof coords === "object" && (coords.lat != null || coords.latitude != null)
+    ? (() => {
+        const latRaw = coords.lat ?? coords.latitude;
+        // accept either lon or lng or longitude
+        const lngRaw = coords.lng ?? coords.lon ?? coords.longitude;
+        const latNum = Number(latRaw);
+        const lngNum = Number(lngRaw);
+        // only send coords when both are valid numbers
+        if (Number.isFinite(latNum) && Number.isFinite(lngNum)) {
+          return { lat: latNum, lng: lngNum };
+        }
+        return null;
+      })()
+    : null;
 
-    try {
-      setBusy(true);
+const payload = {
+  proId: barberId,
+  serviceName,
+  amountKobo,
+  addressText: address.trim(),
+  client: {
+    name: client.fullName,
+    phone: client.phone,
+  },
+  country: "Nigeria",
+  state: carriedState || client.state || "",
+  lga: carriedLga || client.lga || "",
+  coords: normalizedCoords, // <- normalized { lat, lng } or null
+  instant: true,
+  paymentMethod: "card",
+};
+
+try {
+  setBusy(true);
+
 
       // get ID token (if any) and attach to headers
       const idToken = await getIdTokenOrNull();
