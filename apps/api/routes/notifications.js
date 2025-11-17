@@ -1,5 +1,22 @@
 import express from 'express';
 import { createNotification, markRead, unreadCount, listNotifications } from '../services/notificationService.js';
+import admin from "firebase-admin";
+
+/* --------------------------- Auth middleware --------------------------- */
+
+async function requireAuth(req, res, next) {
+  try {
+    const h = req.headers.authorization || "";
+    const token = h.startsWith("Bearer ") ? h.slice(7) : null;
+    if (!token) return res.status(401).json({ error: "Missing token" });
+    const decoded = await admin.auth().verifyIdToken(token);
+    req.user = { uid: decoded.uid, email: decoded.email || null };
+    next();
+  } catch {
+    return res.status(401).json({ error: "Invalid or expired token" });
+  }
+}
+
 
 const router = express.Router();
 
