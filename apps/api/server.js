@@ -5,8 +5,7 @@ import express from "express";
 import cors from "cors";
 import morgan from "morgan";
 import dotenv from "dotenv";
-dotenv.config({ path: "./.env" });
-const { default: admin } = await import("./lib/firebaseAdmin.js");
+import admin from "firebase-admin";
 import crypto from "crypto";
 import mongoose from "mongoose";
 import fs from "fs";
@@ -79,6 +78,25 @@ function requireAdmin(req, res, next) {
     return res.status(403).json({ error: "Admin only" });
   }
   next();
+}
+
+/* ------------------- Firebase Admin ------------------- */
+try {
+  const keyPath =
+    process.env.SERVICE_KEY_PATH ||
+    new URL("./serviceAccountKey.json", import.meta.url).pathname;
+
+  const svc = JSON.parse(fs.readFileSync(keyPath, "utf8"));
+  admin.initializeApp({ credential: admin.credential.cert(svc) });
+  console.log("[auth] ✅ Firebase Admin initialized (service account).");
+} catch (e) {
+  try {
+    admin.initializeApp(); // ADC fallback
+    console.log("[auth] ✅ Firebase Admin initialized (ADC).");
+  } catch (e2) {
+    console.error("[auth] ❌ Firebase Admin failed to initialize:", e2?.message || e2);
+    process.exit(1);
+  }
 }
 
 /* ------------------- MongoDB ------------------- */

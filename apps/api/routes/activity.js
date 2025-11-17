@@ -4,7 +4,6 @@ import Comment from '../models/Comment.js';
 import Follow from '../models/Follow.js';
 import Booking from '../models/Booking.js';
 import Notification from '../models/Notification.js';
-import { tryAuth } from '../lib/auth.js';
 
 const router = express.Router();
 

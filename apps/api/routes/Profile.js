@@ -1,5 +1,5 @@
 import express from "express";
-import admin from "../lib/firebaseAdmin.js";
+import admin from "firebase-admin";
 import { ClientProfile, ProProfile } from "../models/Profile.js";
 import { Booking } from "../models/Booking.js";
 import { Pro } from "../models.js";
@@ -11,10 +11,52 @@ import Post from "../models/Post.js";
 import PostStats from "../models/PostStats.js";
 import { proToBarber } from "../models.js";
 import { getIO } from "../sockets/index.js";
-import { requireAuth, tryAuth, requireAdmin, isAdminUser } from "../lib/auth.js";
-
 
 const router = express.Router();
+
+/* ------------------------------------------------------------------
+   AUTH HELPERS
+   ------------------------------------------------------------------ */
+async function requireAuth(req, res, next) {
+  try {
+    const h = req.headers.authorization || "";
+    const token = h.startsWith("Bearer ") ? h.slice(7) : null;
+    if (!token) return res.status(401).json({ error: "Missing token" });
+
+    const decoded = await admin.auth().verifyIdToken(token);
+    req.user = { uid: decoded.uid, email: decoded.email || null };
+    next();
+  } catch {
+    return res.status(401).json({ error: "Invalid or expired token" });
+  }
+}
+
+const ADMIN_UIDS = (process.env.ADMIN_UIDS || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || "")
+  .split(",")
+  .map((s) => s.trim().toLowerCase())
+  .filter(Boolean);
+
+function isAdminUser(user = {}) {
+  const byUid = !!user?.uid && ADMIN_UIDS.includes(user.uid);
+  const byEmail =
+    !!user?.email && ADMIN_EMAILS.includes(String(user.email).toLowerCase());
+  return byUid || byEmail;
+}
+
+function requireAdmin(req, res, next) {
+  if (!isAdminUser(req.user)) {
+    return res.status(403).json({ error: "Admin only" });
+  }
+  next();
+}
+
+
+
 
 
 /* ------------------------------------------------------------------

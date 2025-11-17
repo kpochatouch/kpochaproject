@@ -1,5 +1,4 @@
 import express from 'express';
-import { requireAuth } from '../lib/auth.js';
 import { createNotification, markRead, unreadCount, listNotifications } from '../services/notificationService.js';
 
 const router = express.Router();

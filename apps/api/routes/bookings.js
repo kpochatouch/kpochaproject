@@ -1,6 +1,6 @@
 // apps/api/routes/bookings.js
 import express from "express";
-import admin from "../lib/firebaseAdmin.js";
+import admin from "firebase-admin";
 import mongoose from "mongoose";
 import { Booking } from "../models/Booking.js";
 import { Pro } from "../models.js";
