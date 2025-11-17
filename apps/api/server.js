@@ -45,8 +45,6 @@ import followRoutes from "./routes/follow.js";
 import notificationsRoutes from "./routes/notifications.js";
 
 
-
-
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);

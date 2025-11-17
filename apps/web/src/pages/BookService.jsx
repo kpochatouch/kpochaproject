@@ -5,6 +5,8 @@
 import { useParams, useLocation, useNavigate, Link } from "react-router-dom";
 import { useEffect, useState, useRef } from "react";
 import { api } from "../lib/api";
+import { getAuth, onAuthStateChanged } from "firebase/auth";
+
 
 function usePaystackReady() {
   const [ready, setReady] = useState(!!window.PaystackPop);
@@ -50,29 +52,43 @@ export default function BookService() {
 
   const okTimer = useRef();
 
-  // load pro + me + client-profile
+    // load pro + me + client-profile — wait for Firebase auth before calling protected endpoints
   useEffect(() => {
     let alive = true;
-    (async () => {
+    let unsub = null;
+
+    async function fetchPublicBarber() {
       try {
-        const [proRes, meRes] = await Promise.all([
-          api.get(`/api/barbers/${barberId}`),
-          api.get("/api/me"),
-        ]);
+        const proRes = await api.get(`/api/barbers/${barberId}`);
         if (!alive) return;
         setBarber(proRes.data || null);
+      } catch (e) {
+        // public barber fetch failed but keep going — it may be recovered by re-render
+        console.error("[book] fetchPublicBarber error:", e);
+        if (alive) setBarber(null);
+      }
+    }
+
+    async function fetchProtected(token) {
+      try {
+        // prepare headers (axios-style config)
+        const headers = token ? { Authorization: `Bearer ${token}` } : {};
+
+        // fetch me (protected) and profile (protected)
+        const meRes = await api.get("/api/me", { headers });
+        if (!alive) return;
         setMe(meRes.data || null);
 
-        // client profile (so we can prefill address)
+        // client profile
         try {
-          const { data } = await api.get("/api/profile/client/me");
+          const profRes = await api.get("/api/profile/client/me", { headers });
           if (alive) {
-            setClient(data || null);
-            // prefill address
-            setAddress(data?.address || "");
+            setClient(profRes.data || null);
+            setAddress((profRes.data && profRes.data.address) || "");
           }
-        } catch {
-          // no client profile, let it pass — but booking might fail
+        } catch (innerErr) {
+          // client profile may be absent for some users — that's okay
+          console.info("[book] no client profile (ok)", innerErr?.response?.data || innerErr?.message || innerErr);
         }
 
         // best-effort GPS → to help the pro
@@ -87,15 +103,49 @@ export default function BookService() {
             { enableHighAccuracy: true, timeout: 10000 }
           );
         }
-      } catch (e) {
-        setErr("Could not load booking.");
+      } catch (err) {
+        console.error("[book] protected fetch error:", err?.response?.data || err?.message || err);
+        if (alive) setErr("Could not load booking.");
       }
-    })();
+    }
+
+    // public barber immediate fetch (no token required)
+    fetchPublicBarber();
+
+    // wait for firebase auth to settle (handle both signed-in and signed-out states)
+    try {
+      const auth = getAuth();
+      unsub = onAuthStateChanged(auth, async (user) => {
+        // onAuthStateChanged fires immediately with the current state (including null).
+        // If user exists, get token and call protected endpoints.
+        if (!alive) return;
+        if (user) {
+          try {
+            const token = await user.getIdToken(false);
+            await fetchProtected(token);
+          } catch (e) {
+            console.error("[book] token/fetchProtected error:", e);
+            if (alive) setErr("Could not load booking.");
+          }
+        } else {
+          // user is signed out — attempt protected fetch without token (backend will 401 if required)
+          // this allows public browsing if you ever make /api/me optional; otherwise user will be prompted to login when booking.
+          await fetchProtected(null);
+        }
+      });
+    } catch (e) {
+      console.error("[book] onAuthStateChanged setup failed:", e);
+      // fallback: try to fetch protected without token (will likely yield 401)
+      fetchProtected(null);
+    }
+
     return () => {
       alive = false;
       clearTimeout(okTimer.current);
+      if (typeof unsub === "function") unsub();
     };
   }, [barberId]);
+
 
   const serviceName = carriedService || "Selected service";
   const amountNaira =
