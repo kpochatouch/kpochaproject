@@ -1,3 +1,4 @@
+// apps/api/routes/matcher.js
 import express from "express";
 import redis from "../redis.js";
 import { findCandidate } from "../services/matchingService.js";
@@ -5,28 +6,56 @@ import { v4 as uuidv4 } from "uuid";
 
 const router = express.Router();
 
+// Dev fallback when redis disabled
+const localMatchStore = new Map(); // key -> { status, createdAt, payload, proId }
+function setLocalMatch(id, obj, ttlSec = 30) {
+  localMatchStore.set(id, obj);
+  setTimeout(() => localMatchStore.delete(id), (ttlSec + 5) * 1000);
+}
+function getLocalMatch(id) {
+  return localMatchStore.get(id) || null;
+}
+function delLocalMatch(id) {
+  localMatchStore.delete(id);
+}
+
 // POST /api/match/request
-// body: { lat, lon, state, lga, serviceName, maxRadiusKm }
 router.post("/match/request", async (req, res) => {
   try {
     const body = req.body || {};
     const matchId = uuidv4();
     const ttlSeconds = 30; // how long this search remains valid
 
-    // save a lightweight search record in redis
-    await redis.hSet(`match:${matchId}`, {
-      status: "searching",
-      createdAt: Date.now().toString(),
-      payload: JSON.stringify(body),
-    });
-    await redis.expire(`match:${matchId}`, ttlSeconds);
+    if (redis) {
+      await redis.hSet(`match:${matchId}`, {
+        status: "searching",
+        createdAt: Date.now().toString(),
+        payload: JSON.stringify(body),
+      });
+      await redis.expire(`match:${matchId}`, ttlSeconds);
+    } else {
+      setLocalMatch(
+        matchId,
+        {
+          status: "searching",
+          createdAt: Date.now().toString(),
+          payload: JSON.stringify(body),
+        },
+        ttlSeconds
+      );
+      console.log("[matcher] Redis disabled — using local fallback for match:", matchId);
+    }
 
     // try to find a candidate synchronously (fast path)
     const proId = await findCandidate(body);
 
     if (proId) {
-      // immediate candidate found — mark and return
-      await redis.hSet(`match:${matchId}`, { status: "found", proId });
+      if (redis) {
+        await redis.hSet(`match:${matchId}`, { status: "found", proId });
+      } else {
+        const existing = getLocalMatch(matchId) || {};
+        setLocalMatch(matchId, { ...existing, status: "found", proId }, ttlSeconds);
+      }
       return res.json({ ok: true, found: true, proId, matchId });
     }
 
@@ -42,8 +71,15 @@ router.post("/match/request", async (req, res) => {
 router.get("/match/:id/status", async (req, res) => {
   try {
     const { id } = req.params;
-    const data = await redis.hGetAll(`match:${id}`);
-    if (!data || !Object.keys(data).length) return res.status(404).json({ error: "not_found" });
+    let data = {};
+    if (redis) {
+      data = await redis.hGetAll(`match:${id}`);
+      if (!data || !Object.keys(data).length) return res.status(404).json({ error: "not_found" });
+    } else {
+      const local = getLocalMatch(id);
+      if (!local) return res.status(404).json({ error: "not_found" });
+      data = local;
+    }
     const out = { status: data.status || "searching" };
     if (data.proId) out.proId = data.proId;
     res.json(out);
@@ -57,7 +93,11 @@ router.get("/match/:id/status", async (req, res) => {
 router.post("/match/:id/cancel", async (req, res) => {
   try {
     const { id } = req.params;
-    await redis.del(`match:${id}`);
+    if (redis) {
+      await redis.del(`match:${id}`);
+    } else {
+      delLocalMatch(id);
+    }
     return res.json({ ok: true });
   } catch (err) {
     console.error("[matcher] cancel error:", err);

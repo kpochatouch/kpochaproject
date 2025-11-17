@@ -2,6 +2,9 @@
 // Socket.IO signaling + lightweight chat relay + feed events
 
 import { Server } from "socket.io";
+import redis from "../redis.js"; 
+import admin from "firebase-admin";
+
 
 // we will stash io here so routes can emit
 let ioRef = null;
@@ -36,6 +39,9 @@ function buildOriginChecker() {
 // ---- Helpers ----
 const roomName = (r) => (r && typeof r === "string" ? r : "");
 const bookingRoom = (id) => `booking:${id}`;
+const profileRoom = (uid) => `profile:${String(uid)}`;
+const userRoom = (uid) => `user:${String(uid)}`;
+const postRoom = (postId) => `post:${String(postId)}`;
 
 export default function attachSockets(httpServer) {
   const originAllowed = buildOriginChecker();
@@ -59,6 +65,56 @@ export default function attachSockets(httpServer) {
 
   io.on("connection", (socket) => {
     const uid = socket.handshake.auth?.uid || socket.handshake.query?.uid || null;
+
+    // verify Firebase idToken or Authorization: Bearer <token> if provided; attach socket.data.uid
+(async () => {
+  try {
+    // client may send the token in different places:
+    //  - socket.handshake.auth.token
+    //  - socket.handshake.auth.Authorization (or .authorization) as "Bearer <token>"
+    //  - socket.handshake.query.token
+    const authObj = socket.handshake?.auth || {};
+    const provided =
+      authObj.token ||
+      authObj.Authorization ||
+      authObj.authorization ||
+      socket.handshake?.query?.token ||
+      null;
+
+    if (provided) {
+      const raw = typeof provided === "string" && provided.startsWith("Bearer ")
+        ? provided.slice(7).trim()
+        : provided;
+
+      try {
+        const decoded = await admin.auth().verifyIdToken(raw);
+        socket.data = socket.data || {};
+        socket.data.uid = decoded.uid;
+        socket.data.firebaseUser = decoded;
+        socket.data.authenticated = true;
+        console.log("[sockets] verified uid on connect:", decoded.uid);
+      } catch (err) {
+        // invalid token — fallback to hintedUid below
+        console.warn("[sockets] token verify failed:", err?.message || err);
+        socket.data = socket.data || {};
+        socket.data.uid = hintedUid || null;
+      }
+    } else {
+      socket.data = socket.data || {};
+      socket.data.uid = hintedUid || null;
+    }
+
+    // join private user room if we have uid
+    if (socket.data?.uid) {
+      socket.join(userRoom(socket.data.uid));
+    }
+  } catch (e) {
+    console.warn("[sockets] auth parse error:", e?.message || e);
+    socket.data = socket.data || {};
+    socket.data.uid = hintedUid || null;
+    if (socket.data.uid) socket.join(userRoom(socket.data.uid));
+  }
+})();
 
     // --- Join room (keeps your name: room:join) ---
     socket.on("room:join", ({ room, who } = {}, cb) => {
@@ -151,9 +207,49 @@ export default function attachSockets(httpServer) {
     });
   });
 
-  io.engine.on("connection_error", (err) => {
+    io.engine.on("connection_error", (err) => {
     console.warn("[sockets] connection_error:", err.code, err.message);
   });
+
+  // --- Redis pub/sub for cross-node events ---
+  (async () => {
+    if (!redis) {
+      console.warn("[sockets] Redis not configured; skipping pub/sub subscription");
+      return;
+    }
+
+    let sub = null;
+
+    if (typeof redis.duplicate === "function") {
+      sub = redis.duplicate();
+      await sub.connect();
+    } else {
+      sub = redis;
+    }
+
+    const safeParse = (raw) => {
+      try { return JSON.parse(raw); } catch { return null; }
+    };
+
+    // subscribe: post stats
+    if (typeof sub.subscribe === "function") {
+      await sub.subscribe("channel:post:stats", (raw) => {
+        const p = safeParse(raw);
+        if (!p?.postId) return;
+        ioRef?.to(`post:${p.postId}`).emit("post:stats", p);
+      });
+
+      // subscribe: profile follow
+      await sub.subscribe("channel:profile:follow", (raw) => {
+        const p = safeParse(raw);
+        if (!p?.targetUid) return;
+        ioRef?.to(`profile:${p.targetUid}`).emit("profile:follow", p);
+        ioRef?.to(`user:${p.targetUid}`).emit("notification:new", p);
+      });
+
+      console.log("[sockets] subscribed to Redis channels");
+    }
+  })();
 
   console.log("[sockets] ✅ Socket.IO attached (with feed events hook)");
   return io;

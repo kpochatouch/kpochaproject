@@ -7,7 +7,8 @@ let handlers = new Map();
 function getAuthHeader() {
   try {
     const t = localStorage.getItem('token');
-    if (t) return { Authorization: `Bearer ${t}` };
+    if (t) return { token: `Bearer ${t}` };
+
   } catch {}
   return {};
 }
@@ -52,9 +53,16 @@ export function registerSocketHandler(event, fn) {
 export function joinRooms(rooms = []) {
   try {
     if (!socket) connectSocket();
-    socket.emit('join', { rooms });
+    if (!Array.isArray(rooms)) rooms = [rooms];
+    for (const r of rooms) {
+      // server listens for 'room:join'
+      socket.emit('room:join', { room: r }, (ack) => {
+        // optional ack handling — ignore for now
+      });
+    }
   } catch (e) {}
 }
+
 
 export function disconnectSocket() {
   try {
