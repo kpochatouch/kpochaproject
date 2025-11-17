@@ -27,6 +27,52 @@ function usePaystackReady() {
   return ready;
 }
 
+// helper: get firebase id token, waiting briefly if auth not yet ready
+async function getIdTokenOrNull(timeoutMs = 5000) {
+  try {
+    const auth = getAuth();
+    if (auth?.currentUser) {
+      try {
+        return await auth.currentUser.getIdToken(false);
+      } catch {
+        // fall through to onAuthStateChanged below
+      }
+    }
+
+    return await new Promise((resolve) => {
+      let done = false;
+      let unsub = () => {};
+      try {
+        unsub = onAuthStateChanged(auth, async (user) => {
+          if (done) return;
+          done = true;
+          try { unsub(); } catch {}
+          if (!user) return resolve(null);
+          try {
+            const t = await user.getIdToken(false);
+            resolve(t);
+          } catch {
+            resolve(null);
+          }
+        });
+      } catch (e) {
+        // if onAuthStateChanged fails, resolve null after timeout
+      }
+      setTimeout(() => {
+        if (!done) {
+          done = true;
+          try { unsub(); } catch {}
+          resolve(null);
+        }
+      }, timeoutMs);
+    });
+  } catch (e) {
+    console.warn("getIdTokenOrNull error:", e);
+    return null;
+  }
+}
+
+
 export default function BookService() {
   const { barberId } = useParams();
   const nav = useNavigate();
@@ -151,7 +197,7 @@ export default function BookService() {
   const amountNaira =
     carriedAmount !== "" ? Number(carriedAmount) : Number(barber?.services?.[0]?.price || 0);
 
-  async function startPaystackInline(booking) {
+  async function startPaystackInline(booking, idToken = null) {
     if (!window.PaystackPop || typeof window.PaystackPop.setup !== "function") {
       throw new Error("paystack_not_ready");
     }
@@ -177,13 +223,17 @@ export default function BookService() {
         },
         callback: async (res) => {
           try {
-            await api.post("/api/payments/verify", {
-              bookingId: booking._id,
-              reference: res.reference,
-            });
+            // include idToken (if available) via header when calling verify
+            const headers = idToken ? { Authorization: `Bearer ${idToken}` } : {};
+            await api.post(
+              "/api/payments/verify",
+              { bookingId: booking._id, reference: res.reference },
+              { headers }
+            );
             nav(`/bookings/${booking._id}`, { replace: true });
             resolve();
           } catch (e) {
+            console.error("verify payment error:", e?.response?.data || e?.message || e);
             reject(e);
           }
         },
@@ -192,6 +242,7 @@ export default function BookService() {
       handler.openIframe();
     });
   }
+
 
   async function startPaystackRedirect(booking) {
     // fallback if inline fails
@@ -218,10 +269,19 @@ export default function BookService() {
       setErr("No service selected.");
       return;
     }
-    if (!amountNaira || Number(amountNaira) <= 0) {
+
+    // compute amount in kobo and validate
+    const amountNairaNum = Number(amountNaira || 0);
+    if (!Number.isFinite(amountNairaNum) || amountNairaNum <= 0) {
       setErr("Invalid price for this service.");
       return;
     }
+    const amountKobo = Math.round(amountNairaNum * 100);
+    if (!Number.isFinite(amountKobo) || amountKobo <= 0) {
+      setErr("Invalid price for this service.");
+      return;
+    }
+
     if (!address.trim()) {
       setErr("Please confirm or edit your address/landmark.");
       return;
@@ -230,7 +290,7 @@ export default function BookService() {
     const payload = {
       proId: barberId,
       serviceName,
-      amountKobo: Math.round(Number(amountNaira) * 100),
+      amountKobo,
       addressText: address.trim(),
       client: {
         name: client.fullName,
@@ -246,32 +306,41 @@ export default function BookService() {
 
     try {
       setBusy(true);
-      const { data } = await api.post("/api/bookings/instant", payload);
+
+      // get ID token (if any) and attach to headers
+      const idToken = await getIdTokenOrNull();
+
+      const headers = idToken ? { Authorization: `Bearer ${idToken}` } : {};
+
+      // create booking (protected route)
+      const { data } = await api.post("/api/bookings/instant", payload, { headers });
       const booking = data?.booking || data;
-      if (!booking?._id) throw new Error("booking_init_failed");
+      if (!booking?._id) {
+        console.error("booking create response:", data);
+        throw new Error("booking_init_failed");
+      }
 
       // go to paystack
       try {
         if (paystackReady) {
-          await startPaystackInline(booking);
+          await startPaystackInline(booking, idToken);
         } else {
           await startPaystackRedirect(booking);
         }
       } catch (e) {
-        console.error(e);
+        console.error("Payment start error:", e);
         setErr("Payment could not start. Open the booking detail to pay again.");
         nav(`/bookings/${booking._id}`);
       }
     } catch (e) {
-      setErr(
-        e?.response?.data?.error ||
-          e?.response?.data?.message ||
-          "Booking failed. Please try again."
-      );
+      console.error("handleBook error:", e?.response?.data || e?.message || e);
+      const serverMsg = e?.response?.data?.error || e?.response?.data?.message;
+      setErr(serverMsg || "Booking failed. Please try again.");
     } finally {
       setBusy(false);
     }
   }
+
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-10">
