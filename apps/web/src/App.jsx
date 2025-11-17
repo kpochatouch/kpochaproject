@@ -20,6 +20,7 @@ const Home = lazy(() => import("./pages/Home.jsx"));
 const Browse = lazy(() => import("./pages/Browse.jsx"));
 const BookService = lazy(() => import("./pages/BookService.jsx"));
 const BookingDetails = lazy(() => import("./pages/BookingDetails.jsx"));
+const InstantRequest = lazy(() => import("./pages/InstantRequest.jsx"));
 const Wallet = lazy(() => import("./pages/Wallet.jsx"));
 const ClientWallet = lazy(() => import("./pages/ClientWallet.jsx"));
 const Profile = lazy(() => import("./pages/Profile.jsx"));
@@ -195,7 +196,18 @@ export default function App() {
               }
             />
             <Route path="/find" element={<FindProSmart />} />
-            <Route path="/book/:barberId" element={<BookService />} />
+
+<Route
+  path="/instant-request"
+  element={
+    <RequireAuth>
+      <InstantRequest />
+    </RequireAuth>
+  }
+/>
+
+<Route path="/book/:barberId" element={<BookService />} />
+
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
             <Route path="/legal" element={<Legal />} />

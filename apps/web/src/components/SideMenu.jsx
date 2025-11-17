@@ -5,6 +5,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 const icons = {
   feed: "/menu/feed.png",
   browse: "/menu/browse-pros.png",
+  instant: "/menu/bookings.png",
   profile: "/menu/profile.png",
   wallet: "/menu/wallet.png",
   settings: "/menu/settings.png",
@@ -33,7 +34,7 @@ export default function SideMenu({ me }) {
   const isBrowsePros =
     pathname === "/browse" && search.includes("tab=pros");
 
-  const baseNav = [
+    const baseNav = [
     {
       key: "feed",
       label: "Feed",
@@ -45,6 +46,13 @@ export default function SideMenu({ me }) {
       label: "Browse Pros",
       to: "/browse?tab=pros",
       active: isBrowsePros,
+    },
+    // 🔥 Instant Request – only when logged in
+    me && {
+      key: "instant",
+      label: "Instant Request",
+      to: "/instant-request",
+      active: pathname === "/instant-request",
     },
     me && {
       key: "profile",

@@ -14,6 +14,9 @@ import http from "http";
 import { fileURLToPath } from "url";
 import cron from "node-cron";
 
+import { sweepMatches } from "./workers/assignWorker.js";
+
+
 // Models & core routers
 import { Application, Pro, proToBarber } from "./models.js";
 import bookingsRouter from "./routes/bookings.js";
@@ -43,6 +46,7 @@ import postStatsRouter from "./routes/postStats.js";
 import followRoutes from "./routes/follow.js";
 // correct (exact filename in your repo)
 import notificationsRoutes from "./routes/notifications.js";
+import matcherRouter from "./routes/matcher.js";
 
 
 dotenv.config();
@@ -323,6 +327,7 @@ async function initSchedulers() {
 async function restartSchedulers() {
   await initSchedulers();
 }
+
 
 /* ------------------- Express App ------------------- */
 const app = express();
@@ -945,8 +950,13 @@ app.use("/api/bookings", requireAuth, async (req, _res, next) => {
   }
 });
 
+
 /* ------------------- Routers ------------------- */
 app.use("/api", bookingsRouter);
+
+// after other app.use("/api", ...) lines (or alongside them)
+app.use("/api", matcherRouter);
+console.log("[api] ✅ Matcher routes mounted");
 
 // wallet write guard
 app.use("/api/wallet", requireAuth, (req, res, next) => {
@@ -972,6 +982,7 @@ app.use("/api", payoutRoutes({ requireAuth, Application }));
 app.use("/api", riskRoutes({ requireAuth, requireAdmin, Application }));
 app.use("/api", awsLivenessRoutes({ requireAuth }));
 app.use("/api", notificationsRoutes);
+
 
 
 // admin pros
@@ -1659,6 +1670,15 @@ async function handlePaystackEvent(event) {
 
 /* ------------------- Start ------------------- */
 await initSchedulers();
+
+// optional: clean up stale instant-match entries in Redis
+if (redis) {
+  setInterval(() => {
+    sweepMatches().catch(e => console.error("[sweepMatches] err:", e?.message || e));
+  }, 30_000);
+} else {
+  console.warn("[sweepMatches] Redis not configured — sweep disabled");
+}
 
 try {
   const { default: attachSockets } = await import("./sockets/index.js");
