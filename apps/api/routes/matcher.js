@@ -24,7 +24,17 @@ router.post("/match/request", async (req, res) => {
   try {
     const body = req.body || {};
     const matchId = uuidv4();
-    const ttlSeconds = 30; // how long this search remains valid
+    // increased TTL for debugging so UI doesn't time out while we inspect
+    const ttlSeconds = 120; // was 30
+
+    // debug log: record the incoming search
+    console.log("[matcher] new match request:", matchId, {
+      serviceName: body.serviceName,
+      lat: body.lat,
+      lon: body.lon,
+      state: body.state,
+      lga: body.lga,
+    });
 
     if (redis) {
       await redis.hSet(`match:${matchId}`, {
@@ -34,15 +44,11 @@ router.post("/match/request", async (req, res) => {
       });
       await redis.expire(`match:${matchId}`, ttlSeconds);
     } else {
-      setLocalMatch(
-        matchId,
-        {
-          status: "searching",
-          createdAt: Date.now().toString(),
-          payload: JSON.stringify(body),
-        },
-        ttlSeconds
-      );
+      setLocalMatch(matchId, {
+        status: "searching",
+        createdAt: Date.now().toString(),
+        payload: JSON.stringify(body),
+      }, ttlSeconds);
       console.log("[matcher] Redis disabled — using local fallback for match:", matchId);
     }
 
@@ -50,6 +56,8 @@ router.post("/match/request", async (req, res) => {
     const proId = await findCandidate(body);
 
     if (proId) {
+      // debug: immediate found
+      console.log("[matcher] immediate candidate found for", matchId, "proId:", proId);
       if (redis) {
         await redis.hSet(`match:${matchId}`, { status: "found", proId });
       } else {
@@ -66,6 +74,7 @@ router.post("/match/request", async (req, res) => {
     res.status(500).json({ error: "matcher_error" });
   }
 });
+
 
 // GET /api/match/:id/status
 router.get("/match/:id/status", async (req, res) => {
