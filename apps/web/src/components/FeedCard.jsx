@@ -1,4 +1,3 @@
-// apps/web/src/components/FeedCard.jsx
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
@@ -67,16 +66,16 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
   const [userHasInteracted, setUserHasInteracted] = useState(false);
 
   // ⬇️ add these right under: const [userHasInteracted, setUserHasInteracted] = useState(false);
-const [currentTime, setCurrentTime] = useState(0);
-const [duration, setDuration] = useState(0);
-const [seeking, setSeeking] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [seeking, setSeeking] = useState(false);
 
-function formatTime(sec = 0) {
-  if (!isFinite(sec)) return "0:00";
-  const m = Math.floor(sec / 60);
-  const s = Math.floor(sec % 60);
-  return `${m}:${s < 10 ? "0" : ""}${s}`;
-}
+  function formatTime(sec = 0) {
+    if (!isFinite(sec)) return "0:00";
+    const m = Math.floor(sec / 60);
+    const s = Math.floor(sec % 60);
+    return `${m}:${s < 10 ? "0" : ""}${s}`;
+  }
 
   const media =
     Array.isArray(post.media) && post.media.length ? post.media[0] : null;
@@ -116,11 +115,10 @@ function formatTime(sec = 0) {
   }, [postId]);
 
   // Reset internal flags when post changes
-useEffect(() => {
-  hasSentViewRef.current = false;
-  playTriggeredByObserverRef.current = false;
-}, [postId]);
-
+  useEffect(() => {
+    hasSentViewRef.current = false;
+    playTriggeredByObserverRef.current = false;
+  }, [postId]);
 
   function mergeStatsFromServer(partial) {
     setStats((prev) => ({
@@ -207,12 +205,11 @@ useEffect(() => {
   }, [postId, isVideo]);
 
   useEffect(() => {
-  if (!isVideo && mediaObserverRef.current) {
-    mediaObserverRef.current.disconnect();
-    mediaObserverRef.current = null;
-  }
-}, [isVideo]);
-
+    if (!isVideo && mediaObserverRef.current) {
+      mediaObserverRef.current.disconnect();
+      mediaObserverRef.current = null;
+    }
+  }, [isVideo]);
 
   // 3) also send view for NON-video cards (photos / text)
   useEffect(() => {
@@ -273,72 +270,71 @@ useEffect(() => {
   }
 
   // when metadata loads, capture duration
-function onLoadedMetadata() {
-  const vid = videoRef.current;
-  if (!vid) return;
-  setDuration(vid.duration || 0);
-}
+  function onLoadedMetadata() {
+    const vid = videoRef.current;
+    if (!vid) return;
+    setDuration(vid.duration || 0);
+  }
 
-// keep currentTime in sync for the slider + label
-function onTimeUpdate() {
-  if (seeking) return; // don't fight the user's finger while scrubbing
-  const vid = videoRef.current;
-  if (!vid) return;
-  setCurrentTime(vid.currentTime || 0);
-}
+  // keep currentTime in sync for the slider + label
+  function onTimeUpdate() {
+    if (seeking) return; // don't fight the user's finger while scrubbing
+    const vid = videoRef.current;
+    if (!vid) return;
+    setCurrentTime(vid.currentTime || 0);
+  }
 
-// jump helpers
-function jump(seconds) {
-  const vid = videoRef.current;
-  if (!vid) return;
-  const next = Math.min(
-    Math.max((vid.currentTime || 0) + seconds, 0),
-    duration || vid.duration || 0
-  );
-  vid.currentTime = next;
-  setCurrentTime(next);
-}
+  // jump helpers
+  function jump(seconds) {
+    const vid = videoRef.current;
+    if (!vid) return;
+    const next = Math.min(
+      Math.max((vid.currentTime || 0) + seconds, 0),
+      duration || vid.duration || 0
+    );
+    vid.currentTime = next;
+    setCurrentTime(next);
+  }
 
-// fullscreen (desktop + mobile Safari fallback)
-async function toggleFullscreen() {
-  const vid = videoRef.current;
-  if (!vid) return;
-  try {
-    if (document.fullscreenElement) {
-      await document.exitFullscreen().catch(() => {});
+  // fullscreen (desktop + mobile Safari fallback)
+  async function toggleFullscreen() {
+    const vid = videoRef.current;
+    if (!vid) return;
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen().catch(() => {});
+        return;
+      }
+      if (vid.requestFullscreen) return void vid.requestFullscreen();
+      // iOS WebKit fallback
+      const anyVid = /** @type {any} */ (vid);
+      if (anyVid.webkitEnterFullscreen) return void anyVid.webkitEnterFullscreen();
+    } catch {
+      // ignore
+    }
+  }
+
+  // seek slider handlers
+  function onSeekStart() {
+    setSeeking(true);
+  }
+
+  function onSeekChange(e) {
+    const v = Number(e.target.value || 0);
+    setCurrentTime(v);
+  }
+
+  function onSeekCommit(e) {
+    const vid = videoRef.current;
+    if (!vid) {
+      setSeeking(false);
       return;
     }
-    if (vid.requestFullscreen) return void vid.requestFullscreen();
-    // iOS WebKit fallback
-    const anyVid = /** @type {any} */ (vid);
-    if (anyVid.webkitEnterFullscreen)
-      return void anyVid.webkitEnterFullscreen();
-  } catch {
-    // ignore
-  }
-}
-
-// seek slider handlers
-function onSeekStart() {
-  setSeeking(true);
-}
-
-function onSeekChange(e) {
-  const v = Number(e.target.value || 0);
-  setCurrentTime(v);
-}
-
-function onSeekCommit(e) {
-  const vid = videoRef.current;
-  if (!vid) {
+    const v = Number(e.target.value || 0);
+    vid.currentTime = v;
+    setCurrentTime(v);
     setSeeking(false);
-    return;
   }
-  const v = Number(e.target.value || 0);
-  vid.currentTime = v;
-  setCurrentTime(v);
-  setSeeking(false);
-}
 
   // likes
   async function toggleLike() {
@@ -565,13 +561,55 @@ function onSeekCommit(e) {
   const lga = pro.lga || post.lga || "";
 
   // who to follow (prefer owner UID)
-const followTargetUid =
-  post.proOwnerUid ||
-  post.pro?.ownerUid ||
-  post.ownerUid ||
-  post.createdBy ||
-  null;
+  const followTargetUid =
+    post.proOwnerUid ||
+    post.pro?.ownerUid ||
+    post.ownerUid ||
+    post.createdBy ||
+    null;
 
+  // Determine username present on the post (common shapes)
+  const postUsername =
+    (post.username && String(post.username).trim()) ||
+    (post.pro && post.pro.username && String(post.pro.username).trim()) ||
+    (post.ownerUsername && String(post.ownerUsername).trim()) ||
+    null;
+
+  // NAVIGATE TO PUBLIC PROFILE:
+  // - Prefer direct username if present
+  // - Else attempt to resolve username from UID via API (/api/profile/public-by-uid/:uid)
+  // - Fallback: navigate to /profile/<uid> if resolution fails
+  async function goToProfile() {
+    try {
+      if (postUsername) {
+        navigate(`/profile/${encodeURIComponent(postUsername)}`);
+        return;
+      }
+
+      const uid = followTargetUid || post.ownerUid || post.createdBy || null;
+      if (!uid) {
+        // nothing to do
+        return;
+      }
+
+      // try to resolve username server-side
+      try {
+        const res = await api.get(`/api/profile/public-by-uid/${encodeURIComponent(uid)}`);
+        const data = res?.data;
+        if (data && data.profile && data.profile.username) {
+          navigate(`/profile/${encodeURIComponent(data.profile.username)}`);
+          return;
+        }
+      } catch (err) {
+        // server resolution failed — fall back to UID
+      }
+
+      // final fallback: use UID as path segment (this will likely 404 if no public-by-uid handler exists on frontend)
+      navigate(`/profile/${encodeURIComponent(uid)}`);
+    } catch (e) {
+      console.warn("goToProfile failed", e);
+    }
+  }
 
   // clicking text → go to post detail (you can change route)
   function goToPostDetail() {
@@ -593,7 +631,11 @@ const followTargetUid =
       {/* header */}
       <div className="flex items-start justify-between px-4 py-3 gap-3">
         <div className="flex gap-3">
-          <div className="w-10 h-10 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center">
+          <div
+            className="w-10 h-10 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center cursor-pointer"
+            onClick={goToProfile}
+            title="View profile"
+          >
             {avatar ? (
               <img
                 src={avatar}
@@ -608,7 +650,13 @@ const followTargetUid =
             )}
           </div>
           <div>
-            <div className="text-sm font-semibold text-white truncate max-w-[120px]">{proName}</div>
+            <div
+              className="text-sm font-semibold text-white truncate max-w-[120px] cursor-pointer"
+              onClick={goToProfile}
+              title="View profile"
+            >
+              {proName}
+            </div>
 
             <div className="text-xs text-gray-400">
               {lga || "Nigeria"} • {timeAgo(post.createdAt)}
@@ -626,12 +674,12 @@ const followTargetUid =
           )}
           <div className="relative">
             <button
-  onClick={() => setMenuOpen((v) => !v)}
-  aria-label="Open post menu"
-  className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-800 text-white"
->
-  ⋯
-</button>
+              onClick={() => setMenuOpen((v) => !v)}
+              aria-label="Open post menu"
+              className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-800 text-white"
+            >
+              ⋯
+            </button>
 
             {menuOpen && (
               <div className="absolute right-0 mt-2 w-56 bg-[#141414] border border-[#2a2a2a] rounded-lg shadow-lg z-30">
@@ -710,152 +758,149 @@ const followTargetUid =
         </div>
       )}
 
-{!media && (
-  <div className="w-full aspect-[4/5] bg-[#1a1a1a] animate-pulse flex items-center justify-center text-gray-600 text-xs">
-    Loading media...
-  </div>
-)}
-
-
-{media && (
-  <div className="relative w-full bg-black overflow-hidden aspect-[4/5] sm:aspect-[4/5] lg:aspect-[3/4] xl:aspect-[1/1] max-h-[80vh]">
-    {isVideo ? (
-      <>
-        <video
-          ref={videoRef}
-          src={media.url}
-          className="absolute inset-0 w-full h-full object-cover"
-          muted={muted}
-          loop
-          playsInline
-          preload="metadata"
-          controls={false}             // custom controls only
-          onClick={onClickVideo}
-          onPlay={onVideoPlay}
-          onLoadedMetadata={onLoadedMetadata}
-          onTimeUpdate={onTimeUpdate}
-        />
-
-        {!userHasInteracted && (
-          <button
-            onClick={onClickVideo}
-            className="absolute inset-0 flex items-center justify-center bg-black/0"
-            aria-label="Play video"
-          />
-        )}
-
-        {/* Top-left quick controls (Play/Pause, Mute) */}
-        <div className="absolute bottom-3 left-3 flex gap-2 z-[2]">
-          <button
-            onClick={onClickVideo}
-            className="bg-black/50 text-white text-xs px-3 py-1 rounded-full"
-          >
-            {videoRef.current && !videoRef.current.paused ? "Pause" : "Play"}
-          </button>
-          <button
-            onClick={onToggleMute}
-            className="bg-black/50 text-white text-xs px-3 py-1 rounded-full"
-          >
-            {muted ? "Unmute" : "Mute"}
-          </button>
+      {!media && (
+        <div className="w-full aspect-[4/5] bg-[#1a1a1a] animate-pulse flex items-center justify-center text-gray-600 text-xs">
+          Loading media...
         </div>
+      )}
 
-        {/* Bottom control bar with seek + time + +/- 10s + fullscreen */}
-        <div
-          className="absolute inset-x-0 bottom-0 z-[2] px-3 pb-3 pt-6
-                     bg-gradient-to-t from-black/70 via-black/20 to-transparent"
-          // Bigger hit area at bottom for thumbs on mobile
-        >
-          {/* time + jump + fullscreen row */}
-          <div className="flex items-center justify-between gap-2 mb-2">
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => jump(-10)}
-                className="rounded-full bg-black/60 text-white text-xs px-3 py-1"
-                aria-label="Seek backward 10 seconds"
-              >
-                ⏪ 10s
-              </button>
-              <button
-                onClick={() => jump(+10)}
-                className="rounded-full bg-black/60 text-white text-xs px-3 py-1"
-                aria-label="Seek forward 10 seconds"
-              >
-                10s ⏩
-              </button>
-            </div>
+      {media && (
+        <div className="relative w-full bg-black overflow-hidden aspect-[4/5] sm:aspect-[4/5] lg:aspect-[3/4] xl:aspect-[1/1] max-h-[80vh]">
+          {isVideo ? (
+            <>
+              <video
+                ref={videoRef}
+                src={media.url}
+                className="absolute inset-0 w-full h-full object-cover"
+                muted={muted}
+                loop
+                playsInline
+                preload="metadata"
+                controls={false} // custom controls only
+                onClick={onClickVideo}
+                onPlay={onVideoPlay}
+                onLoadedMetadata={onLoadedMetadata}
+                onTimeUpdate={onTimeUpdate}
+              />
 
-            <div className="flex items-center gap-2 text-[11px] text-white/90">
-              <span aria-label="Current time">{formatTime(currentTime)}</span>
-              <span className="opacity-70">/</span>
-              <span aria-label="Duration">{formatTime(duration)}</span>
-              <button
-                onClick={toggleFullscreen}
-                className="rounded-md bg-black/60 text-white text-[11px] px-2 py-1 ml-2"
-                aria-label="Toggle full screen"
-              >
-                ⛶
-              </button>
-            </div>
-          </div>
+              {!userHasInteracted && (
+                <button
+                  onClick={onClickVideo}
+                  className="absolute inset-0 flex items-center justify-center bg-black/0"
+                  aria-label="Play video"
+                />
+              )}
 
-          {/* seek slider */}
-          <input
-            type="range"
-            min={0}
-            max={Math.max(1, duration || 0)}   // avoid 0 max
-            step={0.1}
-            value={Math.min(currentTime, duration || 0)}
-            onMouseDown={onSeekStart}
-            onTouchStart={onSeekStart}
-            onChange={onSeekChange}
-            onMouseUp={onSeekCommit}
-            onTouchEnd={onSeekCommit}
-            className="w-full accent-[#F5C542]"
-            aria-label="Seek"
-          />
+              {/* Top-left quick controls (Play/Pause, Mute) */}
+              <div className="absolute bottom-3 left-3 flex gap-2 z-[2]">
+                <button
+                  onClick={onClickVideo}
+                  className="bg-black/50 text-white text-xs px-3 py-1 rounded-full"
+                >
+                  {videoRef.current && !videoRef.current.paused ? "Pause" : "Play"}
+                </button>
+                <button
+                  onClick={onToggleMute}
+                  className="bg-black/50 text-white text-xs px-3 py-1 rounded-full"
+                >
+                  {muted ? "Unmute" : "Mute"}
+                </button>
+              </div>
+
+              {/* Bottom control bar with seek + time + +/- 10s + fullscreen */}
+              <div
+                className="absolute inset-x-0 bottom-0 z-[2] px-3 pb-3 pt-6
+                       bg-gradient-to-t from-black/70 via-black/20 to-transparent"
+                // Bigger hit area at bottom for thumbs on mobile
+              >
+                {/* time + jump + fullscreen row */}
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => jump(-10)}
+                      className="rounded-full bg-black/60 text-white text-xs px-3 py-1"
+                      aria-label="Seek backward 10 seconds"
+                    >
+                      ⏪ 10s
+                    </button>
+                    <button
+                      onClick={() => jump(+10)}
+                      className="rounded-full bg-black/60 text-white text-xs px-3 py-1"
+                      aria-label="Seek forward 10 seconds"
+                    >
+                      10s ⏩
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-2 text-[11px] text-white/90">
+                    <span aria-label="Current time">{formatTime(currentTime)}</span>
+                    <span className="opacity-70">/</span>
+                    <span aria-label="Duration">{formatTime(duration)}</span>
+                    <button
+                      onClick={toggleFullscreen}
+                      className="rounded-md bg-black/60 text-white text-[11px] px-2 py-1 ml-2"
+                      aria-label="Toggle full screen"
+                    >
+                      ⛶
+                    </button>
+                  </div>
+                </div>
+
+                {/* seek slider */}
+                <input
+                  type="range"
+                  min={0}
+                  max={Math.max(1, duration || 0)} // avoid 0 max
+                  step={0.1}
+                  value={Math.min(currentTime, duration || 0)}
+                  onMouseDown={onSeekStart}
+                  onTouchStart={onSeekStart}
+                  onChange={onSeekChange}
+                  onMouseUp={onSeekCommit}
+                  onTouchEnd={onSeekCommit}
+                  className="w-full accent-[#F5C542]"
+                  aria-label="Seek"
+                />
+              </div>
+            </>
+          ) : (
+            <img
+              src={media.url}
+              alt=""
+              loading="lazy"
+              className="absolute inset-0 w-full h-full object-cover"
+            />
+          )}
         </div>
-      </>
-    ) : (
-      <img
-        src={media.url}
-        alt=""
-        loading="lazy"
-        className="absolute inset-0 w-full h-full object-cover"
-      />
-    )}
-  </div>
-)}
+      )}
 
       {/* counts row (wrap on small screens) */}
-<div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 text-xs text-gray-400 border-t border-[#1F1F1F]">
-  <div className="flex flex-wrap gap-4">
-    <div>{stats.likesCount} likes</div>
-    <button onClick={handleToggleComments}>
-      {stats.commentsCount} comments
-    </button>
-    <div>{stats.sharesCount} shares</div>
-  </div>
-  <div className="flex items-center gap-1">
-    <span role="img" aria-label="views">👁</span>
-    <span>View</span>
-    <span>{stats.viewsCount}</span>
-  </div>
-</div>
-
+      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 text-xs text-gray-400 border-t border-[#1F1F1F]">
+        <div className="flex flex-wrap gap-4">
+          <div>{stats.likesCount} likes</div>
+          <button onClick={handleToggleComments}>
+            {stats.commentsCount} comments
+          </button>
+          <div>{stats.sharesCount} shares</div>
+        </div>
+        <div className="flex items-center gap-1">
+          <span role="img" aria-label="views">👁</span>
+          <span>View</span>
+          <span>{stats.viewsCount}</span>
+        </div>
+      </div>
 
       {/* actions (raised z to avoid overlap with popovers) */}
-<div className="relative z-[1] flex border-t border-[#1F1F1F]">
-  <LikeButton active={stats.likedByMe} onClick={toggleLike} />
-  <CommentToggle onClick={handleToggleComments} />
-  <ShareButton onClick={handleShare} />
-  {!isOwner ? (
-    <FollowButton targetUid={followTargetUid} proId={post.proId || null} />
-  ) : (
-    <ActionButton disabled className="text-gray-500 select-none">—</ActionButton>
-  )}
-</div>
-
+      <div className="relative z-[1] flex border-t border-[#1F1F1F]">
+        <LikeButton active={stats.likedByMe} onClick={toggleLike} />
+        <CommentToggle onClick={handleToggleComments} />
+        <ShareButton onClick={handleShare} />
+        {!isOwner ? (
+          <FollowButton targetUid={followTargetUid} proId={post.proId || null} />
+        ) : (
+          <ActionButton disabled className="text-gray-500 select-none">—</ActionButton>
+        )}
+      </div>
 
       {/* comments */}
       {showComments && (

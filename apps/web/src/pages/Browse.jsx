@@ -518,19 +518,26 @@ export default function Browse() {
     <h1 className="text-2xl font-semibold">Discover</h1>
   </div>
 
-  <div className="flex items-center gap-3">
-    {/* Instant Request button (recommended place) */}
-    <button
-      onClick={() =>
-        navigate("/instant-request", {
-          state: { serviceName: service || "Any service", amountNaira: undefined },
-        })
-      }
-      aria-label="Start instant request"
-      className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold hover:bg-emerald-500 transition"
-    >
-      Instant Request
-    </button>
+ <button
+  onClick={() => {
+    // require a selected service and a location (state + lga)
+    if (!service) {
+      return alert("Please choose a service before requesting an instant booking.");
+    }
+    if (!stateName || !lga) {
+      return alert("Please choose a state and LGA (service location) before requesting.");
+    }
+
+    navigate("/instant-request", {
+      state: { serviceName: service, amountNaira: undefined },
+    });
+  }}
+  aria-label="Start instant request"
+  className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold hover:bg-emerald-500 transition"
+>
+  Instant Request
+</button>
+  <div>
 
     {/* existing tab pills */}
     <div className="inline-flex rounded-xl border border-zinc-800 overflow-hidden">
