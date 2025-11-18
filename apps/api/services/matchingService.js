@@ -1,3 +1,4 @@
+// apps/api/services/matchingService.js
 import { Pro } from "../models.js";
 import redis from "../redis.js";
 
@@ -12,6 +13,7 @@ export async function findCandidate({ lat, lon, state = "", lga = "", serviceNam
     // If lat/lon provided, try geo query (requires loc field on Pro)
     if (lat !== undefined && lon !== undefined && Number.isFinite(Number(lat)) && Number.isFinite(Number(lon))) {
       try {
+        // Attempt $geoNear aggregation first (works when index exists)
         const nearby = await Pro.aggregate([
           {
             $geoNear: {
@@ -24,17 +26,43 @@ export async function findCandidate({ lat, lon, state = "", lga = "", serviceNam
           },
           { $limit: 50 },
         ]);
-        for (const p of nearby) {
-          if (serviceName) {
-            const has = Array.isArray(p.services) && p.services.some(s => String(s).toLowerCase().includes(String(serviceName).toLowerCase()));
-            if (!has) continue;
+        if (Array.isArray(nearby) && nearby.length) {
+          for (const p of nearby) {
+            if (serviceName) {
+              const has = Array.isArray(p.services) && p.services.some(s => String(s).toLowerCase().includes(String(serviceName).toLowerCase()));
+              if (!has) continue;
+            }
+            if (p.status && p.status !== "approved") continue;
+            return String(p._id);
           }
-          // very simple availability check: skip if status not approved
-          if (p.status && p.status !== "approved") continue;
-          return String(p._id);
         }
       } catch (e) {
-        // geo query may fail if no loc; fall through to LGA/state
+        // log the error so we know why geo failed (missing index, bad field, etc.)
+        console.warn("[matchingService] geoNear failed — will fallback to $near or LGA/state. Error:", e?.message || e);
+        // try a safer $near query (this also requires a 2dsphere index but sometimes behaves differently)
+        try {
+          const nearDocs = await Pro.find({
+            loc: {
+              $nearSphere: {
+                $geometry: { type: "Point", coordinates: [Number(lon), Number(lat)] },
+                $maxDistance: 25 * 1000,
+              },
+            },
+          }).limit(50).lean();
+          if (nearDocs && nearDocs.length) {
+            for (const p of nearDocs) {
+              if (serviceName) {
+                const has = Array.isArray(p.services) && p.services.some(s => String(s).toLowerCase().includes(String(serviceName).toLowerCase()));
+                if (!has) continue;
+              }
+              if (p.status && p.status !== "approved") continue;
+              return String(p._id);
+            }
+          }
+        } catch (e2) {
+          console.warn("[matchingService] $nearSphere also failed:", e2?.message || e2);
+          // fall through to LGA/state fallback below
+        }
       }
     }
 
@@ -53,12 +81,12 @@ export async function findCandidate({ lat, lon, state = "", lga = "", serviceNam
     const docs = await Pro.find(q).limit(50).lean();
     for (const p of docs) {
       if (p.status && p.status !== "approved") continue;
-      return String(p._id);
+      return String(p._1 || p._id); // return whichever is present
     }
 
     return null;
   } catch (err) {
-    console.error("[matchingService] error:", err);
+    console.error("[matchingService] error:", err?.stack || err);
     return null;
   }
 }
