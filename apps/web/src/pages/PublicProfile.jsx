@@ -7,6 +7,7 @@ import LiveActivity from "../components/LiveActivity.jsx";
 import NotificationsMenu from "../components/NotificationsMenu.jsx";
 import SideMenu from "../components/SideMenu.jsx";
 import FeedComposer from "../components/FeedComposer.jsx";
+import { useMe } from "../context/MeContext.jsx";
 
 function normalizeProfile(data) {
   if (!data) return null;
@@ -18,7 +19,7 @@ function normalizeProfile(data) {
       username: data.username || data.id || "",
       displayName: data.displayName || data.name || data.fullName || "",
       avatarUrl: data.photoUrl || data.avatarUrl || "",
-      coverUrl: data.coverUrl || "",
+      coverUrl: data.coverUrl || data.coverUrl || "",
       bio: data.bio || data.description || "",
       isPro: Boolean(data.proId || data.proOwnerUid || data.services),
       services: data.services || [],
@@ -35,7 +36,6 @@ function normalizeProfile(data) {
       lga: data.lga || data.locationLga || "",
     };
   }
-
 
   return null;
 }
@@ -55,7 +55,6 @@ function canonicalOwnerUid(p) {
   );
 }
 
-
 export default function PublicProfile() {
   const { username: routeParam } = useParams();
   const idOrHandle = routeParam;
@@ -67,7 +66,9 @@ export default function PublicProfile() {
   const [err, setErr] = useState("");
   const [following, setFollowing] = useState(false);
   const [followPending, setFollowPending] = useState(false);
-  const [currentUser, setCurrentUser] = useState(null);
+
+  // use global MeContext
+  const { me: currentUser, loading: meLoading, isAdmin: meIsAdmin, refresh: refreshMe } = useMe();
 
   // adverts (right rail)
   const [adminAdUrl, setAdminAdUrl] = useState("");
@@ -87,21 +88,6 @@ export default function PublicProfile() {
   useEffect(() => { hasMoreRef.current = hasMore; }, [hasMore]);
   useEffect(() => { loadingMoreRef.current = loadingMore; }, [loadingMore]);
   useEffect(() => { loadingPostsRef.current = loadingPosts; }, [loadingPosts]);
-
-  // fetch current user (best-effort) -> used for SideMenu + admin check + FeedCard actions
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const res = await api.get("/api/me").catch(() => null);
-        if (!alive) return;
-        setCurrentUser(res?.data || null);
-      } catch {
-        // ignore
-      }
-    })();
-    return () => { alive = false; };
-  }, []);
 
   const fetchProfile = useCallback(async () => {
     setLoading(true);
@@ -129,81 +115,80 @@ export default function PublicProfile() {
       let payloadPosts = [];
 
       for (const path of candidates) {
-  try {
-    const resp = await api.get(path);
-    const data = resp?.data ?? null;
-    if (!data) continue;
+        try {
+          const resp = await api.get(path);
+          const data = resp?.data ?? null;
+          if (!data) continue;
 
-    // Helper: normalize a profile object so we always have ownerUid present
-    function ensureProfileOwner(p) {
-      if (!p || typeof p !== "object") return p;
-      p.ownerUid =
-        p.ownerUid ||
-        p.uid ||
-        p.id ||
-        p._id ||
-        p.userId ||
-        p.userUid ||
-        (p.owner && (p.owner.uid || p.owner.userId)) ||
-        idOrHandle ||
-        null;
-      return p;
-    }
+          // Helper: normalize a profile object so we always have ownerUid present
+          function ensureProfileOwner(p) {
+            if (!p || typeof p !== "object") return p;
+            p.ownerUid =
+              p.ownerUid ||
+              p.uid ||
+              p.id ||
+              p._id ||
+              p.userId ||
+              p.userUid ||
+              (p.owner && (p.owner.uid || p.owner.userId)) ||
+              idOrHandle ||
+              null;
+            return p;
+          }
 
-    // Helper: normalize posts array and ensure each post has ownerUid
-    function normalizePostsArray(arr) {
-      if (!Array.isArray(arr)) return [];
-      return arr.map((post) => {
-        if (!post || typeof post !== "object") return post;
-        // prefer explicit ownerUid fields but fall back to other shapes
-        post.ownerUid =
-          post.ownerUid ||
-          post.proOwnerUid ||
-          (post.pro && (post.pro.ownerUid || post.proOwnerUid)) ||
-          post.createdBy ||
-          post.uid ||
-          post.userId ||
-          post._ownerUid ||
-          idOrHandle ||
-          null;
-        return post;
-      });
-    }
+          // Helper: normalize posts array and ensure each post has ownerUid
+          function normalizePostsArray(arr) {
+            if (!Array.isArray(arr)) return [];
+            return arr.map((post) => {
+              if (!post || typeof post !== "object") return post;
+              // prefer explicit ownerUid fields but fall back to other shapes
+              post.ownerUid =
+                post.ownerUid ||
+                post.proOwnerUid ||
+                (post.pro && (post.pro.ownerUid || post.proOwnerUid)) ||
+                post.createdBy ||
+                post.uid ||
+                post.userId ||
+                post._ownerUid ||
+                idOrHandle ||
+                null;
+              return post;
+            });
+          }
 
-    if (data.profile) {
-      payloadProfile = ensureProfileOwner(data.profile);
-      // posts may be in data.posts.items or data.posts (array) or data._posts
-      const postsCand =
-        Array.isArray(data.posts) ? data.posts : data.posts?.items || data._posts || [];
-      payloadPosts = normalizePostsArray(postsCand);
-      break;
-    }
+          if (data.profile) {
+            payloadProfile = ensureProfileOwner(data.profile);
+            // posts may be in data.posts.items or data.posts (array) or data._posts
+            const postsCand =
+              Array.isArray(data.posts) ? data.posts : data.posts?.items || data._posts || [];
+            payloadPosts = normalizePostsArray(postsCand);
+            break;
+          }
 
-    const normalized = normalizeProfile(data);
-    if (normalized) {
-      payloadProfile = ensureProfileOwner(normalized);
+          const normalized = normalizeProfile(data);
+          if (normalized) {
+            payloadProfile = ensureProfileOwner(normalized);
 
-      // pick posts from several possible shapes
-      if (data.posts) {
-        payloadPosts = Array.isArray(data.posts)
-          ? normalizePostsArray(data.posts)
-          : normalizePostsArray(data.posts.items || []);
-      } else if (data._posts) {
-        payloadPosts = normalizePostsArray(Array.isArray(data._posts) ? data._posts : []);
-      } else if (normalized._posts) {
-        payloadPosts = normalizePostsArray(Array.isArray(normalized._posts) ? normalized._posts : []);
-      } else {
-        payloadPosts = [];
+            // pick posts from several possible shapes
+            if (data.posts) {
+              payloadPosts = Array.isArray(data.posts)
+                ? normalizePostsArray(data.posts)
+                : normalizePostsArray(data.posts.items || []);
+            } else if (data._posts) {
+              payloadPosts = normalizePostsArray(Array.isArray(data._posts) ? data._posts : []);
+            } else if (normalized._posts) {
+              payloadPosts = normalizePostsArray(Array.isArray(normalized._posts) ? normalized._posts : []);
+            } else {
+              payloadPosts = [];
+            }
+
+            break;
+          }
+        } catch (e) {
+          const status = e?.response?.status;
+          if (status && status !== 404) throw e;
+        }
       }
-
-      break;
-    }
-  } catch (e) {
-    const status = e?.response?.status;
-    if (status && status !== 404) throw e;
-  }
-}
-
 
       // fallback: query posts by ownerUid
       if (payloadProfile && payloadPosts.length === 0) {
@@ -241,15 +226,15 @@ export default function PublicProfile() {
 
   /* ---------------- realtime handlers: profile stats + posts ---------------- */
   useEffect(() => {
-    if (!canonicalOwnerUid(profile)) return;
-
+    const owner = canonicalOwnerUid(profile);
+    if (!owner) return;
 
     try { connectSocket(); } catch (e) { console.warn("connectSocket failed", e?.message || e); }
 
     // profile stats (followers count, etc.)
     const onProfileStats = (payload) => {
       try {
-        if (!payload || payload.ownerUid !== profile.ownerUid) return;
+        if (!payload || payload.ownerUid !== owner) return;
         setProfile((p) => ({
           ...(p || {}),
           metrics: { ...(p?.metrics || {}), followers: payload.followersCount ?? p?.metrics?.followers },
@@ -263,8 +248,8 @@ export default function PublicProfile() {
     // also accept old profile:follow payloads for backcompat
     const onProfileFollow = (payload) => {
       try {
-        const owner = payload?.targetUid ?? payload?.target?.uid ?? payload?.ownerUid ?? null;
-        if (!owner || owner !== profile.ownerUid) return;
+        const eventOwner = payload?.targetUid ?? payload?.target?.uid ?? payload?.ownerUid ?? null;
+        if (!eventOwner || eventOwner !== owner) return;
         const followers = payload.followers ?? payload.followersCount ?? null;
         setProfile((p) => ({
           ...(p || {}),
@@ -280,7 +265,7 @@ export default function PublicProfile() {
     const onPostCreated = (payload) => {
       try {
         if (!payload || !payload.ownerUid) return;
-        if (String(payload.ownerUid) !== String(profile.ownerUid)) return;
+        if (String(payload.ownerUid) !== String(owner)) return;
         setPosts((prev) => {
           const id = payload._id || payload.id;
           if (!id) return [payload, ...prev];
@@ -296,9 +281,8 @@ export default function PublicProfile() {
     const onPostDeleted = (payload) => {
       try {
         const id = payload?.postId || payload?._id || payload?.id || null;
-        const owner = payload?.ownerUid || payload?.targetUid || null;
-        // if owner specified and doesn't match, ignore; otherwise remove by id
-        if (owner && String(owner) !== String(profile.ownerUid)) return;
+        const ownerPayload = payload?.ownerUid || payload?.targetUid || null;
+        if (ownerPayload && String(ownerPayload) !== String(owner)) return;
         if (!id) return;
         setPosts((prev) => prev.filter((p) => (p._id || p.id) !== id));
       } catch (err) {
@@ -349,15 +333,16 @@ export default function PublicProfile() {
       try { unregisterPostDeleted && unregisterPostDeleted(); } catch {}
       try { unregisterPostStats && unregisterPostStats(); } catch {}
     };
-  }, [profile?.ownerUid]);
+  }, [profile?.ownerUid, profile?.uid, profile?.id]);
 
   /* ------------------------- follow / unfollow (optimistic) ------------------------- */
   useEffect(() => {
-    if (!canonicalOwnerUid(profile)) return;
+    const owner = canonicalOwnerUid(profile);
+    if (!owner) return;
     let alive = true;
     (async () => {
       try {
-        const { data } = await api.get(`/api/follow/${encodeURIComponent(profile.ownerUid)}/status`);
+        const { data } = await api.get(`/api/follow/${encodeURIComponent(owner)}/status`);
         if (!alive) return;
         setFollowing(Boolean(data?.following));
       } catch (e) {
@@ -365,15 +350,16 @@ export default function PublicProfile() {
       }
     })();
     return () => { alive = false; };
-  }, [profile?.ownerUid]);
+  }, [profile?.ownerUid, profile?.uid, profile?.id]);
 
   async function follow() {
-    if (!profile?.ownerUid || followPending) return;
+    const owner = canonicalOwnerUid(profile);
+    if (!owner || followPending) return;
     setFollowPending(true);
     setFollowing(true);
     setProfile((p) => ({ ...(p || {}), followersCount: (p?.followersCount || 0) + 1, metrics: { ...(p?.metrics || {}), followers: (p?.metrics?.followers || 0) + 1 } }));
     try {
-      const { data } = await api.post(`/api/follow/${encodeURIComponent(profile.ownerUid)}`);
+      const { data } = await api.post(`/api/follow/${encodeURIComponent(owner)}`);
       setProfile((p) => ({ ...(p || {}), followersCount: data?.followers ?? p?.followersCount, metrics: { ...(p?.metrics || {}), followers: data?.followers ?? p?.metrics?.followers } }));
     } catch (e) {
       console.error("follow failed", e);
@@ -385,12 +371,13 @@ export default function PublicProfile() {
   }
 
   async function unfollow() {
-    if (!profile?.ownerUid || followPending) return;
+    const owner = canonicalOwnerUid(profile);
+    if (!owner || followPending) return;
     setFollowPending(true);
     setFollowing(false);
     setProfile((p) => ({ ...(p || {}), followersCount: Math.max(0, (p?.followersCount || 1) - 1), metrics: { ...(p?.metrics || {}), followers: Math.max(0, (p?.metrics?.followers || 1) - 1) } }));
     try {
-      const { data } = await api.delete(`/api/follow/${encodeURIComponent(profile.ownerUid)}`);
+      const { data } = await api.delete(`/api/follow/${encodeURIComponent(owner)}`);
       setProfile((p) => ({ ...(p || {}), followersCount: data?.followers ?? p?.followersCount, metrics: { ...(p?.metrics || {}), followers: data?.followers ?? p?.metrics?.followers } }));
     } catch (e) {
       console.error("unfollow failed", e);
@@ -402,21 +389,23 @@ export default function PublicProfile() {
   }
 
   function startMessage() {
-    if (!profile?.ownerUid) {
+    const owner = canonicalOwnerUid(profile);
+    if (!owner) {
       alert("Cannot start chat: missing user id");
       return;
     }
-    navigate(`/chat?with=${encodeURIComponent(profile.ownerUid)}`);
+    navigate(`/chat?with=${encodeURIComponent(owner)}`);
   }
 
   /* ------------------ Posts pagination & infinite scroll ------------------ */
   const fetchPosts = useCallback(
     async ({ append = false, before = null } = {}) => {
-      if (!profile?.ownerUid) return;
+      const owner = canonicalOwnerUid(profile);
+      if (!owner) return;
       try {
         if (append) setLoadingMore(true);
         else setLoadingPosts(true);
-        const params = { limit: pageSize, ownerUid: profile.ownerUid };
+        const params = { limit: pageSize, ownerUid: owner };
         if (before) params.before = before;
         const res = await api.get("/api/posts", { params }).catch(() => ({ data: [] }));
         const list = Array.isArray(res.data) ? res.data : Array.isArray(res.data?.items) ? res.data.items : [];
@@ -438,7 +427,7 @@ export default function PublicProfile() {
         setLoadingPosts(false);
       }
     },
-    [profile?.ownerUid]
+    [profile?.ownerUid, profile?.uid, profile?.id]
   );
 
   // attach IntersectionObserver for infinite scroll
@@ -478,9 +467,10 @@ export default function PublicProfile() {
 
   // ensure we refresh posts when profile changes
   useEffect(() => {
-   if (!canonicalOwnerUid(profile)) return;
+    const owner = canonicalOwnerUid(profile);
+    if (!owner) return;
     fetchPosts({ append: false, before: null });
-  }, [profile?.ownerUid, fetchPosts]);
+  }, [profile?.ownerUid, profile?.uid, profile?.id, fetchPosts]);
 
   if (loading) return <div className="max-w-6xl mx-auto px-4 py-10 text-zinc-200">Loading profile…</div>;
   if (err) return (
@@ -498,7 +488,7 @@ export default function PublicProfile() {
   const badges = Array.isArray(profile.badges) ? profile.badges : [];
   const gallery = Array.isArray(profile.gallery) ? profile.gallery : [];
 
-  const isAdmin = Boolean(currentUser?.isAdmin);
+  const isAdmin = !!meIsAdmin || Boolean(currentUser?.isAdmin);
 
   return (
     <div className="min-h-screen bg-[#0b0c10] text-white">
@@ -542,17 +532,17 @@ export default function PublicProfile() {
         </div>
       </div>
 
-          {/* Main grid */}
+      {/* Main grid */}
       <div className="max-w-6xl mx-auto px-4 mt-6 grid grid-cols-1 lg:grid-cols-[14rem_1fr_14rem] gap-6 pb-10">
 
-        {/* LEFT side menu for large screens - stays in column 1 */}
+        {/* LEFT side menu */}
         <div className="hidden lg:block">
           <div className="lg:sticky lg:top-20">
             <SideMenu me={currentUser} />
           </div>
         </div>
 
-        {/* MAIN column - middle column ONLY */}
+        {/* MAIN column */}
         <div className="space-y-6">
           {(profile.bio || profile.description) && (
             <section className="rounded-lg border border-zinc-800 bg-black/40 p-4">
@@ -592,10 +582,14 @@ export default function PublicProfile() {
             ) : <p className="text-sm text-zinc-400">No photos yet.</p>}
           </section>
 
-          {/* composer (only show for logged-in users) */}
-          {currentUser ? (
-            <FeedComposer lga={profile.lga || ""} onPosted={() => fetchPosts({ append: false, before: null })} />
-          ) : null}
+          {/* composer (only show when visiting your own public profile) */}
+          {(() => {
+            const owner = canonicalOwnerUid(profile);
+            const meUid = currentUser?.uid || currentUser?._id || currentUser?.id || currentUser?.userId || null;
+            if (!owner || !meUid) return null;
+            if (String(owner) !== String(meUid)) return null;
+            return <FeedComposer lga={profile.lga || ""} onPosted={() => fetchPosts({ append: false, before: null })} />;
+          })()}
 
           <section>
             <h3 className="text-lg font-semibold mb-3">Recent posts</h3>
@@ -619,7 +613,7 @@ export default function PublicProfile() {
           </section>
         </div>
 
-        {/* RIGHT ADS + stats - third column */}
+        {/* RIGHT ADS + stats */}
         <div className="hidden lg:block">
           <div className="w-56 self-start lg:sticky lg:top-20 space-y-6">
             <section className="rounded-lg border border-zinc-800 bg-black/40 p-4">
@@ -639,7 +633,7 @@ export default function PublicProfile() {
 
             <section className="rounded-lg border border-zinc-800 bg-black/40 p-4">
               <h2 className="text-lg font-semibold mb-2">Live activity</h2>
-              <LiveActivity ownerUid={profile.ownerUid} />
+              <LiveActivity ownerUid={canonicalOwnerUid(profile)} />
             </section>
 
             {/* Advert rail */}
