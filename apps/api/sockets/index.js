@@ -239,13 +239,28 @@ export default function attachSockets(httpServer) {
         ioRef?.to(`post:${p.postId}`).emit("post:stats", p);
       });
 
-      // subscribe: profile follow
+            // subscribe: profile follow
       await sub.subscribe("channel:profile:follow", (raw) => {
         const p = safeParse(raw);
         if (!p?.targetUid) return;
+
+        // existing follow event (back-compat)
         ioRef?.to(`profile:${p.targetUid}`).emit("profile:follow", p);
         ioRef?.to(`user:${p.targetUid}`).emit("notification:new", p);
+
+        // canonical stats event for frontends: include ownerUid and followersCount (and metrics if present)
+        try {
+          const statsPayload = {
+            ownerUid: p.targetUid,
+            followersCount: p.followers ?? p.followersCount ?? null,
+            metrics: p.metrics || (typeof p.followers !== "undefined" ? { followers: p.followers } : undefined),
+          };
+          ioRef?.to(`profile:${p.targetUid}`).emit("profile:stats", statsPayload);
+        } catch (e) {
+          console.warn("[sockets] emit profile:stats failed", e?.message || e);
+        }
       });
+
 
       console.log("[sockets] subscribed to Redis channels");
     }
