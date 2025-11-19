@@ -84,19 +84,23 @@ export default function PublicProfile() {
         typeof idOrHandle === "string" &&
         (idOrHandle.length > 20 || /^[0-9a-fA-F]{24}$/.test(idOrHandle));
 
+      // choose endpoints to try (more tolerant ordering for UIDs vs handles)
       const candidates = isLikelyUid
-  ? [
-      `/api/profile/public-by-uid/${encodeURIComponent(idOrHandle)}`, // try uid-based lookup first (fast)
-      `/api/barbers/${encodeURIComponent(idOrHandle)}`,               // then try as proId/ownerUid
-      `/api/profile/pro/${encodeURIComponent(idOrHandle)}`,
-      `/api/profile/public/${encodeURIComponent(idOrHandle)}`,
-    ]
-  : [
-      `/api/profile/public/${encodeURIComponent(idOrHandle)}`, // human handles first
-      `/api/profile/pro/${encodeURIComponent(idOrHandle)}`,
-      `/api/profile/public-by-uid/${encodeURIComponent(idOrHandle)}`,
-      `/api/barbers/${encodeURIComponent(idOrHandle)}`,
-    ];
+        ? [
+            // try UID-aware endpoints first (fast, avoids username lookups)
+            `/api/profile/public-by-uid/${encodeURIComponent(idOrHandle)}`, // canonical uid -> public profile
+            `/api/barbers/${encodeURIComponent(idOrHandle)}`,               // pro by _id (or fallback)
+            `/api/profile/pro/${encodeURIComponent(idOrHandle)}`,           // pro extras by proId
+            `/api/profile/public/${encodeURIComponent(idOrHandle)}`,       // fallback: treat uid as username
+          ]
+        : [
+            // human handles: prefer friendly username route first
+            `/api/profile/public/${encodeURIComponent(idOrHandle)}`,
+            `/api/profile/pro/${encodeURIComponent(idOrHandle)}`,
+            `/api/profile/public-by-uid/${encodeURIComponent(idOrHandle)}`,
+            `/api/barbers/${encodeURIComponent(idOrHandle)}`,
+          ];
+
 
       let payloadProfile = null;
       let payloadPosts = [];
