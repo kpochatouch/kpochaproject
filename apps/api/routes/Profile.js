@@ -573,16 +573,22 @@ async function handleGetPublicProfile(req, res) {
 
     if (proDoc?.metrics?.avgRating) profilePublic.ratingAverage = Number(proDoc.metrics.avgRating);
 
-    // 5) Recent public posts (small page)
-    const postsRaw = await Post.find({
-      proOwnerUid: ownerUid,
-      isPublic: true,
-      hidden: { $ne: true },
-      deleted: { $ne: true },
-    })
-      .sort({ createdAt: -1 })
-      .limit(10)
-      .lean();
+    // 5) Recent public posts (small page) — tolerant owner-fields query
+const postsRaw = await Post.find({
+  isPublic: true,
+  hidden: { $ne: true },
+  deleted: { $ne: true },
+  $or: [
+    { proOwnerUid: ownerUid },
+    { ownerUid: ownerUid },
+    { proUid: ownerUid },
+    { createdBy: ownerUid },
+  ],
+})
+  .sort({ createdAt: -1 })
+  .limit(10)
+  .lean();
+
 
     // Enrich posts with PostStats
     const pIds = postsRaw.map((p) => p._id?.toString()).filter(Boolean);
@@ -741,14 +747,20 @@ const ownerUid = client.uid;
     if (pro?.metrics?.avgRating) profilePublic.ratingAverage = Number(pro.metrics.avgRating);
 
     const postsRaw = await Post.find({
-      proOwnerUid: ownerUid,
-      isPublic: true,
-      hidden: { $ne: true },
-      deleted: { $ne: true },
-    })
-      .sort({ createdAt: -1 })
-      .limit(10)
-      .lean();
+  isPublic: true,
+  hidden: { $ne: true },
+  deleted: { $ne: true },
+  $or: [
+    { proOwnerUid: ownerUid },
+    { ownerUid: ownerUid },
+    { proUid: ownerUid },
+    { createdBy: ownerUid },
+  ],
+})
+  .sort({ createdAt: -1 })
+  .limit(10)
+  .lean();
+
 
     const pIds = postsRaw.map((p) => p._id?.toString()).filter(Boolean);
     let statsMap = {};
