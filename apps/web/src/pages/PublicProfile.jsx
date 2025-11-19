@@ -36,8 +36,25 @@ function normalizeProfile(data) {
     };
   }
 
+
   return null;
 }
+
+// --- canonical owner uid helper (use everywhere instead of trusting ownerUid) ---
+function canonicalOwnerUid(p) {
+  if (!p) return null;
+  return (
+    p.ownerUid ||
+    p.uid ||
+    p.id ||
+    p._id ||
+    p.userId ||
+    p.userUid ||
+    (p.owner && (p.owner.uid || p.owner.userId)) ||
+    null
+  );
+}
+
 
 export default function PublicProfile() {
   const { username: routeParam } = useParams();
@@ -112,34 +129,81 @@ export default function PublicProfile() {
       let payloadPosts = [];
 
       for (const path of candidates) {
-        try {
-          const resp = await api.get(path);
-          const data = resp?.data ?? null;
-          if (!data) continue;
+  try {
+    const resp = await api.get(path);
+    const data = resp?.data ?? null;
+    if (!data) continue;
 
-          if (data.profile) {
-            payloadProfile = data.profile;
-            payloadPosts = data.posts?.items || data.posts || [];
-            break;
-          }
+    // Helper: normalize a profile object so we always have ownerUid present
+    function ensureProfileOwner(p) {
+      if (!p || typeof p !== "object") return p;
+      p.ownerUid =
+        p.ownerUid ||
+        p.uid ||
+        p.id ||
+        p._id ||
+        p.userId ||
+        p.userUid ||
+        (p.owner && (p.owner.uid || p.owner.userId)) ||
+        idOrHandle ||
+        null;
+      return p;
+    }
 
-          const normalized = normalizeProfile(data);
-          if (normalized) {
-            payloadProfile = normalized;
-            if (data.posts) {
-              payloadPosts = Array.isArray(data.posts) ? data.posts : data.posts.items || [];
-            } else if (data._posts) {
-              payloadPosts = Array.isArray(data._posts) ? data._posts : [];
-            } else {
-              payloadPosts = [];
-            }
-            break;
-          }
-        } catch (e) {
-          const status = e?.response?.status;
-          if (status && status !== 404) throw e;
-        }
+    // Helper: normalize posts array and ensure each post has ownerUid
+    function normalizePostsArray(arr) {
+      if (!Array.isArray(arr)) return [];
+      return arr.map((post) => {
+        if (!post || typeof post !== "object") return post;
+        // prefer explicit ownerUid fields but fall back to other shapes
+        post.ownerUid =
+          post.ownerUid ||
+          post.proOwnerUid ||
+          (post.pro && (post.pro.ownerUid || post.proOwnerUid)) ||
+          post.createdBy ||
+          post.uid ||
+          post.userId ||
+          post._ownerUid ||
+          idOrHandle ||
+          null;
+        return post;
+      });
+    }
+
+    if (data.profile) {
+      payloadProfile = ensureProfileOwner(data.profile);
+      // posts may be in data.posts.items or data.posts (array) or data._posts
+      const postsCand =
+        Array.isArray(data.posts) ? data.posts : data.posts?.items || data._posts || [];
+      payloadPosts = normalizePostsArray(postsCand);
+      break;
+    }
+
+    const normalized = normalizeProfile(data);
+    if (normalized) {
+      payloadProfile = ensureProfileOwner(normalized);
+
+      // pick posts from several possible shapes
+      if (data.posts) {
+        payloadPosts = Array.isArray(data.posts)
+          ? normalizePostsArray(data.posts)
+          : normalizePostsArray(data.posts.items || []);
+      } else if (data._posts) {
+        payloadPosts = normalizePostsArray(Array.isArray(data._posts) ? data._posts : []);
+      } else if (normalized._posts) {
+        payloadPosts = normalizePostsArray(Array.isArray(normalized._posts) ? normalized._posts : []);
+      } else {
+        payloadPosts = [];
       }
+
+      break;
+    }
+  } catch (e) {
+    const status = e?.response?.status;
+    if (status && status !== 404) throw e;
+  }
+}
+
 
       // fallback: query posts by ownerUid
       if (payloadProfile && payloadPosts.length === 0) {
@@ -177,7 +241,8 @@ export default function PublicProfile() {
 
   /* ---------------- realtime handlers: profile stats + posts ---------------- */
   useEffect(() => {
-    if (!profile?.ownerUid) return;
+    if (!canonicalOwnerUid(profile)) return;
+
 
     try { connectSocket(); } catch (e) { console.warn("connectSocket failed", e?.message || e); }
 
@@ -288,7 +353,7 @@ export default function PublicProfile() {
 
   /* ------------------------- follow / unfollow (optimistic) ------------------------- */
   useEffect(() => {
-    if (!profile?.ownerUid) return;
+    if (!canonicalOwnerUid(profile)) return;
     let alive = true;
     (async () => {
       try {
@@ -413,7 +478,7 @@ export default function PublicProfile() {
 
   // ensure we refresh posts when profile changes
   useEffect(() => {
-    if (!profile?.ownerUid) return;
+   if (!canonicalOwnerUid(profile)) return;
     fetchPosts({ append: false, before: null });
   }, [profile?.ownerUid, fetchPosts]);
 
