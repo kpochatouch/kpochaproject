@@ -972,6 +972,26 @@ app.use("/api", walletWithAuth(requireAuth, requireAdmin));
 
 app.use("/api", pinRoutes({ requireAuth, Application }));
 app.use("/api", profileRouter);
+
+// Ensure posts always carry a canonical ownerUid (place BEFORE mounting postsRouter)
+app.use("/api/posts", requireAuth, (req, res, next) => {
+  try {
+    // only enforce for mutating requests
+    if (["POST", "PUT", "PATCH"].includes(req.method)) {
+      req.body = req.body || {};
+      // prefer explicit ownerUid (if body set by admin), otherwise set from req.user
+      if (!req.body.ownerUid) req.body.ownerUid = req.user?.uid || null;
+      if (!req.body.createdBy) req.body.createdBy = req.user?.uid || req.body.createdBy || null;
+      // keep proOwnerUid/proId if present — do not override
+    }
+  } catch (e) {
+    // do not break on middleware errors — proceed
+    console.warn("[posts:ownerUid-middleware] warn:", e?.message || e);
+  }
+  next();
+});
+
+
 app.use("/api", postsRouter);
 app.use("/api", followRoutes);
 app.use("/api", commentsRouter);

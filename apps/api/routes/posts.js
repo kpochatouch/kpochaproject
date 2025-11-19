@@ -49,6 +49,13 @@ function sanitizePostForClient(p) {
     pro: obj.pro,
     proId: obj.proId,
     proOwnerUid: obj.proOwnerUid,
+    // canonical ownerUid (preferred by frontend)
+    ownerUid:
+      obj.ownerUid ||
+      obj.proOwnerUid ||
+      obj.createdBy ||
+      (obj.pro && (obj.pro.ownerUid || obj.pro._id)) ||
+      null,
     text: obj.text,
     media: obj.media,
     tags: obj.tags || [],
@@ -61,6 +68,8 @@ function sanitizePostForClient(p) {
     authorAvatar: obj.pro?.photoUrl || "",
   };
 }
+
+
 
 function scoreFrom(stats) {
   const s = stats || {};
@@ -142,20 +151,27 @@ router.post("/posts", requireAuth, async (req, res) => {
     const lgaFinal = toUpper(lga || proDoc.lga || "");
 
     const post = await Post.create({
-      proOwnerUid: req.user.uid,
-      proId: proDoc._id,
-      pro: {
-        _id: proDoc._id,
-        name: proDoc.name || "Professional",
-        lga: proDoc.lga || "",
-        photoUrl: proDoc.photoUrl || proDoc.avatarUrl || "",
-      },
-      text,
-      media,
-      tags,
-      lga: lgaFinal,
-      isPublic: !!isPublic,
-    });
+  // canonical owner UID — used by profile pages & follow logic
+  ownerUid: req.user.uid,
+  // for backward compatibility / pro-specific fields
+  proOwnerUid: req.user.uid,
+  createdBy: req.user.uid, 
+  proId: proDoc._id,
+  pro: {
+    _id: proDoc._id,
+    name: proDoc.name || "Professional",
+    lga: proDoc.lga || "",
+    photoUrl: proDoc.photoUrl || proDoc.avatarUrl || "",
+  },
+  text,
+  media,
+  tags,
+  lga: lgaFinal,
+  isPublic: !!isPublic,
+  // createdBy is handy for older payload shapes
+  createdBy: req.user.uid,
+});
+
 
     // make sure stats doc exists
     await PostStats.findOneAndUpdate(

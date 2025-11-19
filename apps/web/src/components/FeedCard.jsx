@@ -561,12 +561,17 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
   const lga = pro.lga || post.lga || "";
 
   // who to follow (prefer owner UID)
-  const followTargetUid =
-    post.proOwnerUid ||
-    post.pro?.ownerUid ||
-    post.ownerUid ||
-    post.createdBy ||
-    null;
+  // who to follow (prefer owner UID) — robust fallbacks for mixed payloads
+const followTargetUid =
+  post.proOwnerUid ||
+  post.pro?.ownerUid ||
+  post.ownerUid ||
+  post.createdBy ||
+  post.uid ||
+  post.userId ||
+  post._ownerUid || // a few APIs use this shape
+  null;
+
 
   // Determine username present on the post (common shapes)
   const postUsername =
