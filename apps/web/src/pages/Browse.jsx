@@ -183,16 +183,26 @@ export default function Browse() {
         if (lga) params.lga = lga.toUpperCase();
 
         if (before) {
+          // try to parse as date; if valid, send ISO; otherwise use raw value
           try {
             const parsed = new Date(before);
-            if (!isNaN(parsed.getTime())) params.before = parsed.toISOString();
-            else params.before = before;
-          } catch {}
+            if (!isNaN(parsed.getTime())) {
+              params.before = parsed.toISOString();
+            } else {
+              params.before = before;
+            }
+          } catch {
+            params.before = before;
+          }
         }
 
         const r = await api.get("/api/feed/public", { params }).catch(() => ({ data: [] }));
 
-        const list = Array.isArray(r.data) ? r.data : Array.isArray(r.data?.items) ? r.data.items : [];
+        const list = Array.isArray(r.data)
+          ? r.data
+          : Array.isArray(r.data?.items)
+            ? r.data.items
+            : [];
 
         if (append) {
           setFeed((prev) => {
@@ -312,9 +322,17 @@ export default function Browse() {
 
           <button
             onClick={() => {
-              if (!service) return alert("Please choose a service before requesting an instant booking.");
-              if (!stateName || !lga) return alert("Please choose a state and LGA (service location) before requesting.");
-              navigate("/instant-request", { state: { serviceName: service, amountNaira: undefined } });
+              // require a selected service and a location (state + lga)
+              if (!service) {
+                return alert("Please choose a service before requesting an instant booking.");
+              }
+              if (!stateName || !lga) {
+                return alert("Please choose a state and LGA (service location) before requesting.");
+              }
+
+              navigate("/instant-request", {
+                state: { serviceName: service, amountNaira: undefined },
+              });
             }}
             aria-label="Start instant request"
             className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold hover:bg-emerald-500 transition"
@@ -325,8 +343,18 @@ export default function Browse() {
           <div>
             {/* existing tab pills */}
             <div className="inline-flex rounded-xl border border-zinc-800 overflow-hidden">
-              <button className={`px-4 py-2 text-sm border-r border-zinc-800 ${tab === "feed" ? "bg-gold text-black font-semibold" : "hover:bg-zinc-900"}`} onClick={() => setTab("feed")}>Feed</button>
-              <button className={`px-4 py-2 text-sm ${tab === "pros" ? "bg-gold text-black font-semibold" : "hover:bg-zinc-900"}`} onClick={() => setTab("pros")}>Pros</button>
+              <button
+                className={`px-4 py-2 text-sm border-r border-zinc-800 ${tab === "feed" ? "bg-gold text-black font-semibold" : "hover:bg-zinc-900"}`}
+                onClick={() => setTab("feed")}
+              >
+                Feed
+              </button>
+              <button
+                className={`px-4 py-2 text-sm ${tab === "pros" ? "bg-gold text-black font-semibold" : "hover:bg-zinc-900"}`}
+                onClick={() => setTab("pros")}
+              >
+                Pros
+              </button>
             </div>
           </div>
         </div>

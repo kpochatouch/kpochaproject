@@ -71,7 +71,7 @@ export default function PublicProfile() {
   useEffect(() => { loadingMoreRef.current = loadingMore; }, [loadingMore]);
   useEffect(() => { loadingPostsRef.current = loadingPosts; }, [loadingPosts]);
 
-  // fetch current user (best-effort) to check admin rights for advert rail
+  // fetch current user (best-effort) -> used for SideMenu + admin check + FeedCard actions
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -141,6 +141,7 @@ export default function PublicProfile() {
         }
       }
 
+      // fallback: query posts by ownerUid
       if (payloadProfile && payloadPosts.length === 0) {
         try {
           const pid = encodeURIComponent(payloadProfile.ownerUid || payloadProfile.id || idOrHandle);
@@ -174,42 +175,118 @@ export default function PublicProfile() {
     fetchProfile();
   }, [fetchProfile]);
 
-  /* sockets: live profile stats (followers, metrics) */
+  /* ---------------- realtime handlers: profile stats + posts ---------------- */
   useEffect(() => {
     if (!profile?.ownerUid) return;
+
     try { connectSocket(); } catch (e) { console.warn("connectSocket failed", e?.message || e); }
 
-    const applyStats = (payload) => {
+    // profile stats (followers count, etc.)
+    const onProfileStats = (payload) => {
       try {
-        if (!payload) return;
-        const ownerUid = payload.ownerUid ?? payload.targetUid ?? payload.target?.uid ?? null;
-        if (!ownerUid || ownerUid !== profile.ownerUid) return;
-        const followers = payload.followersCount ?? payload.followers ?? payload.followersCount ?? (payload.followers || null);
+        if (!payload || payload.ownerUid !== profile.ownerUid) return;
+        setProfile((p) => ({
+          ...(p || {}),
+          metrics: { ...(p?.metrics || {}), followers: payload.followersCount ?? p?.metrics?.followers },
+          followersCount: payload.followersCount ?? p?.followersCount ?? p?.metrics?.followers,
+        }));
+      } catch (err) {
+        console.warn("profile:stats handler failed", err?.message || err);
+      }
+    };
+
+    // also accept old profile:follow payloads for backcompat
+    const onProfileFollow = (payload) => {
+      try {
+        const owner = payload?.targetUid ?? payload?.target?.uid ?? payload?.ownerUid ?? null;
+        if (!owner || owner !== profile.ownerUid) return;
+        const followers = payload.followers ?? payload.followersCount ?? null;
         setProfile((p) => ({
           ...(p || {}),
           metrics: { ...(p?.metrics || {}), followers: followers ?? p?.metrics?.followers },
           followersCount: followers ?? p?.followersCount ?? p?.metrics?.followers,
         }));
       } catch (err) {
-        console.warn("applyStats failed", err?.message || err);
+        console.warn("profile:follow handler failed", err?.message || err);
+      }
+    };
+
+    // when a new post is created anywhere, if it belongs to this profile -> prepend
+    const onPostCreated = (payload) => {
+      try {
+        if (!payload || !payload.ownerUid) return;
+        if (String(payload.ownerUid) !== String(profile.ownerUid)) return;
+        setPosts((prev) => {
+          const id = payload._id || payload.id;
+          if (!id) return [payload, ...prev];
+          if (prev.some((p) => (p._id || p.id) === id)) return prev;
+          return [payload, ...prev];
+        });
+      } catch (err) {
+        console.warn("post:created handler failed", err?.message || err);
+      }
+    };
+
+    // when a post is deleted -> remove from list
+    const onPostDeleted = (payload) => {
+      try {
+        const id = payload?.postId || payload?._id || payload?.id || null;
+        const owner = payload?.ownerUid || payload?.targetUid || null;
+        // if owner specified and doesn't match, ignore; otherwise remove by id
+        if (owner && String(owner) !== String(profile.ownerUid)) return;
+        if (!id) return;
+        setPosts((prev) => prev.filter((p) => (p._id || p.id) !== id));
+      } catch (err) {
+        console.warn("post:deleted handler failed", err?.message || err);
+      }
+    };
+
+    // update per-post metrics (likes/comments) if payload refers to a post shown
+    const onPostStats = (payload) => {
+      try {
+        const id = payload?.postId || payload?.id || null;
+        if (!id) return;
+        setPosts((prev) =>
+          prev.map((p) => {
+            const pid = p._id || p.id;
+            if (!pid || String(pid) !== String(id)) return p;
+            // merge metrics safely
+            return { ...p, stats: { ...(p.stats || {}), ...(payload.stats || payload) } };
+          })
+        );
+      } catch (err) {
+        console.warn("post:stats handler failed", err?.message || err);
       }
     };
 
     const unregisterStats = typeof registerSocketHandler === "function"
-      ? registerSocketHandler("profile:stats", (p) => applyStats(p))
+      ? registerSocketHandler("profile:stats", onProfileStats)
+      : null;
+    const unregisterFollow = typeof registerSocketHandler === "function"
+      ? registerSocketHandler("profile:follow", onProfileFollow)
       : null;
 
-    const unregisterFollow = typeof registerSocketHandler === "function"
-      ? registerSocketHandler("profile:follow", (p) => applyStats(p))
+    // post events
+    const unregisterPostCreated = typeof registerSocketHandler === "function"
+      ? registerSocketHandler("post:created", onPostCreated)
+      : null;
+    const unregisterPostDeleted = typeof registerSocketHandler === "function"
+      ? registerSocketHandler("post:deleted", onPostDeleted)
+      : null;
+    const unregisterPostStats = typeof registerSocketHandler === "function"
+      ? registerSocketHandler("post:stats", onPostStats)
       : null;
 
     return () => {
       try { unregisterStats && unregisterStats(); } catch {}
       try { unregisterFollow && unregisterFollow(); } catch {}
+      try { unregisterPostCreated && unregisterPostCreated(); } catch {}
+      try { unregisterPostDeleted && unregisterPostDeleted(); } catch {}
+      try { unregisterPostStats && unregisterPostStats(); } catch {}
     };
   }, [profile?.ownerUid]);
 
-  /* follow / unfollow (optimistic) */
+  /* ------------------------- follow / unfollow (optimistic) ------------------------- */
   useEffect(() => {
     if (!profile?.ownerUid) return;
     let alive = true;
@@ -229,26 +306,14 @@ export default function PublicProfile() {
     if (!profile?.ownerUid || followPending) return;
     setFollowPending(true);
     setFollowing(true);
-    setProfile((p) => ({
-      ...(p || {}),
-      followersCount: (p?.followersCount || 0) + 1,
-      metrics: { ...(p?.metrics || {}), followers: (p?.metrics?.followers || 0) + 1 },
-    }));
+    setProfile((p) => ({ ...(p || {}), followersCount: (p?.followersCount || 0) + 1, metrics: { ...(p?.metrics || {}), followers: (p?.metrics?.followers || 0) + 1 } }));
     try {
       const { data } = await api.post(`/api/follow/${encodeURIComponent(profile.ownerUid)}`);
-      setProfile((p) => ({
-        ...(p || {}),
-        followersCount: data?.followers ?? p?.followersCount,
-        metrics: { ...(p?.metrics || {}), followers: data?.followers ?? p?.metrics?.followers },
-      }));
+      setProfile((p) => ({ ...(p || {}), followersCount: data?.followers ?? p?.followersCount, metrics: { ...(p?.metrics || {}), followers: data?.followers ?? p?.metrics?.followers } }));
     } catch (e) {
       console.error("follow failed", e);
       setFollowing(false);
-      setProfile((p) => ({
-        ...(p || {}),
-        followersCount: Math.max(0, (p?.followersCount || 1) - 1),
-        metrics: { ...(p?.metrics || {}), followers: Math.max(0, (p?.metrics?.followers || 1) - 1) },
-      }));
+      setProfile((p) => ({ ...(p || {}), followersCount: Math.max(0, (p?.followersCount || 1) - 1), metrics: { ...(p?.metrics || {}), followers: Math.max(0, (p?.metrics?.followers || 1) - 1) } }));
     } finally {
       setFollowPending(false);
     }
@@ -258,26 +323,14 @@ export default function PublicProfile() {
     if (!profile?.ownerUid || followPending) return;
     setFollowPending(true);
     setFollowing(false);
-    setProfile((p) => ({
-      ...(p || {}),
-      followersCount: Math.max(0, (p?.followersCount || 1) - 1),
-      metrics: { ...(p?.metrics || {}), followers: Math.max(0, (p?.metrics?.followers || 1) - 1) },
-    }));
+    setProfile((p) => ({ ...(p || {}), followersCount: Math.max(0, (p?.followersCount || 1) - 1), metrics: { ...(p?.metrics || {}), followers: Math.max(0, (p?.metrics?.followers || 1) - 1) } }));
     try {
       const { data } = await api.delete(`/api/follow/${encodeURIComponent(profile.ownerUid)}`);
-      setProfile((p) => ({
-        ...(p || {}),
-        followersCount: data?.followers ?? p?.followersCount,
-        metrics: { ...(p?.metrics || {}), followers: data?.followers ?? p?.metrics?.followers },
-      }));
+      setProfile((p) => ({ ...(p || {}), followersCount: data?.followers ?? p?.followersCount, metrics: { ...(p?.metrics || {}), followers: data?.followers ?? p?.metrics?.followers } }));
     } catch (e) {
       console.error("unfollow failed", e);
       setFollowing(true);
-      setProfile((p) => ({
-        ...(p || {}),
-        followersCount: (p?.followersCount || 0) + 1,
-        metrics: { ...(p?.metrics || {}), followers: (p?.metrics?.followers || 0) + 1 },
-      }));
+      setProfile((p) => ({ ...(p || {}), followersCount: (p?.followersCount || 0) + 1, metrics: { ...(p?.metrics || {}), followers: (p?.metrics?.followers || 0) + 1 } }));
     } finally {
       setFollowPending(false);
     }
@@ -296,11 +349,8 @@ export default function PublicProfile() {
     async ({ append = false, before = null } = {}) => {
       if (!profile?.ownerUid) return;
       try {
-        if (append) {
-          setLoadingMore(true);
-        } else {
-          setLoadingPosts(true);
-        }
+        if (append) setLoadingMore(true);
+        else setLoadingPosts(true);
         const params = { limit: pageSize, ownerUid: profile.ownerUid };
         if (before) params.before = before;
         const res = await api.get("/api/posts", { params }).catch(() => ({ data: [] }));
@@ -326,7 +376,7 @@ export default function PublicProfile() {
     [profile?.ownerUid]
   );
 
-  // attach observer when profile is set and feed tab (profile page always shows posts)
+  // attach IntersectionObserver for infinite scroll
   useEffect(() => {
     const sentinel = sentinelRef.current;
     if (!sentinel) return;
@@ -339,7 +389,6 @@ export default function PublicProfile() {
         for (const entry of entries) {
           if (entry.isIntersecting) {
             if (hasMoreRef.current && !loadingMoreRef.current && !loadingPostsRef.current) {
-              // compute cursor as last post's createdAt or _id
               const last = posts[posts.length - 1];
               if (!last) return;
               const rawCursor = last.createdAt || last._id || null;
@@ -365,7 +414,6 @@ export default function PublicProfile() {
   // ensure we refresh posts when profile changes
   useEffect(() => {
     if (!profile?.ownerUid) return;
-    // initial posts fetch handled by fetchProfile -> payload; also call fetchPosts to ensure pagination works
     fetchPosts({ append: false, before: null });
   }, [profile?.ownerUid, fetchPosts]);
 
@@ -431,6 +479,12 @@ export default function PublicProfile() {
 
       {/* Main grid */}
       <div className="max-w-6xl mx-auto px-4 mt-6 grid grid-cols-1 lg:grid-cols-3 gap-6 pb-10">
+        {/* LEFT side menu for large screens */}
+        <div className="hidden lg:block lg:sticky lg:top-20">
+          <SideMenu me={currentUser} />
+        </div>
+
+        {/* Main column */}
         <div className="lg:col-span-2 space-y-6">
           {(profile.bio || profile.description) && (
             <section className="rounded-lg border border-zinc-800 bg-black/40 p-4">
@@ -565,7 +619,7 @@ export default function PublicProfile() {
                           tags: ["AD"],
                         });
                         setAdMsg("Published to feed ✔");
-                        // refresh posts (also shows as feed item on global feed)
+                        // refresh posts on profile
                         fetchPosts({ append: false, before: null });
                       } catch (e) {
                         setAdMsg(e?.response?.data?.error || "Failed to publish ad");
