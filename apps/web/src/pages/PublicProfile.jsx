@@ -85,17 +85,18 @@ export default function PublicProfile() {
         (idOrHandle.length > 20 || /^[0-9a-fA-F]{24}$/.test(idOrHandle));
 
       const candidates = isLikelyUid
-        ? [
-            `/api/barbers/${encodeURIComponent(idOrHandle)}`,
-            `/api/profile/public-by-uid/${encodeURIComponent(idOrHandle)}`,
-            `/api/profile/pro/${encodeURIComponent(idOrHandle)}`,
-            `/api/profile/public/${encodeURIComponent(idOrHandle)}`,
-          ]
-        : [
-            `/api/profile/public/${encodeURIComponent(idOrHandle)}`,
-            `/api/profile/pro/${encodeURIComponent(idOrHandle)}`,
-            `/api/profile/public-by-uid/${encodeURIComponent(idOrHandle)}`,
-          ];
+  ? [
+      `/api/profile/public-by-uid/${encodeURIComponent(idOrHandle)}`, // try uid-based lookup first (fast)
+      `/api/barbers/${encodeURIComponent(idOrHandle)}`,               // then try as proId/ownerUid
+      `/api/profile/pro/${encodeURIComponent(idOrHandle)}`,
+      `/api/profile/public/${encodeURIComponent(idOrHandle)}`,
+    ]
+  : [
+      `/api/profile/public/${encodeURIComponent(idOrHandle)}`, // human handles first
+      `/api/profile/pro/${encodeURIComponent(idOrHandle)}`,
+      `/api/profile/public-by-uid/${encodeURIComponent(idOrHandle)}`,
+      `/api/barbers/${encodeURIComponent(idOrHandle)}`,
+    ];
 
       let payloadProfile = null;
       let payloadPosts = [];

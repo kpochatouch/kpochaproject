@@ -451,101 +451,138 @@ async function handleGetPublicProfile(req, res) {
       }
     }
 
-    // 1) Client profile by username (client profile is canonical for username)
-    const client = await ClientProfile.findOne({ username }).lean();
-    if (!client) return res.status(404).json({ error: "profile_not_found" });
+    // -------------------------
+    // TOLERANT LOOKUP — accept:
+    //  - username (exact or case-insensitive)
+    //  - uid (client profile keyed by uid)
+    //  - Pro._id (24-hex object id)
+    //  - ownerUid (Pro.ownerUid)
+    // -------------------------
+    let client = null;
+    let pro = null;
 
-    const ownerUid = client.uid; // your file uses uid for client
+    // If param looks like Mongo ObjectId → try Pro._id first
+    const looksLikeObjectId = /^[0-9a-fA-F]{24}$/.test(username);
+    if (looksLikeObjectId) {
+      pro = await Pro.findById(username).lean().catch(() => null);
+      if (pro) {
+        client = await ClientProfile.findOne({ uid: pro.ownerUid }).lean().catch(() => null);
+      }
+    }
 
-    // 2) Pro doc if exists
-    const pro = await Pro.findOne({ ownerUid }).lean().catch(() => null);
-    const publicFromPro = pro ? proToBarber(pro) : null;
+    // If still no client, try username exact
+    if (!client) {
+      client = await ClientProfile.findOne({ username }).lean().catch(() => null);
+    }
+
+    // Try uid
+    if (!client) {
+      client = await ClientProfile.findOne({ uid: username }).lean().catch(() => null);
+    }
+
+    // Try case-insensitive username
+    if (!client) {
+      const esc = username.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      client = await ClientProfile.findOne({
+        username: new RegExp(`^${esc}$`, "i"),
+      }).lean().catch(() => null);
+    }
+
+    // If still no client, maybe the value is actually ownerUid
+    if (!client && !pro) {
+      pro = await Pro.findOne({ ownerUid: username }).lean().catch(() => null);
+      if (pro) {
+        client = await ClientProfile.findOne({ uid: pro.ownerUid }).lean().catch(() => null);
+      }
+    }
+
+    // If STILL no luck, return not found
+    if (!client && !pro) {
+      return res.status(404).json({ error: "profile_not_found" });
+    }
+
+    const ownerUid = client ? client.uid : pro.ownerUid;
+
+    // 2) Pro doc if exists (load fresh if we only found client above)
+    const proDoc = pro || (await Pro.findOne({ ownerUid }).lean().catch(() => null));
+    const publicFromPro = proDoc ? proToBarber(proDoc) : null;
 
     // 3) Merge identity fields (client is primary for identity)
     const profilePublic = {
       ownerUid,
-      username: client.username || (publicFromPro && publicFromPro.id) || username,
-      displayName: client.displayName || client.fullName || (publicFromPro && publicFromPro.name) || "",
-      avatarUrl: client.photoUrl || (publicFromPro && publicFromPro.photoUrl) || "",
-      coverUrl: client.coverUrl || (pro?.coverUrl || ""),
-      bio: client.bio || (pro?.bio || "") || "",
-      isPro: Boolean(pro),
+      username: (client && client.username) || (publicFromPro && publicFromPro.id) || username,
+      displayName:
+        (client && (client.displayName || client.fullName)) ||
+        (publicFromPro && publicFromPro.name) ||
+        "",
+      avatarUrl:
+        (client && client.photoUrl) || (publicFromPro && publicFromPro.photoUrl) || "",
+      coverUrl: (client && client.coverUrl) || (proDoc && proDoc.coverUrl) || "",
+      bio: (client && client.bio) || (proDoc && proDoc.bio) || "",
+      isPro: Boolean(proDoc),
       services: (publicFromPro && publicFromPro.services) || [],
-      gallery: (publicFromPro && publicFromPro.gallery) || (client.gallery || []),
-      contactPublic: (pro && pro.contactPublic) || {},
+      gallery: (publicFromPro && publicFromPro.gallery) || (client && client.gallery) || [],
+      contactPublic: (proDoc && proDoc.contactPublic) || {},
       badges: (publicFromPro && publicFromPro.badges) || [],
-      metrics: (pro && pro.metrics) || {},
+      metrics: (proDoc && proDoc.metrics) || {},
       followersCount: 0,
       postsCount: 0,
       jobsCompleted: 0,
-      ratingAverage: Number((pro && pro.metrics && pro.metrics.avgRating) || 0),
+      ratingAverage: Number((proDoc && proDoc.metrics && proDoc.metrics.avgRating) || 0),
     };
 
     // 4) Counts: prefer pro.metrics, fall back to client or aggregate
-profilePublic.followersCount = Number(pro?.metrics?.followers || client.followersCount || 0);
+    profilePublic.followersCount = Number(proDoc?.metrics?.followers || (client && client.followersCount) || 0);
 
-// TOLERANT posts count: accept different historical field shapes
-try {
-  profilePublic.postsCount = await Post.countDocuments({
-    $and: [
-      { isPublic: true, hidden: { $ne: true }, deleted: { $ne: true } },
-      {
-        $or: [
-          { proOwnerUid: ownerUid },
-          { ownerUid: ownerUid },
-          { proUid: ownerUid },
-          { createdBy: ownerUid },
+    try {
+      profilePublic.postsCount = await Post.countDocuments({
+        $and: [
+          { isPublic: true, hidden: { $ne: true }, deleted: { $ne: true } },
+          {
+            $or: [
+              { proOwnerUid: ownerUid },
+              { ownerUid: ownerUid },
+              { proUid: ownerUid },
+              { createdBy: ownerUid },
+            ],
+          },
         ],
-      },
-    ],
-  });
-} catch (e) {
-  profilePublic.postsCount = Number(pro?.metrics?.postsCount || 0);
-}
-
-
-// JOBS COMPLETED: try to use pro.metrics first, else count bookings.
-// we attempt a few common field shapes so this is resilient to schema variations.
-if (pro?.metrics?.jobsCompleted) {
-  profilePublic.jobsCompleted = Number(pro.metrics.jobsCompleted || 0);
-} else {
-  try {
-    const bookingQueryOr = [
-      { proOwnerUid: ownerUid },
-      { proUid: ownerUid },
-    ];
-    // if we have a pro._id (ObjectId) include matching proId clause
-    if (pro && pro._id) {
-      try {
-        bookingQueryOr.push({ proId: new mongoose.Types.ObjectId(pro._id) });
-      } catch {}
+      });
+    } catch (e) {
+      profilePublic.postsCount = Number(proDoc?.metrics?.postsCount || 0);
     }
 
-    profilePublic.jobsCompleted = await Booking.countDocuments({
-      $and: [{ status: "completed" }, { $or: bookingQueryOr }],
-    });
-  } catch (e) {
-    profilePublic.jobsCompleted = 0;
-  }
-}
+    // JOBS COMPLETED
+    if (proDoc?.metrics?.jobsCompleted) {
+      profilePublic.jobsCompleted = Number(proDoc.metrics.jobsCompleted || 0);
+    } else {
+      try {
+        const bookingQueryOr = [{ proOwnerUid: ownerUid }, { proUid: ownerUid }];
+        if (proDoc && proDoc._id) {
+          try {
+            bookingQueryOr.push({ proId: new mongoose.Types.ObjectId(proDoc._id) });
+          } catch {}
+        }
+        profilePublic.jobsCompleted = await Booking.countDocuments({
+          $and: [{ status: "completed" }, { $or: bookingQueryOr }],
+        });
+      } catch (e) {
+        profilePublic.jobsCompleted = 0;
+      }
+    }
 
-if (pro?.metrics?.avgRating) {
-  profilePublic.ratingAverage = Number(pro.metrics.avgRating);
-}
-
+    if (proDoc?.metrics?.avgRating) profilePublic.ratingAverage = Number(proDoc.metrics.avgRating);
 
     // 5) Recent public posts (small page)
-// use canonical Post fields: proOwnerUid + isPublic, exclude hidden/deleted
-const postsRaw = await Post.find({
-  proOwnerUid: ownerUid,
-  isPublic: true,
-  hidden: { $ne: true },
-  deleted: { $ne: true },
-})
-  .sort({ createdAt: -1 })
-  .limit(10)
-  .lean();
-
+    const postsRaw = await Post.find({
+      proOwnerUid: ownerUid,
+      isPublic: true,
+      hidden: { $ne: true },
+      deleted: { $ne: true },
+    })
+      .sort({ createdAt: -1 })
+      .limit(10)
+      .lean();
 
     // Enrich posts with PostStats
     const pIds = postsRaw.map((p) => p._id?.toString()).filter(Boolean);
@@ -559,24 +596,22 @@ const postsRaw = await Post.find({
     }
 
     const publicPosts = postsRaw.map((p) => {
-  const s = statsMap[String(p._id)] || {};
-  return {
-    id: p._id?.toString?.() || String(p._id),
-    proOwnerUid: p.proOwnerUid || "",      // <-- standard field name
-    proId: p.proId ? String(p.proId) : null,
-    text: p.text,
-    media: p.media || [],
-    createdAt: p.createdAt,
-    stats: {
-      likes: Number(s.likesCount || s.likes || 0),
-      comments: Number(s.commentsCount || s.comments || 0),
-      shares: Number(s.sharesCount || s.shares || 0),
-      views: Number(s.viewsCount || s.views || 0),
-    },
-  };
-});
-
-
+      const s = statsMap[String(p._id)] || {};
+      return {
+        id: p._id?.toString?.() || String(p._id),
+        proOwnerUid: p.proOwnerUid || "",
+        proId: p.proId ? String(p.proId) : null,
+        text: p.text,
+        media: p.media || [],
+        createdAt: p.createdAt,
+        stats: {
+          likes: Number(s.likesCount || s.likes || 0),
+          comments: Number(s.commentsCount || s.comments || 0),
+          shares: Number(s.sharesCount || s.shares || 0),
+          views: Number(s.viewsCount || s.views || 0),
+        },
+      };
+    });
 
     const payload = { ok: true, profile: profilePublic, posts: { items: publicPosts, cursor: null } };
 
@@ -595,6 +630,7 @@ const postsRaw = await Post.find({
     return res.status(500).json({ error: "server_error" });
   }
 }
+
 
 router.get("/profile/public/:username", handleGetPublicProfile);
 
@@ -888,5 +924,20 @@ router.get(
     }
   }
 );
+
+// temporary debug route — remove after verifying data
+router.get("/profile/debug/:id", async (req, res) => {
+  try {
+    const id = String(req.params.id);
+    const client = await ClientProfile.findOne({ uid: id }).lean().catch(() => null);
+    const clientByUsername = await ClientProfile.findOne({ username: id }).lean().catch(() => null);
+    const proByOwner = await Pro.findOne({ ownerUid: id }).lean().catch(() => null);
+    const proById = await Pro.findById(id).lean().catch(() => null);
+    return res.json({ client, clientByUsername, proByOwner, proById });
+  } catch (e) {
+    return res.status(500).json({ error: e?.message || String(e) });
+  }
+});
+
 
 export default router;

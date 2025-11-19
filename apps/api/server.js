@@ -1402,15 +1402,38 @@ app.get("/api/barbers/:id", async (req, res) => {
   try {
     if (mongoose.connection.readyState !== 1)
       return res.status(503).json({ error: "Database not connected" });
-    const doc = await Pro.findById(req.params.id).lean();
+
+    const id = String(req.params.id || "").trim();
+    if (!id) return res.status(400).json({ error: "missing_id" });
+
+    let doc = null;
+
+    // 1) Try as ObjectId (_id)
+    try {
+      doc = await Pro.findById(id).lean();
+    } catch (e) {
+      // invalid ObjectId — ignore
+    }
+
+    // 2) Fallback: ownerUid
+    if (!doc) {
+      doc = await Pro.findOne({ ownerUid: id }).lean().catch(() => null);
+    }
+
+    // 3) Fallback: username/handle on Pro
+    if (!doc) {
+      doc = await Pro.findOne({ username: id }).lean().catch(() => null);
+    }
+
     if (!doc) return res.status(404).json({ error: "Not found" });
-    // scrub public
+
     return res.json(scrubPublicPro(proToBarber(doc)));
   } catch (err) {
     console.error("[barbers:id] DB error:", err);
     res.status(500).json({ error: "Failed to load barber" });
   }
 });
+
 
 /* ------------------- Contact for booking (restricted) ------------------- */
 app.get(
