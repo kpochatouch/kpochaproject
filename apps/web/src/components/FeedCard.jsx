@@ -629,114 +629,121 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
       className="bg-[#0F0F0F] border border-[#1F1F1F] rounded-xl overflow-hidden"
     >
       {/* header */}
-      <div className="flex items-start justify-between px-4 py-3 gap-3">
-        <div className="flex gap-3">
-          <div
-            className="w-10 h-10 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center cursor-pointer"
-            onClick={goToProfile}
-            title="View profile"
-          >
-            {avatar ? (
-              <img
-                src={avatar}
-                alt={proName}
-                className="w-full h-full object-cover"
-                loading="lazy"
-              />
-            ) : (
-              <span className="text-sm text-white">
-                {proName.slice(0, 1).toUpperCase()}
-              </span>
-            )}
-          </div>
-          <div>
-            <div
-              className="text-sm font-semibold text-white truncate max-w-[120px] cursor-pointer"
-              onClick={goToProfile}
-              title="View profile"
-            >
-              {proName}
-            </div>
+<div className="flex items-start justify-between px-4 py-3 gap-3">
+  <div className="flex gap-3">
+    <div
+      className="w-10 h-10 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center cursor-pointer"
+      onClick={goToProfile}
+      title="View profile"
+      role="button"
+      aria-label="View profile"
+    >
+      {avatar ? (
+        <img
+          src={avatar}
+          alt={proName}
+          className="w-full h-full object-cover"
+          loading="lazy"
+        />
+      ) : (
+        <span className="text-sm text-white">
+          {proName.slice(0, 1).toUpperCase()}
+        </span>
+      )}
+    </div>
 
-            <div className="text-xs text-gray-400">
-              {lga || "Nigeria"} • {timeAgo(post.createdAt)}
-            </div>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          {post.proId && (
-            <Link
-              to={`/book/${post.proId}`}
-              className="rounded-md bg-gold text-black px-3 py-1 text-sm font-semibold"
-            >
-              Book
-            </Link>
-          )}
-          <div className="relative">
-            <button
-              onClick={() => setMenuOpen((v) => !v)}
-              aria-label="Open post menu"
-              className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-800 text-white"
-            >
-              ⋯
-            </button>
-
-            {menuOpen && (
-              <div className="absolute right-0 mt-2 w-56 bg-[#141414] border border-[#2a2a2a] rounded-lg shadow-lg z-30">
-                <button
-                  onClick={toggleSave}
-                  className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
-                >
-                  {stats.savedByMe
-                    ? "Unsave post"
-                    : "Save post / Add to collection"}
-                </button>
-                <button
-                  onClick={handleCopyLink}
-                  className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
-                >
-                  Copy link
-                </button>
-                {isOwner ? (
-                  <button
-                    onClick={handleHideOrDeletePost}
-                    disabled={deleting}
-                    className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b] text-red-300 disabled:opacity-50"
-                  >
-                    {deleting ? "Deleting…" : "Delete / Hide Post"}
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => alert("You can only hide your own post")}
-                    className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
-                  >
-                    Hide Post
-                  </button>
-                )}
-                {isOwner && (
-                  <>
-                    {post.commentsDisabled ? (
-                      <button
-                        onClick={handleEnableComments}
-                        className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
-                      >
-                        Enable comments
-                      </button>
-                    ) : (
-                      <button
-                        onClick={handleDisableComments}
-                        className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
-                      >
-                        Disable comments
-                      </button>
-                    )}
-                  </>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
+    <div>
+      <div
+        className="text-sm font-semibold text-white truncate max-w-[120px] cursor-pointer"
+        onClick={goToProfile}
+        title="View profile"
+      >
+        {proName}
       </div>
+
+      <div className="text-xs text-gray-400">
+        {lga || "Nigeria"} • {timeAgo(post.createdAt)}
+      </div>
+    </div>
+  </div>
+
+  <div className="flex items-center gap-2">
+    {post.proId && (
+      <Link
+        to={`/book/${post.proId}`}
+        className="rounded-md bg-gold text-black px-3 py-1 text-sm font-semibold"
+      >
+        Book
+      </Link>
+    )}
+
+    <div className="relative">
+      <button
+        onClick={() => setMenuOpen((v) => !v)}
+        aria-label="Open post menu"
+        className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-800 text-white"
+      >
+        ⋯
+      </button>
+
+      {menuOpen && (
+        <div className="absolute right-0 mt-2 w-56 bg-[#141414] border border-[#2a2a2a] rounded-lg shadow-lg z-30">
+          <button
+            onClick={toggleSave}
+            className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
+          >
+            {stats.savedByMe ? "Unsave post" : "Save post / Add to collection"}
+          </button>
+
+          <button
+            onClick={handleCopyLink}
+            className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
+          >
+            Copy link
+          </button>
+
+          {isOwner ? (
+            <button
+              onClick={handleHideOrDeletePost}
+              disabled={deleting}
+              className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b] text-red-300 disabled:opacity-50"
+            >
+              {deleting ? "Deleting…" : "Delete / Hide Post"}
+            </button>
+          ) : (
+            <button
+              onClick={() => alert("You can only hide your own post")}
+              className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
+            >
+              Hide Post
+            </button>
+          )}
+
+          {isOwner && (
+            <>
+              {post.commentsDisabled ? (
+                <button
+                  onClick={handleEnableComments}
+                  className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
+                >
+                  Enable comments
+                </button>
+              ) : (
+                <button
+                  onClick={handleDisableComments}
+                  className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
+                >
+                  Disable comments
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  </div>
+</div>
+
 
       {/* text (with “view more”) */}
       {post.text && (

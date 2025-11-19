@@ -598,6 +598,17 @@ export async function getPublicProfile(username) {
   return data; // { ok: true, profile, posts: { items, cursor } }
 }
 
+// -- insert this immediately after getPublicProfile --
+
+export async function getPublicProfileByUid(uid) {
+  if (!uid) throw new Error("uid required");
+  const { data } = await api.get(
+    `/api/profile/public-by-uid/${encodeURIComponent(uid)}`
+  );
+  return data; // same shape: { ok: true, profile, posts: { items, cursor } }
+}
+
+
 export async function getProProfileAdmin(proId) {
   const { data } = await api.get(`/api/profile/pro/${proId}/admin`);
   return data;

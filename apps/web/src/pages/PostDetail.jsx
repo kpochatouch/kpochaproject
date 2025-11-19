@@ -446,22 +446,27 @@ export default function PostDetail() {
     );
   }
 
-  return (
-    <div className="max-w-xl mx-auto">
-      {/* header */}
-      <div className="px-4 pt-4 pb-2 flex items-start justify-between gap-3">
-        <div className="flex gap-3">
-          <div className="w-10 h-10 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center">
-            {avatar ? (
-              <img src={avatar} alt={proName} className="w-full h-full object-cover" />
-            ) : (
-              <span className="text-sm text-white">
-                {proName.slice(0, 1).toUpperCase()}
-              </span>
-            )}
-          </div>
-          <div>
-            <div className="text-sm font-semibold text-white truncate max-w-[120px]">{proName}</div>
+  <div
+  className="w-10 h-10 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center cursor-pointer"
+  onClick={goToProfile}
+  title="View profile"
+  role="button"
+  aria-label="View profile"
+>
+  {avatar ? (
+    <img
+      src={avatar}
+      alt={proName}
+      className="w-full h-full object-cover"
+      loading="lazy"
+    />
+  ) : (
+    <span className="text-sm text-white">
+      {proName.slice(0, 1).toUpperCase()}
+    </span>
+  )}
+</div>
+
 
             <div className="text-xs text-gray-400">
               {lga || "Nigeria"} • {timeAgo(post.createdAt)}
