@@ -477,15 +477,18 @@ export default function PublicProfile() {
         </div>
       </div>
 
-      {/* Main grid */}
-      <div className="max-w-6xl mx-auto px-4 mt-6 grid grid-cols-1 lg:grid-cols-3 gap-6 pb-10">
-        {/* LEFT side menu for large screens */}
-        <div className="hidden lg:block lg:sticky lg:top-20">
-          <SideMenu me={currentUser} />
+          {/* Main grid */}
+      <div className="max-w-6xl mx-auto px-4 mt-6 grid grid-cols-1 lg:grid-cols-[14rem_1fr_14rem] gap-6 pb-10">
+
+        {/* LEFT side menu for large screens - stays in column 1 */}
+        <div className="hidden lg:block">
+          <div className="lg:sticky lg:top-20">
+            <SideMenu me={currentUser} />
+          </div>
         </div>
 
-        {/* Main column */}
-        <div className="lg:col-span-2 space-y-6">
+        {/* MAIN column - middle column ONLY */}
+        <div className="space-y-6">
           {(profile.bio || profile.description) && (
             <section className="rounded-lg border border-zinc-800 bg-black/40 p-4">
               <h2 className="text-lg font-semibold mb-2">About</h2>
@@ -551,102 +554,104 @@ export default function PublicProfile() {
           </section>
         </div>
 
-        {/* RIGHT ADS + stats */}
-        <div className="space-y-6">
-          <section className="rounded-lg border border-zinc-800 bg-black/40 p-4">
-            <h2 className="text-lg font-semibold mb-2">Stats</h2>
-            <div className="text-sm text-zinc-200">
-              <div><strong>{profile.followersCount ?? profile.metrics?.followers ?? 0}</strong> followers</div>
-              <div><strong>{profile.postsCount ?? posts.length ?? 0}</strong> posts</div>
-              <div><strong>{profile.jobsCompleted ?? 0}</strong> completed</div>
-              <div><strong>{profile.ratingAverage ?? 0}</strong> rating</div>
-            </div>
-          </section>
+        {/* RIGHT ADS + stats - third column */}
+        <div className="hidden lg:block">
+          <div className="w-56 self-start lg:sticky lg:top-20 space-y-6">
+            <section className="rounded-lg border border-zinc-800 bg-black/40 p-4">
+              <h2 className="text-lg font-semibold mb-2">Stats</h2>
+              <div className="text-sm text-zinc-200">
+                <div><strong>{profile.followersCount ?? profile.metrics?.followers ?? 0}</strong> followers</div>
+                <div><strong>{profile.postsCount ?? posts.length ?? 0}</strong> posts</div>
+                <div><strong>{profile.jobsCompleted ?? 0}</strong> completed</div>
+                <div><strong>{profile.ratingAverage ?? 0}</strong> rating</div>
+              </div>
+            </section>
 
-          <section className="rounded-lg border border-zinc-800 bg-black/40 p-4">
-            <h2 className="text-lg font-semibold mb-2">Location</h2>
-            <p className="text-sm text-zinc-200">{location || "Nigeria"}</p>
-          </section>
+            <section className="rounded-lg border border-zinc-800 bg-black/40 p-4">
+              <h2 className="text-lg font-semibold mb-2">Location</h2>
+              <p className="text-sm text-zinc-200">{location || "Nigeria"}</p>
+            </section>
 
-          <section className="rounded-lg border border-zinc-800 bg-black/40 p-4">
-            <h2 className="text-lg font-semibold mb-2">Live activity</h2>
-            <LiveActivity ownerUid={profile.ownerUid} />
-          </section>
+            <section className="rounded-lg border border-zinc-800 bg-black/40 p-4">
+              <h2 className="text-lg font-semibold mb-2">Live activity</h2>
+              <LiveActivity ownerUid={profile.ownerUid} />
+            </section>
 
-          {/* Advert rail */}
-          <div className="rounded-lg border border-zinc-800 bg-black/40 p-3">
-            {isAdmin ? (
-              <>
-                <div className="text-xs text-zinc-300 mb-2">Advert (admin only)</div>
-                <input
-                  value={adminAdUrl}
-                  onChange={(e) => { setAdminAdUrl(e.target.value); setAdMsg(""); }}
-                  placeholder="Image / video URL"
-                  className="w-full bg-black border border-zinc-700 rounded px-2 py-1 text-xs mb-2"
-                />
-                <input
-                  type="file"
-                  accept="image/*,video/*"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (!file) return;
-                    const localUrl = URL.createObjectURL(file);
-                    setAdminAdUrl(localUrl);
-                    setAdMsg("Local preview (not uploaded)");
-                  }}
-                  className="w-full text-[10px] text-zinc-400 mb-2"
-                />
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => {
-                      if (!adminAdUrl.trim()) return setAdMsg("Paste a media URL first.");
-                      setAdMsg("Previewing…");
-                      setTimeout(() => setAdMsg("Preview ready"), 250);
+            {/* Advert rail */}
+            <div className="rounded-lg border border-zinc-800 bg-black/40 p-3">
+              {isAdmin ? (
+                <>
+                  <div className="text-xs text-zinc-300 mb-2">Advert (admin only)</div>
+                  <input
+                    value={adminAdUrl}
+                    onChange={(e) => { setAdminAdUrl(e.target.value); setAdMsg(""); }}
+                    placeholder="Image / video URL"
+                    className="w-full bg-black border border-zinc-700 rounded px-2 py-1 text-xs mb-2"
+                  />
+                  <input
+                    type="file"
+                    accept="image/*,video/*"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      const localUrl = URL.createObjectURL(file);
+                      setAdminAdUrl(localUrl);
+                      setAdMsg("Local preview (not uploaded)");
                     }}
-                    className="flex-1 rounded-md border border-zinc-700 px-2 py-1 text-xs hover:bg-zinc-900"
-                  >
-                    Preview
-                  </button>
-                  <button
-                    onClick={async () => {
-                      if (!adminAdUrl.trim()) return setAdMsg("Paste a media URL first.");
-                      try {
-                        setAdMsg("Publishing…");
-                        await api.post("/api/posts", {
-                          text: "Sponsored",
-                          media: [{ url: adminAdUrl.trim(), type: /\.(mp4|mov|webm)$/i.test(adminAdUrl) ? "video" : "image" }],
-                          isPublic: true,
-                          tags: ["AD"],
-                        });
-                        setAdMsg("Published to feed ✔");
-                        // refresh posts on profile
-                        fetchPosts({ append: false, before: null });
-                      } catch (e) {
-                        setAdMsg(e?.response?.data?.error || "Failed to publish ad");
-                      }
-                    }}
-                    className="flex-1 rounded-md bg-gold text-black px-2 py-1 text-xs font-semibold"
-                  >
-                    Publish
-                  </button>
+                    className="w-full text-[10px] text-zinc-400 mb-2"
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => {
+                        if (!adminAdUrl.trim()) return setAdMsg("Paste a media URL first.");
+                        setAdMsg("Previewing…");
+                        setTimeout(() => setAdMsg("Preview ready"), 250);
+                      }}
+                      className="flex-1 rounded-md border border-zinc-700 px-2 py-1 text-xs hover:bg-zinc-900"
+                    >
+                      Preview
+                    </button>
+                    <button
+                      onClick={async () => {
+                        if (!adminAdUrl.trim()) return setAdMsg("Paste a media URL first.");
+                        try {
+                          setAdMsg("Publishing…");
+                          await api.post("/api/posts", {
+                            text: "Sponsored",
+                            media: [{ url: adminAdUrl.trim(), type: /\.(mp4|mov|webm)$/i.test(adminAdUrl) ? "video" : "image" }],
+                            isPublic: true,
+                            tags: ["AD"],
+                          });
+                          setAdMsg("Published to feed ✔");
+                          // refresh posts on profile
+                          fetchPosts({ append: false, before: null });
+                        } catch (e) {
+                          setAdMsg(e?.response?.data?.error || "Failed to publish ad");
+                        }
+                      }}
+                      className="flex-1 rounded-md bg-gold text-black px-2 py-1 text-xs font-semibold"
+                    >
+                      Publish
+                    </button>
+                  </div>
+                  {adMsg && <p className="text-[10px] text-zinc-500 mt-2">{adMsg}</p>}
+                </>
+              ) : null}
+
+              {adminAdUrl ? (
+                <div className="rounded-lg border border-zinc-800 overflow-hidden bg-black/20 h-40 mt-3 flex items-center justify-center">
+                  {adminAdUrl.match(/\.(mp4|mov|webm)$/i) ? (
+                    <video src={adminAdUrl} muted loop playsInline autoPlay className="w-full h-full object-cover" />
+                  ) : (
+                    <img src={adminAdUrl} alt="ad" loading="lazy" className="w-full h-full object-cover" />
+                  )}
                 </div>
-                {adMsg && <p className="text-[10px] text-zinc-500 mt-2">{adMsg}</p>}
-              </>
-            ) : null}
-
-            {adminAdUrl ? (
-              <div className="rounded-lg border border-zinc-800 overflow-hidden bg-black/20 h-40 mt-3 flex items-center justify-center">
-                {adminAdUrl.match(/\.(mp4|mov|webm)$/i) ? (
-                  <video src={adminAdUrl} muted loop playsInline autoPlay className="w-full h-full object-cover" />
-                ) : (
-                  <img src={adminAdUrl} alt="ad" loading="lazy" className="w-full h-full object-cover" />
-                )}
-              </div>
-            ) : (
-              <div className="h-40 rounded-lg border border-zinc-800 bg-black/20 flex items-center justify-center text-xs text-zinc-500 mt-3">
-                Advert space
-              </div>
-            )}
+              ) : (
+                <div className="h-40 rounded-lg border border-zinc-800 bg-black/20 flex items-center justify-center text-xs text-zinc-500 mt-3">
+                  Advert space
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>

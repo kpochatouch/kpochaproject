@@ -16,6 +16,7 @@ import FeedCard from "../components/FeedCard";
 import ErrorBoundary from "../components/ErrorBoundary";
 import SideMenu from "../components/SideMenu.jsx";
 import FeedComposer from "../components/FeedComposer.jsx";
+import { connectSocket, registerSocketHandler } from "../lib/socket";
 
 /* ---------------- Main Browse page ---------------- */
 export default function Browse() {
@@ -250,6 +251,73 @@ export default function Browse() {
     const before = isNaN(d.getTime()) ? rawCursor : d.toISOString();
     await fetchFeed({ append: true, before });
   }, [feed, fetchFeed]);
+
+  // Realtime feed socket handlers — place after your refs/vars and before the component return
+useEffect(() => {
+  // only attach when feed tab is active (optional)
+  if (tab !== "feed") return;
+
+  try { connectSocket(); } catch (e) { console.warn("connectSocket failed", e?.message || e); }
+
+  // Post created anywhere — prepend to feed if not present and if it matches current lga filter (or always if you want global)
+  const onPostCreated = (payload) => {
+    try {
+      if (!payload) return;
+      // optional: filter by lga if feed is currently filtered
+      if (lga) {
+        const postLga = (payload.lga || payload.ownerLga || payload.locationLga || "").toUpperCase();
+        if (postLga && postLga !== (lga || "").toUpperCase()) return;
+      }
+      setFeed((prev) => {
+        const id = payload._id || payload.id;
+        if (!id) return [payload, ...prev];
+        if (prev.some((p) => (p._id || p.id) === id)) return prev;
+        return [payload, ...prev];
+      });
+    } catch (err) { console.warn("post:created handler failed", err); }
+  };
+
+  // Post deleted — remove from list
+  const onPostDeleted = (payload) => {
+    try {
+      const id = payload?.postId || payload?._id || payload?.id || null;
+      if (!id) return;
+      setFeed((prev) => prev.filter((p) => (p._id || p.id) !== id));
+    } catch (err) { console.warn("post:deleted handler failed", err); }
+  };
+
+  // Post stats update (likes/comments/views) — merge into the matching post
+  const onPostStats = (payload) => {
+    try {
+      const id = payload?.postId || payload?.id || null;
+      if (!id) return;
+      setFeed((prev) =>
+        prev.map((p) => {
+          const pid = p._id || p.id;
+          if (!pid || String(pid) !== String(id)) return p;
+          return { ...p, stats: { ...(p.stats || {}), ...(payload.stats || payload) } };
+        })
+      );
+    } catch (err) { console.warn("post:stats handler failed", err); }
+  };
+
+  const unregisterCreated = typeof registerSocketHandler === "function"
+    ? registerSocketHandler("post:created", onPostCreated)
+    : null;
+  const unregisterDeleted = typeof registerSocketHandler === "function"
+    ? registerSocketHandler("post:deleted", onPostDeleted)
+    : null;
+  const unregisterStats = typeof registerSocketHandler === "function"
+    ? registerSocketHandler("post:stats", onPostStats)
+    : null;
+
+  return () => {
+    try { unregisterCreated && unregisterCreated(); } catch {}
+    try { unregisterDeleted && unregisterDeleted(); } catch {}
+    try { unregisterStats && unregisterStats(); } catch {}
+  };
+}, [tab, lga]); // note: depend on tab and lga so handlers respect the current filter
+
 
   // setup IntersectionObserver for automatic infinite scroll
   useEffect(() => {

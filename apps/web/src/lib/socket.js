@@ -1,4 +1,5 @@
-import { io } from 'socket.io-client';
+// app/web/src/lib/socket.js
+import { io } from "socket.io-client";
 
 let socket = null;
 let connected = false;
@@ -6,40 +7,59 @@ let handlers = new Map();
 
 function getAuthHeader() {
   try {
-    const t = localStorage.getItem('token');
-    if (t) return { token: `Bearer ${t}` };
-
-  } catch {}
+    const t = localStorage.getItem("token");
+    if (t) {
+      const bearer = `Bearer ${t}`;
+      // include multiple keys so server-side checks find something whichever key it expects
+      return { token: bearer, Authorization: bearer, authorization: bearer };
+    }
+  } catch (e) {
+    // ignore localStorage failures
+  }
   return {};
 }
 
-export function connectSocket({ url = (import.meta.env.VITE_SOCKET_URL || import.meta.env.VITE_API_BASE_URL || '').replace(/\/api$/, '') } = {}) {
+export function connectSocket({
+  url = (import.meta.env.VITE_SOCKET_URL || import.meta.env.VITE_API_BASE_URL || "").replace(/\/api$/, ""),
+} = {}) {
   if (connected && socket) return socket;
   try {
     const opts = {
       autoConnect: false,
-      transports: ['websocket', 'polling'],
+      transports: ["websocket", "polling"],
       auth: () => getAuthHeader(),
     };
     socket = io(url || window.location.origin, opts);
 
-    socket.on('connect', () => { connected = true; });
-    socket.on('disconnect', () => { connected = false; });
+    socket.on("connect", () => {
+      connected = true;
+      // console.log("[socket] connected", socket.id);
+    });
+    socket.on("disconnect", () => {
+      connected = false;
+      // console.log("[socket] disconnected");
+    });
 
-    socket.onAny((ev, payload) => {
+    // unified dispatcher using onAny — handle variable args safely
+    socket.onAny((ev, ...args) => {
       const set = handlers.get(ev);
-      if (set) for (const fn of set) { try { fn(payload); } catch (e) {} }
+      const payload = args.length ? args[0] : undefined;
+      if (set) {
+        for (const fn of set) {
+          try { fn(payload); } catch (e) { console.warn("[socket] handler failed", e); }
+        }
+      }
     });
 
     socket.connect();
   } catch (e) {
-    console.warn('[socket] connect failed', e?.message || e);
+    console.warn("[socket] connect failed", e?.message || e);
   }
   return socket;
 }
 
 export function registerSocketHandler(event, fn) {
-  if (!event || typeof fn !== 'function') return () => {};
+  if (!event || typeof fn !== "function") return () => {};
   if (!handlers.has(event)) handlers.set(event, new Set());
   handlers.get(event).add(fn);
   if (!connected) connectSocket();
@@ -55,20 +75,22 @@ export function joinRooms(rooms = []) {
     if (!socket) connectSocket();
     if (!Array.isArray(rooms)) rooms = [rooms];
     for (const r of rooms) {
-      // server listens for 'room:join'
-      socket.emit('room:join', { room: r }, (ack) => {
-        // optional ack handling — ignore for now
+      socket.emit("room:join", { room: r }, (ack) => {
+        // optional ack handling
       });
     }
-  } catch (e) {}
+  } catch (e) {
+    console.warn("[socket] joinRooms failed", e?.message || e);
+  }
 }
-
 
 export function disconnectSocket() {
   try {
     socket?.removeAllListeners();
     socket?.disconnect();
-  } catch {}
+  } catch (e) {
+    console.warn("[socket] disconnect failed", e?.message || e);
+  }
   socket = null;
   connected = false;
 }
