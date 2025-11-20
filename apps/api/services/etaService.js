@@ -1,4 +1,5 @@
-// Optional ETA helper (distance → ETA). Minimal implementation using haversine.
+//apps/api/services/etaServices
+ //Optional ETA helper (distance → ETA). Minimal implementation using haversine.
 export function haversineKm(aLat, aLon, bLat, bLon) {
   const R = 6371;
   const dLat = deg2rad(bLat - aLat);

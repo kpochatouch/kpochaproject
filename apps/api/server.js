@@ -1428,31 +1428,36 @@ app.get("/api/barbers/:id", async (req, res) => {
 
     let doc = null;
 
-    // 1) Try as ObjectId (_id)
+    // 1) Try _id
     try {
       doc = await Pro.findById(id).lean();
-    } catch (e) {
-      // invalid ObjectId — ignore
-    }
+    } catch {}
 
-    // 2) Fallback: ownerUid
+    // 2) Try ownerUid
     if (!doc) {
       doc = await Pro.findOne({ ownerUid: id }).lean().catch(() => null);
     }
 
-    // 3) Fallback: username/handle on Pro
+    // 3) Try username
     if (!doc) {
       doc = await Pro.findOne({ username: id }).lean().catch(() => null);
     }
 
     if (!doc) return res.status(404).json({ error: "Not found" });
 
-    return res.json(scrubPublicPro(proToBarber(doc)));
+    // Convert to public shape
+    const shaped = scrubPublicPro(proToBarber(doc));
+
+    // *** FIX: always include actual ownerUid ***
+    shaped.ownerUid = doc.ownerUid;
+
+    return res.json(shaped);
   } catch (err) {
     console.error("[barbers:id] DB error:", err);
     res.status(500).json({ error: "Failed to load barber" });
   }
 });
+
 
 
 /* ------------------- Contact for booking (restricted) ------------------- */
