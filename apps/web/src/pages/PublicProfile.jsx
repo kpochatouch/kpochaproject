@@ -400,24 +400,68 @@ export default function PublicProfile() {
   /* ------------------ Posts pagination & infinite scroll ------------------ */
   const fetchPosts = useCallback(
     async ({ append = false, before = null } = {}) => {
-      const owner = canonicalOwnerUid(profile);
-      if (!owner) return;
+      const owner =
+        profile?.ownerUid || canonicalOwnerUid(profile) || idOrHandle;
+      if (!owner) {
+        console.warn("[PublicProfile] no owner uid, skip fetchPosts", profile);
+        return;
+      }
+
       try {
         if (append) setLoadingMore(true);
         else setLoadingPosts(true);
-        const params = { limit: pageSize, ownerUid: owner };
-        if (before) params.before = before;
-        const res = await api.get("/api/posts", { params }).catch(() => ({ data: [] }));
-        const list = Array.isArray(res.data) ? res.data : Array.isArray(res.data?.items) ? res.data.items : [];
+
+        let list = [];
+
+        // ---- primary: /api/posts?ownerUid=... ----
+        try {
+          const params = { limit: pageSize, ownerUid: owner };
+          if (before) params.before = before;
+          const res = await api.get("/api/posts", { params });
+          list = Array.isArray(res.data)
+            ? res.data
+            : Array.isArray(res.data?.items)
+            ? res.data.items
+            : [];
+        } catch (err) {
+          console.warn(
+            "[PublicProfile] /api/posts failed, will try /posts/author/:uid",
+            err?.response?.data || err?.message || err
+          );
+        }
+
+        // ---- fallback: /api/posts/author/:uid (by proOwnerUid) ----
+        if (!list.length && !before) {
+          try {
+            const res2 = await api.get(
+              `/api/posts/author/${encodeURIComponent(owner)}`
+            );
+            const list2 = Array.isArray(res2.data)
+              ? res2.data
+              : Array.isArray(res2.data?.items)
+              ? res2.data.items
+              : [];
+            if (list2.length) list = list2;
+          } catch (err2) {
+            console.warn(
+              "[PublicProfile] /api/posts/author fallback failed",
+              err2?.response?.data || err2?.message || err2
+            );
+          }
+        }
+
         if (append) {
           setPosts((prev) => {
             const existing = new Set(prev.map((p) => p._id || p.id));
-            const newItems = list.filter((it) => !existing.has(it._id || it.id));
+            const newItems = list.filter(
+              (it) => !existing.has(it._id || it.id)
+            );
             return newItems.length ? [...prev, ...newItems] : prev;
           });
         } else {
           setPosts(list);
         }
+
         if (!list.length || list.length < pageSize) setHasMore(false);
         else setHasMore(true);
       } catch (e) {
@@ -427,8 +471,9 @@ export default function PublicProfile() {
         setLoadingPosts(false);
       }
     },
-    [profile?.ownerUid, profile?.uid, profile?.id]
+    [profile, idOrHandle]
   );
+
 
   // attach IntersectionObserver for infinite scroll
   useEffect(() => {
@@ -465,12 +510,13 @@ export default function PublicProfile() {
     };
   }, [posts, fetchPosts]);
 
-  // ensure we refresh posts when profile changes
+    // ensure we refresh posts when profile changes
   useEffect(() => {
     const owner = canonicalOwnerUid(profile);
     if (!owner) return;
     fetchPosts({ append: false, before: null });
   }, [profile?.ownerUid, profile?.uid, profile?.id, fetchPosts]);
+
 
   if (loading) return <div className="max-w-6xl mx-auto px-4 py-10 text-zinc-200">Loading profile…</div>;
   if (err) return (
@@ -582,14 +628,38 @@ export default function PublicProfile() {
             ) : <p className="text-sm text-zinc-400">No photos yet.</p>}
           </section>
 
-          {/* composer (only show when visiting your own public profile) */}
+           {/* composer (only show when visiting your own public profile) */}
           {(() => {
-            const owner = canonicalOwnerUid(profile);
-            const meUid = currentUser?.uid || currentUser?._id || currentUser?.id || currentUser?.userId || null;
-            if (!owner || !meUid) return null;
-            if (String(owner) !== String(meUid)) return null;
-            return <FeedComposer lga={profile.lga || ""} onPosted={() => fetchPosts({ append: false, before: null })} />;
-          })()}
+  // prefer the MeContext shape (me.uid etc.)
+  const meUid = currentUser?.uid || currentUser?._id || currentUser?.id || currentUser?.userId || null;
+  const meUsername = currentUser?.username || currentUser?.handle || null;
+
+  const ownerUid = profile?.ownerUid || canonicalOwnerUid(profile); // prefer explicit ownerUid
+
+  const profileUsername = profile?.username || profile?.id || null;
+
+  // 1) If both have real UIDs -> require equality
+  if (ownerUid && meUid) {
+    if (String(ownerUid) === String(meUid)) {
+      return <FeedComposer lga={profile.lga || ""} onPosted={() => fetchPosts({ append: false, before: null })} />;
+    }
+    return null;
+  }
+
+  // 2) If no UID on profile, fall back to username equality (safe fallback)
+  if (!ownerUid && profileUsername && meUsername && String(profileUsername) === String(meUsername)) {
+    return <FeedComposer lga={profile.lga || ""} onPosted={() => fetchPosts({ append: false, before: null })} />;
+  }
+
+  // 3) last fallback: if profile has ownerUid-like field that looks like a username,
+  //    try to compare against meUsername (defensive; temporary)
+  if (profileUsername && meUsername && String(profileUsername) === String(meUsername)) {
+    return <FeedComposer lga={profile.lga || ""} onPosted={() => fetchPosts({ append: false, before: null })} />;
+  }
+
+  return null;
+})()}
+
 
           <section>
             <h3 className="text-lg font-semibold mb-3">Recent posts</h3>
