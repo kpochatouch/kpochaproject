@@ -202,9 +202,29 @@ if ("geolocation" in navigator) {
   }, [barberId]);
 
 
-  const serviceName = carriedService || "Selected service";
-  const amountNaira =
-    carriedAmount !== "" ? Number(carriedAmount) : Number(barber?.services?.[0]?.price || 0);
+  // If no carriedService, fall back to the first service from backend
+const fallbackServiceName =
+  carriedService ||
+  (Array.isArray(barber?.services) && barber.services.length
+    ? (typeof barber.services[0] === "string"
+        ? barber.services[0]                     // string style
+        : barber.services[0]?.name || "")        // object style { name, price }
+    : "");
+
+const serviceName = fallbackServiceName;
+
+// Amount: use carriedAmount if present, otherwise price of that first service
+const amountNaira =
+  carriedAmount !== "" && carriedAmount !== null && typeof carriedAmount !== "undefined"
+    ? Number(carriedAmount)
+    : (Array.isArray(barber?.services) && barber.services.length
+        ? Number(
+            typeof barber.services[0] === "string"
+              ? 0
+              : barber.services[0]?.price || 0
+          )
+        : 0);
+
 
   async function startPaystackInline(booking, idToken = null) {
     if (!window.PaystackPop || typeof window.PaystackPop.setup !== "function") {
@@ -222,12 +242,13 @@ if ("geolocation" in navigator) {
             { display_name: "Service", variable_name: "service", value: serviceName },
             { display_name: "Address", variable_name: "address", value: address.trim() },
             coords
-              ? {
-                  display_name: "GPS",
-                  variable_name: "gps",
-                  value: `${coords.lat},${coords.lon}`,
-                }
-              : null,
+  ? {
+      display_name: "GPS",
+      variable_name: "gps",
+      value: `${coords.lat},${coords.lng}`, // ✅ use lng
+    }
+  : null,
+
           ].filter(Boolean),
         },
         callback: async (res) => {
@@ -333,39 +354,65 @@ const payload = {
 try {
   setBusy(true);
 
+  // 1) Availability check (only if we have coords)
+  if (normalizedCoords) {
+    try {
+      const { data: avail } = await api.post("/api/availability/check", {
+        lat: normalizedCoords.lat,
+        lng: normalizedCoords.lng,
+      });
 
-      // get ID token (if any) and attach to headers
-      const idToken = await getIdTokenOrNull();
-
-      const headers = idToken ? { Authorization: `Bearer ${idToken}` } : {};
-
-      // create booking (protected route)
-      const { data } = await api.post("/api/bookings/instant", payload, { headers });
-      const booking = data?.booking || data;
-      if (!booking?._id) {
-        console.error("booking create response:", data);
-        throw new Error("booking_init_failed");
-      }
-
-      // go to paystack
-      try {
-        if (paystackReady) {
-          await startPaystackInline(booking, idToken);
+      if (!avail?.ok) {
+        if (avail?.reason === "NO_PRO_AVAILABLE") {
+          setErr("No professional is currently available around this location.");
         } else {
-          await startPaystackRedirect(booking);
+          setErr("Could not confirm availability. Please try again in a moment.");
         }
-      } catch (e) {
-        console.error("Payment start error:", e);
-        setErr("Payment could not start. Open the booking detail to pay again.");
-        nav(`/bookings/${booking._id}`);
+        return; // stop here, do not create booking
       }
+
+      // Optionally: you can show ETA somewhere later with avail.etaMins
+      // e.g., "Pro can arrive in about 10 minutes"
     } catch (e) {
-      console.error("handleBook error:", e?.response?.data || e?.message || e);
-      const serverMsg = e?.response?.data?.error || e?.response?.data?.message;
-      setErr(serverMsg || "Booking failed. Please try again.");
-    } finally {
-      setBusy(false);
+      console.error("[availability] check failed:", e?.response?.data || e?.message || e);
+      // Fail-soft: you can either block or allow booking when availability fails.
+      // I'll allow booking but you can choose to block if you prefer.
+      // setErr("We couldn't confirm availability right now. Please try again.");
+      // return;
     }
+  }
+
+  // 2) Get ID token (if any) and attach to headers
+  const idToken = await getIdTokenOrNull();
+  const headers = idToken ? { Authorization: `Bearer ${idToken}` } : {};
+
+  // 3) Create booking (protected route)
+  const { data } = await api.post("/api/bookings/instant", payload, { headers });
+  const booking = data?.booking || data;
+  if (!booking?._id) {
+    console.error("booking create response:", data);
+    throw new Error("booking_init_failed");
+  }
+
+  // 4) Go to Paystack
+  try {
+    if (paystackReady) {
+      await startPaystackInline(booking, idToken);
+    } else {
+      await startPaystackRedirect(booking);
+    }
+  } catch (e) {
+    console.error("Payment start error:", e);
+    setErr("Payment could not start. Open the booking detail to pay again.");
+    nav(`/bookings/${booking._id}`);
+  }
+} catch (e) {
+  console.error("handleBook error:", e?.response?.data || e?.message || e);
+  const serverMsg = e?.response?.data?.error || e?.response?.data?.message;
+  setErr(serverMsg || "Booking failed. Please try again.");
+} finally {
+  setBusy(false);
+}
   }
 
 

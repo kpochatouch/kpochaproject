@@ -112,24 +112,35 @@ export default function BarberCard({ barber = {}, onOpen, onBook }) {
   const bio = String(barber.bio || barber.description || "").trim();
   const photoUrl = barber.photoUrl || barber.avatarUrl || "";
 
-  // rating source priority: backend already gave rating + ratingStars
-  const rawRating =
-    typeof barber.rating === "number"
-      ? barber.rating
-      : Number(
-          barber?.metrics && typeof barber.metrics.avgRating !== "undefined"
-            ? barber.metrics.avgRating
-            : 0
-        ) || 0;
+// ======================= FIXED RATING LOGIC ===========================
+const ratingCount = Number(barber.ratingCount || 0);
 
-  const fullStars =
-    Number.isFinite(Number(barber?.ratingStars?.full))
-      ? Math.max(0, Math.min(5, Number(barber.ratingStars.full)))
-      : Math.max(0, Math.min(5, Math.round(rawRating)));
+const rawRating =
+  typeof barber.rating === "number"
+    ? barber.rating
+    : Number(
+        barber?.metrics && typeof barber.metrics.avgRating !== "undefined"
+          ? barber.metrics.avgRating
+          : 0
+      ) || 0;
 
-  const emptyStars = 5 - fullStars;
-  const rating = Math.max(0, Math.min(5, rawRating));
-  const ratingCount = Number(barber.ratingCount || 0);
+// Only show rating if there are REAL reviews
+const hasRealReviews = ratingCount > 0 && rawRating > 0;
+
+const rating = hasRealReviews
+  ? Math.max(0, Math.min(5, rawRating))
+  : 0;
+
+// Stars
+const fullStars =
+  hasRealReviews && Number.isFinite(Number(barber?.ratingStars?.full))
+    ? Math.max(0, Math.min(5, Number(barber.ratingStars.full)))
+    : hasRealReviews
+    ? Math.max(0, Math.min(5, Math.round(rating)))
+    : 0;
+
+const emptyStars = 5 - fullStars;
+
 
   function handleAvatarClick() {
     onOpen?.(barber);

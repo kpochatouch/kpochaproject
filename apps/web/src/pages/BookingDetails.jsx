@@ -304,6 +304,16 @@ export default function BookingDetails() {
               </button>
             )}
 
+            {/* Chat / Call button */}
+            {booking?._id && (
+              <Link
+                to={`/bookings/${booking._id}/chat`}
+                className="px-4 py-2 rounded-lg border border-zinc-700 hover:bg-zinc-900 text-sm"
+              >
+                Open Chat / Call
+              </Link>
+            )}
+
             <Link
               to={me?.isPro ? "/pro" : "/browse"}
               className="px-4 py-2 rounded-lg border border-zinc-800"
@@ -311,6 +321,7 @@ export default function BookingDetails() {
               Back
             </Link>
           </div>
+
 
           {/* Meta */}
           <div className="mt-6 text-xs text-zinc-500 space-y-1">

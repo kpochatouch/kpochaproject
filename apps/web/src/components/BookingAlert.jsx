@@ -1,341 +1,218 @@
-// apps/web/src/components/BarberCard.jsx
+// apps/web/src/components/BookingAlert.jsx
+import { useEffect, useMemo, useRef, useState } from "react";
+import { getProBookings, acceptBooking } from "../lib/api";
 import { Link } from "react-router-dom";
 
 /**
- * Branding is sourced from .env for flexibility.
- * Vite: VITE_APP_LOGO_URL=https://your-cdn/...png
+ * BookingAlert
+ * - Polls bookings assigned to the signed-in pro (every 20s by default)
+ * - Shows a compact alert when a NEW booking appears (status scheduled/pending_payment)
+ * - Optional chime (off by default)
+ *
+ * Props:
+ *   pollMs?: number        (default 20000)
+ *   playSound?: boolean    (default false)
+ *   soundSrc?: string      (custom audio file if playSound is true)
  */
-const APP_LOGO_URL = import.meta.env.VITE_APP_LOGO_URL || "";
+export default function BookingAlert({ pollMs = 20000, playSound = false, soundSrc }) {
+  const [queue, setQueue] = useState([]); // alerts to show (FIFO)
+  const [busy, setBusy] = useState(false);
+  const audioRef = useRef(null);
 
-/* ------------------------------ Helpers ------------------------------ */
-function toArrayServices(svcs) {
-  if (Array.isArray(svcs)) {
-    return svcs
-      .map((s) => (typeof s === "string" ? { name: s, price: 0 } : s))
-      .filter((s) => s && s.name);
+  // Used to remember what we’ve already alerted about (latest timestamp)
+  const STORAGE_KEY = "pro:lastBookingAlertAt";
+
+  const current = queue.length ? queue[0] : null;
+
+  // Prepare sound (lazy)
+  useEffect(() => {
+    if (!playSound) return;
+    if (!audioRef.current) {
+      const a = new Audio(soundSrc || "/chime.mp3");
+      a.preload = "auto";
+      audioRef.current = a;
+    }
+  }, [playSound, soundSrc]);
+
+  // Poll bookings
+  useEffect(() => {
+    let alive = true;
+    let timer;
+
+    async function tick() {
+      try {
+        const data = await getProBookings(); // array
+        if (!alive) return;
+
+        // Actionable to notify: 'scheduled' (always), 'pending_payment' (heads-up; accept disabled if unpaid)
+        const actionable = (Array.isArray(data) ? data : []).filter((b) =>
+          ["scheduled", "pending_payment"].includes(b.status)
+        );
+
+        // last time (ms) we alerted
+        const lastAtMs = Number(localStorage.getItem(STORAGE_KEY) || 0);
+
+        // normalize created time (prefer createdAt; fallback to updatedAt or now)
+        const norm = actionable.map((b) => ({
+          ...b,
+          _createdMs: new Date(b.createdAt || b.updatedAt || Date.now()).getTime(),
+        }));
+
+        // Only push items newer than watermark, and avoid duplicates already queued
+        const existingIds = new Set(queue.map((q) => q._id));
+        const fresh = norm
+          .filter((b) => b._createdMs > lastAtMs && !existingIds.has(b._id))
+          .sort((a, b) => b._createdMs - a._createdMs); // newest first
+
+        if (fresh.length) {
+          setQueue((q) => [...q, ...fresh]);
+
+          // watermark = newest created time from this batch
+          localStorage.setItem(STORAGE_KEY, String(fresh[0]._createdMs));
+
+          if (playSound && audioRef.current) {
+            try {
+              audioRef.current.currentTime = 0;
+              audioRef.current.play();
+            } catch {}
+          }
+        }
+      } catch {
+        // silent fail
+      } finally {
+        if (alive) timer = setTimeout(tick, pollMs);
+      }
+    }
+
+    tick();
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [pollMs, playSound, queue]);
+
+  async function onAccept(id) {
+    setBusy(true);
+    try {
+      await acceptBooking(id);
+      // remove current alert from queue
+      setQueue((q) => q.slice(1));
+    } catch (e) {
+      alert("Could not accept booking. Ensure payment is 'paid'.");
+    } finally {
+      setBusy(false);
+    }
   }
-  if (typeof svcs === "string") {
-    return svcs
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean)
-      .map((name) => ({ name, price: 0 }));
+
+  function onDismiss() {
+    setQueue((q) => q.slice(1));
   }
-  return [];
-}
 
-function priceTag(s) {
-  const name = s?.name || "Service";
-  const raw = s?.price;
-  const priceNum = Number(raw);
-  if (!Number.isFinite(priceNum) || priceNum <= 0) return name;
-  return `${name} ₦${priceNum.toLocaleString()}`;
-}
+  // Read fields safely (instant flow stores a service snapshot)
+  const svcName = useMemo(() => {
+    if (!current) return "Service";
+    return current.service?.serviceName || current.serviceName || "Service";
+  }, [current]);
 
-function availabilityLabel(av) {
-  if (!av) return "";
-  if (typeof av === "string") return av.trim();
-  if (typeof av === "object") {
-    if (av.status) return String(av.status).trim();
-    if (av.start && av.end) return `Hours ${av.start}-${av.end}`;
-  }
-  return "";
-}
+  const amountKobo = useMemo(() => {
+    if (!current) return 0;
+    // prefer top-level amountKobo written by server; fallback to service snapshot price
+    if (Number.isFinite(Number(current.amountKobo))) return Number(current.amountKobo);
+    if (Number.isFinite(Number(current.service?.priceKobo))) return Number(current.service.priceKobo);
+    return 0;
+  }, [current]);
 
-function Avatar({ url, seed, onClick }) {
-  if (url) {
+  const whenText = useMemo(() => {
+    if (!current) return "";
+    // Instant booking may have scheduledFor === null
+    if (!current.scheduledFor) return "ASAP";
+    return formatDate(current.scheduledFor);
+  }, [current]);
+
+  const lgaText = useMemo(() => {
+    if (!current) return "";
+    return current.lga || "";
+  }, [current]);
+
+  const canAccept = useMemo(() => {
+    if (!current) return false;
     return (
-      <img
-        src={url}
-        alt="Profile"
-        className="w-20 h-20 rounded-full border-2 border-zinc-700 object-cover shadow-lg cursor-pointer"
-        onClick={onClick}
-      />
+      current.paymentStatus === "paid" &&
+      (current.status === "scheduled" || current.status === "pending_payment")
     );
-  }
-  const initials =
-    (seed || "")
-      .toString()
-      .split("@")[0]
-      .split(/[.\-_ ]+/)
-      .slice(0, 2)
-      .map((s) => s?.[0]?.toUpperCase())
-      .join("") || "PR";
-  return (
-    <div
-      className="w-20 h-20 rounded-full border-2 border-zinc-700 bg-zinc-900 flex items-center justify-center text-xl font-semibold"
-      onClick={onClick}
-    >
-      {initials}
-    </div>
-  );
-}
+  }, [current]);
 
-/* ------------------------------------------------------------------ */
-/* Actual BarberCard component                                         */
-/* ------------------------------------------------------------------ */
-export default function BarberCard({ barber = {}, onOpen, onBook }) {
-  // canonical id from backend (pro doc)
-  const id = barber.id || barber._id || "";
-
-  // prefer friendly handle when available
-  const publicHandle = (barber.username || barber.handle || barber.publicHandle || "").toString().trim();
-
-  // helper: detect id-like (Mongo ObjectId or long id)
-  const isLikelyUid =
-    typeof id === "string" && (id.length > 20 || /^[0-9a-fA-F]{24}$/.test(id));
-
-  // Build the profile link:
-  // - If we have an id that looks like a uid, use /profile/:id (fast + reliable)
-  // - Else if we have a friendly handle, use /profile/:handle
-  // - Else, fall back to "#" and prevent navigation
-  const profilePath = isLikelyUid
-    ? `/profile/${encodeURIComponent(id)}`
-    : publicHandle
-    ? `/profile/${encodeURIComponent(publicHandle)}`
-    : "#";
-
-  const name =
-    barber.name ||
-    [barber.firstName, barber.lastName].filter(Boolean).join(" ").trim() ||
-    "Professional";
-
-  const role = typeof barber.title === "string" ? barber.title.trim() : "";
-  const availability = availabilityLabel(barber.availability);
-  const verified = !!barber.verified;
-
-  const lga = String(barber.lga || "").trim();
-  const state = String(barber.state || "").trim();
-
-  const services = toArrayServices(barber.services);
-  const topThree = services.slice(0, 3);
-
-  const startingPrice =
-    typeof barber.startingPrice === "number" && barber.startingPrice >= 0
-      ? barber.startingPrice
-      : services.length
-      ? Math.min(
-          ...services
-            .map((s) => Number(s.price) || 0)
-            .filter((n) => Number.isFinite(n))
-        )
-      : 0;
-
-  const bio = String(barber.bio || barber.description || "").trim();
-  const photoUrl = barber.photoUrl || barber.avatarUrl || "";
-
-  const rawRating =
-    typeof barber.rating === "number"
-      ? barber.rating
-      : Number(
-          barber?.metrics && typeof barber.metrics.avgRating !== "undefined"
-            ? barber.metrics.avgRating
-            : 0
-        ) || 0;
-
-  const fullStars =
-    Number.isFinite(Number(barber?.ratingStars?.full))
-      ? Math.max(0, Math.min(5, Number(barber.ratingStars.full)))
-      : Math.max(0, Math.min(5, Math.round(rawRating)));
-
-  const emptyStars = 5 - fullStars;
-  const rating = Math.max(0, Math.min(5, rawRating));
-  const ratingCount = Number(barber.ratingCount || 0);
-
-  function handleAvatarClick() {
-    onOpen?.(barber);
-  }
+  if (!current) return null;
 
   return (
-    <div
-      className="
-        relative overflow-hidden rounded-2xl
-        border border-zinc-800
-        bg-[#0f1116]
-        text-white
-      "
-      style={{
-        boxShadow:
-          "0 1px 0 rgba(255,255,255,0.03) inset, 0 10px 30px rgba(0,0,0,0.45)",
-      }}
-    >
-      {/* Dot decoration */}
-      <svg
-        className="absolute left-1/2 -translate-x-1/2 -top-1 h-16 w-24 opacity-30"
-        viewBox="0 0 80 60"
-        fill="none"
-        aria-hidden="true"
-      >
-        <defs>
-          <pattern
-            id="dots"
-            x="0"
-            y="0"
-            width="4"
-            height="4"
-            patternUnits="userSpaceOnUse"
-          >
-            <circle cx="1" cy="1" r="0.6" fill="#ff7a00" />
-          </pattern>
-        </defs>
-        <path d="M0,0 L80,0 L40,60 Z" fill="url(#dots)" />
-      </svg>
-
-      {/* Logo from .env */}
-      {APP_LOGO_URL && (
-        <img
-          src={APP_LOGO_URL}
-          alt="Kpocha Touch"
-          className="absolute right-4 top-3 h-9 w-9 rounded-full object-cover ring-1 ring-white/10 bg-white/10 p-0.5"
-          loading="lazy"
-        />
-      )}
-
-      {/* Top content */}
-      <div className="flex gap-5 px-5 pt-5 pb-16">
-        <div className="shrink-0">
-          <Avatar url={photoUrl} seed={name} onClick={handleAvatarClick} />
+    <div className="fixed bottom-4 right-4 z-50 w-[22rem] rounded-xl border border-amber-700 bg-black/80 backdrop-blur p-4 shadow-xl">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm text-amber-300 mb-1">New booking available</div>
+          <div className="font-medium">
+            {svcName} • {formatMoney(amountKobo)}
+          </div>
+          <div className="text-xs text-zinc-400 mt-0.5">
+            {whenText} • {lgaText}
+          </div>
+          {/* Private client contact is not shown here; becomes visible to pro after ACCEPT. */}
         </div>
 
-        <div className="min-w-0 flex-1">
-          <div className="leading-tight flex items-center gap-2">
-            <div className="text-[20px] font-extrabold tracking-wide truncate">
-              {name}
-            </div>
-            {startingPrice > 0 && (
-              <span className="text-[11px] text-gold bg-gold/10 px-2 py-0.5 rounded-full">
-                From ₦{startingPrice.toLocaleString()}
-              </span>
-            )}
-          </div>
-          {role && <div className="text-sm text-zinc-400">{role}</div>}
-
-          {/* Rating, location, etc. */}
-          <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-zinc-300">
-            {rating > 0 && (
-              <span className="inline-flex items-center gap-0.5">
-                {Array.from({ length: fullStars }).map((_, i) => (
-                  <span
-                    key={`f${i}`}
-                    className={`text-yellow-400 kpo-star-anim ${
-                      rating >= 4.6 ? "kpo-star-glow" : ""
-                    }`}
-                  >
-                    ★
-                  </span>
-                ))}
-                {Array.from({ length: emptyStars }).map((_, i) => (
-                  <span key={`e${i}`} className="text-zinc-600 kpo-star-anim">
-                    ★
-                  </span>
-                ))}
-                <span className="ml-1 font-semibold">{rating.toFixed(1)}</span>
-                {ratingCount > 0 && (
-                  <span className="text-zinc-500 ml-1">({ratingCount})</span>
-                )}
-              </span>
-            )}
-
-            {(state || lga) && (
-              <>
-                {rating > 0 && <span className="h-3 w-px bg-zinc-700" />}
-                <span className="truncate">
-                  {[state, lga].filter(Boolean).join(", ")}
-                </span>
-              </>
-            )}
-
-            {availability && (
-              <>
-                <span className="h-3 w-px bg-zinc-700" />
-                <span className="rounded-full px-2 py-0.5 bg-zinc-800 text-zinc-200">
-                  {availability}
-                </span>
-              </>
-            )}
-
-            {verified && (
-              <>
-                <span className="h-3 w-px bg-zinc-700" />
-                <span className="rounded-full bg-emerald-900/40 px-2 py-0.5 text-emerald-300">
-                  ✓ Verified
-                </span>
-              </>
-            )}
-          </div>
-
-          {/* Top 3 services */}
-          {!!topThree.length && (
-            <div className="mt-3 flex flex-wrap gap-2">
-              {topThree.map((s, i) => {
-                const label = priceTag(s);
-                const svcName = s?.name || "";
-                return onBook && svcName ? (
-                  <button
-                    key={`${svcName}-${i}`}
-                    type="button"
-                    onClick={() => onBook(s)}
-                    className="rounded-full border border-zinc-700 bg-zinc-900/60 px-3 py-1 text-xs text-zinc-200 hover:bg-zinc-900"
-                    title={`Book ${svcName}`}
-                  >
-                    {label}
-                  </button>
-                ) : (
-                  <span
-                    key={`${label}-${i}`}
-                    className="rounded-full border border-zinc-700 bg-zinc-900/60 px-3 py-1 text-xs text-zinc-200"
-                  >
-                    {label}
-                  </span>
-                );
-              })}
-            </div>
-          )}
-
-          {bio && <p className="mt-3 line-clamp-2 text-sm text-zinc-300">{bio}</p>}
-        </div>
+        <button
+          onClick={onDismiss}
+          className="text-xs text-zinc-400 hover:text-zinc-200 px-2 py-1"
+          aria-label="Dismiss"
+        >
+          ✕
+        </button>
       </div>
 
-      {/* Gradient footer */}
-      <div
-        className="pointer-events-none absolute bottom-0 left-0 right-0 h-16"
-        style={{
-          background:
-            "linear-gradient(90deg, #ff7a00 0%, #ff3b3b 45%, #ff2d55 100%)",
-          clipPath:
-            "path('M0,0 C120,30 260,-5 360,12 C420,22 480,40 520,0 L520,64 L0,64 Z')",
-        }}
-        aria-hidden="true"
-      />
-
-      {/* Bottom action bar */}
-      <div className="absolute inset-x-5 bottom-3 z-10 flex items-center justify-between">
-        <Link
-          to={profilePath}
-          className="px-4 py-2 rounded-lg bg-black text-white font-bold text-sm shadow-md hover:opacity-90"
-          onClick={(e) => profilePath === "#" && e.preventDefault()}
-          title="View public profile"
+      <div className="mt-3 flex items-center gap-2">
+        <button
+          disabled={!canAccept || busy}
+          onClick={() => onAccept(current._id)}
+          className="rounded-lg border border-emerald-700 text-emerald-300 px-3 py-1.5 text-sm hover:bg-emerald-950/40 disabled:opacity-40"
+          title={canAccept ? "Accept booking" : "Payment not confirmed yet"}
         >
-          View profile
+          {busy ? "Working…" : "Accept"}
+        </button>
+
+        {/* If you have a booking details page, link it here. Otherwise keep dashboard link. */}
+        <Link
+          to={`/bookings/${current._id}`}
+          className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-900"
+          title="Open booking details"
+          onClick={onDismiss}
+        >
+          View Details
         </Link>
 
-        {onBook ? (
-          <button
-            onClick={() => onBook(null)}
-            className="px-4 py-2 rounded-lg bg-black text-white font-bold text-sm shadow-md hover:opacity-90"
-          >
-            Book now
-          </button>
-        ) : (
-          <Link
-            to={id ? `/book/${encodeURIComponent(id)}` : "#"}
-            className="px-4 py-2 rounded-lg bg-black text-white font-bold text-sm shadow-md hover:opacity-90"
-            onClick={(e) => !id && e.preventDefault()}
-          >
-            Book now
-          </Link>
-        )}
+        <Link
+          to="/pro"
+          className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-900"
+          title="Open dashboard"
+          onClick={onDismiss}
+        >
+          Dashboard
+        </Link>
       </div>
     </div>
   );
+}
+
+/* ---- tiny local formatters ---- */
+function formatMoney(kobo = 0) {
+  const naira = (Number(kobo) || 0) / 100;
+  try {
+    return new Intl.NumberFormat("en-NG", { style: "currency", currency: "NGN" }).format(naira);
+  } catch {
+    return `₦${naira.toLocaleString()}`;
+  }
+}
+function formatDate(iso) {
+  try {
+    return new Date(iso).toLocaleString();
+  } catch {
+    return iso || "";
+  }
 }

@@ -64,57 +64,57 @@ export default function attachSockets(httpServer) {
   ioRef = io;
 
   io.on("connection", (socket) => {
-    const uid = socket.handshake.auth?.uid || socket.handshake.query?.uid || null;
+  const uid = socket.handshake.auth?.uid || socket.handshake.query?.uid || null;
+  const hintedUid =
+    socket.handshake?.auth?.uid ||
+    socket.handshake?.query?.uid ||
+    uid ||
+    null;
 
-    // verify Firebase idToken or Authorization: Bearer <token> if provided; attach socket.data.uid
-(async () => {
-  try {
-    // client may send the token in different places:
-    //  - socket.handshake.auth.token
-    //  - socket.handshake.auth.Authorization (or .authorization) as "Bearer <token>"
-    //  - socket.handshake.query.token
-    const authObj = socket.handshake?.auth || {};
-    const provided =
-      authObj.token ||
-      authObj.Authorization ||
-      authObj.authorization ||
-      socket.handshake?.query?.token ||
-      null;
+  // verify Firebase idToken or Authorization: Bearer <token> if provided; attach socket.data.uid
+  (async () => {
+    try {
+      const authObj = socket.handshake?.auth || {};
+      const provided =
+        authObj.token ||
+        authObj.Authorization ||
+        authObj.authorization ||
+        socket.handshake?.query?.token ||
+        null;
 
-    if (provided) {
-      const raw = typeof provided === "string" && provided.startsWith("Bearer ")
-        ? provided.slice(7).trim()
-        : provided;
+      if (provided) {
+        const raw =
+          typeof provided === "string" && provided.startsWith("Bearer ")
+            ? provided.slice(7).trim()
+            : provided;
 
-      try {
-        const decoded = await admin.auth().verifyIdToken(raw);
-        socket.data = socket.data || {};
-        socket.data.uid = decoded.uid;
-        socket.data.firebaseUser = decoded;
-        socket.data.authenticated = true;
-        console.log("[sockets] verified uid on connect:", decoded.uid);
-      } catch (err) {
-        // invalid token — fallback to hintedUid below
-        console.warn("[sockets] token verify failed:", err?.message || err);
+        try {
+          const decoded = await admin.auth().verifyIdToken(raw);
+          socket.data = socket.data || {};
+          socket.data.uid = decoded.uid;
+          socket.data.firebaseUser = decoded;
+          socket.data.authenticated = true;
+          console.log("[sockets] verified uid on connect:", decoded.uid);
+        } catch (err) {
+          console.warn("[sockets] token verify failed:", err?.message || err);
+          socket.data = socket.data || {};
+          socket.data.uid = hintedUid || null;
+        }
+      } else {
         socket.data = socket.data || {};
         socket.data.uid = hintedUid || null;
       }
-    } else {
+
+      if (socket.data?.uid) {
+        socket.join(userRoom(socket.data.uid));
+      }
+    } catch (e) {
+      console.warn("[sockets] auth parse error:", e?.message || e);
       socket.data = socket.data || {};
       socket.data.uid = hintedUid || null;
+      if (socket.data.uid) socket.join(userRoom(socket.data.uid));
     }
-
-    // join private user room if we have uid
-    if (socket.data?.uid) {
-      socket.join(userRoom(socket.data.uid));
-    }
-  } catch (e) {
-    console.warn("[sockets] auth parse error:", e?.message || e);
-    socket.data = socket.data || {};
-    socket.data.uid = hintedUid || null;
-    if (socket.data.uid) socket.join(userRoom(socket.data.uid));
-  }
-})();
+  })();
 
     // --- Join room (keeps your name: room:join) ---
     socket.on("room:join", ({ room, who } = {}, cb) => {

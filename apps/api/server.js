@@ -1099,12 +1099,16 @@ app.get("/api/pros/pending", requireAuth, requireAdmin, async (_req, res) => {
   }
 });
 
-// small helper to coerce prices coming from forms like "15,000"
+// small helper to coerce prices coming from forms like "15,000" or "₦ 15,000"
 function toKpochaNumber(val) {
   if (val === null || val === undefined) return 0;
-  const num = Number(String(val).replace(/,/g, "").trim());
+  const cleaned = String(val)
+    .replace(/[₦,]/g, "")
+    .trim();
+  const num = Number(cleaned);
   return Number.isFinite(num) ? num : 0;
 }
+
 
 /** Approve application → upsert Pro, and mark profile as hasPro */
 app.post("/api/pros/approve/:id", requireAuth, requireAdmin, async (req, res) => {

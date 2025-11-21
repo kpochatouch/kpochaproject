@@ -1,131 +1,112 @@
-// apps/api/sockets/index.js
-// Socket.IO signaling + lightweight chat relay (compatible with your SignalingClient.js)
-// server.js attaches like:
-//   const server = http.createServer(app);
-//   attachSockets(server);
+// apps/web/src/lib/webrtc/SignalingClient.js
+import { io } from "socket.io-client";
 
-import { Server } from "socket.io";
+export default class SignalingClient {
+  constructor(room, me) {
+    this.room = room;
+    this.me = me || "client";
 
-// Mirror server.js CORS logic so sockets succeed wherever REST succeeds
-function buildOriginChecker() {
-  const allowList = String(process.env.CORS_ORIGIN || "http://localhost:5173")
-    .split(/[,\s]+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-  const allowVercel = (process.env.ALLOW_VERCEL_PREVIEWS || "true") !== "false";
+    const url =
+      import.meta.env.VITE_SOCKET_URL ||
+      import.meta.env.VITE_API_BASE_URL ||
+      window.location.origin;
 
-  return function originAllowed(origin) {
-    if (!origin) return true; // same-origin / non-browser
+    // Best-effort auth token (keeps it simple and avoids circular imports)
+    let token = null;
     try {
-      const oh = new URL(origin).host;
-      for (const o of allowList) {
-        try {
-          if (new URL(o).host === oh) return true;
-          if (o === origin) return true;
-        } catch {}
-      }
-      if (allowVercel && oh.endsWith(".vercel.app")) return true;
-    } catch {}
-    return false;
-  };
-}
+      token = localStorage.getItem("token") || null;
+    } catch {
+      token = null;
+    }
 
-export default function attachSockets(httpServer) {
-  const originAllowed = buildOriginChecker();
-
-  const io = new Server(httpServer, {
-    cors: {
-      origin: (origin, cb) =>
-        originAllowed(origin) ? cb(null, true) : cb(new Error("Socket.IO CORS blocked")),
-      credentials: true,
-      methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-      allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
-    },
-    path: "/socket.io",
-    serveClient: false,
-    pingTimeout: 25000,
-    pingInterval: 20000,
-  });
-
-  const roomName = (r) => (r && typeof r === "string" ? r : "");
-  const bookingRoom = (id) => `booking:${id}`;
-
-  io.on("connection", (socket) => {
-    // Optional identity hint (not sent back in events to keep client payload shape unchanged)
-    const uid = socket.handshake.auth?.uid || socket.handshake.query?.uid || null;
-
-    // --- Room join (keeps your name) ---
-    socket.on("room:join", ({ room, who } = {}, cb) => {
-      const r = roomName(room);
-      if (!r) return cb?.({ ok: false, error: "room_required" });
-      socket.join(r);
-      socket.data.room = r;
-      socket.data.who = who || uid || "anon";
-      // (Presence is optional; harmless if unused)
-      socket.to(r).emit("presence:join", { id: socket.id });
-      const peers = Array.from(io.sockets.adapter.rooms.get(r) || []).filter((id) => id !== socket.id);
-      cb?.({ ok: true, room: r, peers });
+    this.socket = io(url, {
+      transports: ["websocket"],
+      path: "/socket.io",
+      auth: token ? { Authorization: `Bearer ${token}` } : {},
     });
 
-    // Convenience: join by booking id
-    socket.on("join:booking", ({ bookingId, who } = {}, cb) => {
-      const id = bookingId != null ? String(bookingId) : "";
-      if (!id) return cb?.({ ok: false, error: "bookingId_required" });
-      const r = bookingRoom(id);
-      socket.join(r);
-      socket.data.room = r;
-      socket.data.who = who || uid || "anon";
-      socket.to(r).emit("presence:join", { id: socket.id });
-      const peers = Array.from(io.sockets.adapter.rooms.get(r) || []).filter((sid) => sid !== socket.id);
-      cb?.({ ok: true, room: r, peers });
+    this.handlers = {};
+
+    this.socket.on("connect", () => {
+      // join the provided room; in our usage this is "booking:<id>"
+      this.socket.emit("room:join", { room: this.room, who: this.me });
     });
 
-    // Optional explicit leave
-    socket.on("room:leave", ({ room } = {}, cb) => {
-      const r = roomName(room) || socket.data.room;
-      if (!r) return cb?.({ ok: false, error: "room_required" });
-      socket.leave(r);
-      socket.to(r).emit("presence:leave", { id: socket.id });
-      if (socket.data.room === r) delete socket.data.room;
-      cb?.({ ok: true });
-    });
-
-    // --- Chat (name preserved). No self-echo. Payload relayed as-is. ---
-    socket.on("chat:message", (msg = {}) => {
-      const r = roomName(msg?.room) || socket.data.room;
-      if (!r) return;
-      socket.to(r).emit("chat:message", msg);
-    });
-
-    // --- WebRTC signaling (names preserved). No self-echo. Emit raw payload only. ---
     ["webrtc:offer", "webrtc:answer", "webrtc:ice"].forEach((evt) => {
-      socket.on(evt, ({ room, payload } = {}) => {
-        const r = roomName(room) || socket.data.room;
-        if (!r || payload == null) return;
-        // IMPORTANT for your SignalingClient.js: forward the raw payload only
-        socket.to(r).emit(evt, payload);
+      this.socket.on(evt, (payload) => this._emitLocal(evt, payload));
+    });
+
+    this.socket.on("disconnect", () => {});
+  }
+
+  /**
+   * Preferred: fetch ICE servers from backend API, then fall back to env.
+   * Usage:
+   *   const iceServers = await SignalingClient.getIceServers();
+   *   const pc = new RTCPeerConnection({ iceServers });
+   */
+  static async getIceServers() {
+    const base =
+      import.meta.env.VITE_API_BASE_URL || window.location.origin;
+
+    try {
+      const res = await fetch(`${base}/api/webrtc/ice`, {
+        credentials: "include",
       });
-    });
+      if (res.ok) {
+        const data = await res.json();
+        if (data && Array.isArray(data.iceServers) && data.iceServers.length) {
+          return data.iceServers;
+        }
+      }
+    } catch (err) {
+      console.warn(
+        "[SignalingClient] ICE fetch failed, falling back to env:",
+        err?.message || err
+      );
+    }
 
-    // Optional generic signaling if ever needed (not used by your client now)
-    socket.on("signal", ({ room, type, data } = {}) => {
-      const r = roomName(room) || socket.data.room;
-      if (!r || !type) return;
-      // Keep generic signals raw-consistent too: emit {type,data} only if you’ll consume it that way.
-      socket.to(r).emit("signal", { type, data });
-    });
+    return SignalingClient.buildIceServersFromEnv();
+  }
 
-    // Presence on disconnect
-    socket.on("disconnecting", () => {
-      const rooms = [...socket.rooms].filter((r) => r !== socket.id);
-      rooms.forEach((r) => socket.to(r).emit("presence:leave", { id: socket.id, reason: "disconnect" }));
-    });
-  });
+  /** Fallback: build ICE from .env (VITE_STUN_URLS, VITE_TURN_URLS, etc.) */
+  static buildIceServersFromEnv() {
+    const stun = (import.meta.env.VITE_STUN_URLS || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
 
-  io.engine.on("connection_error", (err) => {
-    console.warn("[sockets] connection_error:", err.code, err.message);
-  });
+    const turn = (import.meta.env.VITE_TURN_URLS || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
 
-  console.log("[sockets] ✅ Socket.IO attached");
-  return io;
+    const username = import.meta.env.VITE_TURN_USERNAME || "";
+    const credential = import.meta.env.VITE_TURN_PASSWORD || "";
+
+    const out = [];
+    if (stun.length) out.push({ urls: stun });
+    if (turn.length) out.push({ urls: turn, username, credential });
+
+    return out.length ? out : [{ urls: ["stun:stun.l.google.com:19302"] }];
+  }
+
+  on(evt, fn) {
+    this.handlers[evt] = this.handlers[evt] || [];
+    this.handlers[evt].push(fn);
+  }
+
+  _emitLocal(evt, payload) {
+    (this.handlers[evt] || []).forEach((fn) => fn(payload));
+  }
+
+  emit(evt, payload) {
+    this.socket.emit(evt, { room: this.room, from: this.me, payload });
+  }
+
+  disconnect() {
+    try {
+      this.socket.disconnect();
+    } catch {}
+  }
 }

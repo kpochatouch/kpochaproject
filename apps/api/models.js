@@ -207,35 +207,50 @@ export function proToBarber(doc) {
   }
 
   // 2b) normalize services → always { name, price, ... }
-  const normalizedServices = Array.isArray(rawServices)
-    ? rawServices
-        .filter((s) => (typeof s?.visible === "boolean" ? s.visible : true))
-        .map((s) => {
-          // if it's just "Barbering" → turn into an object
-          if (typeof s === "string") {
-            return { name: s, price: 0 };
-          }
+const normalizedServices = Array.isArray(rawServices)
+  ? rawServices
+      .filter((s) => (typeof s?.visible === "boolean" ? s.visible : true))
+      .map((s) => {
+        // if it's just "Barbering" → turn into an object
+        if (typeof s === "string") {
+          return { name: s, price: 0 };
+        }
 
-          // price might be "3000", "15,000", 3000, or even promoPrice
-          const rawPrice =
-            s?.price !== undefined && s?.price !== null
-              ? s.price
-              : s?.promoPrice || 0;
+        // accept multiple legacy price fields
+        let rawPrice;
 
-          const n = Number(String(rawPrice).replace(/,/g, "").trim());
-          const priceNum = Number.isFinite(n) ? n : 0;
+        if (s?.price !== undefined && s?.price !== null && s.price !== "") {
+          rawPrice = s.price;
+        } else if (s?.amount !== undefined && s.amount !== null && s.amount !== "") {
+          rawPrice = s.amount;
+        } else if (s?.priceNaira !== undefined && s.priceNaira !== null && s.priceNaira !== "") {
+          rawPrice = s.priceNaira;
+        } else if (s?.promoPrice !== undefined && s.promoPrice !== null && s.promoPrice !== "") {
+          rawPrice = s.promoPrice;
+        } else {
+          rawPrice = 0;
+        }
 
-          return {
-            name: s?.name || "",
-            price: priceNum,
-            description: s?.description || "",
-            durationMins: Number.isFinite(Number(s?.durationMins))
-              ? Number(s.durationMins)
-              : 0,
-          };
-        })
-        .filter((s) => s.name)
-    : [];
+        // strip commas, ₦, spaces
+        const cleaned = String(rawPrice)
+          .replace(/[₦₦,]/g, "")
+          .trim();
+
+        const n = Number(cleaned);
+        const priceNum = Number.isFinite(n) ? n : 0;
+
+        return {
+          name: s?.name || "",
+          price: priceNum,
+          description: s?.description || s?.desc || "",
+          durationMins: Number.isFinite(Number(s?.durationMins || s?.durationMin))
+            ? Number(s.durationMins || s.durationMin)
+            : 0,
+        };
+      })
+      .filter((s) => s.name)
+  : [];
+
 
   // 2c) derive a starting price so UI doesn't have to compute
   const startingPrice =

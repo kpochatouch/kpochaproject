@@ -81,12 +81,20 @@ export default function Navbar() {
     Browse
   </NavLink>
 
-  {/* Instant Request (desktop) - requires auth */}
-  {token && (
-    <NavLink to="/instant-request" className={navLinkClass}>
-      Instant Request
-    </NavLink>
-  )}
+  {/* Instant Request (desktop) - WILDCARD MODE */}
+{token && (
+  <button
+    onClick={() =>
+      window.location.assign(
+        "/instant-request#wildcard"
+      )
+    }
+    className={navLinkClass}
+  >
+    Instant Request
+  </button>
+)}
+
 
   {token && (
     <NavLink to="/wallet" className={navLinkClass}>
@@ -180,16 +188,21 @@ export default function Navbar() {
         Browse
       </NavLink>
 
-      {/* Instant Request (mobile) - requires auth */}
-      {token && (
-        <NavLink
-          to="/instant-request"
-          onClick={() => setOpen(false)}
-          className={navLinkClass}
-        >
-          Instant Request
-        </NavLink>
-      )}
+      {/* Instant Request (mobile) - WILDCARD MODE */}
+{token && (
+  <button
+    onClick={() => {
+      setOpen(false);
+      window.location.assign(
+        "/instant-request#wildcard"
+      );
+    }}
+    className={navLinkClass}
+  >
+    Instant Request
+  </button>
+)}
+
 
       {token && (
         <NavLink

@@ -6,9 +6,11 @@ const APP_LOGO_URL = import.meta.env.VITE_APP_LOGO_URL || "";
 
 /* ------------------------------ helpers ------------------------------ */
 function money(n) {
-  if (n === null || n === undefined || isNaN(Number(n))) return "—";
-  return `₦${Number(n).toLocaleString()}`;
+  const num = Number(n);
+  if (!Number.isFinite(num) || num <= 0) return "—";
+  return `₦${num.toLocaleString()}`;
 }
+
 function toArray(x) {
   if (Array.isArray(x)) return x;
   if (typeof x === "string")
@@ -27,11 +29,13 @@ function svcRows(services) {
           key: s._id || s.id || `${i}-${s?.name || "Service"}`,
           name: s?.name || "Service",
           price: s?.price ?? null,
-          durationMin: s?.durationMin ?? null,
-          desc: s?.desc,
+          durationMin: s?.durationMin ?? s?.durationMins ?? null,
+          desc: s?.desc || s?.description,
         }
   );
 }
+
+
 
 /* ------------------------------ component ------------------------------ */
 export default function ProDrawer({ open, pro, onClose, onBook }) {
@@ -43,20 +47,36 @@ export default function ProDrawer({ open, pro, onClose, onBook }) {
   const photos = toArray(pro.photos);
   const services = svcRows(pro.services);
 
-  // rating source priority: metrics.avgRating -> rating
+    // ===== FIXED RATING DISPLAY (only if there are real reviews) =====
+  const ratingCount =
+    typeof pro.ratingCount === "number"
+      ? pro.ratingCount
+      : Number(pro?.metrics?.totalReviews || 0);
+
   const rawRating =
-    Number(
-      pro?.metrics && typeof pro.metrics.avgRating !== "undefined"
-        ? pro.metrics.avgRating
-        : pro.rating
-    ) || 0;
+    typeof pro.rating === "number"
+      ? pro.rating
+      : Number(
+          pro?.metrics && typeof pro.metrics.avgRating !== "undefined"
+            ? pro.metrics.avgRating
+            : 0
+        ) || 0;
+
+  const hasRealReviews = ratingCount > 0 && rawRating > 0;
+
+  const rating = hasRealReviews
+    ? Math.max(0, Math.min(5, rawRating))
+    : 0;
 
   const fullStars =
-    Number.isFinite(Number(pro?.ratingStars?.full))
+    hasRealReviews && Number.isFinite(Number(pro?.ratingStars?.full))
       ? Math.max(0, Math.min(5, Number(pro.ratingStars.full)))
-      : Math.max(0, Math.min(5, Math.round(rawRating)));
+      : hasRealReviews
+      ? Math.max(0, Math.min(5, Math.round(rating)))
+      : 0;
+
   const emptyStars = 5 - fullStars;
-  const rating = Math.max(0, Math.min(5, rawRating));
+
 
   const proId = pro.id || pro._id;
   const gallery = photos.length ? photos : pro.photoUrl ? [pro.photoUrl] : [];
@@ -163,7 +183,7 @@ export default function ProDrawer({ open, pro, onClose, onBook }) {
                           {onBook ? (
                             <button
                               className="rounded-lg bg-gold text-black px-3 py-1.5 text-sm font-semibold disabled:opacity-50"
-                              onClick={() => s.name && onBook(s.name)}
+                              onClick={() => s.name && onBook(s.name, s.price ?? 0)}
                               disabled={!s.name}
                               title={
                                 s.name
@@ -254,10 +274,13 @@ export default function ProDrawer({ open, pro, onClose, onBook }) {
                 to={proId ? `/book/${proId}` : "#"}
                 className="inline-block rounded-lg bg-black text-white px-4 py-2 font-bold shadow-md hover:opacity-90"
                 onClick={(e) => !proId && e.preventDefault()}
+                title="Book now"
               >
                 Book now
               </Link>
             )}
+
+
             <button
               className="rounded-lg border border-zinc-700 px-4 py-2 hover:bg-zinc-900"
               onClick={onClose}

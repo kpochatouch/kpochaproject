@@ -1,5 +1,6 @@
 // apps/web/src/components/ServicePicker.jsx
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { UNIVERSAL_PROFESSIONS } from "../../scripts/universalList.js";
 
 /** Normalize for robust de-dup (case/space/punct insensitive) */
 function normName(s = "") {
@@ -245,16 +246,17 @@ export function getDefaultCatalog() {
 }
 
 /**
- * Props (unchanged):
+ * Props:
  * - value: selected id or name
  * - onChange: (value, meta) => void; meta = { id, name, price? }
- * - catalog?: [{ id, name, price? }]
+ * - catalog?: [{ id, name, price?, category? }]
  * - includeOther?: boolean (default true)
  * - otherText?: string
  * - onOtherText?: (text)=>void
  * - showPrice?: boolean (default false)
  * - className?: string
  * - selectProps?: any
+ * - placeholder?: string (default "Select a service…")
  */
 export default function ServicePicker({
   value,
@@ -266,19 +268,77 @@ export default function ServicePicker({
   showPrice = false,
   className = "",
   selectProps = {},
+  placeholder = "Select a service…",
 }) {
-  const items = useMemo(() => {
-    const base = Array.isArray(catalog) && catalog.length ? catalog : getDefaultCatalog();
-    const byId = new Set();
-    const byName = new Set();
-    return base.filter((it) => {
-      if (!it?.id || !it?.name) return false;
-      const n = normName(it.name);
-      if (byId.has(it.id) || byName.has(n)) return false;
-      byId.add(it.id); byName.add(n);
+  const [search, setSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("");
+
+  // Build merged + alphabetized catalog (salon list + universal list)
+  const allItems = useMemo(() => {
+    let base;
+
+    if (Array.isArray(catalog) && catalog.length) {
+      base = catalog;
+    } else {
+      const salon = getDefaultCatalog().map((it) => ({
+        ...it,
+        category: it.category || "Salon & Beauty",
+      }));
+
+      const uni = Array.isArray(UNIVERSAL_PROFESSIONS)
+        ? UNIVERSAL_PROFESSIONS.map((it) => ({
+            id: it.id,
+            name: it.name,
+            category: it.category || "Other",
+            price: it.price,
+          }))
+        : [];
+
+      base = [...salon, ...uni];
+    }
+
+    const map = new Map();
+    for (const raw of base) {
+      if (!raw || !raw.id || !raw.name) continue;
+      const name = String(raw.name);
+      const cat = raw.category || "Other";
+      const key = `${cat}::${normName(name)}`;
+      if (map.has(key)) continue;
+      map.set(key, {
+        id: raw.id,
+        name,
+        category: cat,
+        price:
+          typeof raw.price === "number"
+            ? raw.price
+            : Number.isFinite(Number(raw.price))
+            ? Number(raw.price)
+            : undefined,
+      });
+    }
+
+    const arr = Array.from(map.values());
+    // Alphabetical A → Z
+    arr.sort((a, b) => a.name.localeCompare(b.name));
+    return arr;
+  }, [catalog]);
+
+  const categories = useMemo(() => {
+    const set = new Set();
+    for (const it of allItems) {
+      if (it.category) set.add(it.category);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [allItems]);
+
+  const filteredItems = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return allItems.filter((it) => {
+      if (categoryFilter && it.category !== categoryFilter) return false;
+      if (q && !it.name.toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [catalog]);
+  }, [allItems, search, categoryFilter]);
 
   const selectedIsOther = includeOther && value === "other";
 
@@ -297,8 +357,8 @@ export default function ServicePicker({
       return;
     }
     const found =
-      items.find((it) => it.id === v) ||
-      items.find((it) => normName(it.name) === normName(v));
+      allItems.find((it) => it.id === v) ||
+      allItems.find((it) => normName(it.name) === normName(v));
     onChange?.(v, found || { id: v, name: v });
   }
 
@@ -312,6 +372,31 @@ export default function ServicePicker({
 
   return (
     <div className={`space-y-2 ${className}`}>
+      {/* Search + Category row */}
+      <div className="flex gap-2">
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search service…"
+          className="flex-1 bg-black border border-zinc-800 rounded-lg px-3 py-2 text-sm"
+        />
+        {categories.length > 1 && (
+          <select
+            value={categoryFilter}
+            onChange={(e) => setCategoryFilter(e.target.value)}
+            className="w-40 bg-black border border-zinc-800 rounded-lg px-2 py-2 text-sm"
+          >
+            <option value="">All categories</option>
+            {categories.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
+
+      {/* Main select */}
       <select
         value={selectedIsOther ? "other" : value || ""}
         onChange={handleSelect}
@@ -319,9 +404,9 @@ export default function ServicePicker({
         {...selectProps}
       >
         <option value="" disabled>
-          Select a service…
+          {placeholder}
         </option>
-        {items.map((it) => (
+        {filteredItems.map((it) => (
           <option key={it.id} value={it.id}>
             {formatted(it)}
           </option>

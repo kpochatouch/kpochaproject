@@ -20,6 +20,7 @@ const Home = lazy(() => import("./pages/Home.jsx"));
 const Browse = lazy(() => import("./pages/Browse.jsx"));
 const BookService = lazy(() => import("./pages/BookService.jsx"));
 const BookingDetails = lazy(() => import("./pages/BookingDetails.jsx"));
+const BookingChat = lazy(() => import("./pages/BookingChat.jsx"));
 const InstantRequest = lazy(() => import("./pages/InstantRequest.jsx"));
 const Wallet = lazy(() => import("./pages/Wallet.jsx"));
 const ClientWallet = lazy(() => import("./pages/ClientWallet.jsx"));
@@ -103,6 +104,12 @@ function SettingsSmart() {
   return isPro ? <Settings /> : <ClientSettings />;
 }
 
+/**
+ * FindProSmart: used when user taps "Find a Pro"
+ * - If not logged in → send to /login
+ * - If logged in but no client profile → /client/register
+ * - Else → /browse (Discover page)
+ */
 function FindProSmart() {
   const navigate = useNavigate();
   const loc = useLocation();
@@ -143,7 +150,7 @@ export default function App() {
   const location = useLocation();
   const navigate = useNavigate();
 
-  // ✅ this is the listener you need
+  // Listener for AWS liveness events
   useEffect(() => {
     function onAwsLivenessStart(e) {
       const sessionId =
@@ -184,9 +191,42 @@ export default function App() {
       <main className={hideChrome ? "flex-1 bg-black" : "flex-1"}>
         <Suspense fallback={<RouteLoader full />}>
           <Routes>
+            {/* Public routes */}
             <Route path="/" element={<Home />} />
             <Route path="/browse" element={<Browse />} />
             <Route path="/post/:id" element={<PostDetail />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/signup" element={<Signup />} />
+            <Route path="/legal" element={<Legal />} />
+            <Route path="/legal/*" element={<Legal />} />
+            <Route path="/profile/:username" element={<PublicProfile />} />
+            <Route path="/apply/thanks" element={<ApplyThanks />} />
+            <Route path="/payment/confirm" element={<PaymentConfirm />} />
+
+            {/* Entry to “Find a Pro” flow */}
+            <Route path="/find" element={<FindProSmart />} />
+
+            {/* Booking flows */}
+            <Route
+              path="/instant-request"
+              element={
+                <RequireAuth>
+                  <InstantRequest />
+                </RequireAuth>
+              }
+            />
+
+            {/* 🔐 Booking page must be authenticated */}
+            <Route
+              path="/book/:barberId"
+              element={
+                <RequireAuth>
+                  <BookService />
+                </RequireAuth>
+              }
+            />
+
+            {/* Auth-required core pages */}
             <Route
               path="/compose"
               element={
@@ -195,29 +235,19 @@ export default function App() {
                 </RequireAuth>
               }
             />
-            <Route path="/find" element={<FindProSmart />} />
-
-<Route
-  path="/instant-request"
-  element={
-    <RequireAuth>
-      <InstantRequest />
-    </RequireAuth>
-  }
-/>
-
-<Route path="/book/:barberId" element={<BookService />} />
-
-            <Route path="/login" element={<Login />} />
-            <Route path="/signup" element={<Signup />} />
-            <Route path="/legal" element={<Legal />} />
-            <Route path="/legal/*" element={<Legal />} />
-            <Route path="/profile/:username" element={<PublicProfile />} />
             <Route
               path="/bookings/:id"
               element={
                 <RequireAuth>
                   <BookingDetails />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/bookings/:bookingId/chat"
+              element={
+                <RequireAuth>
+                  <BookingChat />
                 </RequireAuth>
               }
             />
@@ -282,6 +312,16 @@ export default function App() {
               }
             />
             <Route
+              path="/chat"
+              element={
+                <RequireAuth>
+                  <Chat />
+                </RequireAuth>
+              }
+            />
+
+            {/* Role-based dashboards */}
+            <Route
               path="/pro-dashboard"
               element={
                 <RequireRole role="pro">
@@ -313,16 +353,8 @@ export default function App() {
                 </RequireRole>
               }
             />
-            <Route
-              path="/chat"
-              element={
-                <RequireAuth>
-                  <Chat />
-                </RequireAuth>
-              }
-            />
-            <Route path="/apply/thanks" element={<ApplyThanks />} />
-            <Route path="/payment/confirm" element={<PaymentConfirm />} />
+
+            {/* Catch-all */}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>

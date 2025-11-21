@@ -35,50 +35,61 @@ export default function SideMenu({ me }) {
     pathname === "/browse" && search.includes("tab=pros");
 
     const baseNav = [
-    {
-      key: "feed",
-      label: "Feed",
-      to: "/browse",
-      active: isFeed,
+  {
+    key: "feed",
+    label: "Feed",
+    to: "/browse",
+    active: isFeed,
+  },
+  {
+    key: "browse",
+    label: "Browse Pros",
+    to: "/browse?tab=pros",
+    active: isBrowsePros,
+  },
+
+  // 🔥 Instant Request – only when logged in
+  me && {
+    key: "instant",
+    label: "Instant Request",
+    icon: icons.instant,
+    active: pathname === "/instant-request",
+    onClick: () => {
+      navigate("/instant-request", {
+        state: {
+          mode: "wildcard",
+        },
+      });
+      setOpen(false);
     },
-    {
-      key: "browse",
-      label: "Browse Pros",
-      to: "/browse?tab=pros",
-      active: isBrowsePros,
-    },
-    // 🔥 Instant Request – only when logged in
-    me && {
-      key: "instant",
-      label: "Instant Request",
-      to: "/instant-request",
-      active: pathname === "/instant-request",
-    },
-    me && {
-      key: "profile",
-      label: "Profile",
-      to: "/profile",
-      active: pathname === "/profile",
-    },
-    me && {
-      key: "wallet",
-      label: "Wallet",
-      to: "/wallet",
-      active: pathname === "/wallet",
-    },
-    me && {
-      key: "settings",
-      label: "Settings",
-      to: "/settings",
-      active: pathname === "/settings",
-    },
-    me && {
-      key: "pro",
-      label: "Become a Pro",
-      to: "/become",
-      active: pathname === "/become",
-    },
-  ].filter(Boolean);
+  },
+
+  me && {
+    key: "profile",
+    label: "Profile",
+    to: "/profile",
+    active: pathname === "/profile",
+  },
+  me && {
+    key: "wallet",
+    label: "Wallet",
+    to: "/wallet",
+    active: pathname === "/wallet",
+  },
+  me && {
+    key: "settings",
+    label: "Settings",
+    to: "/settings",
+    active: pathname === "/settings",
+  },
+  me && {
+    key: "pro",
+    label: "Become a Pro",
+    to: "/become",
+    active: pathname === "/become",
+  },
+].filter(Boolean);
+
 
   const socialNav = [
     {
@@ -190,7 +201,7 @@ export default function SideMenu({ me }) {
                 icon={icons[item.key]}
                 active={item.active}
                 collapsed={collapsed}
-                onClick={() => go(item.to)}
+                onClick={() => item.onClick ? item.onClick() : go(item.to)}
               />
             ))}
 
