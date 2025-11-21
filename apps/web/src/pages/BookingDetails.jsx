@@ -217,65 +217,6 @@ export default function BookingDetails() {
     }
   }
 
-  // ---- CARD (Paystack) ----
-  async function onClientPayNow() {
-    console.log("[BookingDetails] Card pay clicked");
-
-    if (!booking) {
-      console.log("[BookingDetails] No booking in state");
-      return;
-    }
-
-    // 1) Check Paystack SDK
-    if (
-      !window.PaystackPop ||
-      typeof window.PaystackPop.setup !== "function"
-    ) {
-      alert(
-        "Paystack library not loaded yet. Please wait a moment or refresh and try again."
-      );
-      return;
-    }
-
-    // 2) Check public key
-    const pubKey = import.meta.env.VITE_PAYSTACK_PUBLIC_KEY;
-    if (!pubKey) {
-      alert("Missing VITE_PAYSTACK_PUBLIC_KEY in frontend env.");
-      return;
-    }
-
-    // small debug snapshot
-    console.log("==== DEBUG: PAYSTACK SETUP DATA ====");
-    console.log({
-      amountKobo: Number(booking.amountKobo || priceKobo),
-      bookingId: booking._id,
-      email: me?.email,
-      svcName,
-      paystackReady,
-      pubKey,
-      windowPaystackPopExists: !!window.PaystackPop,
-    });
-
-    setBusy(true);
-
-    try {
-      // best-effort email from token
-      let email = me?.email || "customer@example.com";
-      try {
-        const token = localStorage.getItem("token") || "";
-        const payloadJwt = JSON.parse(
-          atob((token.split(".")[1] || "e30="))
-        );
-        if (payloadJwt?.email) email = payloadJwt.email;
-      } catch (e) {
-        console.warn("JWT decode failed, using fallback email:", e);
-      }
-
-      const ref = `BOOKING-${booking._id}`;
-      const amountKobo = Number(booking.amountKobo || priceKobo) || 0;
-
-      console.log("DEBUG: About to call PaystackPop.setup()");
-
       const handler = window.PaystackPop.setup({
         key: String(pubKey),
         email,
@@ -296,42 +237,45 @@ export default function BookingDetails() {
           ],
         },
 
-        // ✅ THIS IS A NORMAL FUNCTION, NOT A VARIABLE
-        callback: async function (response) {
+        // NOTE: plain function, async work done inside
+        callback: function (response) {
           console.log("[Paystack callback]", response);
-          try {
-            const v = await verifyPayment({
-              bookingId: booking._id,
-              reference: response.reference,
-            });
 
-            if (v?.ok) {
-              // reload my bookings to get fresh status
-              const mine =
-                (await getMyBookings().catch(() => [])) || [];
-              const updated =
-                mine.find(
-                  (b) => String(b._id) === String(booking._id)
-                ) ||
-                {
-                  ...booking,
-                  paymentStatus: "paid",
-                  status:
-                    booking.status === "pending_payment"
-                      ? "scheduled"
-                      : booking.status,
-                };
-              setBooking(updated);
-              alert("Payment successful.");
-            } else {
-              alert("Payment verification failed.");
+          (async () => {
+            try {
+              const v = await verifyPayment({
+                bookingId: booking._id,
+                reference: response.reference,
+              });
+
+              if (v?.ok) {
+                // reload my bookings to get fresh status
+                const mine =
+                  (await getMyBookings().catch(() => [])) || [];
+                const updated =
+                  mine.find(
+                    (b) => String(b._id) === String(booking._id)
+                  ) ||
+                  {
+                    ...booking,
+                    paymentStatus: "paid",
+                    status:
+                      booking.status === "pending_payment"
+                        ? "scheduled"
+                        : booking.status,
+                  };
+                setBooking(updated);
+                alert("Payment successful.");
+              } else {
+                alert("Payment verification failed.");
+              }
+            } catch (err) {
+              console.error("verifyPayment error:", err);
+              alert("Payment verification error.");
+            } finally {
+              setBusy(false);
             }
-          } catch (err) {
-            console.error("verifyPayment error:", err);
-            alert("Payment verification error.");
-          } finally {
-            setBusy(false);
-          }
+          })();
         },
 
         onClose: function () {
@@ -341,14 +285,7 @@ export default function BookingDetails() {
       });
 
       handler.openIframe();
-    } catch (err) {
-      console.error("[BookingDetails] PaystackPop.setup FAILED:", err);
-      setBusy(false);
-      alert(
-        "Could not start card payment. See console for PaystackPop.setup error."
-      );
-    }
-  }
+
 
   // ---- WALLET ----
   async function onClientPayWithWallet() {

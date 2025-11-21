@@ -226,34 +226,35 @@ const amountNaira =
         : 0);
 
 
-  async function startPaystackInline(booking, idToken = null) {
-    if (!window.PaystackPop || typeof window.PaystackPop.setup !== "function") {
-      throw new Error("paystack_not_ready");
-    }
-    const email = me?.email || "customer@example.com";
-    return new Promise((resolve, reject) => {
-      const handler = window.PaystackPop.setup({
-        key: String(import.meta.env.VITE_PAYSTACK_PUBLIC_KEY || ""),
-        email,
-        amount: Number(booking.amountKobo),
-        ref: "BOOKING-" + booking._id,
-        metadata: {
-          custom_fields: [
-            { display_name: "Service", variable_name: "service", value: serviceName },
-            { display_name: "Address", variable_name: "address", value: address.trim() },
-            coords
-  ? {
-      display_name: "GPS",
-      variable_name: "gps",
-      value: `${coords.lat},${coords.lng}`, // ✅ use lng
-    }
-  : null,
+async function startPaystackInline(booking, idToken = null) {
+  if (!window.PaystackPop || typeof window.PaystackPop.setup !== "function") {
+    throw new Error("paystack_not_ready");
+  }
+  const email = me?.email || "customer@example.com";
 
-          ].filter(Boolean),
-        },
-        callback: async (res) => {
+  return new Promise((resolve, reject) => {
+    const handler = window.PaystackPop.setup({
+      key: String(import.meta.env.VITE_PAYSTACK_PUBLIC_KEY || ""),
+      email,
+      amount: Number(booking.amountKobo),
+      ref: "BOOKING-" + booking._id,
+      metadata: {
+        custom_fields: [
+          { display_name: "Service", variable_name: "service", value: serviceName },
+          { display_name: "Address", variable_name: "address", value: address.trim() },
+          coords
+            ? {
+                display_name: "GPS",
+                variable_name: "gps",
+                value: `${coords.lat},${coords.lng}`,
+              }
+            : null,
+        ].filter(Boolean),
+      },
+
+      callback: function (res) {
+        (async () => {
           try {
-            // include idToken (if available) via header when calling verify
             const headers = idToken ? { Authorization: `Bearer ${idToken}` } : {};
             await api.post(
               "/api/payments/verify",
@@ -266,12 +267,18 @@ const amountNaira =
             console.error("verify payment error:", e?.response?.data || e?.message || e);
             reject(e);
           }
-        },
-        onClose: () => reject(new Error("pay_cancelled")),
-      });
-      handler.openIframe();
+        })();
+      },
+
+      onClose: function () {
+        reject(new Error("pay_cancelled"));
+      },
     });
-  }
+
+    handler.openIframe();
+  });
+}
+
 
 
   async function startPaystackRedirect(booking) {

@@ -87,28 +87,31 @@ export default function ClientWallet() {
     return () => { on = false; };
   }, []);
 
-  // ---------- inline flow ----------
-  async function startTopupInline(amountKobo) {
-    // Force redirect if no public key configured
-    const pubKey = String(import.meta.env.VITE_PAYSTACK_PUBLIC_KEY || "");
-    if (!pubKey || !window.PaystackPop || typeof window.PaystackPop.setup !== "function") {
-      throw new Error("inline_not_ready");
-    }
+   // ---------- inline flow ----------
+async function startTopupInline(amountKobo) {
+  const pubKey = String(import.meta.env.VITE_PAYSTACK_PUBLIC_KEY || "");
+  if (!pubKey || !window.PaystackPop || typeof window.PaystackPop.setup !== "function") {
+    throw new Error("inline_not_ready");
+  }
 
-    return new Promise((resolve, reject) => {
-      const handler = window.PaystackPop.setup({
-        key: pubKey,
-        email: me?.email || "customer@example.com",
-        amount: Number(amountKobo), // kobo
-        ref: `TOPUP-${me?.uid || "anon"}-${Date.now()}`,
-        metadata: {
-          custom_fields: [
-            { display_name: "Topup", variable_name: "topup", value: String(amountKobo) }
-          ]
-        },
-        callback: async (response) => {
+  return new Promise((resolve, reject) => {
+    const handler = window.PaystackPop.setup({
+      key: pubKey,
+      email: me?.email || "customer@example.com",
+      amount: Number(amountKobo),
+      ref: `TOPUP-${me?.uid || "anon"}-${Date.now()}`,
+      metadata: {
+        custom_fields: [
+          { display_name: "Topup", variable_name: "topup", value: String(amountKobo) },
+        ],
+      },
+
+      callback: function (response) {
+        (async () => {
           try {
-            const verify = await api.post("/api/wallet/topup/verify", { reference: response.reference });
+            const verify = await api.post("/api/wallet/topup/verify", {
+              reference: response.reference,
+            });
             if (verify?.data?.ok) {
               await refreshWallet();
               resolve();
@@ -118,12 +121,18 @@ export default function ClientWallet() {
           } catch (e) {
             reject(e);
           }
-        },
-        onClose: () => reject(new Error("payment_cancelled")),
-      });
-      handler.openIframe();
+        })();
+      },
+
+      onClose: function () {
+        reject(new Error("payment_cancelled"));
+      },
     });
-  }
+
+    handler.openIframe();
+  });
+}
+
 
   // ---------- redirect/init flow ----------
   async function startTopupRedirect(amountKobo) {
