@@ -217,27 +217,42 @@ export default function BookingDetails() {
     }
   }
 
-  // ---- CARD (Paystack) ----
+  // ---- CARD (Paystack) [DEBUG VERSION] ----
   async function onClientPayNow() {
-    console.log("[BookingDetails] Card pay clicked");
     if (!booking) {
-      console.log("[BookingDetails] No booking in state");
+      console.log("==== DEBUG: PAY CLICKED BUT NO BOOKING ====");
       return;
     }
 
-    // 1) Check Paystack SDK
+    console.log("==== DEBUG: PAYSTACK CLICKED ====");
+    console.log("DEBUG_PAYSTACK_SETUP", {
+      paystackReady,
+      windowPaystackPopExists: !!window.PaystackPop,
+      hasSetupMethod:
+        window.PaystackPop &&
+        typeof window.PaystackPop.setup === "function",
+      pubKey: import.meta.env.VITE_PAYSTACK_PUBLIC_KEY,
+      amountKobo: booking.amountKobo || priceKobo,
+      svcName,
+      bookingId: booking._id,
+      email: me?.email,
+    });
+
+    // 1) Check SDK
     if (
       !window.PaystackPop ||
       typeof window.PaystackPop.setup !== "function"
     ) {
+      console.error("❌ PaystackPop.setup is NOT ready.");
       alert(
-        "Paystack library not loaded yet. Please wait a moment or refresh and try again."
+        "Paystack library not loaded yet. Debug in console: PaystackPop.setup missing."
       );
       return;
     }
 
     // 2) Check public key
     if (!import.meta.env.VITE_PAYSTACK_PUBLIC_KEY) {
+      console.error("❌ Missing VITE_PAYSTACK_PUBLIC_KEY.");
       alert("Missing VITE_PAYSTACK_PUBLIC_KEY in frontend env.");
       return;
     }
@@ -253,16 +268,26 @@ export default function BookingDetails() {
         );
         if (payloadJwt?.email) email = payloadJwt.email;
       } catch (e) {
-        console.warn("JWT decode failed, using fallback email:", e);
+        console.warn(
+          "JWT decode failed, using fallback email:",
+          e
+        );
       }
 
       const ref = `BOOKING-${booking._id}`;
-      console.log("[BookingDetails] Opening Paystack with ref:", ref);
+      const amount = Number(booking.amountKobo || priceKobo);
+
+      console.log("DEBUG: About to call PaystackPop.setup()", {
+        key: String(import.meta.env.VITE_PAYSTACK_PUBLIC_KEY),
+        email,
+        amount,
+        ref,
+      });
 
       const handler = window.PaystackPop.setup({
         key: String(import.meta.env.VITE_PAYSTACK_PUBLIC_KEY || ""),
         email,
-        amount: Number(booking.amountKobo || priceKobo), // kobo
+        amount,
         ref,
         metadata: {
           custom_fields: [
@@ -279,12 +304,17 @@ export default function BookingDetails() {
           ],
         },
         callback: async function (response) {
-          console.log("[Paystack callback]", response);
+          console.log(
+            "DEBUG: Paystack callback triggered:",
+            response
+          );
           try {
             const v = await verifyPayment({
               bookingId: booking._id,
               reference: response.reference,
             });
+            console.log("DEBUG: Verify response:", v);
+
             if (v?.ok) {
               const mine =
                 (await getMyBookings().catch(() => [])) || [];
@@ -305,26 +335,49 @@ export default function BookingDetails() {
             } else {
               alert("Payment verification failed.");
             }
-          } catch (err) {
-            console.error("verifyPayment error:", err);
+          } catch (e) {
+            console.error(
+              "DEBUG: Payment verification error:",
+              e
+            );
             alert("Payment verification error.");
           } finally {
             setBusy(false);
           }
         },
         onClose: function () {
-          console.log("[Paystack] popup closed");
+          console.log(
+            "DEBUG: Paystack popup CLOSED by user"
+          );
           setBusy(false);
         },
       });
 
-      handler.openIframe();
+      console.log("DEBUG: handler created:", handler);
+      if (handler && typeof handler.openIframe === "function") {
+        handler.openIframe();
+        console.log(
+          "DEBUG: handler.openIframe() executed"
+        );
+      } else {
+        console.error(
+          "❌ handler.openIframe is not a function:",
+          handler
+        );
+        alert(
+          "Paystack handler not created properly. See console for details."
+        );
+        setBusy(false);
+      }
     } catch (err) {
-      console.error("[BookingDetails] Paystack setup failed:", err);
+      console.error("❌ PaystackPop.setup FAILED:", err);
+      alert(
+        "Could not start card payment. See console for PaystackPop.setup error."
+      );
       setBusy(false);
-      alert("Could not start card payment. Check console for details.");
     }
   }
+
 
 
   // ---- WALLET ----
