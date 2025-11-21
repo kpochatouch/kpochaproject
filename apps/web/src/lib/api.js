@@ -513,6 +513,14 @@ export async function getClientWalletMe() {
   return data;
 }
 
+export async function payBookingWithWallet(bookingId) {
+  const { data } = await api.post("/api/wallet/pay-booking", {
+    bookingId,
+  });
+  return data;
+}
+
+
 /* =========================================
    PIN
    ========================================= */

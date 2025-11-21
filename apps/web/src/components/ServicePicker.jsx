@@ -4,7 +4,11 @@ import { UNIVERSAL_PROFESSIONS } from "../../scripts/universalList.js";
 
 /** Normalize for robust de-dup (case/space/punct insensitive) */
 function normName(s = "") {
-  return String(s).toLowerCase().replace(/\s+/g, " ").replace(/[^\w ]+/g, "").trim();
+  return String(s)
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/[^\w ]+/g, "")
+    .trim();
 }
 
 /**
@@ -153,7 +157,10 @@ export function getDefaultCatalog() {
 
     // ===== Bridal & Events (Bundles)
     { id: "bridal_hair_makeup_trial_day", name: "Bridal Hair + Makeup (trial + day)" },
-    { id: "traditional_engagement_bundle", name: "Traditional Engagement (makeup + gele + hair)" },
+    {
+      id: "traditional_engagement_bundle",
+      name: "Traditional Engagement (makeup + gele + hair)",
+    },
     { id: "bridal_party_per_person", name: "Bridal Party (per person)" },
     { id: "groom_package", name: "Groom Package (haircut + beard + facial)" },
     { id: "photoshoot_package_hair_makeup", name: "Photoshoot Package (hair + makeup)" },
@@ -245,6 +252,13 @@ export function getDefaultCatalog() {
   return deduped;
 }
 
+// names we *never* show as real services, even if present in the TXT
+const BLOCKED_NAMES = new Set([
+  "(For rare or emerging categories)",
+  "KPOCHA TOUCH — MASTER SERVICE LIST (BY CATEGORY)",
+  "KPOCHA TOUCH - MASTER SERVICE LIST (BY CATEGORY)",
+]);
+
 /**
  * Props:
  * - value: selected id or name
@@ -273,7 +287,7 @@ export default function ServicePicker({
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
 
-  // Build merged + alphabetized catalog (salon list + universal list)
+  // 1️⃣ Merge salon catalog + universal list (or use provided catalog)
   const allItems = useMemo(() => {
     let base;
 
@@ -298,31 +312,48 @@ export default function ServicePicker({
     }
 
     const map = new Map();
+
     for (const raw of base) {
       if (!raw || !raw.id || !raw.name) continue;
-      const name = String(raw.name);
-      const cat = raw.category || "Other";
-      const key = `${cat}::${normName(name)}`;
+
+      const name = String(raw.name).trim();
+      if (!name) continue;
+
+      // skip meta / heading-ish rows defensively
+      const plain = name.replace(/\s+/g, " ");
+      const isMeta =
+        BLOCKED_NAMES.has(plain) ||
+        /^\(.*\)$/.test(plain) ||
+        /^kpocha touch/i.test(plain);
+
+      if (isMeta) continue;
+
+      const cat = (raw.category || "Other").trim();
+      const key = `${normName(cat)}::${normName(name)}`;
+
       if (map.has(key)) continue;
+
+      const numPrice =
+        typeof raw.price === "number"
+          ? raw.price
+          : Number.isFinite(Number(raw.price))
+          ? Number(raw.price)
+          : undefined;
+
       map.set(key, {
         id: raw.id,
         name,
         category: cat,
-        price:
-          typeof raw.price === "number"
-            ? raw.price
-            : Number.isFinite(Number(raw.price))
-            ? Number(raw.price)
-            : undefined,
+        price: numPrice,
       });
     }
 
     const arr = Array.from(map.values());
-    // Alphabetical A → Z
-    arr.sort((a, b) => a.name.localeCompare(b.name));
+    arr.sort((a, b) => a.name.localeCompare(b.name)); // A → Z
     return arr;
   }, [catalog]);
 
+  // 2️⃣ Category list (for first dropdown)
   const categories = useMemo(() => {
     const set = new Set();
     for (const it of allItems) {
@@ -331,14 +362,21 @@ export default function ServicePicker({
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [allItems]);
 
+  // 3️⃣ Filtered services by category + search
   const filteredItems = useMemo(() => {
+    let list = allItems;
+
+    if (categoryFilter) {
+      list = list.filter((it) => it.category === categoryFilter);
+    }
+
     const q = search.trim().toLowerCase();
-    return allItems.filter((it) => {
-      if (categoryFilter && it.category !== categoryFilter) return false;
-      if (q && !it.name.toLowerCase().includes(q)) return false;
-      return true;
-    });
-  }, [allItems, search, categoryFilter]);
+    if (q) {
+      list = list.filter((it) => it.name.toLowerCase().includes(q));
+    }
+
+    return list;
+  }, [allItems, categoryFilter, search]);
 
   const selectedIsOther = includeOther && value === "other";
 
@@ -359,6 +397,7 @@ export default function ServicePicker({
     const found =
       allItems.find((it) => it.id === v) ||
       allItems.find((it) => normName(it.name) === normName(v));
+
     onChange?.(v, found || { id: v, name: v });
   }
 
@@ -372,31 +411,29 @@ export default function ServicePicker({
 
   return (
     <div className={`space-y-2 ${className}`}>
-      {/* Search + Category row */}
-      <div className="flex gap-2">
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search service…"
-          className="flex-1 bg-black border border-zinc-800 rounded-lg px-3 py-2 text-sm"
-        />
-        {categories.length > 1 && (
-          <select
-            value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value)}
-            className="w-40 bg-black border border-zinc-800 rounded-lg px-2 py-2 text-sm"
-          >
-            <option value="">All categories</option>
-            {categories.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </select>
-        )}
-      </div>
+      {/* STEP 1: Category */}
+      <select
+        value={categoryFilter}
+        onChange={(e) => setCategoryFilter(e.target.value)}
+        className="w-full bg-black border border-zinc-800 rounded-lg px-3 py-2 text-sm"
+      >
+        <option value="">All categories</option>
+        {categories.map((c) => (
+          <option key={c} value={c}>
+            {c}
+          </option>
+        ))}
+      </select>
 
-      {/* Main select */}
+      {/* Search box (within selected category / all) */}
+      <input
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        placeholder="Search service…"
+        className="w-full bg-black border border-zinc-800 rounded-lg px-3 py-2 text-sm"
+      />
+
+      {/* STEP 2: Service select */}
       <select
         value={selectedIsOther ? "other" : value || ""}
         onChange={handleSelect}

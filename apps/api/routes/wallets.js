@@ -432,5 +432,76 @@ export function withAuth(requireAuth, requireAdmin) {
     }
   });
 
+  /**
+ * POST /api/wallet/pay-booking
+ * Body: { bookingId }
+ * - Debits client wallet
+ * - Marks booking as paid
+ * - Credits pro pending via walletService.creditProPendingForBooking()
+ */
+router.post("/wallet/pay-booking", requireAuth, async (req, res) => {
+  try {
+    const { bookingId } = req.body || {};
+    if (!bookingId) {
+      return res.status(400).json({ error: "bookingId_required" });
+    }
+
+    // 1. Load booking
+    const booking = await mongoose.models.Booking.findById(bookingId);
+    if (!booking) return res.status(404).json({ error: "booking_not_found" });
+
+    // Only the client who owns the booking can pay
+    if (String(booking.clientUid) !== String(req.user.uid)) {
+      return res.status(403).json({ error: "not_your_booking" });
+    }
+
+    // Already paid?
+    if (booking.paymentStatus === "paid") {
+      return res.json({ ok: true, alreadyPaid: true });
+    }
+
+    const amountKobo = Math.floor(Number(booking.amountKobo || 0));
+    if (!amountKobo || amountKobo <= 0) {
+      return res.status(400).json({ error: "invalid_amount" });
+    }
+
+    // 2. Debit the client wallet
+    const Wallet = mongoose.models.Wallet;
+    const w = await Wallet.findOne({ ownerUid: req.user.uid });
+    if (!w || w.availableKobo < amountKobo) {
+      return res.status(400).json({ error: "insufficient_wallet_balance" });
+    }
+
+    // Deduct
+    w.availableKobo -= amountKobo;
+    w.transactions.push({
+      type: "wallet_booking_debit",
+      direction: "debit",
+      amountKobo,
+      meta: { bookingId },
+    });
+    await w.save();
+
+    // 3. Mark booking paid
+    booking.paymentStatus = "paid";
+    booking.status =
+      booking.status === "pending_payment" ? "scheduled" : booking.status;
+    booking.paystackReference = `WALLET-${Date.now()}`;
+    await booking.save();
+
+    // 4. Credit the pro pending
+    const walletService = await import("../services/walletService.js");
+    await walletService.creditProPendingForBooking(booking, {
+      wallet: true,
+    });
+
+    res.json({ ok: true, booking });
+  } catch (err) {
+    console.error("[wallet/pay-booking] error:", err);
+    res.status(500).json({ error: "wallet_booking_failed" });
+  }
+});
+
+
   return router;
 }

@@ -1,16 +1,18 @@
 // apps/web/scripts/generateUniversalList.js
+// Run with: node apps/web/scripts/generateUniversalList.js
+
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 
-// ESM-safe __dirname
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// The TXT file must be in the same folder as this script
-const filePath = path.join(__dirname, "KPOCHA TOUCH — UNIVERSAL PROFESSI.txt");
-const text = fs.readFileSync(filePath, "utf8");
+// Read the TXT master list (your edited file)
+const txtPath = path.join(__dirname, "KPOCHA TOUCH — UNIVERSAL PROFESSI.txt");
+const text = fs.readFileSync(txtPath, "utf8");
 
+// ---------- helpers ----------
 function slugify(str) {
   return (
     str
@@ -23,58 +25,69 @@ function slugify(str) {
   );
 }
 
+// A heading in your TXT is an ALL-CAPS line like “BEAUTY & PERSONAL CARE”
+function isHeading(line) {
+  const trimmed = line.trim();
+  if (!trimmed) return false;
+  // ignore lines that contain lowercase
+  if (/[a-z]/.test(trimmed)) return false;
+  // we treat anything all-caps (with spaces/&/) as a category
+  return true;
+}
+
+// ---------- parse the TXT ----------
 const lines = text.split(/\r?\n/).map((l) => l.trim());
-const categories = {};
-let current = null;
+let currentCategory = null;
+const seen = new Set();
+const out = [];
 
-// Build { category: [item, item, ...] }
 for (const line of lines) {
-  if (!line) continue;
-
-  // "1. Hair & Beauty" style headers
-  const m = line.match(/^(\d+)\.\s*(.+)$/);
-  if (m) {
-    current = m[2].trim();
-    if (!categories[current]) categories[current] = [];
+  if (!line) {
+    // blank line, just separator
     continue;
   }
 
-  if (line === "...") continue;
-  if (!current) continue;
-
-  categories[current].push(line);
-}
-
-// Flatten into one big array with id + category
-const out = [];
-
-for (const [category, items] of Object.entries(categories)) {
-  const catSlug = slugify(category);
-  for (const name of items) {
-    const id = `${catSlug}__${slugify(name)}`;
-    out.push({ id, name, category });
+  if (isHeading(line)) {
+    currentCategory = line; // e.g. "BEAUTY & PERSONAL CARE"
+    continue;
   }
+
+  if (!currentCategory) {
+    // skip stray lines before first category
+    continue;
+  }
+
+  const category = currentCategory;
+  const name = line;
+
+  const key = `${category}::${name.toLowerCase()}`;
+  if (seen.has(key)) continue; // de-dup exact repeats
+  seen.add(key);
+
+  const id = `${slugify(category)}__${slugify(name)}`;
+  out.push({ id, name, category });
 }
 
-// Build JS file contents
-const output = [
-  "// AUTO-GENERATED from KPOCHA TOUCH — UNIVERSAL PROFESSI.txt",
-  "// Do not edit by hand; re-run scripts/generateUniversalList.js instead.",
-  "",
-  "export const UNIVERSAL_PROFESSIONS = [",
-  ...out.map(
-    (it) =>
-      `  { id: '${it.id}', name: '${it.name.replace(/'/g, "\\'")}', category: '${it.category.replace(
-        /'/g,
-        "\\'"
-      )}' },`
-  ),
-  "];",
-  "",
-].join("\n");
+// ---------- write universalList.js ----------
+const header = `// AUTO-GENERATED from KPOCHA TOUCH — UNIVERSAL PROFESSI.txt
+// Do not edit by hand; re-run scripts/generateUniversalList.js instead.
 
-// Write apps/web/scripts/universalList.js
+`;
+
+const body =
+  "export const UNIVERSAL_PROFESSIONS = [\n" +
+  out
+    .map(
+      (it) =>
+        `  { id: '${it.id}', name: '${it.name.replace(/'/g, "\\'")}', category: '${it.category.replace(
+          /'/g,
+          "\\'"
+        )}' },`
+    )
+    .join("\n") +
+  "\n];\n";
+
 const outPath = path.join(__dirname, "universalList.js");
-fs.writeFileSync(outPath, output, "utf8");
+fs.writeFileSync(outPath, header + body, "utf8");
 
-console.log("✅ universalList.js generated successfully at:", outPath);
+console.log(`✅ universalList.js generated with ${out.length} items at: ${outPath}`);

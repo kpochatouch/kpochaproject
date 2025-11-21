@@ -17,7 +17,7 @@ import ErrorBoundary from "../components/ErrorBoundary";
 import SideMenu from "../components/SideMenu.jsx";
 import FeedComposer from "../components/FeedComposer.jsx";
 import { connectSocket, registerSocketHandler } from "../lib/socket";
-import InstantRequestButton from "../components/InstantRequestButton";
+// ❌ InstantRequestButton import removed
 
 /* ---------------- Main Browse page ---------------- */
 export default function Browse() {
@@ -32,7 +32,7 @@ export default function Browse() {
   const [errPros, setErrPros] = useState("");
 
   const [q, setQ] = useState("");
-  const [service, setService] = useState("");
+  const [service, setService] = useState(""); // <- we will store the SERVICE NAME here
   const [stateName, setStateName] = useState("");
   const [lga, setLga] = useState("");
 
@@ -111,13 +111,14 @@ export default function Browse() {
     return () => { on = false; };
   }, [tab, lga, stateName]);
 
+  // Normalize services for each pro -> array of lowercased service NAMES
   function svcArray(p) {
     const raw = p?.services;
     if (Array.isArray(raw))
       return raw
         .map((s) => (typeof s === "string" ? s : s?.name))
         .filter(Boolean)
-        .map((s) => s.toLowerCase());
+        .map((s) => String(s).toLowerCase());
     if (typeof raw === "string")
       return raw
         .split(",")
@@ -130,6 +131,7 @@ export default function Browse() {
     const term = q.trim().toLowerCase();
     const selectedState = (stateName || "").toUpperCase();
     const selectedLga = (lga || "").toUpperCase();
+    const selectedServiceName = (service || "").toLowerCase(); // <- service NAME
 
     return [...pros]
       .map((p) => {
@@ -144,12 +146,17 @@ export default function Browse() {
         const servicesLC = svcArray(p);
 
         const matchName = term ? name.includes(term) || desc.includes(term) : true;
-        const matchSvc = service ? servicesLC.includes(service.toLowerCase()) : true;
+
+        // ✅ Now match by SERVICE NAME (from ServicePicker meta.name)
+        const matchSvc = selectedServiceName
+          ? servicesLC.includes(selectedServiceName)
+          : true;
+
         const matchState = selectedState ? proState === selectedState : true;
         const matchLga = selectedLga ? proLga === selectedLga : true;
 
         let score = 0;
-        if (service && matchSvc) score += 3;
+        if (selectedServiceName && matchSvc) score += 3;
         if (selectedLga && matchLga) score += 2;
         if (selectedState && matchState) score += 2;
         if (term && matchName) score += 1;
@@ -198,13 +205,15 @@ export default function Browse() {
           }
         }
 
-        const r = await api.get("/api/feed/public", { params }).catch(() => ({ data: [] }));
+        const r = await api
+          .get("/api/feed/public", { params })
+          .catch(() => ({ data: [] }));
 
         const list = Array.isArray(r.data)
           ? r.data
           : Array.isArray(r.data?.items)
-            ? r.data.items
-            : [];
+          ? r.data.items
+          : [];
 
         if (append) {
           setFeed((prev) => {
@@ -253,72 +262,85 @@ export default function Browse() {
     await fetchFeed({ append: true, before });
   }, [feed, fetchFeed]);
 
-  // Realtime feed socket handlers — place after your refs/vars and before the component return
-useEffect(() => {
-  // only attach when feed tab is active (optional)
-  if (tab !== "feed") return;
+  // Realtime feed socket handlers
+  useEffect(() => {
+    if (tab !== "feed") return;
 
-  try { connectSocket(); } catch (e) { console.warn("connectSocket failed", e?.message || e); }
-
-  // Post created anywhere — prepend to feed if not present and if it matches current lga filter (or always if you want global)
-  const onPostCreated = (payload) => {
     try {
-      if (!payload) return;
-      // optional: filter by lga if feed is currently filtered
-      if (lga) {
-        const postLga = (payload.lga || payload.ownerLga || payload.locationLga || "").toUpperCase();
-        if (postLga && postLga !== (lga || "").toUpperCase()) return;
+      connectSocket();
+    } catch (e) {
+      console.warn("connectSocket failed", e?.message || e);
+    }
+
+    const onPostCreated = (payload) => {
+      try {
+        if (!payload) return;
+        if (lga) {
+          const postLga = (payload.lga || payload.ownerLga || payload.locationLga || "").toUpperCase();
+          if (postLga && postLga !== (lga || "").toUpperCase()) return;
+        }
+        setFeed((prev) => {
+          const id = payload._id || payload.id;
+          if (!id) return [payload, ...prev];
+          if (prev.some((p) => (p._id || p.id) === id)) return prev;
+          return [payload, ...prev];
+        });
+      } catch (err) {
+        console.warn("post:created handler failed", err);
       }
-      setFeed((prev) => {
-        const id = payload._id || payload.id;
-        if (!id) return [payload, ...prev];
-        if (prev.some((p) => (p._id || p.id) === id)) return prev;
-        return [payload, ...prev];
-      });
-    } catch (err) { console.warn("post:created handler failed", err); }
-  };
+    };
 
-  // Post deleted — remove from list
-  const onPostDeleted = (payload) => {
-    try {
-      const id = payload?.postId || payload?._id || payload?.id || null;
-      if (!id) return;
-      setFeed((prev) => prev.filter((p) => (p._id || p.id) !== id));
-    } catch (err) { console.warn("post:deleted handler failed", err); }
-  };
+    const onPostDeleted = (payload) => {
+      try {
+        const id = payload?.postId || payload?._id || payload?.id || null;
+        if (!id) return;
+        setFeed((prev) => prev.filter((p) => (p._id || p.id) !== id));
+      } catch (err) {
+        console.warn("post:deleted handler failed", err);
+      }
+    };
 
-  // Post stats update (likes/comments/views) — merge into the matching post
-  const onPostStats = (payload) => {
-    try {
-      const id = payload?.postId || payload?.id || null;
-      if (!id) return;
-      setFeed((prev) =>
-        prev.map((p) => {
-          const pid = p._id || p.id;
-          if (!pid || String(pid) !== String(id)) return p;
-          return { ...p, stats: { ...(p.stats || {}), ...(payload.stats || payload) } };
-        })
-      );
-    } catch (err) { console.warn("post:stats handler failed", err); }
-  };
+    const onPostStats = (payload) => {
+      try {
+        const id = payload?.postId || payload?.id || null;
+        if (!id) return;
+        setFeed((prev) =>
+          prev.map((p) => {
+            const pid = p._id || p.id;
+            if (!pid || String(pid) !== String(id)) return p;
+            return { ...p, stats: { ...(p.stats || {}), ...(payload.stats || payload) } };
+          })
+        );
+      } catch (err) {
+        console.warn("post:stats handler failed", err);
+      }
+    };
 
-  const unregisterCreated = typeof registerSocketHandler === "function"
-    ? registerSocketHandler("post:created", onPostCreated)
-    : null;
-  const unregisterDeleted = typeof registerSocketHandler === "function"
-    ? registerSocketHandler("post:deleted", onPostDeleted)
-    : null;
-  const unregisterStats = typeof registerSocketHandler === "function"
-    ? registerSocketHandler("post:stats", onPostStats)
-    : null;
+    const unregisterCreated =
+      typeof registerSocketHandler === "function"
+        ? registerSocketHandler("post:created", onPostCreated)
+        : null;
+    const unregisterDeleted =
+      typeof registerSocketHandler === "function"
+        ? registerSocketHandler("post:deleted", onPostDeleted)
+        : null;
+    const unregisterStats =
+      typeof registerSocketHandler === "function"
+        ? registerSocketHandler("post:stats", onPostStats)
+        : null;
 
-  return () => {
-    try { unregisterCreated && unregisterCreated(); } catch {}
-    try { unregisterDeleted && unregisterDeleted(); } catch {}
-    try { unregisterStats && unregisterStats(); } catch {}
-  };
-}, [tab, lga]); // note: depend on tab and lga so handlers respect the current filter
-
+    return () => {
+      try {
+        unregisterCreated && unregisterCreated();
+      } catch {}
+      try {
+        unregisterDeleted && unregisterDeleted();
+      } catch {}
+      try {
+        unregisterStats && unregisterStats();
+      } catch {}
+    };
+  }, [tab, lga]);
 
   // setup IntersectionObserver for automatic infinite scroll
   useEffect(() => {
@@ -355,11 +377,14 @@ useEffect(() => {
   }, [tab, loadMore]);
 
   function goBook(pro, chosenService) {
-    const svcName = chosenService || service || null;
+    const svcName = chosenService || service || null; // service NAME
     const svcList = Array.isArray(pro?.services)
       ? pro.services.map((s) => (typeof s === "string" ? { name: s } : s))
       : [];
-    const svcPrice = svcName ? svcList.find((s) => s.name === svcName)?.price : undefined;
+    const svcPrice = svcName
+      ? svcList.find((s) => String(s.name).toLowerCase() === String(svcName).toLowerCase())
+          ?.price
+      : undefined;
 
     const proId = pro?.id || pro?._id;
     if (!proId) return;
@@ -376,85 +401,139 @@ useEffect(() => {
     });
   }
 
-  const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+  const token =
+    typeof window !== "undefined" ? localStorage.getItem("token") : null;
   const canPostOnFeed = !!token;
 
   return (
     <ErrorBoundary>
       <div className="max-w-6xl mx-auto px-4 py-10">
         {/* header + tabs */}
-<div className="mb-6 flex items-center justify-between gap-3 flex-wrap">
-  <div className="flex items-center gap-2">
-    <img src="/discovery.png" alt="Discover" className="w-6 h-6 object-contain max-w-full" />
-    <h1 className="text-2xl font-semibold">Discover</h1>
-  </div>
+        <div className="mb-6 flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2">
+            <img
+              src="/discovery.png"
+              alt="Discover"
+              className="w-6 h-6 object-contain max-w-full"
+            />
+            <h1 className="text-2xl font-semibold">Discover</h1>
+          </div>
 
-  {/* ⬇️ New Instant Request Button Component */}
-  <InstantRequestButton
-    mode="service"
-    service={service}
-    amountNaira={undefined}
-    stateName={stateName}
-    lga={lga}
-  />
+          {/* 👇 InstantRequestButton removed here */}
 
-  <div>
-    {/* existing tab pills */}
-    <div className="inline-flex rounded-xl border border-zinc-800 overflow-hidden">
-      <button
-        className={`px-4 py-2 text-sm border-r border-zinc-800 ${
-          tab === "feed"
-            ? "bg-gold text-black font-semibold"
-            : "hover:bg-zinc-900"
-        }`}
-        onClick={() => setTab("feed")}
-      >
-        Feed
-      </button>
-      <button
-        className={`px-4 py-2 text-sm ${
-          tab === "pros"
-            ? "bg-gold text-black font-semibold"
-            : "hover:bg-zinc-900"
-        }`}
-        onClick={() => setTab("pros")}
-      >
-        Pros
-      </button>
-    </div>
-  </div>
-</div>
-
-
+          <div>
+            {/* existing tab pills */}
+            <div className="inline-flex rounded-xl border border-zinc-800 overflow-hidden">
+              <button
+                className={`px-4 py-2 text-sm border-r border-zinc-800 ${
+                  tab === "feed"
+                    ? "bg-gold text-black font-semibold"
+                    : "hover:bg-zinc-900"
+                }`}
+                onClick={() => setTab("feed")}
+              >
+                Feed
+              </button>
+              <button
+                className={`px-4 py-2 text-sm ${
+                  tab === "pros"
+                    ? "bg-gold text-black font-semibold"
+                    : "hover:bg-zinc-900"
+                }`}
+                onClick={() => setTab("pros")}
+              >
+                Pros
+              </button>
+            </div>
+          </div>
+        </div>
 
         {/* filters — only show on Pros tab */}
         {tab === "pros" && (
           <div className="flex flex-wrap items-center gap-2 mb-6">
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by name or description…" className="bg-black border border-zinc-800 rounded-lg px-3 py-2 w-56 max-w-full" />
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search by name or description…"
+              className="bg-black border border-zinc-800 rounded-lg px-3 py-2 w-56 max-w-full"
+            />
+
             <div className="w-56 max-w-full">
-              <ServicePicker value={service} onChange={setService} placeholder="All services" allowCustom={false} />
+              {/* ✅ Use ServicePicker meta.name so Browse filters by NAME, not id */}
+              <ServicePicker
+                value={service}
+                onChange={(_value, meta) => setService(meta?.name || "")}
+                placeholder="All services"
+                includeOther={false}
+              />
             </div>
-            <select value={stateName} onChange={(e) => { const val = e.target.value.toUpperCase(); setStateName(val); setLga(""); }} className="bg-black border border-zinc-800 rounded-lg px-3 py-2">
+
+            <select
+              value={stateName}
+              onChange={(e) => {
+                const val = e.target.value.toUpperCase();
+                setStateName(val);
+                setLga("");
+              }}
+              className="bg-black border border-zinc-800 rounded-lg px-3 py-2"
+            >
               <option value="">All States</option>
-              {states.map((s) => <option key={s} value={s}>{s}</option>)}
+              {states.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
             </select>
-            <select value={lga} onChange={(e) => setLga(e.target.value.toUpperCase())} className="bg-black border border-zinc-800 rounded-lg px-3 py-2" disabled={stateName && !lgasForState.length}>
+
+            <select
+              value={lga}
+              onChange={(e) => setLga(e.target.value.toUpperCase())}
+              className="bg-black border border-zinc-800 rounded-lg px-3 py-2"
+              disabled={stateName && !lgasForState.length}
+            >
               <option value="">All LGAs</option>
-              {(stateName ? lgasForState : []).map((x) => <option key={x} value={x}>{x}</option>)}
+              {(stateName ? lgasForState : []).map((x) => (
+                <option key={x} value={x}>
+                  {x}
+                </option>
+              ))}
             </select>
-            <button onClick={clearFilters} className="rounded-lg border border-zinc-700 px-3 py-2 text-sm">Clear</button>
+
+            <button
+              onClick={clearFilters}
+              className="rounded-lg border border-zinc-700 px-3 py-2 text-sm"
+            >
+              Clear
+            </button>
           </div>
         )}
 
         {/* content */}
         {tab === "pros" ? (
           <>
-            {errPros && <div className="mb-4 rounded border border-red-800 bg-red-900/30 text-red-100 px-3 py-2">{errPros}</div>}
-            {loadingPros ? <p className="text-zinc-400">Loading…</p> : filteredAndRanked.length ? (
-              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {filteredAndRanked.map((pro) => <BarberCard key={pro.id || pro._id} barber={pro} onOpen={setOpenPro} onBook={(svc) => goBook(pro, svc)} />)}
+            {errPros && (
+              <div className="mb-4 rounded border border-red-800 bg-red-900/30 text-red-100 px-3 py-2">
+                {errPros}
               </div>
-            ) : <div className="text-zinc-400">No professionals match your filters.</div>}
+            )}
+            {loadingPros ? (
+              <p className="text-zinc-400">Loading…</p>
+            ) : filteredAndRanked.length ? (
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filteredAndRanked.map((pro) => (
+                  <BarberCard
+                    key={pro.id || pro._id}
+                    barber={pro}
+                    onOpen={setOpenPro}
+                    onBook={(svc) => goBook(pro, svc)}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="text-zinc-400">
+                No professionals match your filters.
+              </div>
+            )}
           </>
         ) : (
           <div className="flex flex-col lg:flex-row gap-4 items-start">
@@ -465,15 +544,37 @@ useEffect(() => {
 
             {/* FEED */}
             <div className="flex-1 w-full max-w-2xl lg:mx-0 mx-auto">
-              {canPostOnFeed && <FeedComposer lga={lga} onPosted={() => fetchFeed({ append: false, before: null })} />}
+              {canPostOnFeed && (
+                <FeedComposer
+                  lga={lga}
+                  onPosted={() =>
+                    fetchFeed({ append: false, before: null })
+                  }
+                />
+              )}
 
-              {errFeed && <div className="mb-4 rounded border border-red-800 bg-red-900/30 text-red-100 px-3 py-2">{errFeed}</div>}
+              {errFeed && (
+                <div className="mb-4 rounded border border-red-800 bg-red-900/30 text-red-100 px-3 py-2">
+                  {errFeed}
+                </div>
+              )}
 
-              {loadingFeed ? <p className="text-zinc-400">Loading feed…</p> : feed.length ? (
+              {loadingFeed ? (
+                <p className="text-zinc-400">Loading feed…</p>
+              ) : feed.length ? (
                 <>
                   <div className="space-y-4">
                     {feed.map((post) => (
-                      <FeedCard key={post._id || post.id} post={post} currentUser={me ? { uid: me.uid || me.id, ...me } : null} onDeleted={() => fetchFeed({ append: false, before: null })} />
+                      <FeedCard
+                        key={post._id || post.id}
+                        post={post}
+                        currentUser={
+                          me ? { uid: me.uid || me.id, ...me } : null
+                        }
+                        onDeleted={() =>
+                          fetchFeed({ append: false, before: null })
+                        }
+                      />
                     ))}
                   </div>
 
@@ -481,17 +582,43 @@ useEffect(() => {
                   <div ref={sentinelRef} className="h-1 w-full" aria-hidden />
 
                   <div className="mt-6 flex justify-center">
-                    {loadingMore ? <div className="text-sm text-zinc-400">Loading…</div> : hasMore ? (
-                      <button onClick={loadMore} className="flex items-center gap-2 px-4 py-2 rounded-md border border-zinc-700 hover:bg-zinc-900" aria-label="Load more posts">
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" className="w-5 h-5" aria-hidden>
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                    {loadingMore ? (
+                      <div className="text-sm text-zinc-400">Loading…</div>
+                    ) : hasMore ? (
+                      <button
+                        onClick={loadMore}
+                        className="flex items-center gap-2 px-4 py-2 rounded-md border border-zinc-700 hover:bg-zinc-900"
+                        aria-label="Load more posts"
+                      >
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          className="w-5 h-5"
+                          aria-hidden
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth="2"
+                            d="M19 9l-7 7-7-7"
+                          />
                         </svg>
                         <span className="text-sm">Load more</span>
                       </button>
-                    ) : <div className="text-xs text-zinc-500">No more posts</div>}
+                    ) : (
+                      <div className="text-xs text-zinc-500">
+                        No more posts
+                      </div>
+                    )}
                   </div>
                 </>
-              ) : <div className="rounded-lg border border-zinc-800 p-6 text-zinc-400">No updates yet.</div>}
+              ) : (
+                <div className="rounded-lg border border-zinc-800 p-6 text-zinc-400">
+                  No updates yet.
+                </div>
+              )}
             </div>
 
             {/* RIGHT ADS */}
@@ -499,59 +626,122 @@ useEffect(() => {
               <div className="space-y-4">
                 {isAdmin ? (
                   <div className="rounded-lg border border-zinc-800 bg-black/40 p-3 space-y-2">
-                    <div className="text-xs text-zinc-300 mb-1">Advert (admin only)</div>
-                    <input value={adminAdUrl} onChange={(e) => { setAdminAdUrl(e.target.value); setAdMsg(""); }} placeholder="Image / video URL" className="w-full bg-black border border-zinc-700 rounded px-2 py-1 text-xs" />
-                    <input type="file" accept="image/*,video/*" onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (!file) return;
-                      const localUrl = URL.createObjectURL(file);
-                      setAdminAdUrl(localUrl);
-                      setAdMsg("Local preview (not uploaded to backend)");
-                    }} className="w-full text-[10px] text-zinc-400" />
-                    <div className="flex gap-2">
-                      <button onClick={() => {
-                        if (!adminAdUrl.trim()) return setAdMsg("Paste a media URL first.");
-                        setAdMsg("Previewing…");
-                        setTimeout(() => setAdMsg("Preview ready"), 300);
-                      }} className="flex-1 rounded-md border border-zinc-700 px-2 py-1 text-xs hover:bg-zinc-900">Preview</button>
-                      <button onClick={async () => {
-                        if (!adminAdUrl.trim()) return setAdMsg("Paste a media URL first.");
-                        try {
-                          setAdMsg("Publishing…");
-                          await api.post("/api/posts", {
-                            text: "Sponsored",
-                            media: [{ url: adminAdUrl.trim(), type: /\.(mp4|mov|webm)$/i.test(adminAdUrl) ? "video" : "image" }],
-                            isPublic: true,
-                            tags: ["AD"],
-                          });
-                          setAdMsg("Published to feed ✔");
-                          await fetchFeed({ append: false, before: null });
-                        } catch (e) {
-                          setAdMsg(e?.response?.data?.error || "Failed to publish ad");
-                        }
-                      }} className="flex-1 rounded-md bg-gold text-black px-2 py-1 text-xs font-semibold">Publish</button>
+                    <div className="text-xs text-zinc-300 mb-1">
+                      Advert (admin only)
                     </div>
-                    {adMsg && <p className="text-[10px] text-zinc-500 mt-1">{adMsg}</p>}
+                    <input
+                      value={adminAdUrl}
+                      onChange={(e) => {
+                        setAdminAdUrl(e.target.value);
+                        setAdMsg("");
+                      }}
+                      placeholder="Image / video URL"
+                      className="w-full bg-black border border-zinc-700 rounded px-2 py-1 text-xs"
+                    />
+                    <input
+                      type="file"
+                      accept="image/*,video/*"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        const localUrl = URL.createObjectURL(file);
+                        setAdminAdUrl(localUrl);
+                        setAdMsg("Local preview (not uploaded to backend)");
+                      }}
+                      className="w-full text-[10px] text-zinc-400"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => {
+                          if (!adminAdUrl.trim())
+                            return setAdMsg("Paste a media URL first.");
+                          setAdMsg("Previewing…");
+                          setTimeout(() => setAdMsg("Preview ready"), 300);
+                        }}
+                        className="flex-1 rounded-md border border-zinc-700 px-2 py-1 text-xs hover:bg-zinc-900"
+                      >
+                        Preview
+                      </button>
+                      <button
+                        onClick={async () => {
+                          if (!adminAdUrl.trim())
+                            return setAdMsg("Paste a media URL first.");
+                          try {
+                            setAdMsg("Publishing…");
+                            await api.post("/api/posts", {
+                              text: "Sponsored",
+                              media: [
+                                {
+                                  url: adminAdUrl.trim(),
+                                  type: /\.(mp4|mov|webm)$/i.test(adminAdUrl)
+                                    ? "video"
+                                    : "image",
+                                },
+                              ],
+                              isPublic: true,
+                              tags: ["AD"],
+                            });
+                            setAdMsg("Published to feed ✔");
+                            await fetchFeed({
+                              append: false,
+                              before: null,
+                            });
+                          } catch (e) {
+                            setAdMsg(
+                              e?.response?.data?.error ||
+                                "Failed to publish ad"
+                            );
+                          }
+                        }}
+                        className="flex-1 rounded-md bg-gold text-black px-2 py-1 text-xs font-semibold"
+                      >
+                        Publish
+                      </button>
+                    </div>
+                    {adMsg && (
+                      <p className="text-[10px] text-zinc-500 mt-1">
+                        {adMsg}
+                      </p>
+                    )}
                   </div>
                 ) : null}
 
                 {adminAdUrl ? (
                   <div className="rounded-lg border border-zinc-800 overflow-hidden bg-black/40 h-40 flex items-center justify-center">
                     {adminAdUrl.match(/\.(mp4|mov|webm)$/i) ? (
-                      <video src={adminAdUrl} muted loop playsInline autoPlay className="w-full h-full object-cover max-w-full" />
+                      <video
+                        src={adminAdUrl}
+                        muted
+                        loop
+                        playsInline
+                        autoPlay
+                        className="w-full h-full object-cover max-w-full"
+                      />
                     ) : (
-                      <img src={adminAdUrl} alt="ad" loading="lazy" className="w-full h-full object-cover max-w-full" />
+                      <img
+                        src={adminAdUrl}
+                        alt="ad"
+                        loading="lazy"
+                        className="w-full h-full object-cover max-w-full"
+                      />
                     )}
                   </div>
                 ) : (
-                  <div className="h-40 rounded-lg border border-zinc-800 bg-black/20 flex items-center justify-center text-xs text-zinc-500">Advert space</div>
+                  <div className="h-40 rounded-lg border border-zinc-800 bg-black/20 flex items-center justify-center text-xs text-zinc-500">
+                    Advert space
+                  </div>
                 )}
               </div>
             </div>
           </div>
         )}
 
-        <ProDrawer open={!!openPro} pro={openPro} onClose={() => setOpenPro(null)} onBook={(svc) => (openPro ? goBook(openPro, svc) : null)} />
+        <ProDrawer
+          open={!!openPro}
+          pro={openPro}
+          onClose={() => setOpenPro(null)}
+          onBook={(svc) => (openPro ? goBook(openPro, svc) : null)}
+        />
       </div>
     </ErrorBoundary>
   );

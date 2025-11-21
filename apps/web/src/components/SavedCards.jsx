@@ -1,3 +1,4 @@
+//apps/web/srd/components/SavedCard.jsx
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 
