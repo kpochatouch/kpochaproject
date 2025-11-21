@@ -219,19 +219,27 @@ export default function BookingDetails() {
 
   // ---- CARD (Paystack) ----
   async function onClientPayNow() {
-    if (!booking) return;
+    console.log("[BookingDetails] Card pay clicked");
+    if (!booking) {
+      console.log("[BookingDetails] No booking in state");
+      return;
+    }
+
+    // 1) Check Paystack SDK
     if (
       !window.PaystackPop ||
       typeof window.PaystackPop.setup !== "function"
     ) {
-      return alert(
+      alert(
         "Paystack library not loaded yet. Please wait a moment or refresh and try again."
       );
+      return;
     }
+
+    // 2) Check public key
     if (!import.meta.env.VITE_PAYSTACK_PUBLIC_KEY) {
-      return alert(
-        "Missing VITE_PAYSTACK_PUBLIC_KEY in frontend env."
-      );
+      alert("Missing VITE_PAYSTACK_PUBLIC_KEY in frontend env.");
+      return;
     }
 
     setBusy(true);
@@ -244,13 +252,15 @@ export default function BookingDetails() {
           atob((token.split(".")[1] || "e30="))
         );
         if (payloadJwt?.email) email = payloadJwt.email;
-      } catch {}
+      } catch (e) {
+        console.warn("JWT decode failed, using fallback email:", e);
+      }
 
       const ref = `BOOKING-${booking._id}`;
+      console.log("[BookingDetails] Opening Paystack with ref:", ref);
+
       const handler = window.PaystackPop.setup({
-        key: String(
-          import.meta.env.VITE_PAYSTACK_PUBLIC_KEY || ""
-        ),
+        key: String(import.meta.env.VITE_PAYSTACK_PUBLIC_KEY || ""),
         email,
         amount: Number(booking.amountKobo || priceKobo), // kobo
         ref,
@@ -269,6 +279,7 @@ export default function BookingDetails() {
           ],
         },
         callback: async function (response) {
+          console.log("[Paystack callback]", response);
           try {
             const v = await verifyPayment({
               bookingId: booking._id,
@@ -279,8 +290,7 @@ export default function BookingDetails() {
                 (await getMyBookings().catch(() => [])) || [];
               const updated =
                 mine.find(
-                  (b) =>
-                    String(b._id) === String(booking._id)
+                  (b) => String(b._id) === String(booking._id)
                 ) ||
                 {
                   ...booking,
@@ -295,22 +305,27 @@ export default function BookingDetails() {
             } else {
               alert("Payment verification failed.");
             }
-          } catch {
+          } catch (err) {
+            console.error("verifyPayment error:", err);
             alert("Payment verification error.");
           } finally {
             setBusy(false);
           }
         },
         onClose: function () {
+          console.log("[Paystack] popup closed");
           setBusy(false);
         },
       });
 
       handler.openIframe();
-    } catch {
+    } catch (err) {
+      console.error("[BookingDetails] Paystack setup failed:", err);
       setBusy(false);
+      alert("Could not start card payment. Check console for details.");
     }
   }
+
 
   // ---- WALLET ----
   async function onClientPayWithWallet() {
