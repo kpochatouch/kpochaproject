@@ -397,6 +397,50 @@ export default function PublicProfile() {
     navigate(`/chat?with=${encodeURIComponent(owner)}`);
   }
 
+    function handleBookNow() {
+    // 1) Resolve pro id
+    const proId =
+      profile.id ||
+      canonicalOwnerUid(profile) ||
+      idOrHandle;
+
+    if (!proId) {
+      alert("Cannot start booking: missing professional id.");
+      return;
+    }
+
+    // 2) Normalize services to objects { name, price }
+    const svcList = Array.isArray(services)
+      ? services.map((s) =>
+          typeof s === "string" ? { name: s } : s
+        )
+      : [];
+
+    // 3) Default to first listed service on profile
+    const primary = svcList[0] || null;
+    const svcName = primary?.name || null;
+    const svcPrice = primary?.price;
+
+    // 4) Navigate to BookService with same shape as Browse.goBook
+    navigate(
+      `/book/${proId}?service=${encodeURIComponent(
+        svcName || ""
+      )}`,
+      {
+        state: {
+          proId,
+          serviceName: svcName || undefined,
+          amountNaira:
+            typeof svcPrice !== "undefined" ? svcPrice : undefined,
+          country: "Nigeria",
+          state: (profile.state || "").toUpperCase(),
+          lga: (profile.lga || "").toUpperCase(),
+        },
+      }
+    );
+  }
+
+
   /* ------------------ Posts pagination & infinite scroll ------------------ */
   const fetchPosts = useCallback(
     async ({ append = false, before = null } = {}) => {
@@ -571,12 +615,32 @@ export default function PublicProfile() {
           </div>
 
           <div className="pb-3 flex gap-2">
-            <a className="px-4 py-2 bg-gold text-black font-semibold rounded-lg hover:opacity-90" href={`/book/${profile.id || profile.username || idOrHandle}`}>Book now</a>
-            <button className="px-4 py-2 border border-zinc-700 rounded-lg text-sm text-zinc-200" title="Follow this profile" onClick={following ? unfollow : follow} disabled={followPending}>{followPending ? "…" : following ? "Unfollow" : "Follow"}</button>
-            <button onClick={startMessage} className="px-4 py-2 rounded-lg border border-zinc-700 bg-zinc-900 hover:bg-zinc-800 text-sm" title="Send message">Message</button>
-          </div>
-        </div>
-      </div>
+  <button
+    onClick={handleBookNow}
+    className="px-4 py-2 bg-gold text-black font-semibold rounded-lg hover:opacity-90"
+  >
+    Book now
+  </button>
+
+  <button
+    className="px-4 py-2 border border-zinc-700 rounded-lg text-sm text-zinc-200"
+    title="Follow this profile"
+    onClick={following ? unfollow : follow}
+    disabled={followPending}
+  >
+    {followPending ? "…" : following ? "Unfollow" : "Follow"}
+  </button>
+
+  <button
+    onClick={startMessage}
+    className="px-4 py-2 rounded-lg border border-zinc-700 bg-zinc-900 hover:bg-zinc-800 text-sm"
+    title="Send message"
+  >
+    Message
+  </button>
+    </div>
+  </div>
+ </div>
 
       {/* Main grid */}
       <div className="max-w-6xl mx-auto px-4 mt-6 grid grid-cols-1 lg:grid-cols-[14rem_1fr_14rem] gap-6 pb-10">

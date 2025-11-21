@@ -252,16 +252,35 @@ async function startPaystackInline(booking, idToken = null) {
         ].filter(Boolean),
       },
 
+      // NOTE: plain function; async work inside
       callback: function (res) {
         (async () => {
           try {
             const headers = idToken ? { Authorization: `Bearer ${idToken}` } : {};
+
+            // optional: verify immediately
             await api.post(
               "/api/payments/verify",
               { bookingId: booking._id, reference: res.reference },
               { headers }
             );
-            nav(`/bookings/${booking._id}`, { replace: true });
+
+            // save info for PaymentConfirm.jsx
+            sessionStorage.setItem(
+              "pay_ref",
+              JSON.stringify({
+                bookingId: booking._id,
+                reference: res.reference,
+              })
+            );
+
+            // go to payment confirm page (not booking details)
+            nav(
+              `/payment/confirm?bookingId=${booking._id}&reference=${encodeURIComponent(
+                res.reference
+              )}`
+            );
+
             resolve();
           } catch (e) {
             console.error("verify payment error:", e?.response?.data || e?.message || e);
@@ -278,6 +297,7 @@ async function startPaystackInline(booking, idToken = null) {
     handler.openIframe();
   });
 }
+
 
 
 
