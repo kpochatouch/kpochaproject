@@ -27,6 +27,7 @@ import { withAuth as walletWithAuth } from "./routes/wallets.js";
 import {
   creditProPendingForBooking,
   releasePendingToAvailableForBooking,
+  cancelBookingAndRefund,
 } from "./services/walletService.js";
 
 // Feature routers (factories)
@@ -178,9 +179,16 @@ const BookingRulesSchema = new mongoose.Schema(
     noShowStrikeLimit: { type: Number, default: 2 },
     enableNoShowSweep: { type: Boolean, default: true },
     noShowSweepCron: { type: String, default: "0 3 * * *" },
+
+    // NEW: how long pro has to accept (seconds)
+    ringTimeoutSeconds: { type: Number, default: 120 },
+
+    // NEW: client cancel fee % when cancelling AFTER accept
+    clientCancelFeePercentAfterAccept: { type: Number, default: 3 },
   },
   { _id: false }
 );
+
 const MaintenanceSchema = new mongoose.Schema(
   {
     isMaintenanceMode: { type: Boolean, default: false },
@@ -252,6 +260,7 @@ try {
 /* ------------------- Schedulers ------------------- */
 let CRON_TASKS = [];
 async function initSchedulers() {
+  // stop any old cron tasks
   CRON_TASKS.forEach((t) => t.stop());
   CRON_TASKS = [];
 
@@ -306,6 +315,48 @@ async function initSchedulers() {
     CRON_TASKS.push(t);
   }
 
+  // 🔔 Auto-cancel 'ringing' bookings that were never accepted
+if (s?.bookingRules?.ringTimeoutSeconds) {
+  const t = cron.schedule("*/1 * * * *", async () => {
+    try {
+      const timeoutMs = (s.bookingRules.ringTimeoutSeconds || 120) * 1000;
+      const cutoff = new Date(Date.now() - timeoutMs);
+
+      // "Ringing" = paid + scheduled + still not accepted (no acceptedAt)
+      const ringing = await Booking.find({
+        status: "scheduled",
+        paymentStatus: "paid",
+        acceptedAt: { $exists: false },
+        createdAt: { $lte: cutoff },
+      }).limit(200);
+
+      for (const b of ringing) {
+        try {
+          const refundInfo = await cancelBookingAndRefund(b, {
+            cancelledBy: "system_timeout",
+            reason: "ring_timeout",
+          });
+
+          console.log(
+            "[scheduler] auto-cancelled ringing booking via helper",
+            b._id.toString(),
+            refundInfo ? `refund=${refundInfo?.refundAmountKobo}` : ""
+          );
+        } catch (e) {
+          console.error(
+            "[scheduler] ring-timeout cancelBookingAndRefund error:",
+            b._id?.toString?.(),
+            e?.message || e
+          );
+        }
+      }
+    } catch (err) {
+      console.error("[scheduler] ring-timeout error:", err.message);
+    }
+  });
+  CRON_TASKS.push(t);
+}
+
   // (Placeholder) No-show sweeper
   if (s?.bookingRules?.enableNoShowSweep && s?.bookingRules?.noShowSweepCron) {
     const t = cron.schedule(s.bookingRules.noShowSweepCron, async () => {
@@ -324,9 +375,11 @@ async function initSchedulers() {
   CRON_TASKS.forEach((t) => t.start());
   console.log("[scheduler] Schedulers initialized.");
 }
+
 async function restartSchedulers() {
   await initSchedulers();
 }
+
 
 
 /* ------------------- Express App ------------------- */

@@ -8,7 +8,7 @@ import { Pro } from "../models.js";
 /* Helpers: config with soft dependency on Settings (no hard import)  */
 /* ------------------------------------------------------------------ */
 
-let _cache = { proPct: null, feePct: null, ts: 0 };
+let _cache = { proPct: null, feePct: null, cancelFeePct: null, ts: 0 };
 const CACHE_MS = 5 * 60 * 1000; // 5 minutes
 
 function now() { return Date.now(); }
@@ -49,6 +49,18 @@ async function getWithdrawPendingFeePercent() {
   const envPct = envNumber("WITHDRAW_PENDING_FEE_PCT", 3);
   const pct = Number.isFinite(fromSettings) ? fromSettings : envPct;
   _cache.feePct = pct;
+  _cache.ts = now();
+  return pct;
+}
+
+// NEW: client cancel fee percent (used when client cancels AFTER accept)
+async function getClientCancelFeePercentAfterAccept() {
+  if (fresh() && _cache.cancelFeePct != null) return _cache.cancelFeePct;
+  const s = await readSettingsDoc();
+  const fromSettings = Number(s?.bookingRules?.clientCancelFeePercentAfterAccept);
+  const envPct = envNumber("CLIENT_CANCEL_FEE_AFTER_ACCEPT_PCT", 3);
+  const pct = Number.isFinite(fromSettings) ? fromSettings : envPct;
+  _cache.cancelFeePct = pct;
   _cache.ts = now();
   return pct;
 }
@@ -296,4 +308,149 @@ export async function releasePendingToAvailableForBooking(bookingOrId, meta = {}
   await Booking.updateOne({ _id: booking._id }, { $set: { payoutReleased: true } });
 
   return { ok: true, proPct, ...rel };
+}
+
+/* ------------------------------------------------------------------ */
+/* Booking cancel + refund (pro pending reversal + client fee calc)   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Cancel a booking and prepare refund info.
+ *
+ * - Always sets booking.status = "cancelled" and cancelledAt.
+ * - If booking was PAID:
+ *    - Reverse the pro's pending "booking_fund" for this booking (idempotent).
+ *    - Compute client refund + 3% fee ONLY when client cancels AFTER accept.
+ *    - Store refund info on booking.meta.cancelMeta (for Paystack/manual refund).
+ *
+ * NOTE: We do NOT send any money back to the client wallet here.
+ *       Actual refund to card is done via Paystack dashboard/API using the
+ *       amounts we store on the booking.
+ */
+export async function cancelBookingAndRefund(bookingOrId, options = {}) {
+  const { cancelledBy = "system", reason = "" } = options;
+
+  // 1) resolve booking document (full, not lean; we will mutate + save)
+  const booking =
+    typeof bookingOrId === "object" && bookingOrId?._id && typeof bookingOrId.save === "function"
+      ? bookingOrId
+      : await Booking.findById(bookingOrId);
+
+  if (!booking) throw new Error("booking_not_found");
+
+  const wasAccepted = booking.status === "accepted";
+  const wasPaid = booking.paymentStatus === "paid";
+  const amountKobo = Math.floor(Number(booking.amountKobo || 0));
+
+  // 2) Reverse pro pending (if paid & previously credited)
+  let reversedKobo = 0;
+  let ownerUid = null;
+
+  if (wasPaid && amountKobo > 0) {
+    ownerUid = await resolveProOwnerUid(booking);
+    if (ownerUid) {
+      const bookingIdStr = booking._id.toString();
+
+      // Idempotency: if we already have a refund tx, skip wallet mutation
+      const existingRefund = await WalletTx.findOne({
+        ownerUid,
+        type: "booking_fund_refund",
+        "meta.bookingId": bookingIdStr,
+      })
+        .sort({ createdAt: -1 })
+        .lean();
+
+      if (!existingRefund) {
+        // Find the original booking_fund tx to know how much was credited
+        const originalFund = await WalletTx.findOne({
+          ownerUid,
+          type: "booking_fund",
+          "meta.bookingId": bookingIdStr,
+        })
+          .sort({ createdAt: 1 })
+          .lean();
+
+        const creditedKobo = Math.floor(Number(originalFund?.amountKobo || 0));
+        if (creditedKobo > 0) {
+          const w = await getOrCreateWallet(ownerUid);
+          const pend = Math.max(0, w.pendingKobo || 0);
+          const toReverse = Math.min(creditedKobo, pend);
+
+          if (toReverse > 0) {
+            w.pendingKobo = pend - toReverse;
+            await w.save();
+
+            await WalletTx.create({
+              ownerUid,
+              type: "booking_fund_refund",
+              direction: "debit",
+              amountKobo: toReverse,
+              balancePendingKobo: w.pendingKobo,
+              balanceAvailableKobo: w.availableKobo || 0,
+              meta: {
+                bookingId: bookingIdStr,
+                cancelledBy,
+                reason,
+              },
+            });
+
+            reversedKobo = toReverse;
+          }
+        }
+      } else {
+        reversedKobo = existingRefund.amountKobo || 0;
+      }
+    }
+  }
+
+  // 3) Compute client fee + refund amount (for Paystack use)
+  let cancelFeePctApplied = 0;
+  let cancelFeeKobo = 0;
+  let refundAmountKobo = 0;
+
+  if (wasPaid && amountKobo > 0) {
+    const eligibleForClientFee = cancelledBy === "client" && wasAccepted;
+    if (eligibleForClientFee) {
+      const feePct = await getClientCancelFeePercentAfterAccept();
+      const pct = Math.max(0, Math.floor(feePct));
+      cancelFeePctApplied = pct;
+      cancelFeeKobo = Math.floor((amountKobo * pct) / 100);
+    }
+
+    refundAmountKobo = Math.max(0, amountKobo - cancelFeeKobo);
+  }
+
+  // 4) Update booking document
+  booking.status = "cancelled";
+  booking.cancelledAt = new Date();
+  if (wasPaid && booking.paymentStatus === "paid") {
+    // mark as refunded or partially-refunded logically
+    booking.paymentStatus = "refunded";
+  }
+
+  const meta = booking.meta || {};
+  meta.cancelMeta = {
+    ...(meta.cancelMeta || {}),
+    cancelledBy,
+    reason,
+    reversedProPendingKobo: reversedKobo,
+    cancelFeePercentApplied: cancelFeePctApplied,
+    cancelFeeKobo,
+    refundAmountKobo,
+    refundCurrency: booking.currency || "NGN",
+    refundedAt: new Date(),
+  };
+  booking.meta = meta;
+
+  await booking.save();
+
+  return {
+    ok: true,
+    bookingId: booking._id.toString(),
+    cancelledBy,
+    reversedProPendingKobo: reversedKobo,
+    cancelFeePercentApplied: cancelFeePctApplied,
+    cancelFeeKobo,
+    refundAmountKobo,
+  };
 }

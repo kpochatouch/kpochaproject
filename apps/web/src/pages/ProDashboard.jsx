@@ -5,25 +5,45 @@ import { getProBookings, acceptBooking, completeBooking } from "../lib/api";
 /* ---------- utils ---------- */
 function formatMoney(kobo = 0) {
   const naira = (Number(kobo) || 0) / 100;
-  try { return new Intl.NumberFormat("en-NG", { style: "currency", currency: "NGN" }).format(naira); }
-  catch { return `₦${naira.toLocaleString()}`; }
+  try {
+    return new Intl.NumberFormat("en-NG", {
+      style: "currency",
+      currency: "NGN",
+    }).format(naira);
+  } catch {
+    return `₦${naira.toLocaleString()}`;
+  }
 }
+
 function toDate(iso) {
-  try { return iso ? new Date(iso) : null; } catch { return null; }
+  try {
+    return iso ? new Date(iso) : null;
+  } catch {
+    return null;
+  }
 }
+
 function formatWhen(iso) {
   const d = toDate(iso);
   return d ? d.toLocaleString() : "ASAP";
 }
+
 const TONE = {
   zinc: "bg-zinc-900/40 border-zinc-800",
   emerald: "bg-emerald-900/30 border-emerald-800",
   amber: "bg-amber-900/30 border-amber-800",
   sky: "bg-sky-900/30 border-sky-800",
 };
+
 const Badge = ({ children, color = "zinc" }) => (
-  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${TONE[color]}`}>{children}</span>
+  <span
+    className={`px-2 py-0.5 rounded-full text-xs font-medium ${TONE[color]}`}
+  >
+    {children}
+  </span>
 );
+
+const PRO_FALLBACK_MINUTES = 120; // 2 hours before pro can close job
 
 /* ---------- page ---------- */
 export default function ProDashboard() {
@@ -39,7 +59,14 @@ export default function ProDashboard() {
   // Derived counts
   const counts = useMemo(() => {
     const c = { all: items.length };
-    for (const s of ["scheduled", "accepted", "completed", "pending_payment", "cancelled"]) {
+    for (const s of [
+      "scheduled",
+      "accepted",
+      "completed",
+      "pending_payment",
+      "cancelled",
+      "declined",
+    ]) {
       c[s] = items.filter((b) => b.status === s).length;
     }
     return c;
@@ -73,7 +100,10 @@ export default function ProDashboard() {
   }
 
   // initial + optional auto refresh
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+  }, []);
+
   useEffect(() => {
     clearInterval(timerRef.current);
     if (autoRefresh) {
@@ -86,7 +116,17 @@ export default function ProDashboard() {
   async function onAccept(id) {
     try {
       // optimistic: flip just this one to accepted
-      setItems((prev) => prev.map((b) => (b._id === id ? { ...b, status: "accepted" } : b)));
+      setItems((prev) =>
+        prev.map((b) =>
+          b._id === id
+            ? {
+                ...b,
+                status: "accepted",
+                acceptedAt: new Date().toISOString(),
+              }
+            : b
+        )
+      );
       await acceptBooking(id);
       flashOK("Booking accepted.");
     } catch (e) {
@@ -96,10 +136,43 @@ export default function ProDashboard() {
       load();
     }
   }
-  async function onComplete(id) {
+
+  // Pro-only completion (fallback after 2 hours)
+  async function onCompleteAsPro(id, askNote = false) {
     try {
-      setItems((prev) => prev.map((b) => (b._id === id ? { ...b, status: "completed" } : b)));
-      await completeBooking(id);
+      const payload = {};
+      if (askNote) {
+        const note = window.prompt(
+          "Optional: add a brief note about this completion (e.g. client did not click complete, but job is done). Leave blank to continue.",
+          ""
+        );
+        if (note && note.trim()) {
+          // backend accepts completionNote or note; either works
+          payload.completionNote = note.trim();
+        }
+      }
+
+      // optimistic UI: mark as completed
+      setItems((prev) =>
+        prev.map((b) =>
+          b._id === id
+            ? {
+                ...b,
+                status: "completed",
+                completedAt: new Date().toISOString(),
+                meta: {
+                  ...(b.meta || {}),
+                  completedBy: "pro", // frontend hint (backend is source of truth)
+                  ...(payload.completionNote
+                    ? { completionNote: payload.completionNote }
+                    : {}),
+                },
+              }
+            : b
+        )
+      );
+
+      await completeBooking(id, payload);
       flashOK("Booking completed.");
     } catch (e) {
       console.error(e);
@@ -123,8 +196,11 @@ export default function ProDashboard() {
             <option value="scheduled">Scheduled ({counts.scheduled})</option>
             <option value="accepted">Accepted ({counts.accepted})</option>
             <option value="completed">Completed ({counts.completed})</option>
-            <option value="pending_payment">Pending payment ({counts.pending_payment})</option>
+            <option value="pending_payment">
+              Pending payment ({counts.pending_payment})
+            </option>
             <option value="cancelled">Cancelled ({counts.cancelled})</option>
+            <option value="declined">Declined ({counts.declined})</option>
           </select>
           <label className="text-sm inline-flex items-center gap-1">
             <input
@@ -144,8 +220,16 @@ export default function ProDashboard() {
         </div>
       </div>
 
-      {err && <div className="mb-4 rounded border border-red-800 bg-red-900/40 text-red-100 px-3 py-2">{err}</div>}
-      {ok && <div className="mb-4 rounded border border-green-800 bg-green-900/30 text-green-100 px-3 py-2">{ok}</div>}
+      {err && (
+        <div className="mb-4 rounded border border-red-800 bg-red-900/40 text-red-100 px-3 py-2">
+          {err}
+        </div>
+      )}
+      {ok && (
+        <div className="mb-4 rounded border border-green-800 bg-green-900/30 text-green-100 px-3 py-2">
+          {ok}
+        </div>
+      )}
 
       {loading ? (
         <p className="text-zinc-400">Loading…</p>
@@ -157,26 +241,57 @@ export default function ProDashboard() {
         <div className="space-y-4">
           {filtered.map((b) => {
             // Snapshot vs legacy
-            const svcName = b?.service?.serviceName || b?.serviceName || "Service";
+            const svcName =
+              b?.service?.serviceName || b?.serviceName || "Service";
             const priceKobo = Number.isFinite(Number(b?.amountKobo))
               ? Number(b.amountKobo)
               : Number(b?.service?.priceKobo) || 0;
 
             const paidTone = b.paymentStatus === "paid" ? "emerald" : "amber";
             const statusTone =
-              b.status === "scheduled" ? "sky" :
-              b.status === "accepted" ? "emerald" :
-              b.status === "completed" ? "emerald" :
-              b.status === "cancelled" ? "amber" : "amber";
+              b.status === "scheduled"
+                ? "sky"
+                : b.status === "accepted"
+                ? "emerald"
+                : b.status === "completed"
+                ? "emerald"
+                : b.status === "cancelled" || b.status === "declined"
+                ? "amber"
+                : "amber";
 
             const canAccept =
               b.paymentStatus === "paid" &&
-              (b.status === "scheduled" || b.status === "pending_payment");
+              (b.status === "scheduled" ||
+                b.status === "pending_payment");
 
-            const canComplete = b.status === "accepted";
+            // 2-hour rule: how long since accepted?
+            const acceptedAt = toDate(b.acceptedAt);
+            const minutesSinceAccepted = acceptedAt
+              ? Math.floor(
+                  (Date.now() - acceptedAt.getTime()) / 60000
+                )
+              : null;
+
+            // Pro is only allowed to complete as a fallback after 2 hours
+            const proCanCompleteFallback =
+              b.status === "accepted" &&
+              minutesSinceAccepted !== null &&
+              minutesSinceAccepted >= PRO_FALLBACK_MINUTES;
+
+            const completedByLabel =
+              b.meta?.completedBy === "client"
+                ? "client"
+                : b.meta?.completedBy === "pro"
+                ? "professional"
+                : b.meta?.completedBy === "admin"
+                ? "admin"
+                : null;
 
             return (
-              <div key={b._id} className="border border-zinc-800 rounded-xl p-4 bg-black/40">
+              <div
+                key={b._id}
+                className="border border-zinc-800 rounded-xl p-4 bg-black/40"
+              >
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <div className="font-medium">
@@ -186,14 +301,40 @@ export default function ProDashboard() {
                       {formatWhen(b.scheduledFor)} — {b.lga}
                     </div>
                     {b.addressText ? (
-                      <div className="text-sm text-zinc-500 mt-1">{b.addressText}</div>
+                      <div className="text-sm text-zinc-500 mt-1">
+                        {b.addressText}
+                      </div>
                     ) : null}
                     {b.clientName || b.client?.name ? (
                       <div className="text-xs text-zinc-500 mt-1">
                         Client: {b.clientName || b.client?.name}
-                        {b.clientPhone || b.client?.phone ? ` • ${b.clientPhone || b.client?.phone}` : ""}
+                        {/* NOTE: Pro is NOT allowed to see phone numbers */}
                       </div>
                     ) : null}
+
+                    {b.status === "accepted" && !proCanCompleteFallback && (
+                      <div className="text-xs text-zinc-500 mt-1">
+                        Waiting for client to mark this job as completed.
+                      </div>
+                    )}
+
+                    {proCanCompleteFallback && (
+                      <div className="text-xs text-amber-400 mt-1">
+                        Client has not marked this as completed for about{" "}
+                        {minutesSinceAccepted} minutes. You may close it as
+                        completed if the job is truly done (optional note will
+                        be saved for admin).
+                      </div>
+                    )}
+
+                    {b.status === "completed" && completedByLabel && (
+                      <div className="text-xs text-zinc-500 mt-1">
+                        Completed by: <span className="font-semibold">{completedByLabel}</span>
+                        {b.meta?.completionNote
+                          ? ` — Note: ${b.meta.completionNote}`
+                          : ""}
+                      </div>
+                    )}
                   </div>
                   <div className="flex items-center gap-2">
                     <Badge color={paidTone}>{b.paymentStatus}</Badge>
@@ -210,14 +351,16 @@ export default function ProDashboard() {
                   >
                     Accept
                   </button>
-                  <button
-                    onClick={() => onComplete(b._id)}
-                    disabled={!canComplete}
-                    className="rounded-lg border border-sky-700 text-sky-300 px-3 py-1.5 text-sm hover:bg-sky-950/40 disabled:opacity-40"
-                    title="Mark as completed (available when accepted)"
-                  >
-                    Complete
-                  </button>
+
+                  {proCanCompleteFallback && (
+                    <button
+                      onClick={() => onCompleteAsPro(b._id, true)}
+                      className="rounded-lg border border-sky-700 text-sky-300 px-3 py-1.5 text-sm hover:bg-sky-950/40"
+                      title="Client not responding – close job and (optionally) add a note"
+                    >
+                      Close job & add note
+                    </button>
+                  )}
                 </div>
               </div>
             );

@@ -3,12 +3,20 @@
 // Shows one booking by :id for BOTH clients and pros.
 // - Loads viewer identity (/api/me) to know if they’re a pro
 // - Finds the booking from "my bookings" (client) and/or "pro bookings" (pro)
-// - Respects privacy: clientContactPrivate is only visible to a pro AFTER accept
 // - Client can pay if unpaid (Wallet OR Paystack inline)
-// - Pro can Accept / Complete with the same rules as dashboard
+// - Pro can Accept
+// - Client OR Pro can mark job Completed (backend records who did it)
+// - Client and Pro ONLY see their own phone (no sharing phone numbers)
+//   • Both sides can still see names (for trust & safety)
+// - Only client + pro see address; pro only after accept/completed
+// - Chat/Call is available ONLY after booking is accepted/completed
+// - When status === "scheduled" & paymentStatus === "paid":
+//   • UI shows “Calling your professional…” with 3-ring timer
+//   • Client can cancel now or keep waiting
+//   • If cron cancels/refunds, client is sent back to /browse
 
 import { useEffect, useMemo, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import {
   api,
   getMe,
@@ -17,7 +25,9 @@ import {
   acceptBooking,
   completeBooking,
   verifyPayment,
-  payBookingWithWallet, // 👈 ADD THIS
+  payBookingWithWallet,
+  cancelBooking,
+  getSettings,
 } from "../lib/api";
 import PaymentMethodPicker from "../components/PaymentMethodPicker.jsx";
 
@@ -33,6 +43,7 @@ function formatMoney(kobo = 0) {
     return `₦${naira.toLocaleString()}`;
   }
 }
+
 function formatWhen(iso) {
   if (!iso) return "ASAP";
   try {
@@ -44,8 +55,12 @@ function formatWhen(iso) {
 
 /* -------- Paystack loader (same idea as BookService) -------- */
 function usePaystackReady() {
-  const [ready, setReady] = useState(!!window.PaystackPop);
+  const [ready, setReady] = useState(
+    typeof window !== "undefined" && !!window.PaystackPop
+  );
+
   useEffect(() => {
+    if (typeof window === "undefined") return;
     if (window.PaystackPop) {
       setReady(true);
       return;
@@ -59,11 +74,13 @@ function usePaystackReady() {
     s.onload = () => setReady(!!window.PaystackPop);
     document.body.appendChild(s);
   }, []);
+
   return ready;
 }
 
 export default function BookingDetails() {
   const { id } = useParams();
+  const navigate = useNavigate();
 
   const [me, setMe] = useState(null);
   const [booking, setBooking] = useState(null);
@@ -74,6 +91,10 @@ export default function BookingDetails() {
   const [payMethod, setPayMethod] = useState("wallet"); // "wallet" | "card"
   const paystackReady = usePaystackReady();
 
+  // Ring/calling UX
+  const [ringSeconds, setRingSeconds] = useState(null); // from /api/settings
+  const [ringElapsed, setRingElapsed] = useState(0); // seconds passed while scheduled
+
   // derived (supports new snapshot + legacy fields)
   const svcName = useMemo(
     () =>
@@ -82,6 +103,7 @@ export default function BookingDetails() {
       "Service",
     [booking]
   );
+
   const priceKobo = useMemo(
     () =>
       Number.isFinite(Number(booking?.amountKobo))
@@ -94,6 +116,7 @@ export default function BookingDetails() {
     () => !!me && booking && me.uid === booking.clientUid,
     [me, booking]
   );
+
   const isProOwner = useMemo(
     () => !!me && booking && me.uid === booking.proOwnerUid,
     [me, booking]
@@ -107,12 +130,14 @@ export default function BookingDetails() {
         booking?.status === "pending_payment"),
     [isProOwner, booking]
   );
+
+  // Either client OR pro can complete when status is "accepted"
   const canComplete = useMemo(
     () =>
-      isProOwner &&
-      (booking?.status === "accepted" ||
-        booking?.status === "scheduled"),
-    [isProOwner, booking]
+      !!booking &&
+      booking.status === "accepted" &&
+      (isClient || isProOwner),
+    [booking, isClient, isProOwner]
   );
 
   const canClientPay = useMemo(
@@ -124,9 +149,53 @@ export default function BookingDetails() {
     [isClient, booking]
   );
 
-  // Load viewer + booking (from lists, since API may not have GET /bookings/:id)
+  // Name: safe to show to both parties (no phone exposed)
+  const clientDisplayName = useMemo(
+    () =>
+      booking?.clientName ||
+      booking?.client?.name ||
+      booking?.clientProfile?.fullName ||
+      "",
+    [booking]
+  );
+
+  // Who can see client contact details card?
+  // - Client: sees own phone + address.
+  // - Pro: sees ONLY address AFTER accept/completed, NEVER sees phone.
+  const showClientContactToViewer = useMemo(() => {
+    if (!booking) return false;
+    if (isClient) return true;
+    if (
+      isProOwner &&
+      (booking.status === "accepted" ||
+        booking.status === "completed")
+    ) {
+      return true;
+    }
+    return false;
+  }, [booking, isClient, isProOwner]);
+
+  // Chat/Call visibility:
+  // - Before accept: nobody sees it
+  // - After accept/completed: both sides can initiate call/chat
+  const showChatButton = useMemo(() => {
+    if (!booking) return false;
+    if (
+      booking.status !== "accepted" &&
+      booking.status !== "completed"
+    )
+      return false;
+
+    if (isProOwner) return true;
+    if (isClient) return true;
+
+    return false;
+  }, [booking, isProOwner, isClient]);
+
+  // Load viewer + booking
   useEffect(() => {
     let alive = true;
+
     (async () => {
       try {
         setLoading(true);
@@ -158,7 +227,7 @@ export default function BookingDetails() {
           } catch {}
         }
 
-        // 3) Optional direct GET if you add it later
+        // 3) Optional direct GET
         if (!found) {
           try {
             const { data } = await api.get(
@@ -182,10 +251,65 @@ export default function BookingDetails() {
         if (alive) setLoading(false);
       }
     })();
+
     return () => {
       alive = false;
     };
   }, [id]);
+
+  // Load ringTimeoutSeconds from settings once
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const s = await getSettings();
+        if (!mounted) return;
+        const secs =
+          Number(s?.bookingRules?.ringTimeoutSeconds) || 120;
+        setRingSeconds(secs);
+      } catch {
+        if (!mounted) return;
+        setRingSeconds(120); // fallback
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  // Ring timer: runs while booking is scheduled + paid, and viewer is the client
+  useEffect(() => {
+    if (!booking || !me) return;
+    if (me.uid !== booking.clientUid) return;
+    if (booking.paymentStatus !== "paid") return;
+    if (booking.status !== "scheduled") return;
+
+    setRingElapsed(0);
+    const start = Date.now();
+
+    const id = setInterval(() => {
+      setRingElapsed(Math.floor((Date.now() - start) / 1000));
+    }, 1000);
+
+    return () => clearInterval(id);
+  }, [booking, me]);
+
+  // If booking is cancelled/refunded for the client, send them back to browse
+  useEffect(() => {
+    if (!booking || !me) return;
+    const clientIsViewer = me.uid === booking.clientUid;
+    if (!clientIsViewer) return;
+
+    if (
+      booking.paymentStatus === "refunded" ||
+      booking.status === "cancelled"
+    ) {
+      alert(
+        "We’re sorry, this service request has been cancelled.\n\nYou can now choose another professional."
+      );
+      navigate("/browse", { replace: true });
+    }
+  }, [booking, me, navigate]);
 
   async function onAccept() {
     if (!booking) return;
@@ -209,9 +333,43 @@ export default function BookingDetails() {
     try {
       const updated = await completeBooking(booking._id);
       setBooking(updated);
-      alert("Booking completed.");
+
+      if (isClient) {
+        alert(
+          "Thank you for confirming. Please remember to leave a review for your professional."
+        );
+      } else if (isProOwner) {
+        alert(
+          "Job marked as completed. You can now leave a review for this client."
+        );
+      } else {
+        alert("Booking completed.");
+      }
     } catch {
       alert("Could not complete booking.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onClientCancelNow() {
+    if (!booking) return;
+    const sure = window.confirm(
+      "Do you want to cancel this booking now? If the pro has not accepted yet, your payment will be refunded according to our rules."
+    );
+    if (!sure) return;
+
+    setBusy(true);
+    try {
+      const updated = await cancelBooking(booking._id);
+      setBooking(updated);
+      // redirect is handled by the cancelled/refunded effect above
+    } catch (e) {
+      console.error(
+        "cancel booking error:",
+        e?.response?.data || e?.message || e
+      );
+      alert("Could not cancel booking. Please try again.");
     } finally {
       setBusy(false);
     }
@@ -223,6 +381,11 @@ export default function BookingDetails() {
 
     if (!booking) {
       console.log("[BookingDetails] No booking in state");
+      return;
+    }
+
+    if (typeof window === "undefined") {
+      alert("Payment is only available in the browser.");
       return;
     }
 
@@ -259,14 +422,20 @@ export default function BookingDetails() {
       let email = me?.email || "customer@example.com";
       try {
         const token = localStorage.getItem("token") || "";
-        const payloadJwt = JSON.parse(atob((token.split(".")[1] || "e30=")));
+        const payloadJwt = JSON.parse(
+          atob((token.split(".")[1] || "e30="))
+        );
         if (payloadJwt?.email) email = payloadJwt.email;
       } catch (e) {
-        console.warn("JWT decode failed, using fallback email:", e);
+        console.warn(
+          "JWT decode failed, using fallback email:",
+          e
+        );
       }
 
       const ref = `BOOKING-${booking._id}`;
-      const amountKobo = Number(booking.amountKobo || priceKobo) || 0;
+      const amountKobo =
+        Number(booking.amountKobo || priceKobo) || 0;
 
       console.log("DEBUG: About to call PaystackPop.setup()");
 
@@ -307,7 +476,8 @@ export default function BookingDetails() {
                   (await getMyBookings().catch(() => [])) || [];
                 const updated =
                   mine.find(
-                    (b) => String(b._id) === String(booking._id)
+                    (b) =>
+                      String(b._id) === String(booking._id)
                   ) ||
                   {
                     ...booking,
@@ -323,7 +493,10 @@ export default function BookingDetails() {
                 alert("Payment verification failed.");
               }
             } catch (err) {
-              console.error("verifyPayment error:", err);
+              console.error(
+                "verifyPayment error:",
+                err
+              );
               alert("Payment verification error.");
             } finally {
               setBusy(false);
@@ -339,7 +512,10 @@ export default function BookingDetails() {
 
       handler.openIframe();
     } catch (err) {
-      console.error("[BookingDetails] PaystackPop.setup FAILED:", err);
+      console.error(
+        "[BookingDetails] PaystackPop.setup FAILED:",
+        err
+      );
       setBusy(false);
       alert(
         "Could not start card payment. See console for PaystackPop.setup error."
@@ -347,14 +523,11 @@ export default function BookingDetails() {
     }
   }
 
-
-
   // ---- WALLET ----
   async function onClientPayWithWallet() {
     if (!booking) return;
     setBusy(true);
     try {
-      // 🔴 If your backend uses a different endpoint, adjust this URL/payload.
       const data = await payBookingWithWallet(booking._id);
 
       const updated = data?.booking || data || null;
@@ -390,14 +563,6 @@ export default function BookingDetails() {
     }
   }
 
-  const showPrivateToPro = useMemo(() => {
-    return (
-      isProOwner &&
-      (booking?.status === "accepted" ||
-        booking?.status === "completed")
-    );
-  }, [isProOwner, booking]);
-
   return (
     <div className="max-w-3xl mx-auto px-4 py-10">
       {loading ? (
@@ -428,6 +593,37 @@ export default function BookingDetails() {
             </div>
           </div>
 
+          {/* STATUS TIMELINE */}
+          <div className="mb-4 text-sm text-zinc-400">
+            <div>Progress:</div>
+            <div className="flex items-center gap-2 mt-1">
+              <Step
+                label="Pending Payment"
+                active={booking?.status === "pending_payment"}
+              />
+              <Line />
+              <Step
+                label="Scheduled / Ringing"
+                active={booking?.status === "scheduled"}
+              />
+              <Line />
+              <Step
+                label="Accepted"
+                active={booking?.status === "accepted"}
+              />
+              <Line />
+              <Step
+                label="Completed"
+                active={booking?.status === "completed"}
+              />
+              <Line />
+              <Step
+                label="Cancelled"
+                active={booking?.status === "cancelled"}
+              />
+            </div>
+          </div>
+
           <div className="rounded-xl border border-zinc-800 p-4 bg-black/40 mb-4">
             <div className="font-medium mb-1">
               {svcName} • {formatMoney(priceKobo)}
@@ -437,6 +633,16 @@ export default function BookingDetails() {
               <span className="mx-2">•</span> LGA:{" "}
               {booking?.lga}
             </div>
+            {clientDisplayName && (
+              <div className="text-xs text-zinc-400 mt-1">
+                Client: {clientDisplayName}
+              </div>
+            )}
+            {booking?.proName && (
+              <div className="text-xs text-zinc-400 mt-1">
+                Professional: {booking.proName}
+              </div>
+            )}
             {booking?.addressText ? (
               <div className="text-sm text-zinc-500 mt-1">
                 Address/landmark: {booking.addressText}
@@ -444,7 +650,10 @@ export default function BookingDetails() {
             ) : null}
           </div>
 
-          {(isClient || showPrivateToPro) && (
+          {/* Client & Pro contact view:
+              - Client: sees own phone + address
+              - Pro: sees ONLY address (after accept/completed), phone is hidden */}
+          {showClientContactToViewer && (
             <div className="rounded-xl border border-zinc-800 p-4 bg-black/30 mb-4">
               <div className="font-medium mb-2">
                 Client Contact (private)
@@ -452,27 +661,47 @@ export default function BookingDetails() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                 <div>
                   <div className="text-zinc-500">Name</div>
-                  <div>{booking?.clientName || "—"}</div>
+                  <div>{clientDisplayName || "—"}</div>
                 </div>
                 <div>
                   <div className="text-zinc-500">Phone</div>
                   <div>
-                    {booking?.clientContactPrivate?.phone ||
-                      "—"}
+                    {isClient
+                      ? booking?.clientContactPrivate?.phone ||
+                        "—"
+                      : "Hidden – use in-app chat/call"}
                   </div>
                 </div>
                 <div className="sm:col-span-2">
                   <div className="text-zinc-500">
-                    Private Address
+                    Service Address
                   </div>
                   <div className="break-words">
                     {booking?.clientContactPrivate?.address ||
+                      booking?.addressText ||
                       "—"}
                   </div>
                 </div>
               </div>
+              {isClient && (
+                <p className="text-xs text-zinc-500 mt-2">
+                  Your phone number is kept private. Professionals
+                  contact you through in-app chat and calls only.
+                </p>
+              )}
             </div>
           )}
+
+          {/* CALLING / RINGING PHASE */}
+          {booking?.paymentStatus === "paid" &&
+            booking?.status === "scheduled" && (
+              <CallingPanel
+                booking={booking}
+                ringSeconds={ringSeconds}
+                ringElapsed={ringElapsed}
+                onCancel={isClient ? onClientCancelNow : null}
+              />
+            )}
 
           {/* Actions */}
           <div className="flex flex-col gap-3">
@@ -536,8 +765,8 @@ export default function BookingDetails() {
                 </button>
               )}
 
-              {/* Chat / Call button */}
-              {booking?._id && (
+              {/* Chat / Call button – only after accept/completed, for both sides */}
+              {showChatButton && booking?._id && (
                 <Link
                   to={`/bookings/${booking._id}/chat`}
                   className="px-4 py-2 rounded-lg border border-zinc-700 hover:bg-zinc-900 text-sm"
@@ -593,9 +822,90 @@ function Badge({ children, tone = "zinc" }) {
     </span>
   );
 }
+
 function statusTone(s) {
   if (s === "accepted" || s === "completed") return "emerald";
-  if (s === "scheduled") return "sky";
+  if (s === "scheduled" || s === "pending_payment") return "sky";
   if (s === "cancelled") return "amber";
   return "amber";
+}
+
+function Step({ label, active }) {
+  return (
+    <div
+      className={`px-2 py-1 rounded text-xs ${
+        active
+          ? "bg-gold text-black"
+          : "bg-zinc-800 text-zinc-500"
+      }`}
+    >
+      {label}
+    </div>
+  );
+}
+
+function Line() {
+  return <div className="flex-1 h-px bg-zinc-700" />;
+}
+
+function CallingPanel({ booking, ringSeconds, ringElapsed, onCancel }) {
+  const total = ringSeconds || 120;
+  const elapsed = Math.min(ringElapsed || 0, total);
+  const progress = total > 0 ? elapsed / total : 0;
+
+  let title = "Calling your professional…";
+  let subtitle = "Trying to reach your pro.";
+
+  if (progress >= 1 / 3 && progress < 2 / 3) {
+    title = "Still trying to connect…";
+    subtitle = "Your request is still ringing on the pro’s side.";
+  } else if (progress >= 2 / 3) {
+    title = "Last attempt before we cancel…";
+    subtitle =
+      "If they don’t accept soon, this booking will be cancelled automatically.";
+  }
+
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-black/40 p-4 mb-4 text-center animate-pulse">
+      <div className="text-lg font-semibold text-gold">
+        {title}
+      </div>
+      <div className="text-sm text-zinc-400 mt-1">
+        {subtitle}
+      </div>
+
+      {/* Simple progress bar */}
+      <div className="mt-3 h-1 w-full bg-zinc-800 rounded-full overflow-hidden">
+        <div
+          className="h-full bg-gold transition-all"
+          style={{
+            width: `${Math.min(
+              100,
+              Math.round(progress * 100)
+            )}%`,
+          }}
+        />
+      </div>
+
+      {/* Three Ring Dots */}
+      <div className="flex justify-center gap-2 mt-3">
+        <div className="w-2 h-2 bg-gold rounded-full animate-bounce" />
+        <div className="w-2 h-2 bg-gold rounded-full animate-bounce delay-150" />
+        <div className="w-2 h-2 bg-gold rounded-full animate-bounce delay-300" />
+      </div>
+
+      {onCancel && (
+        <button
+          onClick={onCancel}
+          className="mt-3 inline-flex items-center justify-center px-4 py-2 rounded-lg border border-zinc-700 text-sm hover:bg-zinc-900"
+        >
+          Cancel request and go back
+        </button>
+      )}
+
+      <div className="mt-2 text-xs text-zinc-500">
+        Time elapsed: {elapsed}s / {total}s
+      </div>
+    </div>
+  );
 }

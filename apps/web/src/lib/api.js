@@ -148,13 +148,20 @@ function _getAuthHeader() {
   return latestToken ? { Authorization: `Bearer ${latestToken}` } : {};
 }
 
-export function connectSocket({ onNotification } = {}) {
+export function connectSocket({ onNotification, onBookingAccepted } = {}) {
   // allow multiple callers and multiple handlers
   if (onNotification) {
     if (!socketListeners.has("notification:received")) {
       socketListeners.set("notification:received", new Set());
     }
     socketListeners.get("notification:received").add(onNotification);
+  }
+
+  if (onBookingAccepted) {
+    if (!socketListeners.has("booking:accepted")) {
+      socketListeners.set("booking:accepted", new Set());
+    }
+    socketListeners.get("booking:accepted").add(onBookingAccepted);
   }
 
   // if already connected return socket
@@ -182,8 +189,8 @@ export function connectSocket({ onNotification } = {}) {
       socketConnected = false;
     });
 
-    // forward notification:received to registered handlers
-    socket.on("notification:received", (payload) => {
+    // forward server notifications to registered handlers
+    const notifHandler = (payload) => {
       const set = socketListeners.get("notification:received");
       if (set && set.size) {
         set.forEach((fn) => {
@@ -194,7 +201,11 @@ export function connectSocket({ onNotification } = {}) {
           }
         });
       }
-    });
+    };
+
+    // server currently emits "notification:new"; keep both for safety
+    socket.on("notification:new", notifHandler);
+    socket.on("notification:received", notifHandler);
 
     // forward profile:stats to registered handlers
     socket.on("profile:stats", (payload) => {
@@ -210,20 +221,33 @@ export function connectSocket({ onNotification } = {}) {
       }
     });
 
+    // forward booking:accepted to registered handlers
+    socket.on("booking:accepted", (payload) => {
+      const set = socketListeners.get("booking:accepted");
+      if (set && set.size) {
+        set.forEach((fn) => {
+          try {
+            fn(payload);
+          } catch (e) {
+            console.warn("[socket] booking:accepted handler failed", e?.message || e);
+          }
+        });
+      }
+    });
+
     socket.connect();
   } catch (e) {
     console.warn("[socket] connect failed:", e?.message || e);
     // try reconnect later
     setTimeout(() => {
       try {
-        if (!socketConnected) connectSocket({ onNotification });
+        if (!socketConnected) connectSocket({ onNotification, onBookingAccepted });
       } catch {}
     }, reconnectDelayMs);
   }
 
   return socket;
 }
-
 
 /**
  * disconnectSocket() - removes all notification handlers and disconnects socket
@@ -258,6 +282,31 @@ export function registerSocketHandler(event, fn) {
     } catch {}
   };
 }
+
+// Join booking room so chat + WebRTC can use booking:<id>
+export function joinBookingRoom(bookingId, who = "user") {
+  if (!bookingId) return Promise.reject(new Error("bookingId required"));
+
+  // ensure socket exists
+  if (!socketConnected) connectSocket();
+
+  return new Promise((resolve, reject) => {
+    try {
+      if (!socket) return reject(new Error("socket_not_ready"));
+      socket.emit(
+        "join:booking",
+        { bookingId, who },
+        (resp) => {
+          if (resp && resp.ok) resolve(resp);
+          else reject(new Error(resp?.error || "join_failed"));
+        }
+      );
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
 
 
 /* Notification REST API helpers */
@@ -476,17 +525,19 @@ export async function getWalletMe() {
   return data;
 }
 export async function initWalletTopup(amountKobo) {
-  const { data } = await api.post("/api/wallet/topup/init", {
-    amountKobo,
+  const { data } = await api.get("/api/wallet/topup/init", {
+    params: { amountKobo },
   });
   return data;
 }
+
 export async function verifyWalletTopup(reference) {
-  const { data } = await api.post("/api/wallet/topup/verify", {
-    reference,
+  const { data } = await api.get("/api/wallet/topup/verify", {
+    params: { reference },
   });
   return data;
 }
+
 export async function withdrawPendingToAvailable({ amountKobo, pin }) {
   const { data } = await api.post("/api/wallet/withdraw-pending", {
     amountKobo,

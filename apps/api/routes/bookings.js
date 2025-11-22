@@ -8,6 +8,7 @@ import { Pro } from "../models.js";
 import redisClient from "../redis.js";
 import { getIO } from "../sockets/index.js";
 import { ClientProfile } from "../models/Profile.js";
+import { cancelBookingAndRefund } from "../services/walletService.js";
 
 const router = express.Router();
 
@@ -37,22 +38,57 @@ function isAdminReq(req) {
 }
 
 /**
- * Hide private contact unless:
- *  - caller is admin, OR
- *  - caller is the assigned proOwnerUid AND booking is accepted|completed
+ * Hide private contact depending on viewer:
+ *
+ * - Admin: sees everything.
+ * - Client (booking.clientUid): sees their full phone + address.
+ * - Pro owner:
+ *      • Before ACCEPTED: sees no phone, no address.
+ *      • When ACCEPTED or COMPLETED: sees address only (never phone).
+ * - Any other user: no phone, no address.
  */
 function sanitizeBookingFor(req, b) {
   const isAdmin = isAdminReq(req);
-  const isProOwner = req?.user?.uid && b?.proOwnerUid && req.user.uid === b.proOwnerUid;
+  const isClient = req?.user?.uid && b?.clientUid && req.user.uid === b.clientUid;
+  const isProOwner =
+    req?.user?.uid && b?.proOwnerUid && req.user.uid === b.proOwnerUid;
 
   const obj = typeof b.toObject === "function" ? b.toObject() : { ...b };
-  const showPrivate =
-    isAdmin || (isProOwner && (b.status === "accepted" || b.status === "completed"));
+  const status = b.status;
 
-  if (!showPrivate) {
-    if (obj.clientContactPrivate) {
-      obj.clientContactPrivate = { phone: "", address: "" };
+  // Admin: full access
+  if (isAdmin) {
+    return obj;
+  }
+
+  // Client: always sees their own contact
+  if (isClient) {
+    if (!obj.clientContactPrivate) {
+      obj.clientContactPrivate = {
+        phone: "",
+        address: obj.addressText || "",
+      };
     }
+    return obj;
+  }
+
+  // Pro owner: never sees phone; only sees address after accept/completed
+  if (isProOwner) {
+    const original = obj.clientContactPrivate || {};
+    const canSeeAddress = status === "accepted" || status === "completed";
+
+    obj.clientContactPrivate = {
+      phone: "", // always hidden from pro
+      address: canSeeAddress
+        ? original.address || obj.addressText || ""
+        : "",
+    };
+    return obj;
+  }
+
+  // Any other authenticated user: strip contact data
+  if (obj.clientContactPrivate) {
+    obj.clientContactPrivate = { phone: "", address: "" };
   }
   return obj;
 }
@@ -85,6 +121,33 @@ function buildServiceSnapshotFromPayload(body = {}) {
 const trimStr = (v) => (typeof v === "string" ? v.trim() : v);
 const toUpper = (v) => (typeof v === "string" ? v.trim().toUpperCase() : v);
 
+/**
+ * Try to resolve a display name for the client from:
+ *   - body.clientName
+ *   - ClientProfile (fullName, displayName, firstName + lastName)
+ */
+async function resolveClientName(uid, fallbackName = "") {
+  if (fallbackName && typeof fallbackName === "string") {
+    return fallbackName.trim();
+  }
+
+  try {
+    const prof = await ClientProfile.findOne({ uid })
+      .select("fullName displayName firstName lastName")
+      .lean();
+    if (!prof) return "";
+
+    return (
+      prof.fullName ||
+      prof.displayName ||
+      [prof.firstName, prof.lastName].filter(Boolean).join(" ") ||
+      ""
+    ).trim();
+  } catch {
+    return "";
+  }
+}
+
 /* ============================== ROUTES ============================== */
 
 /**
@@ -93,6 +156,7 @@ const toUpper = (v) => (typeof v === "string" ? v.trim().toUpperCase() : v);
  *  - { proId, service:{ serviceId?, serviceName, priceKobo } } OR { serviceName, amountKobo }
  *  - scheduledFor (ISO)
  *  - lga, addressText?, notes?
+ *  - OPTIONAL: clientName (otherwise resolved from profile)
  */
 router.post("/bookings", requireAuth, async (req, res) => {
   try {
@@ -104,6 +168,7 @@ router.post("/bookings", requireAuth, async (req, res) => {
       notes = "",
       location = null,
       clientContactPrivate = null,
+      clientName: rawClientName = "",
     } = req.body || {};
 
     const svcSnap = buildServiceSnapshotFromPayload(req.body);
@@ -114,6 +179,9 @@ router.post("/bookings", requireAuth, async (req, res) => {
       });
     }
 
+    // Resolve client display name
+    const clientName = await resolveClientName(req.user.uid, rawClientName);
+
     // Fetch pro to attach owner uid
     let proOwnerUid = null;
     try {
@@ -121,9 +189,11 @@ router.post("/bookings", requireAuth, async (req, res) => {
       proOwnerUid = pro?.ownerUid || null;
     } catch {}
 
-        const b = await Booking.create({
+    const b = await Booking.create({
       clientUid: req.user.uid,
       clientEmail: req.user.email || "",
+      clientName: clientName || undefined,
+
       proId: new mongoose.Types.ObjectId(proId),
       proOwnerUid,
       instant: false, // scheduled booking (not instant)
@@ -143,7 +213,6 @@ router.post("/bookings", requireAuth, async (req, res) => {
       paymentStatus: "pending",
       status: "pending_payment",
     });
-
 
     res.json({ ok: true, booking: sanitizeBookingFor(req, b) });
   } catch (err) {
@@ -179,7 +248,7 @@ router.post("/bookings/instant", requireAuth, async (req, res) => {
       state = "",
       lga = "",
       addressText = "",
-      clientName = "",
+      clientName: rawClientName = "",
       clientPhone = "",
       coords = null,
       paymentMethod = "card",
@@ -231,6 +300,9 @@ router.post("/bookings/instant", requireAuth, async (req, res) => {
       }
     }
 
+    // Resolve client display name
+    const clientName = await resolveClientName(req.user.uid, rawClientName);
+
     const svcSnap = {
       serviceId: "",
       serviceName: String(serviceName),
@@ -240,6 +312,8 @@ router.post("/bookings/instant", requireAuth, async (req, res) => {
     const b = await Booking.create({
       clientUid: req.user.uid,
       clientEmail: req.user.email || "",
+      clientName: clientName || undefined,
+
       proId: new mongoose.Types.ObjectId(proId),
       proOwnerUid,
 
@@ -262,7 +336,7 @@ router.post("/bookings/instant", requireAuth, async (req, res) => {
         address: String(addressText || ""),
       },
 
-            // Normalize coords coming from the client. Accept either { lat, lng } or { lat, lon }.
+      // Normalize coords coming from the client. Accept either { lat, lng } or { lat, lon }.
       // If values are not finite numbers, omit `location` to avoid Mongoose casting errors.
       location: (function () {
         try {
@@ -281,7 +355,6 @@ router.post("/bookings/instant", requireAuth, async (req, res) => {
           return undefined;
         }
       })(),
-
 
       paymentStatus: "pending",
       status: "pending_payment", // becomes scheduled/accepted after payment + pro action
@@ -341,10 +414,13 @@ router.get("/bookings/me", requireAuth, async (req, res) => {
     const items = await Booking.find({ clientUid: req.user.uid })
       .sort({ createdAt: -1 })
       .lean();
-    // Client can see their own private contact
+    // Client can see their own private contact (full)
     const sanitized = items.map((b) => ({
       ...b,
-      clientContactPrivate: b.clientContactPrivate || { phone: "", address: "" },
+      clientContactPrivate: b.clientContactPrivate || {
+        phone: "",
+        address: b.addressText || "",
+      },
     }));
     res.json(sanitized);
   } catch (err) {
@@ -395,6 +471,9 @@ router.get("/bookings/:id", requireAuth, async (req, res) => {
 /** Client: cancel booking (safe states) */
 router.put("/bookings/:id/cancel", requireAuth, async (req, res) => {
   try {
+    const reason =
+      (req.body && (req.body.reason || req.body.reasonText || "")) || "";
+
     const b = await Booking.findById(req.params.id);
     if (!b) return res.status(404).json({ error: "Not found" });
     if (b.clientUid !== req.user.uid)
@@ -406,9 +485,20 @@ router.put("/bookings/:id/cancel", requireAuth, async (req, res) => {
         .json({ error: `Cannot cancel when status is ${b.status}` });
     }
 
-    b.status = "cancelled";
-    await b.save();
-    res.json({ ok: true, booking: sanitizeBookingFor(req, b) });
+    // ✅ This will:
+    // - reverse pro pending (if funded)
+    // - only apply fee when client cancels AFTER accept (booking.status === "accepted")
+    // - set booking.status = "cancelled" and paymentStatus = "refunded"
+    const refundInfo = await cancelBookingAndRefund(b, {
+      cancelledBy: "client",
+      reason,
+    });
+
+    res.json({
+      ok: true,
+      booking: sanitizeBookingFor(req, b),
+      refund: refundInfo,
+    });
   } catch (err) {
     console.error("[bookings:cancel] error:", err);
     res.status(500).json({ error: "Failed to cancel booking" });
@@ -433,7 +523,36 @@ router.put("/bookings/:id/accept", requireAuth, async (req, res) => {
     }
 
     b.status = "accepted";
+    b.acceptedAt = new Date(); // for ring-timeout / analytics
     await b.save();
+
+    // --- Socket: notify both client and pro so chat can open ---
+    try {
+      const io = getIO();
+      const payload = {
+        bookingId: b._id.toString(),
+        status: b.status,
+        clientUid: b.clientUid,
+        proOwnerUid: b.proOwnerUid,
+      };
+
+      // Both sides listen on user:<uid> to react (e.g. open chat)
+      if (b.clientUid) {
+        io.to(`user:${b.clientUid}`).emit("booking:accepted", payload);
+      }
+      if (b.proOwnerUid) {
+        io.to(`user:${b.proOwnerUid}`).emit("booking:accepted", payload);
+      }
+      // Optional: booking-scoped room for future
+      io.to(`booking:${b._id.toString()}`).emit("booking:accepted", payload);
+    } catch (err) {
+      console.warn(
+        "[bookings:accept] socket emit failed:",
+        err?.message || err
+      );
+    }
+    // --- end socket block ---
+
     res.json({ ok: true, booking: sanitizeBookingFor(req, b) });
   } catch (err) {
     console.error("[bookings:accept] error:", err);
@@ -467,15 +586,31 @@ router.put("/bookings/:id/decline", requireAuth, async (req, res) => {
   }
 });
 
-/** Pro: complete booking */
+/**
+ * Client or Pro: complete booking.
+ *
+ * - Only allowed from ACCEPTED state.
+ * - Either client or pro (or admin) can call it.
+ * - We record who completed it in booking.meta.completedBy.
+ * - Optional: completionNote / note is saved as booking.meta.completionNote.
+ */
 router.put("/bookings/:id/complete", requireAuth, async (req, res) => {
   try {
+    const { completionNote = "", note = "" } = req.body || {};
+
     const b = await Booking.findById(req.params.id);
     if (!b) return res.status(404).json({ error: "Not found" });
-    if (b.proOwnerUid !== req.user.uid)
-      return res.status(403).json({ error: "Forbidden" });
 
-    if (!["accepted", "scheduled"].includes(b.status)) {
+    const isClient = b.clientUid === req.user.uid;
+    const isProOwner = b.proOwnerUid === req.user.uid;
+    const isAdmin = isAdminReq(req);
+
+    if (!isClient && !isProOwner && !isAdmin) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    // Only allow completion from ACCEPTED state
+    if (b.status !== "accepted") {
       return res
         .status(400)
         .json({ error: `Cannot complete when status is ${b.status}` });
@@ -483,15 +618,26 @@ router.put("/bookings/:id/complete", requireAuth, async (req, res) => {
 
     b.status = "completed";
     b.completedAt = new Date(); // important for auto-release scheduler
+
+    const meta = b.meta || {};
+    meta.completedBy = isClient ? "client" : isProOwner ? "pro" : "admin";
+    const finalNote = (completionNote || note || "").trim();
+    if (finalNote) {
+      meta.completionNote = finalNote;
+    }
+    b.meta = meta;
+
     await b.save();
 
-        // --- update Pro jobsCompleted metric, invalidate cache and emit socket update ---
+    // --- update Pro jobsCompleted metric, invalidate cache and emit socket update ---
     try {
       const updatedPro = await Pro.findOneAndUpdate(
         { ownerUid: b.proOwnerUid },
         { $inc: { "metrics.jobsCompleted": 1 } },
         { new: true }
-      ).lean().catch(() => null);
+      )
+        .lean()
+        .catch(() => null);
 
       // compute fallback jobsCompleted if pro metrics absent
       let newJobsCompletedCount = updatedPro?.metrics?.jobsCompleted ?? null;
@@ -513,10 +659,15 @@ router.put("/bookings/:id/complete", requireAuth, async (req, res) => {
           .lean()
           .catch(() => null);
         if (redisClient && prof?.username) {
-          await redisClient.del(`public:profile:${String(prof.username).toLowerCase()}`);
+          await redisClient.del(
+            `public:profile:${String(prof.username).toLowerCase()}`
+          );
         }
       } catch (err) {
-        console.warn("[public/profile] invalidate after booking completion failed:", err?.message || err);
+        console.warn(
+          "[public/profile] invalidate after booking completion failed:",
+          err?.message || err
+        );
       }
 
       // emit socket update
@@ -527,14 +678,19 @@ router.put("/bookings/:id/complete", requireAuth, async (req, res) => {
           jobsCompleted: newJobsCompletedCount,
         });
       } catch (err) {
-        console.warn("[public/profile] socket emit after booking complete failed:", err?.message || err);
+        console.warn(
+          "[public/profile] socket emit after booking complete failed:",
+          err?.message || err
+        );
       }
     } catch (err) {
       // non-fatal: log and continue returning booking to client
-      console.warn("[bookings:complete] post-complete update failed:", err?.message || err);
+      console.warn(
+        "[bookings:complete] post-complete update failed:",
+        err?.message || err
+      );
     }
     // --- end post-complete block ---
-
 
     res.json({ ok: true, booking: sanitizeBookingFor(req, b) });
   } catch (err) {

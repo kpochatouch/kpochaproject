@@ -58,12 +58,18 @@ const BookingSchema = new mongoose.Schema(
     // Who booked
     clientUid: { type: String, required: true, index: true },
     clientEmail: { type: String },
+    clientName: { type: String, default: "" }, // snapshot of client name
 
     // Public read-only snapshot of client identity for the booking
     client: { type: ClientPublicSchema, default: () => ({}) },
 
     // Which professional
-    proId: { type: mongoose.Schema.Types.ObjectId, ref: "Pro", required: true, index: true },
+    proId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Pro",
+      required: true,
+      index: true,
+    },
     // optional; routes infer & set it
     proOwnerUid: { type: String, index: true },
 
@@ -79,9 +85,9 @@ const BookingSchema = new mongoose.Schema(
     instant: { type: Boolean, default: false, index: true },
 
     // Region (upper-cased)
-    country: { type: String, default: "Nigeria" }, // ← added (used by /bookings/instant)
-    state:   { type: String, default: "" },        // ← added (used by /bookings/instant)
-    lga: { type: String, default: "" }, // e.g., "OREDO"
+    country: { type: String, default: "Nigeria" }, // ← used by /bookings/instant
+    state: { type: String, default: "" },          // ← used by /bookings/instant
+    lga: { type: String, default: "" },            // e.g., "OREDO"
     addressText: { type: String, default: "" },
     location: { type: LocationSchema, default: () => ({}) },
 
@@ -106,6 +112,7 @@ const BookingSchema = new mongoose.Schema(
       default: "pending_payment",
       index: true,
     },
+    acceptedAt: { type: Date }, // when pro accepts (ring timeout / analytics)
 
     // When pro declines
     decline: {
@@ -121,12 +128,15 @@ const BookingSchema = new mongoose.Schema(
     },
 
     // Private client contact (visible to assigned pro after accept, and to admins)
-    clientContactPrivate: { type: ClientContactPrivateSchema, default: () => ({}) },
+    clientContactPrivate: {
+      type: ClientContactPrivateSchema,
+      default: () => ({}),
+    },
 
-    // Metadata (idempotency, requested method)
-    meta: {                                       // ← added (used by /bookings/instant)
-      clientRequestId: { type: String, default: "" },
-      paymentMethodRequested: { type: String, default: "" },
+    // Metadata (idempotency, requested method, completion, auto-cancel, etc.)
+    meta: {
+      type: mongoose.Schema.Types.Mixed,
+      default: () => ({}),
     },
 
     // Timestamps
