@@ -95,6 +95,12 @@ export default function Navbar() {
   </button>
 )}
 
+{token && (
+    <NavLink to="/my-bookings" className={navLinkClass}>
+      My Bookings
+    </NavLink>
+  )}
+
 
   {token && (
     <NavLink to="/wallet" className={navLinkClass}>
@@ -220,6 +226,17 @@ export default function Navbar() {
       >
         Profile
       </NavLink>
+
+        {token && (
+        <NavLink
+          to="/my-bookings"
+          onClick={() => setOpen(false)}
+          className={navLinkClass}
+        >
+          My Bookings
+        </NavLink>
+      )}
+
       {token && (
         <NavLink
           to="/settings"

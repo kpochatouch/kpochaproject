@@ -34,61 +34,71 @@ export default function SideMenu({ me }) {
   const isBrowsePros =
     pathname === "/browse" && search.includes("tab=pros");
 
-    const baseNav = [
-  {
-    key: "feed",
-    label: "Feed",
-    to: "/browse",
-    active: isFeed,
-  },
-  {
-    key: "browse",
-    label: "Browse Pros",
-    to: "/browse?tab=pros",
-    active: isBrowsePros,
-  },
-
-  // 🔥 Instant Request – only when logged in
-  me && {
-    key: "instant",
-    label: "Instant Request",
-    icon: icons.instant,
-    active: pathname === "/instant-request",
-    onClick: () => {
-      navigate("/instant-request", {
-        state: {
-          mode: "wildcard",
-        },
-      });
-      setOpen(false);
+      const baseNav = [
+    {
+      key: "feed",
+      label: "Feed",
+      to: "/browse",
+      active: isFeed,
     },
-  },
+    {
+      key: "browse",
+      label: "Browse Pros",
+      to: "/browse?tab=pros",
+      active: isBrowsePros,
+    },
 
-  me && {
-    key: "profile",
-    label: "Profile",
-    to: "/profile",
-    active: pathname === "/profile",
-  },
-  me && {
-    key: "wallet",
-    label: "Wallet",
-    to: "/wallet",
-    active: pathname === "/wallet",
-  },
-  me && {
-    key: "settings",
-    label: "Settings",
-    to: "/settings",
-    active: pathname === "/settings",
-  },
-  me && {
-    key: "pro",
-    label: "Become a Pro",
-    to: "/become",
-    active: pathname === "/become",
-  },
-].filter(Boolean);
+    // Instant Request – only when logged in
+    me && {
+      key: "instant",
+      label: "Instant Request",
+      icon: icons.instant,
+      active: pathname === "/instant-request",
+      onClick: () => {
+        navigate("/instant-request", {
+          state: { mode: "wildcard" },
+        });
+        setOpen(false);
+      },
+    },
+
+    me && {
+      key: "profile",
+      label: "Profile",
+      to: "/profile",
+      active: pathname === "/profile",
+    },
+
+    // ✅ NEW: My Bookings (client bookings)
+    me && {
+      key: "bookings",
+      label: "My Bookings",
+      to: "/my-bookings",
+      active: pathname === "/my-bookings",
+    },
+
+    me && {
+      key: "wallet",
+      label: "Wallet",
+      to: "/wallet",
+      active: pathname === "/wallet",
+    },
+    me && {
+      key: "settings",
+      label: "Settings",
+      to: "/settings",
+      active: pathname === "/settings",
+    },
+
+    // ✅ Only show Become a Pro when user is not already a pro
+    me && !isPro && {
+      key: "pro",
+      label: "Become a Pro",
+      to: "/become",
+      active: pathname === "/become",
+    },
+  ].filter(Boolean);
+
 
 
   const socialNav = [
@@ -113,12 +123,6 @@ export default function SideMenu({ me }) {
           label: "Pro Dashboard",
           to: "/pro-dashboard",
           active: pathname === "/pro-dashboard",
-        },
-        {
-          key: "bookings",
-          label: "Bookings",
-          to: "/browse?tab=pros",
-          active: isBrowsePros,
         },
       ]
     : [];

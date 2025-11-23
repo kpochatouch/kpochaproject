@@ -24,6 +24,7 @@ const BookingChat = lazy(() => import("./pages/BookingChat.jsx"));
 const InstantRequest = lazy(() => import("./pages/InstantRequest.jsx"));
 const Wallet = lazy(() => import("./pages/Wallet.jsx"));
 const ClientWallet = lazy(() => import("./pages/ClientWallet.jsx"));
+const ClientDashboard = lazy(() => import("./pages/ClientDashboard.jsx"));
 const Profile = lazy(() => import("./pages/Profile.jsx"));
 const Login = lazy(() => import("./pages/Login.jsx"));
 const Signup = lazy(() => import("./pages/Signup.jsx"));
@@ -259,14 +260,22 @@ export default function App() {
                 </RequireAuth>
               }
             />
-            <Route
-              path="/wallet"
-              element={
-                <RequireAuth>
-                  <WalletSmart />
-                </RequireAuth>
-              }
-            />
+  <Route
+    path="/wallet"
+    element={
+      <RequireAuth>
+        <WalletSmart />
+      </RequireAuth>
+    }
+  />
+  <Route
+    path="/my-bookings"
+    element={
+      <RequireAuth>
+        <ClientDashboard />
+      </RequireAuth>
+    }
+  />
             <Route
               path="/settings"
               element={
