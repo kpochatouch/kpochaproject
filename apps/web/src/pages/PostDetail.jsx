@@ -54,6 +54,7 @@ export default function PostDetail() {
 
   // media bits
   const videoRef = useRef(null);
+  const menuRef = useRef(null); // 👈 add this
   const [muted, setMuted] = useState(true);
   const [userHasInteracted, setUserHasInteracted] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -81,6 +82,22 @@ export default function PostDetail() {
     })();
     return () => { on = false; };
   }, [id]);
+
+    useEffect(() => {
+    function onGlobalClick(e) {
+      if (!menuOpen) return;
+      if (!menuRef.current) return;
+
+      const target = e?.detail?.target;
+      if (target && menuRef.current.contains(target)) return;
+
+      setMenuOpen(false);
+    }
+
+    window.addEventListener("global-click", onGlobalClick);
+    return () => window.removeEventListener("global-click", onGlobalClick);
+  }, [menuOpen]);
+
 
   // ---------- initial stats ----------
   useEffect(() => {
@@ -478,7 +495,7 @@ export default function PostDetail() {
               Book
             </Link>
           )}
-          <div className="relative">
+          <div className="relative" ref={menuRef}>
             <button
   onClick={() => setMenuOpen((v) => !v)}
   aria-label="Open post menu"

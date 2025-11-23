@@ -1,6 +1,6 @@
 // apps/web/src/components/Navbar.jsx
 import { Link, NavLink } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { getAuth, onIdTokenChanged, signOut } from "firebase/auth";
 import { api } from "../lib/api";
 
@@ -10,6 +10,7 @@ export default function Navbar() {
     () => localStorage.getItem("token") || null
   );
   const [open, setOpen] = useState(false);
+    const headerRef = useRef(null); // 👈 add this
 
   // watch firebase auth → keep token in localStorage
   useEffect(() => {
@@ -26,6 +27,23 @@ export default function Navbar() {
     });
     return () => unsub();
   }, []);
+
+    useEffect(() => {
+    function onGlobalClick(e) {
+      if (!open) return;
+      if (!headerRef.current) return;
+
+      const target = e?.detail?.target;
+      // If click is inside header (logo, nav, toggle, mobile menu), ignore
+      if (target && headerRef.current.contains(target)) return;
+
+      setOpen(false);
+    }
+
+    window.addEventListener("global-click", onGlobalClick);
+    return () => window.removeEventListener("global-click", onGlobalClick);
+  }, [open]);
+
 
   // fetch /api/me when we have a token
   useEffect(() => {
@@ -65,7 +83,11 @@ export default function Navbar() {
     isActive ? "text-gold font-medium" : "hover:text-gold";
 
   return (
-    <header className="border-b border-zinc-800 sticky top-0 z-40 bg-black/70 backdrop-blur h-[60px]">
+    <header
+      ref={headerRef}
+      className="border-b border-zinc-800 sticky top-0 z-40 bg-black/70 backdrop-blur h-[60px]"
+    >
+
       <div className="max-w-6xl mx-auto px-4 h-full flex items-center justify-between gap-3">
         {/* centered on mobile, left on md+ */}
         <Link to="/" className="flex items-center gap-2 mx-auto md:mx-0">

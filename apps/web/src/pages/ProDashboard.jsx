@@ -296,8 +296,15 @@ export default function ProDashboard() {
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <div className="font-medium">
+                    <Link
+                      to={`/bookings/${b._id}`}
+                      className="hover:underline"
+                      title="Open full booking details"
+                    >
                       {svcName} • {formatMoney(priceKobo)}
-                    </div>
+                    </Link>
+                  </div>
+
                     <div className="text-sm text-zinc-400">
                       {formatWhen(b.scheduledFor)} — {b.lga}
                     </div>

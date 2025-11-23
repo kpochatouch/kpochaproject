@@ -1,4 +1,4 @@
-//apps/web/src/components/FeedCard
+//apps/web/src/components/FeedCard.jsx
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
@@ -53,6 +53,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
   const videoRef = useRef(null);
   const mediaObserverRef = useRef(null);
   const cardRef = useRef(null);
+  const menuRef = useRef(null); // 👈 add this
   const [inView, setInView] = useState(false);
   const hasSentViewRef = useRef(false);
   const playTriggeredByObserverRef = useRef(false);
@@ -78,79 +79,9 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
     return `${m}:${s < 10 ? "0" : ""}${s}`;
   }
 
-// 🔍 DEBUG: log once per post if media fails to resolve
-if (typeof window !== "undefined" && !post.__loggedMediaOnce) {
-  post.__loggedMediaOnce = true;
-  console.log("FeedCard media debug:", {
-    id: post._id || post.id,
-    media: post.media,
-    mediaUrl: post.mediaUrl,
-    videoUrl: post.videoUrl,
-    imageUrl: post.imageUrl,
-    url: post.url,
-  });
-}
-
-// 🔧 normalize media from multiple possible shapes
-let media = null;
-
-// 1) pick a "raw" field to use
-let rawMedia =
-  post.media ??
-  post.mediaUrl ??
-  post.videoUrl ??
-  post.imageUrl ??
-  post.url ??
-  null;
-
-// 2) if it's an array, take the first element
-if (Array.isArray(rawMedia) && rawMedia.length) {
-  rawMedia = rawMedia[0];
-}
-
-// 3) if it's now an object, try to pull a URL from common keys
-if (rawMedia && typeof rawMedia === "object" && !Array.isArray(rawMedia)) {
-  let url =
-    rawMedia.url ||
-    rawMedia.secure_url || // Cloudinary
-    rawMedia.src ||
-    rawMedia.path ||
-    rawMedia.mediaUrl ||   // handle nested mediaUrl
-    rawMedia.videoUrl ||   // handle nested videoUrl
-    rawMedia.imageUrl ||   // handle nested imageUrl
-    null;
-
-  // fallback: first string value that looks like a URL
-  if (!url) {
-    const firstStringUrl = Object.values(rawMedia).find(
-      (v) => typeof v === "string" && /^https?:\/\//.test(v)
-    );
-    if (firstStringUrl) url = firstStringUrl;
-  }
-
-  if (url) {
-    const type =
-      rawMedia.type ||
-      rawMedia.kind ||
-      (/\.(mp4|mov|webm|m4v)$/i.test(url) ? "video" : "image");
-
-    media = { url, type };
-  }
-}
-// 4) if it's a plain string, treat as URL
-else if (typeof rawMedia === "string") {
-  const url = rawMedia.trim();
-  if (url) {
-    media = {
-      url,
-      type: /\.(mp4|mov|webm|m4v)$/i.test(url) ? "video" : "image",
-    };
-  }
-}
-
-const isVideo = media?.type === "video";
-
-
+  const media =
+    Array.isArray(post.media) && post.media.length ? post.media[0] : null;
+  const isVideo = media?.type === "video";
 
   // text clamp
   const [showFullText, setShowFullText] = useState(false);
@@ -184,6 +115,23 @@ const isVideo = media?.type === "video";
       stopped = true;
     };
   }, [postId]);
+
+    useEffect(() => {
+    function onGlobalClick(e) {
+      if (!menuOpen) return;
+      if (!menuRef.current) return;
+
+      const target = e?.detail?.target;
+      // If click is inside the menu area, ignore
+      if (target && menuRef.current.contains(target)) return;
+
+      setMenuOpen(false);
+    }
+
+    window.addEventListener("global-click", onGlobalClick);
+    return () => window.removeEventListener("global-click", onGlobalClick);
+  }, [menuOpen]);
+
 
   // Reset internal flags when post changes
   useEffect(() => {
@@ -753,7 +701,7 @@ const followTargetUid =
       </Link>
     )}
 
-    <div className="relative">
+    <div className="relative" ref={menuRef}>
       <button
         onClick={() => setMenuOpen((v) => !v)}
         aria-label="Open post menu"
@@ -763,7 +711,7 @@ const followTargetUid =
       </button>
 
       {menuOpen && (
-        <div className="absolute right-0 mt-2 w-56 bg-[#141414] border border-[#2a2a2a] rounded-lg shadow-lg z-30">
+         <div className="absolute right-0 mt-2 w-56 bg-[#141414] border border-[#2a2a2a] rounded-lg shadow-lg z-30">
           <button
             onClick={toggleSave}
             className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
