@@ -589,58 +589,83 @@ export default function PublicProfile() {
         </div>
       </div>
 
-      <div className="max-w-6xl mx-auto px-4 -mt-16 relative z-30">
-        <div className="flex gap-6 items-end">
-          <div className="w-32 h-32 rounded-full border-4 border-[#0b0c10] bg-zinc-900 overflow-hidden shrink-0 relative z-[9999]">
-            {avatar ? <img src={avatar} alt={name} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-3xl">{name.slice(0, 1)}</div>}
-          </div>
+<div className="max-w-6xl mx-auto px-4 -mt-16 relative z-30">
+  <div className="flex flex-col sm:flex-row sm:items-end gap-4 sm:gap-6">
+    {/* avatar */}
+    <div className="w-32 h-32 rounded-full border-4 border-[#0b0c10] bg-zinc-900 overflow-hidden shrink-0 relative z-[9999]">
+      {avatar ? (
+        <img src={avatar} alt={name} className="w-full h-full object-cover" />
+      ) : (
+        <div className="w-full h-full flex items-center justify-center text-3xl">
+          {name.slice(0, 1)}
+        </div>
+      )}
+    </div>
 
-          <div className="flex-1 pb-3">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-2xl font-bold">{name}</h1>
-              {badges.map((b, i) => (
-                <span key={i} className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-900/40 text-emerald-200 border border-emerald-700">{b}</span>
-              ))}
-            </div>
+    {/* name + meta */}
+    <div className="flex-1 pb-3">
+      <div className="flex items-center gap-2 flex-wrap">
+        <h1 className="text-2xl font-bold">{name}</h1>
+        {badges.map((b, i) => (
+          <span
+            key={i}
+            className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-900/40 text-emerald-200 border border-emerald-700"
+          >
+            {b}
+          </span>
+        ))}
+      </div>
 
-            <p className="text-sm text-zinc-400 mt-1">{location || "Nigeria"}</p>
+      <p className="text-sm text-zinc-400 mt-1">{location || "Nigeria"}</p>
 
-            {rating > 0 && (
-              <div className="flex items-center gap-1 mt-2 text-sm">
-                {Array.from({ length: Math.round(rating) }).map((_, i) => <span key={i} className="text-yellow-400">★</span>)}
-                {Array.from({ length: 5 - Math.round(rating) }).map((_, i) => <span key={i} className="text-zinc-600">★</span>)}
-                <span className="text-zinc-300 ml-1">{rating.toFixed(1)}</span>
-              </div>
-            )}
-          </div>
+      {rating > 0 && (
+        <div className="flex items-center gap-1 mt-2 text-sm">
+          {Array.from({ length: Math.round(rating) }).map((_, i) => (
+            <span key={i} className="text-yellow-400">
+              ★
+            </span>
+          ))}
+          {Array.from({ length: 5 - Math.round(rating) }).map((_, i) => (
+            <span key={i} className="text-zinc-600">
+              ★
+            </span>
+          ))}
+          <span className="text-zinc-300 ml-1">{rating.toFixed(1)}</span>
+        </div>
+      )}
+    </div>
 
-          <div className="pb-3 flex gap-2">
-  <button
-    onClick={handleBookNow}
-    className="px-4 py-2 bg-gold text-black font-semibold rounded-lg hover:opacity-90"
-  >
-    Book now
-  </button>
+    {/* actions */}
+    <div className="w-full sm:w-auto pb-3">
+      <div className="flex flex-wrap sm:flex-nowrap gap-2 w-full sm:w-auto justify-start sm:justify-end">
+        <button
+          onClick={handleBookNow}
+          className="px-4 py-2 bg-gold text-black font-semibold rounded-lg hover:opacity-90 flex-1 sm:flex-none text-sm text-center"
+        >
+          Book now
+        </button>
 
-  <button
-    className="px-4 py-2 border border-zinc-700 rounded-lg text-sm text-zinc-200"
-    title="Follow this profile"
-    onClick={following ? unfollow : follow}
-    disabled={followPending}
-  >
-    {followPending ? "…" : following ? "Unfollow" : "Follow"}
-  </button>
+        <button
+          className="px-4 py-2 border border-zinc-700 rounded-lg text-sm text-zinc-200 flex-1 sm:flex-none text-center"
+          title="Follow this profile"
+          onClick={following ? unfollow : follow}
+          disabled={followPending}
+        >
+          {followPending ? "…" : following ? "Unfollow" : "Follow"}
+        </button>
 
-  <button
-    onClick={startMessage}
-    className="px-4 py-2 rounded-lg border border-zinc-700 bg-zinc-900 hover:bg-zinc-800 text-sm"
-    title="Send message"
-  >
-    Message
-  </button>
+        <button
+          onClick={startMessage}
+          className="px-4 py-2 rounded-lg border border-zinc-700 bg-zinc-900 hover:bg-zinc-800 text-sm flex-1 sm:flex-none text-center"
+          title="Send message"
+        >
+          Message
+        </button>
+      </div>
     </div>
   </div>
- </div>
+</div>
+
 
       {/* Main grid */}
       <div className="max-w-6xl mx-auto px-4 mt-6 grid grid-cols-1 lg:grid-cols-[14rem_1fr_14rem] gap-6 pb-10">

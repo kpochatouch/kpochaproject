@@ -11,6 +11,7 @@ import { api } from "./lib/api";
 
 import Navbar from "./components/Navbar.jsx";
 import Footer from "./components/Footer.jsx";
+import ClickOutsideLayer from "./components/ClickOutsideLayer.jsx"; // add this
 import RequireAuth from "./components/RequireAuth.jsx";
 import RouteLoader from "./components/RouteLoader.jsx";
 import { useMe } from "./context/MeContext.jsx";
@@ -187,8 +188,10 @@ export default function App() {
   const hideChrome = location.pathname.startsWith("/aws-liveness");
 
   return (
-    <div className="min-h-screen flex flex-col bg-black text-white">
+  <div className="min-h-screen flex flex-col bg-black text-white">
+      <ClickOutsideLayer /> {/* add this */}
       {!hideChrome && <Navbar />}
+
 
       <main className={hideChrome ? "flex-1 bg-black" : "flex-1"}>
         <Suspense fallback={<RouteLoader full />}>

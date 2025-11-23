@@ -1,3 +1,4 @@
+//apps/web/src/components/FeedCard
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
@@ -77,9 +78,79 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
     return `${m}:${s < 10 ? "0" : ""}${s}`;
   }
 
-  const media =
-    Array.isArray(post.media) && post.media.length ? post.media[0] : null;
-  const isVideo = media?.type === "video";
+// 🔍 DEBUG: log once per post if media fails to resolve
+if (typeof window !== "undefined" && !post.__loggedMediaOnce) {
+  post.__loggedMediaOnce = true;
+  console.log("FeedCard media debug:", {
+    id: post._id || post.id,
+    media: post.media,
+    mediaUrl: post.mediaUrl,
+    videoUrl: post.videoUrl,
+    imageUrl: post.imageUrl,
+    url: post.url,
+  });
+}
+
+// 🔧 normalize media from multiple possible shapes
+let media = null;
+
+// 1) pick a "raw" field to use
+let rawMedia =
+  post.media ??
+  post.mediaUrl ??
+  post.videoUrl ??
+  post.imageUrl ??
+  post.url ??
+  null;
+
+// 2) if it's an array, take the first element
+if (Array.isArray(rawMedia) && rawMedia.length) {
+  rawMedia = rawMedia[0];
+}
+
+// 3) if it's now an object, try to pull a URL from common keys
+if (rawMedia && typeof rawMedia === "object" && !Array.isArray(rawMedia)) {
+  let url =
+    rawMedia.url ||
+    rawMedia.secure_url || // Cloudinary
+    rawMedia.src ||
+    rawMedia.path ||
+    rawMedia.mediaUrl ||   // handle nested mediaUrl
+    rawMedia.videoUrl ||   // handle nested videoUrl
+    rawMedia.imageUrl ||   // handle nested imageUrl
+    null;
+
+  // fallback: first string value that looks like a URL
+  if (!url) {
+    const firstStringUrl = Object.values(rawMedia).find(
+      (v) => typeof v === "string" && /^https?:\/\//.test(v)
+    );
+    if (firstStringUrl) url = firstStringUrl;
+  }
+
+  if (url) {
+    const type =
+      rawMedia.type ||
+      rawMedia.kind ||
+      (/\.(mp4|mov|webm|m4v)$/i.test(url) ? "video" : "image");
+
+    media = { url, type };
+  }
+}
+// 4) if it's a plain string, treat as URL
+else if (typeof rawMedia === "string") {
+  const url = rawMedia.trim();
+  if (url) {
+    media = {
+      url,
+      type: /\.(mp4|mov|webm|m4v)$/i.test(url) ? "video" : "image",
+    };
+  }
+}
+
+const isVideo = media?.type === "video";
+
+
 
   // text clamp
   const [showFullText, setShowFullText] = useState(false);
@@ -767,12 +838,6 @@ const followTargetUid =
               View more
             </button>
           )}
-        </div>
-      )}
-
-      {!media && (
-        <div className="w-full aspect-[4/5] bg-[#1a1a1a] animate-pulse flex items-center justify-center text-gray-600 text-xs">
-          Loading media...
         </div>
       )}
 
