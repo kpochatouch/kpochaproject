@@ -1,13 +1,17 @@
 // apps/web/src/components/NotificationBell.jsx
 import React, { useEffect, useState } from "react";
 import { connectSocket, registerSocketHandler } from "../lib/socket";
-import { fetchNotifications, markNotificationSeen, markAllSeen } from "../lib/notifications";
+import {
+  fetchNotifications,
+  markAllSeen,
+} from "../lib/notifications";
 
 export default function NotificationBell() {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState([]);
   const [unread, setUnread] = useState(0);
 
+  // Load initial notifications
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -15,43 +19,44 @@ export default function NotificationBell() {
         const list = await fetchNotifications({ unreadOnly: false, limit: 30 });
         if (!alive) return;
         setItems(list);
-        setUnread(list.filter((it) => !it.seen).length);
+        setUnread(list.filter((it) => !it.read).length);
       } catch (e) {
         console.warn("fetch notifications", e);
       }
     })();
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
   }, []);
 
+  // Realtime socket listener
   useEffect(() => {
-    connectSocket(); // idempotent
+    connectSocket(); // safe, idempotent
 
-    const offNotif = registerSocketHandler("notification", (payload) => {
-      // server should emit { ownerUid, type, data, createdAt, _id }
-      setItems((prev) => [payload, ...prev]);
-      setUnread((n) => n + 1);
-    });
-
-    const offProfileStats = registerSocketHandler("profile:stats", (p) => {
-      // optionally update UI counters here or bubble up via context
-      // ignore in bell
-    });
+    // 🔥 FIX: backend emits "notification:received"
+    const offNotif = registerSocketHandler(
+      "notification:received",
+      (payload) => {
+        setItems((prev) => [payload, ...prev]);
+        setUnread((n) => n + 1);
+      }
+    );
 
     return () => {
       offNotif && offNotif();
-      offProfileStats && offProfileStats();
     };
   }, []);
 
   async function handleOpen() {
     setOpen((v) => !v);
     if (!open && unread > 0) {
-      // mark all seen quickly
       try {
         await markAllSeen();
-        setItems((it) => it.map((i) => ({ ...i, seen: true })));
+        setItems((it) => it.map((i) => ({ ...i, read: true })));
         setUnread(0);
-      } catch (e) { console.warn(e); }
+      } catch (e) {
+        console.warn(e);
+      }
     }
   }
 
@@ -59,19 +64,33 @@ export default function NotificationBell() {
     <div className="relative">
       <button onClick={handleOpen} className="relative">
         🔔
-        {unread > 0 && <span className="absolute -top-1 -right-1 text-xs bg-red-600 rounded-full px-1 py-0.5">{unread}</span>}
+        {unread > 0 && (
+          <span className="absolute -top-1 -right-1 text-xs bg-red-600 rounded-full px-1 py-0.5">
+            {unread}
+          </span>
+        )}
       </button>
+
       {open && (
         <div className="absolute right-0 mt-2 w-72 max-h-80 overflow-auto bg-black border border-zinc-800 rounded-lg p-2">
-          {items.length === 0 ? <div className="text-xs text-zinc-500">No notifications</div> :
+          {items.length === 0 ? (
+            <div className="text-xs text-zinc-500">No notifications</div>
+          ) : (
             items.map((n) => (
-              <div key={n._id || n.id} className={`p-2 rounded ${n.seen ? "opacity-80" : "bg-zinc-900/40"}`}>
-                <div className="text-sm">{n.type}</div>
-                <div className="text-xs text-zinc-400">{n.data?.text || JSON.stringify(n.data)}</div>
-                <div className="text-[10px] text-zinc-500 mt-1">{new Date(n.createdAt).toLocaleString()}</div>
+              <div
+                key={n._id || n.id}
+                className={`p-2 rounded ${
+                  n.read ? "opacity-80" : "bg-zinc-900/40"
+                }`}
+              >
+                <div className="text-sm font-semibold">{n.title}</div>
+                <div className="text-xs text-zinc-400">{n.body}</div>
+                <div className="text-[10px] text-zinc-500 mt-1">
+                  {new Date(n.createdAt).toLocaleString()}
+                </div>
               </div>
             ))
-          }
+          )}
         </div>
       )}
     </div>

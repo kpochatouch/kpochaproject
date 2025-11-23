@@ -9,6 +9,8 @@ import redisClient from "../redis.js";
 import { getIO } from "../sockets/index.js";
 import { ClientProfile } from "../models/Profile.js";
 import { cancelBookingAndRefund } from "../services/walletService.js";
+import { createNotification } from "../services/notificationService.js";
+
 
 const router = express.Router();
 
@@ -214,6 +216,33 @@ router.post("/bookings", requireAuth, async (req, res) => {
       status: "pending_payment",
     });
 
+        // 🔔 Notify pro owner about new scheduled booking (pending payment)
+    try {
+      if (proOwnerUid) {
+        await createNotification({
+          toUid: proOwnerUid,
+          fromUid: req.user.uid,
+          type: "booking_created",
+          title: "New booking request",
+          body:
+            (clientName || "A client") +
+            ` requested ${svcSnap.serviceName} in ${toUpper(lga || "")}.`,
+          data: {
+            bookingId: b._id.toString(),
+            status: b.status,
+            paymentStatus: b.paymentStatus,
+            kind: "scheduled",
+          },
+        });
+      }
+    } catch (notifyErr) {
+      console.warn(
+        "[bookings:create] notify pro failed:",
+        notifyErr?.message || notifyErr
+      );
+    }
+
+
     res.json({ ok: true, booking: sanitizeBookingFor(req, b) });
   } catch (err) {
     console.error("[bookings:create] error:", err);
@@ -365,6 +394,33 @@ router.post("/bookings/instant", requireAuth, async (req, res) => {
       },
     });
 
+        // 🔔 Notify pro owner about new instant booking (pending payment)
+    try {
+      if (proOwnerUid) {
+        await createNotification({
+          toUid: proOwnerUid,
+          fromUid: req.user.uid,
+          type: "booking_created",
+          title: "New booking request",
+          body:
+            (clientName || "A client") +
+            ` requested ${svcSnap.serviceName} in ${normalizedLga}.`,
+          data: {
+            bookingId: b._id.toString(),
+            status: b.status,
+            paymentStatus: b.paymentStatus,
+            kind: "instant",
+          },
+        });
+      }
+    } catch (notifyErr) {
+      console.warn(
+        "[bookings:instant] notify pro failed:",
+        notifyErr?.message || notifyErr
+      );
+    }
+
+
     // For card, FE will open Paystack and then call /api/payments/verify
     if (paymentMethod === "card") {
       return res.json({
@@ -494,6 +550,32 @@ router.put("/bookings/:id/cancel", requireAuth, async (req, res) => {
       reason,
     });
 
+    // 🔔 Notify pro owner that client cancelled
+    try {
+      if (b.proOwnerUid) {
+        await createNotification({
+          toUid: b.proOwnerUid,
+          fromUid: req.user.uid,
+          type: "booking_cancelled",
+          title: "Booking cancelled",
+          body:
+            "The client cancelled a booking for " +
+            (b?.service?.serviceName || "a service") +
+            (reason ? ` (reason: ${reason})` : ""),
+          data: {
+            bookingId: b._id.toString(),
+            status: b.status,
+            paymentStatus: b.paymentStatus,
+          },
+        });
+      }
+    } catch (notifyErr) {
+      console.warn(
+        "[bookings:cancel] notify pro failed:",
+        notifyErr?.message || notifyErr
+      );
+    }
+
     res.json({
       ok: true,
       booking: sanitizeBookingFor(req, b),
@@ -553,36 +635,36 @@ router.put("/bookings/:id/accept", requireAuth, async (req, res) => {
     }
     // --- end socket block ---
 
+    // 🔔 Notify client that pro accepted
+    try {
+      if (b.clientUid) {
+        await createNotification({
+          toUid: b.clientUid,
+          fromUid: req.user.uid,
+          type: "booking_accepted",
+          title: "Booking accepted",
+          body:
+            "Your professional accepted your booking for " +
+            (b?.service?.serviceName || "a service") +
+            ". You can now chat or call in the app.",
+          data: {
+            bookingId: b._id.toString(),
+            status: b.status,
+            paymentStatus: b.paymentStatus,
+          },
+        });
+      }
+    } catch (notifyErr) {
+      console.warn(
+        "[bookings:accept] notify client failed:",
+        notifyErr?.message || notifyErr
+      );
+    }
+
     res.json({ ok: true, booking: sanitizeBookingFor(req, b) });
   } catch (err) {
     console.error("[bookings:accept] error:", err);
     res.status(500).json({ error: "Failed to accept booking" });
-  }
-});
-
-/** Pro: decline booking (with reason) */
-router.put("/bookings/:id/decline", requireAuth, async (req, res) => {
-  try {
-    const { reasonCode = "", reasonText = "" } = req.body || {};
-    const b = await Booking.findById(req.params.id);
-    if (!b) return res.status(404).json({ error: "Not found" });
-    if (b.proOwnerUid !== req.user.uid)
-      return res.status(403).json({ error: "Forbidden" });
-
-    if (["completed", "cancelled"].includes(b.status)) {
-      return res
-        .status(400)
-        .json({ error: `Cannot decline when status is ${b.status}` });
-    }
-
-    b.status = "declined";
-    b.decline = { reasonCode, reasonText, at: new Date() };
-    await b.save();
-
-    res.json({ ok: true, booking: sanitizeBookingFor(req, b) });
-  } catch (err) {
-    console.error("[bookings:decline] error:", err);
-    res.status(500).json({ error: "Failed to decline booking" });
   }
 });
 
@@ -690,7 +772,98 @@ router.put("/bookings/:id/complete", requireAuth, async (req, res) => {
         err?.message || err
       );
     }
+
     // --- end post-complete block ---
+
+    // 🔔 Notify both sides about completion + prompt for reviews
+    try {
+      const baseBody =
+        "A booking for " +
+        (b?.service?.serviceName || "a service") +
+        " was marked as completed.";
+      const completedBy = meta.completedBy || "unknown";
+
+      // If client completed -> notify pro
+      if (b.proOwnerUid && completedBy === "client") {
+        await createNotification({
+          toUid: b.proOwnerUid,
+          fromUid: b.clientUid || null,
+          type: "booking_completed",
+          title: "Job completed by client",
+          body:
+            baseBody +
+            " You can now leave a review for this client.",
+          data: {
+            bookingId: b._id.toString(),
+            completedBy,
+            completionNote: meta.completionNote || "",
+            role: "pro",
+          },
+        });
+      }
+
+      // If pro completed -> notify client
+      if (b.clientUid && completedBy === "pro") {
+        await createNotification({
+          toUid: b.clientUid,
+          fromUid: b.proOwnerUid || null,
+          type: "booking_completed",
+          title: "Job completed by your professional",
+          body:
+            baseBody +
+            " Please remember to leave a review for your professional.",
+          data: {
+            bookingId: b._id.toString(),
+            completedBy,
+            completionNote: meta.completionNote || "",
+            role: "client",
+          },
+        });
+      }
+
+      // If admin completed -> notify both
+      if (completedBy === "admin") {
+        if (b.clientUid) {
+          await createNotification({
+            toUid: b.clientUid,
+            fromUid: null,
+            type: "booking_completed",
+            title: "Job marked as completed",
+            body:
+              baseBody +
+              " Our team closed this booking. You may leave a review.",
+            data: {
+              bookingId: b._id.toString(),
+              completedBy,
+              completionNote: meta.completionNote || "",
+              role: "client",
+            },
+          });
+        }
+        if (b.proOwnerUid) {
+          await createNotification({
+            toUid: b.proOwnerUid,
+            fromUid: null,
+            type: "booking_completed",
+            title: "Job marked as completed",
+            body:
+              baseBody +
+              " Our team closed this booking. You may leave a review.",
+            data: {
+              bookingId: b._id.toString(),
+              completedBy,
+              completionNote: meta.completionNote || "",
+              role: "pro",
+            },
+          });
+        }
+      }
+    } catch (notifyErr) {
+      console.warn(
+        "[bookings:complete] notify failed:",
+        notifyErr?.message || notifyErr
+      );
+    }
 
     res.json({ ok: true, booking: sanitizeBookingFor(req, b) });
   } catch (err) {
@@ -698,5 +871,6 @@ router.put("/bookings/:id/complete", requireAuth, async (req, res) => {
     res.status(500).json({ error: "Failed to complete booking" });
   }
 });
+
 
 export default router;

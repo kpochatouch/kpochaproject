@@ -1,6 +1,7 @@
 // apps/web/src/pages/ProDashboard.jsx
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getProBookings, acceptBooking, completeBooking } from "../lib/api";
+import { Link } from "react-router-dom";
 
 /* ---------- utils ---------- */
 function formatMoney(kobo = 0) {

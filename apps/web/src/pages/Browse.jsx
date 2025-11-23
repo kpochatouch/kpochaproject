@@ -17,7 +17,7 @@ import ErrorBoundary from "../components/ErrorBoundary";
 import SideMenu from "../components/SideMenu.jsx";
 import FeedComposer from "../components/FeedComposer.jsx";
 import { connectSocket, registerSocketHandler } from "../lib/socket";
-// ❌ InstantRequestButton import removed
+import NotificationsBell from "../components/NotificationBell.jsx";
 
 /* ---------------- Main Browse page ---------------- */
 export default function Browse() {
@@ -419,9 +419,10 @@ export default function Browse() {
             <h1 className="text-2xl font-semibold">Discover</h1>
           </div>
 
-          {/* 👇 InstantRequestButton removed here */}
+          <div className="flex items-center gap-3">
+            {/* 🔔 Notifications bell is always visible; badge shows only when there are unread items */}
+            <NotificationsBell />
 
-          <div>
             {/* existing tab pills */}
             <div className="inline-flex rounded-xl border border-zinc-800 overflow-hidden">
               <button
@@ -447,6 +448,7 @@ export default function Browse() {
             </div>
           </div>
         </div>
+
 
         {/* filters — only show on Pros tab */}
         {tab === "pros" && (

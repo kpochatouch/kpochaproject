@@ -48,6 +48,7 @@ import followRoutes from "./routes/follow.js";
 // correct (exact filename in your repo)
 import notificationsRoutes from "./routes/notifications.js";
 import matcherRouter from "./routes/matcher.js";
+import { createNotification } from "./services/notificationService.js";
 
 
 dotenv.config();
@@ -180,14 +181,19 @@ const BookingRulesSchema = new mongoose.Schema(
     enableNoShowSweep: { type: Boolean, default: true },
     noShowSweepCron: { type: String, default: "0 3 * * *" },
 
-    // NEW: how long pro has to accept (seconds)
     ringTimeoutSeconds: { type: Number, default: 120 },
 
-    // NEW: client cancel fee % when cancelling AFTER accept
     clientCancelFeePercentAfterAccept: { type: Number, default: 3 },
+
+    // NEW: reminder configuration
+    completionReminderHours: { type: Number, default: 2 }, // wait before first reminder
+    completionReminderRepeat: { type: Number, default: 1 }, // how many times max
+    completionReminderToPro: { type: Boolean, default: true },
+    completionReminderToClient: { type: Boolean, default: false },
   },
   { _id: false }
 );
+
 
 const MaintenanceSchema = new mongoose.Schema(
   {
@@ -258,7 +264,9 @@ try {
 }
 
 /* ------------------- Schedulers ------------------- */
+/* ------------------- Schedulers ------------------- */
 let CRON_TASKS = [];
+
 async function initSchedulers() {
   // stop any old cron tasks
   CRON_TASKS.forEach((t) => t.stop());
@@ -266,7 +274,7 @@ async function initSchedulers() {
 
   const s = await loadSettings();
 
-  // 🔁 Auto-release completed bookings older than releaseDays
+  /* 1️⃣ Auto-release completed bookings after releaseDays */
   if (s?.payouts?.enableAutoRelease && s?.payouts?.autoReleaseCron) {
     const t = cron.schedule(s.payouts.autoReleaseCron, async () => {
       const started = Date.now();
@@ -315,49 +323,141 @@ async function initSchedulers() {
     CRON_TASKS.push(t);
   }
 
-  // 🔔 Auto-cancel 'ringing' bookings that were never accepted
-if (s?.bookingRules?.ringTimeoutSeconds) {
-  const t = cron.schedule("*/1 * * * *", async () => {
-    try {
-      const timeoutMs = (s.bookingRules.ringTimeoutSeconds || 120) * 1000;
-      const cutoff = new Date(Date.now() - timeoutMs);
+  /* 2️⃣ Auto-cancel “ringing” bookings that were never accepted */
+  if (s?.bookingRules?.ringTimeoutSeconds) {
+    const t = cron.schedule("*/1 * * * *", async () => {
+      try {
+        const timeoutMs = (s.bookingRules.ringTimeoutSeconds || 120) * 1000;
+        const cutoff = new Date(Date.now() - timeoutMs);
 
-      // "Ringing" = paid + scheduled + still not accepted (no acceptedAt)
-      const ringing = await Booking.find({
-        status: "scheduled",
-        paymentStatus: "paid",
-        acceptedAt: { $exists: false },
-        createdAt: { $lte: cutoff },
-      }).limit(200);
+        // "Ringing" = paid + scheduled + still not accepted (no acceptedAt)
+        const ringing = await Booking.find({
+          status: "scheduled",
+          paymentStatus: "paid",
+          acceptedAt: { $exists: false },
+          createdAt: { $lte: cutoff },
+        }).limit(200);
 
-      for (const b of ringing) {
+        for (const b of ringing) {
+          try {
+            const refundInfo = await cancelBookingAndRefund(b, {
+              cancelledBy: "system_timeout",
+              reason: "ring_timeout",
+            });
+
+            console.log(
+              "[scheduler] auto-cancelled ringing booking via helper",
+              b._id.toString(),
+              refundInfo ? `refund=${refundInfo?.refundAmountKobo}` : ""
+            );
+          } catch (e) {
+            console.error(
+              "[scheduler] ring-timeout cancelBookingAndRefund error:",
+              b._id?.toString?.(),
+              e?.message || e
+            );
+          }
+        }
+      } catch (err) {
+        console.error("[scheduler] ring-timeout error:", err.message);
+      }
+    });
+    CRON_TASKS.push(t);
+  }
+
+  /* 3️⃣ Auto-remind on accepted-but-not-completed bookings */
+  {
+    const rules = s?.bookingRules || {};
+    const hours =
+      rules.completionReminderHours ?? 2; // wait before first reminder
+    const maxRepeat =
+      rules.completionReminderRepeat ?? 1; // how many times max
+    const remindPro = rules.completionReminderToPro ?? true;
+    const remindClient = rules.completionReminderToClient ?? false;
+
+    const remindersEnabled =
+      (remindPro || remindClient) && hours > 0 && maxRepeat > 0;
+
+    if (remindersEnabled) {
+      const t = cron.schedule("*/10 * * * *", async () => {
         try {
-          const refundInfo = await cancelBookingAndRefund(b, {
-            cancelledBy: "system_timeout",
-            reason: "ring_timeout",
-          });
+          const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000);
 
-          console.log(
-            "[scheduler] auto-cancelled ringing booking via helper",
-            b._id.toString(),
-            refundInfo ? `refund=${refundInfo?.refundAmountKobo}` : ""
-          );
-        } catch (e) {
+          const due = await Booking.find({
+            status: "accepted",
+            paymentStatus: "paid",
+            acceptedAt: { $lte: cutoff },
+            completedAt: { $exists: false },
+          }).limit(200);
+
+          for (const b of due) {
+            try {
+              b.meta = b.meta || {};
+              const count = b.meta.completionReminderCount || 0;
+
+              if (count >= maxRepeat) continue;
+
+              // 👉 Notify Pro
+              if (remindPro && b.proOwnerUid) {
+                await createNotification({
+                  toUid: b.proOwnerUid,
+                  fromUid: b.clientUid || null,
+                  type: "booking_completion_reminder",
+                  title: "Reminder: Complete Booking",
+                  body:
+                    "This booking has been pending completion. Please confirm with the client.",
+                  data: {
+                    bookingId: b._id.toString(),
+                    role: "pro",
+                  },
+                });
+              }
+
+              // 👉 Notify Client
+              if (remindClient && b.clientUid) {
+                await createNotification({
+                  toUid: b.clientUid,
+                  fromUid: b.proOwnerUid || null,
+                  type: "booking_completion_reminder",
+                  title: "Reminder: Please Complete Booking",
+                  body:
+                    "Your service appears completed. Please mark the booking as completed in the app.",
+                  data: {
+                    bookingId: b._id.toString(),
+                    role: "client",
+                  },
+                });
+              }
+
+              // Track reminders
+              b.meta.completionReminderCount = count + 1;
+              b.meta.lastReminderAt = new Date();
+              await b.save();
+
+              console.log(
+                "[scheduler] completion reminder sent for booking",
+                b._id.toString()
+              );
+            } catch (e) {
+              console.error(
+                "[scheduler] completion-reminder item error:",
+                e?.message || e
+              );
+            }
+          }
+        } catch (err) {
           console.error(
-            "[scheduler] ring-timeout cancelBookingAndRefund error:",
-            b._id?.toString?.(),
-            e?.message || e
+            "[scheduler] completion reminder error:",
+            err?.message || err
           );
         }
-      }
-    } catch (err) {
-      console.error("[scheduler] ring-timeout error:", err.message);
-    }
-  });
-  CRON_TASKS.push(t);
-}
+      });
 
-  // (Placeholder) No-show sweeper
+      CRON_TASKS.push(t);
+    }
+  }
+
+  /* 4️⃣ (Placeholder) No-show sweeper */
   if (s?.bookingRules?.enableNoShowSweep && s?.bookingRules?.noShowSweepCron) {
     const t = cron.schedule(s.bookingRules.noShowSweepCron, async () => {
       try {
@@ -365,6 +465,7 @@ if (s?.bookingRules?.ringTimeoutSeconds) {
         console.log(
           `[scheduler] No-show sweep ran. Strike limit: ${strikeLimit}`
         );
+        // TODO: implement actual no-show penalties
       } catch (err) {
         console.error("[scheduler] No-show sweep error:", err.message);
       }

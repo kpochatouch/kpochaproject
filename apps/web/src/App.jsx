@@ -31,6 +31,7 @@ const Signup = lazy(() => import("./pages/Signup.jsx"));
 const BecomePro = lazy(() => import("./pages/BecomePro.jsx"));
 const ProDashboard = lazy(() => import("./pages/ProDashboard.jsx"));
 const Admin = lazy(() => import("./pages/Admin.jsx"));
+const LeaveReview = lazy(() => import("./pages/LeaveReview.jsx"));
 const Settings = lazy(() => import("./pages/Settings.jsx"));
 const ClientSettings = lazy(() => import("./pages/ClientSettings.jsx"));
 const AdminDecline = lazy(() => import("./pages/AdminDecline.jsx"));
@@ -228,33 +229,51 @@ export default function App() {
             />
 
             {/* Auth-required core pages */}
-            <Route
-              path="/compose"
-              element={
-                <RequireAuth>
-                  <Compose />
-                </RequireAuth>
-              }
-            />
-            <Route
-              path="/bookings/:id"
-              element={
-                <RequireAuth>
-                  <BookingDetails />
-                </RequireAuth>
-              }
-            />
-            <Route
-              path="/bookings/:bookingId/chat"
-              element={
-                <RequireAuth>
-                  <BookingChat />
-                </RequireAuth>
-              }
-            />
-            <Route
-              path="/profile"
-              element={
+<Route
+  path="/compose"
+  element={
+    <RequireAuth>
+      <Compose />
+    </RequireAuth>
+  }
+/>
+<Route
+  path="/bookings/:id"
+  element={
+    <RequireAuth>
+      <BookingDetails />
+    </RequireAuth>
+  }
+/>
+<Route
+  path="/bookings/:bookingId/chat"
+  element={
+    <RequireAuth>
+      <BookingChat />
+    </RequireAuth>
+  }
+/>
+{/* Review Page */}
+<Route
+  path="/review/:proId"
+  element={
+    <RequireAuth>
+      <LeaveReview />
+    </RequireAuth>
+  }
+/>
+<Route
+  path="/review-client/:clientUid"
+  element={
+    <RequireAuth>
+      <LeaveReview />
+    </RequireAuth>
+  }
+/>
+
+<Route
+  path="/profile"
+  element={
                 <RequireAuth>
                   <Profile />
                 </RequireAuth>

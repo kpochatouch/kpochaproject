@@ -96,8 +96,6 @@ export default function BookService() {
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const okTimer = useRef();
-
     // load pro + me + client-profile — wait for Firebase auth before calling protected endpoints
   useEffect(() => {
     let alive = true;

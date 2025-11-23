@@ -13,7 +13,7 @@
 // - When status === "scheduled" & paymentStatus === "paid":
 //   • UI shows “Calling your professional…” with 3-ring timer
 //   • Client can cancel now or keep waiting
-//   • If cron cancels/refunds, client is sent back to /browse
+//   • If cron or auto-timeout cancels/refunds, client is sent back to /browse
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
@@ -28,6 +28,7 @@ import {
   payBookingWithWallet,
   cancelBooking,
   getSettings,
+  getClientReviews,
 } from "../lib/api";
 import PaymentMethodPicker from "../components/PaymentMethodPicker.jsx";
 
@@ -78,6 +79,7 @@ function usePaystackReady() {
   return ready;
 }
 
+
 export default function BookingDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -94,6 +96,12 @@ export default function BookingDetails() {
   // Ring/calling UX
   const [ringSeconds, setRingSeconds] = useState(null); // from /api/settings
   const [ringElapsed, setRingElapsed] = useState(0); // seconds passed while scheduled
+  const [autoCancelled, setAutoCancelled] = useState(false); // prevent double calls
+
+    // ⭐ NEW: client reputation state
+  const [clientReputation, setClientReputation] = useState(null);
+  const [clientReputationLoading, setClientReputationLoading] = useState(false);
+  const [clientReputationErr, setClientReputationErr] = useState("");
 
   // derived (supports new snapshot + legacy fields)
   const svcName = useMemo(
@@ -121,6 +129,51 @@ export default function BookingDetails() {
     () => !!me && booking && me.uid === booking.proOwnerUid,
     [me, booking]
   );
+
+    // Load client reputation (pro side only)
+  useEffect(() => {
+    if (!booking || !isProOwner) return;
+    const clientUid = booking.clientUid;
+    if (!clientUid) return;
+
+    let alive = true;
+    setClientReputationLoading(true);
+    setClientReputationErr("");
+
+    (async () => {
+      try {
+        const items = await getClientReviews(clientUid);
+        if (!alive) return;
+
+        const list = Array.isArray(items) ? items : [];
+        if (!list.length) {
+          setClientReputation({ total: 0, avg: null, last: null });
+          return;
+        }
+
+        const total = list.length;
+        const sum = list.reduce(
+          (acc, r) => acc + (Number(r.rating) || 0),
+          0
+        );
+        const avg = total ? sum / total : null;
+        const last = list[0];
+
+        setClientReputation({ total, avg, last });
+      } catch (e) {
+        console.error("load client reputation failed", e);
+        if (!alive) return;
+        setClientReputationErr("Could not load client reputation.");
+      } finally {
+        if (alive) setClientReputationLoading(false);
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [booking, isProOwner]);
+
 
   const canAccept = useMemo(
     () =>
@@ -192,6 +245,23 @@ export default function BookingDetails() {
     return false;
   }, [booking, isProOwner, isClient]);
 
+  // Pro ID used for review links (client -> pro)
+  const proIdForReview = useMemo(() => {
+    if (!booking) return null;
+    return booking.proId || booking.pro?._id || null;
+  }, [booking]);
+
+  // Client ID used for pro -> client review links
+  const clientIdForReview = useMemo(() => {
+    if (!booking) return null;
+    return (
+      booking.clientUid ||
+      booking.clientId ||
+      booking.client?._id ||
+      null
+    );
+  }, [booking]);
+
   // Load viewer + booking
   useEffect(() => {
     let alive = true;
@@ -244,6 +314,7 @@ export default function BookingDetails() {
           );
         } else {
           setBooking(found);
+          setAutoCancelled(false); // reset when we load a booking
         }
       } catch {
         if (alive) setErr("Unable to load booking.");
@@ -277,7 +348,27 @@ export default function BookingDetails() {
     };
   }, []);
 
-  // Ring timer: runs while booking is scheduled + paid, and viewer is the client
+  // Auto-cancel helper used by timeout
+  async function autoCancelAfterTimeout() {
+    if (!booking) return;
+    setBusy(true);
+    try {
+      const updated = await cancelBooking(booking._id);
+      setBooking(updated);
+      // redirect is handled by the cancelled/refunded effect below
+    } catch (e) {
+      console.error(
+        "auto-timeout cancel booking error:",
+        e?.response?.data || e?.message || e
+      );
+      // silently fail – user can still cancel manually
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Ring timer: runs while booking is scheduled + paid, and viewer is the client.
+  // Also triggers auto-cancel when elapsed >= ringSeconds.
   useEffect(() => {
     if (!booking || !me) return;
     if (me.uid !== booking.clientUid) return;
@@ -285,14 +376,26 @@ export default function BookingDetails() {
     if (booking.status !== "scheduled") return;
 
     setRingElapsed(0);
+    setAutoCancelled(false);
     const start = Date.now();
 
-    const id = setInterval(() => {
-      setRingElapsed(Math.floor((Date.now() - start) / 1000));
+    const intervalId = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - start) / 1000);
+      setRingElapsed(elapsed);
+
+      if (
+        !autoCancelled &&
+        ringSeconds &&
+        elapsed >= ringSeconds
+      ) {
+        setAutoCancelled(true);
+        void autoCancelAfterTimeout();
+      }
     }, 1000);
 
-    return () => clearInterval(id);
-  }, [booking, me]);
+    return () => clearInterval(intervalId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [booking, me, ringSeconds]);
 
   // If booking is cancelled/refunded for the client, send them back to browse
   useEffect(() => {
@@ -650,9 +753,7 @@ export default function BookingDetails() {
             ) : null}
           </div>
 
-          {/* Client & Pro contact view:
-              - Client: sees own phone + address
-              - Pro: sees ONLY address (after accept/completed), phone is hidden */}
+          {/* Client & Pro contact view */}
           {showClientContactToViewer && (
             <div className="rounded-xl border border-zinc-800 p-4 bg-black/30 mb-4">
               <div className="font-medium mb-2">
@@ -691,6 +792,60 @@ export default function BookingDetails() {
               )}
             </div>
           )}
+
+                    {/* Client reputation (only visible to pro) */}
+          {isProOwner && (
+            <div className="rounded-xl border border-zinc-800 p-4 bg-black/30 mb-4">
+              <div className="font-medium mb-2">
+                Client Reputation
+              </div>
+
+              {clientReputationLoading ? (
+                <div className="text-sm text-zinc-400">
+                  Loading client reputation…
+                </div>
+              ) : clientReputationErr ? (
+                <div className="text-sm text-red-400">
+                  {clientReputationErr}
+                </div>
+              ) : clientReputation && clientReputation.total > 0 ? (
+                <>
+                  <div className="text-sm text-zinc-200">
+                    Average rating:{" "}
+                    <span className="font-semibold">
+                      {clientReputation.avg.toFixed(1)} / 5
+                    </span>{" "}
+                    ({clientReputation.total} review
+                    {clientReputation.total > 1 ? "s" : ""})
+                  </div>
+                  {clientReputation.last && (
+                    <div className="mt-2 text-xs text-zinc-400">
+                      Last review:{" "}
+                      <span className="italic">
+                        {clientReputation.last.title ||
+                          clientReputation.last.comment?.slice(0, 80) ||
+                          "No comment text"}
+                        {clientReputation.last.comment &&
+                        clientReputation.last.comment.length > 80
+                          ? "…"
+                          : ""}
+                      </span>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="text-sm text-zinc-400">
+                  No previous reviews recorded for this client yet.
+                </div>
+              )}
+
+              <p className="mt-2 text-xs text-zinc-500">
+                This reputation is based on reviews from other
+                professionals who have worked with this client.
+              </p>
+            </div>
+          )}
+
 
           {/* CALLING / RINGING PHASE */}
           {booking?.paymentStatus === "paid" &&
@@ -764,6 +919,30 @@ export default function BookingDetails() {
                   {busy ? "Working…" : "Mark Completed"}
                 </button>
               )}
+
+              {/* Client can leave a review ONLY after completion */}
+              {isClient &&
+                booking?.status === "completed" &&
+                proIdForReview && (
+                  <Link
+                    to={`/review/${proIdForReview}?bookingId=${booking._id}`}
+                    className="px-4 py-2 rounded-lg border border-sky-700 text-sky-300 text-sm hover:bg-sky-950/40"
+                  >
+                    Leave Review
+                  </Link>
+                )}
+
+              {/* Pro can review client ONLY after completion */}
+              {isProOwner &&
+                booking?.status === "completed" &&
+                clientIdForReview && (
+                  <Link
+                    to={`/review-client/${clientIdForReview}?bookingId=${booking._id}`}
+                    className="px-4 py-2 rounded-lg border border-amber-700 text-amber-300 text-sm hover:bg-amber-950/40"
+                  >
+                    Review Client
+                  </Link>
+                )}
 
               {/* Chat / Call button – only after accept/completed, for both sides */}
               {showChatButton && booking?._id && (

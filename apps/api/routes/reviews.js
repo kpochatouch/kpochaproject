@@ -3,7 +3,7 @@ import express from "express";
 import mongoose from "mongoose";
 import { Review } from "../models/Review.js";
 import { Pro } from "../models.js";
-
+import { ClientReview } from "../models/ClientReview.js";
 function clamp(n, min, max) { return Math.max(min, Math.min(max, n)); }
 function safeObjectId(id) { try { return new mongoose.Types.ObjectId(id); } catch { return null; } }
 
@@ -92,6 +92,119 @@ export default function reviewsRouter({ requireAuth } = {}) {
       res.status(500).json({ error: "mine_failed" });
     }
   });
+
+    /* =======================================================================
+   * PRO → CLIENT REVIEWS
+   *  - Used when a pro reviews a client after a completed booking.
+   *  - Frontend will hit something like /api/reviews/client (POST)
+   *    and /api/reviews/client/:clientUid, /api/reviews/client/:clientUid/me.
+   * ======================================================================= */
+
+  // helper to ensure caller is a Pro
+  async function ensureIsPro(uid) {
+    if (!uid) return null;
+    try {
+      const pro = await Pro.findOne({ ownerUid: uid })
+        .select("_id ownerUid")
+        .lean();
+      return pro || null;
+    } catch {
+      return null;
+    }
+  }
+
+  // CREATE a review (pro -> client)
+  r.post("/reviews/client", mustAuth, async (req, res) => {
+    try {
+      if (!req.user?.uid) {
+        return res.status(401).json({ error: "auth_required" });
+      }
+
+      const { clientUid, rating, title, comment, photos, bookingId } =
+        req.body || {};
+
+      if (!clientUid || typeof clientUid !== "string") {
+        return res.status(400).json({ error: "bad_client_uid" });
+      }
+
+      // caller must be a Pro
+      const pro = await ensureIsPro(req.user.uid);
+      if (!pro) {
+        return res.status(403).json({ error: "only_pro_can_review_client" });
+      }
+
+      const safeRating = clamp(Number(rating), 1, 5);
+
+      const doc = await ClientReview.create({
+        reviewerUid: req.user.uid,
+        reviewerRole: "pro",
+        clientUid: clientUid.trim(),
+        bookingId: bookingId ? safeObjectId(bookingId) : undefined,
+        rating: safeRating,
+        title: String(title || "").slice(0, 120),
+        comment: String(comment || ""),
+        photos: Array.isArray(photos) ? photos : [],
+      });
+
+      res.json({ ok: true, item: doc });
+    } catch (e) {
+      // handle "duplicate key" from unique index (one review per (pro, client))
+      if (e?.code === 11000) {
+        return res.status(409).json({ error: "already_reviewed" });
+      }
+      console.error("[clientReviews:create]", e);
+      res.status(500).json({ error: "create_failed" });
+    }
+  });
+
+  // LIST reviews for a client (for admin / future client-profile view)
+  r.get("/reviews/client/:clientUid", async (req, res) => {
+    try {
+      const clientUid = String(req.params.clientUid || "").trim();
+      if (!clientUid) {
+        return res.status(400).json({ error: "bad_client_uid" });
+      }
+
+      const items = await ClientReview.find({
+        clientUid,
+        status: "public",
+      })
+        .sort({ createdAt: -1 })
+        .limit(200)
+        .lean();
+
+      res.json(items);
+    } catch (e) {
+      console.error("[clientReviews:list]", e);
+      res.status(500).json({ error: "list_failed" });
+    }
+  });
+
+  // GET my review on a client (unique-per-pro flow)
+  r.get("/reviews/client/:clientUid/me", mustAuth, async (req, res) => {
+    try {
+      if (!req.user?.uid) {
+        return res.status(401).json({ error: "auth_required" });
+      }
+
+      const clientUid = String(req.params.clientUid || "").trim();
+      if (!clientUid) {
+        return res.status(400).json({ error: "bad_client_uid" });
+      }
+
+      const item = await ClientReview.findOne({
+        clientUid,
+        reviewerUid: req.user.uid,
+        status: { $ne: "deleted" },
+      }).lean();
+
+      res.json(item || null);
+    } catch (e) {
+      console.error("[clientReviews:mine]", e);
+      res.status(500).json({ error: "mine_failed" });
+    }
+  });
+
 
   return r;
 }

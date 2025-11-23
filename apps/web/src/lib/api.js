@@ -512,10 +512,89 @@ export async function declineBooking(id, payload = {}) {
   );
   return data.booking;
 }
-export async function completeBooking(id) {
-  const { data } = await api.put(`/api/bookings/${id}/complete`);
+export async function completeBooking(id, payload = {}) {
+  const { data } = await api.put(`/api/bookings/${id}/complete`, payload);
   return data.booking;
 }
+
+/* =========================================
+   REVIEWS
+   ========================================= */
+
+/** Client → Pro: create a review for a pro */
+export async function createProReview({
+  proId,
+  rating,
+  title,
+  comment,
+  photos = [],
+  bookingId,
+}) {
+  const payload = {
+    proId,
+    rating,
+    title,
+    comment,
+    photos,
+  };
+  if (bookingId) payload.bookingId = bookingId;
+  const { data } = await api.post("/api/reviews", payload);
+  return data;
+}
+
+/** Client → Pro: get all public reviews for a pro */
+export async function getProReviews(proId) {
+  const { data } = await api.get(
+    `/api/reviews/pro/${encodeURIComponent(proId)}`
+  );
+  return data;
+}
+
+/** Client → Pro: get MY review on a pro (one per client/pro) */
+export async function getMyReviewOnPro(proId) {
+  const { data } = await api.get(
+    `/api/reviews/pro/${encodeURIComponent(proId)}/me`
+  );
+  return data; // null or review
+}
+
+/** Pro → Client: create a review about a client */
+export async function createClientReview({
+  clientUid,
+  rating,
+  title,
+  comment,
+  photos = [],
+  bookingId,
+}) {
+  const payload = {
+    clientUid,
+    rating,
+    title,
+    comment,
+    photos,
+  };
+  if (bookingId) payload.bookingId = bookingId;
+  const { data } = await api.post("/api/reviews/client", payload);
+  return data;
+}
+
+/** Pro → Client: get all public reviews about a client */
+export async function getClientReviews(clientUid) {
+  const { data } = await api.get(
+    `/api/reviews/client/${encodeURIComponent(clientUid)}`
+  );
+  return data; // array
+}
+
+/** Pro → Client: get MY review on a specific client */
+export async function getMyReviewOnClient(clientUid) {
+  const { data } = await api.get(
+    `/api/reviews/client/${encodeURIComponent(clientUid)}/me`
+  );
+  return data; // null or review
+}
+
 
 /* =========================================
    WALLET (client + pro)
