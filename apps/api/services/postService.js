@@ -1,7 +1,8 @@
-import Post from '../models/Post.js';
-import PostStats from '../models/PostStats.js';
-import { createNotification } from './notificationService.js';
-import { getIO } from '../sockets/index.js';
+// apps/api/services/postService.js
+import Post from "../models/Post.js";
+import PostStats from "../models/PostStats.js";
+import { createNotification } from "./notificationService.js";
+import { getIO } from "../sockets/index.js";
 
 /**
  * createPost(payload, proOwnerUid)
@@ -13,10 +14,10 @@ export async function createPost({ payload = {}, proOwnerUid }) {
     proOwnerUid,
     proId: payload.proId,
     pro: payload.pro,
-    text: payload.text || '',
+    text: payload.text || "",
     media: payload.media || [],
     tags: payload.tags || [],
-    lga: payload.lga || '',
+    lga: payload.lga || "",
     isPublic: payload.isPublic !== false,
   });
 
@@ -30,7 +31,7 @@ export async function createPost({ payload = {}, proOwnerUid }) {
   try {
     const io = getIO();
     if (io) {
-      io.to(`profile:${proOwnerUid}`).emit('post:created', {
+      io.to(`profile:${proOwnerUid}`).emit("post:created", {
         id: String(post._id),
         proOwnerUid,
         text: post.text,
@@ -46,7 +47,7 @@ export async function createPost({ payload = {}, proOwnerUid }) {
 /**
  * notifyOnLike({ postId, likerUid })
  * - creates a notification to post owner
- * - updates PostStats incrementally (caller may have already done this)
+ * - emits a post:engagement socket event
  */
 export async function notifyOnLike({ postId, likerUid }) {
   const post = await Post.findById(postId).lean();
@@ -55,18 +56,23 @@ export async function notifyOnLike({ postId, likerUid }) {
   if (!ownerUid || ownerUid === likerUid) return null;
 
   await createNotification({
-    toUid: ownerUid,
-    fromUid: likerUid,
-    type: 'post_like',
-    title: 'Your post got a like',
-    body: `${likerUid} liked your post.`,
-    data: { postId: String(postId) },
+    ownerUid,
+    actorUid: likerUid,
+    type: "post_like",
+    data: {
+      postId: String(postId),
+      message: "Your post got a new like.",
+    },
   });
 
   try {
     const io = getIO();
     if (io) {
-      io.to(`user:${ownerUid}`).emit('post:engagement', { postId: String(postId), type: 'like', from: likerUid });
+      io.to(`user:${ownerUid}`).emit("post:engagement", {
+        postId: String(postId),
+        type: "like",
+        from: likerUid,
+      });
     }
   } catch (e) {}
 }

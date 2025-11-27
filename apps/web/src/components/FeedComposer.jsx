@@ -1,5 +1,5 @@
 // apps/web/src/components/FeedComposer.jsx
-import React, { useRef, useState } from "react";
+import React, { useRef, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 
@@ -13,6 +13,12 @@ import { api } from "../lib/api";
  *  - exitTo (string) -> path to navigate to on Close (full-page only)
  *  - showHeader (boolean) -> show header for full-page (default true)
  *  - autoGoto (string|null) -> redirect after posting, default "/browse" for full-page, null disables
+ *
+ * Behaviour:
+ *  - Inline: acts as a compact composer at the top of Feed.
+ *            Focusing the textarea navigates to /compose (old behaviour kept).
+ *            You can still attach media and post directly without going to /compose.
+ *  - Full-page: used on /compose; shows full textarea, media preview, progress, etc.
  */
 export default function FeedComposer({
   lga = "",
@@ -27,13 +33,18 @@ export default function FeedComposer({
 
   const [text, setText] = useState("");
   const [mediaUrl, setMediaUrl] = useState("");
-  const [mediaType, setMediaType] = useState("image");
+  const [mediaType, setMediaType] = useState("image"); // "image" | "video"
   const [posting, setPosting] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [msg, setMsg] = useState("");
 
   const maxChars = 500;
+
+  const canSubmit = useMemo(
+    () => !posting && !uploading && (text.trim().length > 0 || !!mediaUrl),
+    [posting, uploading, text, mediaUrl]
+  );
 
   function close() {
     if (exitTo) return navigate(exitTo);
@@ -74,21 +85,30 @@ export default function FeedComposer({
       form.append("signature", signature);
       form.append("folder", folder);
 
-      // XHR so we can show progress
       await new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
-        xhr.open("POST", `https://api.cloudinary.com/v1_1/${cloudName}/auto/upload`);
+        xhr.open(
+          "POST",
+          `https://api.cloudinary.com/v1_1/${cloudName}/auto/upload`
+        );
 
         xhr.upload.onprogress = (e) => {
-          if (e.lengthComputable) setProgress(Math.round((e.loaded / e.total) * 100));
+          if (e.lengthComputable) {
+            setProgress(Math.round((e.loaded / e.total) * 100));
+          }
         };
 
         xhr.onload = () => {
           if (xhr.status === 200) {
             try {
               const json = JSON.parse(xhr.responseText);
-              setMediaUrl(json.secure_url || json.url || "");
-              setMediaType(file.type.startsWith("video/") ? "video" : "image");
+              const url = json.secure_url || json.url || "";
+              if (!url) throw new Error("Upload response missing URL");
+
+              // Detect actual media type from file
+              const isVideo = file.type?.startsWith("video/");
+              setMediaUrl(url);
+              setMediaType(isVideo ? "video" : "image");
               setMsg("Media uploaded ✔");
               resolve(json);
             } catch (err) {
@@ -114,19 +134,26 @@ export default function FeedComposer({
 
   async function submit() {
     setMsg("");
-    if (!text.trim() && !mediaUrl) {
-      setMsg("Add text or upload a photo/video.");
+
+    if (!canSubmit) {
+      if (!text.trim() && !mediaUrl) {
+        setMsg("Add text or upload a photo/video.");
+      }
       return;
     }
 
+    const cleanText = text.trim();
+    const cleanLga = (lga || "").trim().toUpperCase();
+
     try {
       setPosting(true);
+
       await api.post("/api/posts", {
-        text: text.trim(),
+        text: cleanText,
         media: mediaUrl ? [{ url: mediaUrl.trim(), type: mediaType }] : [],
-        lga: (lga || "").toUpperCase(),
+        lga: cleanLga,
         isPublic: true,
-        tags: [],
+        tags: [], // reserved for future: hashtag extraction, etc.
       });
 
       setMsg("Posted!");
@@ -134,18 +161,29 @@ export default function FeedComposer({
       setMediaUrl("");
       setMediaType("image");
 
-      try { onPosted && onPosted(); } catch (err) { console.warn(err); }
+      try {
+        onPosted && onPosted();
+      } catch (err) {
+        console.warn("onPosted callback error", err);
+      }
 
-      if (autoGoto) navigate(autoGoto);
+      if (autoGoto) {
+        navigate(autoGoto);
+      }
     } catch (e) {
       console.error("post error", e);
-      setMsg(e?.response?.data?.error || "Post failed.");
+      const errMsg =
+        e?.response?.data?.error ||
+        e?.response?.data?.message ||
+        "Post failed.";
+      setMsg(errMsg);
     } finally {
       setPosting(false);
     }
   }
 
   // ----- RENDER: two modes -----
+
   if (inline) {
     // compact inline composer (keeps old markup + behavior)
     return (
@@ -219,8 +257,9 @@ export default function FeedComposer({
               Write long post
             </button>
             <button
+              type="button"
               onClick={submit}
-              disabled={posting || uploading}
+              disabled={!canSubmit}
               className="rounded-lg bg-gold text-black px-4 py-1.5 text-sm font-semibold disabled:opacity-50"
             >
               {posting ? "Posting…" : "Post"}
@@ -237,6 +276,7 @@ export default function FeedComposer({
       {showHeader && (
         <div className="flex items-center justify-between mb-4">
           <button
+            type="button"
             onClick={close}
             className="px-3 py-1 rounded border border-zinc-600 hover:bg-zinc-900 text-xs"
           >
@@ -261,9 +301,17 @@ export default function FeedComposer({
       {mediaUrl && (
         <div className="mb-3">
           {mediaType === "video" ? (
-            <video src={mediaUrl} controls className="w-full h-40 object-cover rounded" />
+            <video
+              src={mediaUrl}
+              controls
+              className="w-full h-40 object-cover rounded"
+            />
           ) : (
-            <img src={mediaUrl} alt="preview" className="w-full h-40 object-cover rounded" />
+            <img
+              src={mediaUrl}
+              alt="preview"
+              className="w-full h-40 object-cover rounded"
+            />
           )}
         </div>
       )}
@@ -272,15 +320,19 @@ export default function FeedComposer({
         <div className="mt-2">
           <div className="text-xs">Uploading: {progress}%</div>
           <div className="w-full bg-zinc-800 rounded h-2 mt-1">
-            <div className="bg-gold h-2 rounded" style={{ width: `${progress}%` }} />
+            <div
+              className="bg-gold h-2 rounded"
+              style={{ width: `${progress}%` }}
+            />
           </div>
         </div>
       )}
 
       <div className="flex items-center gap-2 mt-3">
         <button
+          type="button"
           className="border border-zinc-600 rounded px-3 py-1.5 text-xs hover:bg-zinc-900"
-          onClick={() => fileInputRef.current.click()}
+          onClick={() => fileInputRef.current?.click()}
           disabled={uploading}
         >
           {uploading ? "Uploading…" : "Upload media"}
@@ -304,8 +356,9 @@ export default function FeedComposer({
         />
 
         <button
+          type="button"
           onClick={submit}
-          disabled={posting || uploading}
+          disabled={!canSubmit}
           className="ml-auto bg-gold text-black px-4 py-1.5 rounded text-sm font-semibold disabled:opacity-50"
         >
           {posting ? "Posting…" : "Post"}

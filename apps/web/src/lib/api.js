@@ -136,6 +136,7 @@ let socket = null;
 let socketConnected = false;
 let socketListeners = new Map(); // event -> Set(handlers)
 let reconnectDelayMs = 2000;
+let wiredEvents = new Set(); // events that already have socket.on attached
 
 // Internal: build auth header token getter (reuses latestToken)
 function _getAuthHeader() {
@@ -146,6 +147,28 @@ function _getAuthHeader() {
     } catch {}
   }
   return latestToken ? { Authorization: `Bearer ${latestToken}` } : {};
+}
+
+// Generic dispatcher → call all handlers for a given event
+function forwardEventToListeners(event, payload) {
+  const set = socketListeners.get(event);
+  if (!set || !set.size) return;
+  set.forEach((fn) => {
+    try {
+      fn(payload);
+    } catch (e) {
+      console.warn(`[socket] handler for ${event} failed`, e?.message || e);
+    }
+  });
+}
+
+// Ensure we have socket.on(event, ...) wired exactly once
+function ensureSocketEvent(event) {
+  if (!socket || wiredEvents.has(event)) return;
+  wiredEvents.add(event);
+  socket.on(event, (payload) => {
+    forwardEventToListeners(event, payload);
+  });
 }
 
 export function connectSocket({ onNotification, onBookingAccepted } = {}) {
@@ -162,15 +185,16 @@ export function connectSocket({ onNotification, onBookingAccepted } = {}) {
       socketListeners.set("booking:accepted", new Set());
     }
     socketListeners.get("booking:accepted").add(onBookingAccepted);
+    // make sure this event is wired on the socket
+    if (socket) ensureSocketEvent("booking:accepted");
   }
 
   // if already connected return socket
-  if (socketConnected) return socket;
+  if (socketConnected && socket) return socket;
 
   try {
     const url = ROOT; // server root
 
-    // opts: use a function for auth so the handshake always reads the latest token
     const opts = {
       autoConnect: false,
       transports: ["websocket", "polling"],
@@ -181,59 +205,25 @@ export function connectSocket({ onNotification, onBookingAccepted } = {}) {
 
     socket.on("connect", () => {
       socketConnected = true;
-      // server should derive user identity from the token in the handshake.
-      // If you need explicit room joins, emit here (optional).
+      // wire any already-registered events (except notification:received, see below)
+      for (const event of socketListeners.keys()) {
+        if (event === "notification:received") continue; // bridged below
+        ensureSocketEvent(event);
+      }
     });
 
     socket.on("disconnect", () => {
       socketConnected = false;
     });
 
-    // forward server notifications to registered handlers
+    // notifications have a special bridge: server may emit "notification:new"
+    // but UI listens on "notification:received"
     const notifHandler = (payload) => {
-      const set = socketListeners.get("notification:received");
-      if (set && set.size) {
-        set.forEach((fn) => {
-          try {
-            fn(payload);
-          } catch (e) {
-            console.warn("notif handler failed", e?.message || e);
-          }
-        });
-      }
+      forwardEventToListeners("notification:received", payload);
     };
 
-    // server currently emits "notification:new"; keep both for safety
     socket.on("notification:new", notifHandler);
-    socket.on("notification:received", notifHandler);
-
-    // forward profile:stats to registered handlers
-    socket.on("profile:stats", (payload) => {
-      const set = socketListeners.get("profile:stats");
-      if (set && set.size) {
-        set.forEach((fn) => {
-          try {
-            fn(payload);
-          } catch (e) {
-            // swallow handler errors
-          }
-        });
-      }
-    });
-
-    // forward booking:accepted to registered handlers
-    socket.on("booking:accepted", (payload) => {
-      const set = socketListeners.get("booking:accepted");
-      if (set && set.size) {
-        set.forEach((fn) => {
-          try {
-            fn(payload);
-          } catch (e) {
-            console.warn("[socket] booking:accepted handler failed", e?.message || e);
-          }
-        });
-      }
-    });
+    socket.on("notification:received", notifHandler); // just in case backend already uses this
 
     socket.connect();
   } catch (e) {
@@ -250,7 +240,7 @@ export function connectSocket({ onNotification, onBookingAccepted } = {}) {
 }
 
 /**
- * disconnectSocket() - removes all notification handlers and disconnects socket
+ * disconnectSocket() - removes all handlers and disconnects socket
  */
 export function disconnectSocket() {
   try {
@@ -261,6 +251,7 @@ export function disconnectSocket() {
       socketConnected = false;
     }
     socketListeners.clear();
+    wiredEvents.clear();
   } catch (e) {
     console.warn("[socket] disconnect failed:", e?.message || e);
   }
@@ -269,11 +260,19 @@ export function disconnectSocket() {
 // registerSocketHandler(event, fn) - returns unregister function
 export function registerSocketHandler(event, fn) {
   if (typeof event !== "string" || typeof fn !== "function") return () => {};
-  if (!socketListeners.has(event)) socketListeners.set(event, new Set());
+
+  if (!socketListeners.has(event)) {
+    socketListeners.set(event, new Set());
+  }
   socketListeners.get(event).add(fn);
 
   // ensure socket connected so server can send events
-  if (!socketConnected) connectSocket();
+  if (!socketConnected) {
+    connectSocket();
+  } else if (event !== "notification:received") {
+    // notifications are wired via special bridge above
+    ensureSocketEvent(event);
+  }
 
   return () => {
     try {
@@ -306,6 +305,7 @@ export function joinBookingRoom(bookingId, who = "user") {
     }
   });
 }
+
 
 
 

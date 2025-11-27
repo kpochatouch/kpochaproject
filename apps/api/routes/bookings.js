@@ -134,7 +134,7 @@ async function resolveClientName(uid, fallbackName = "") {
   }
 
   try {
-    const prof = await ClientProfile.findOne({ uid })
+    const prof = await ClientProfile.findOne({ ownerUid: uid })
       .select("fullName displayName firstName lastName")
       .lean();
     if (!prof) return "";

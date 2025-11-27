@@ -1,6 +1,7 @@
+//apps//web/src/hooks/useNotifications.js
 import { useEffect, useState, useRef } from "react";
 import { api } from "../lib/api";
-import { connectSocket, registerSocketHandler } from "../lib/socket";
+import { connectSocket, registerSocketHandler } from "../lib/api";
 
 export default function useNotifications() {
   const [items, setItems] = useState([]);

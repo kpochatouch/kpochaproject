@@ -8,30 +8,6 @@ import redisClient from "../redis.js";
 import { getIO } from "../sockets/index.js";
 import { ClientProfile } from "../models/Profile.js";
 
-
-// helper: invalidate cache for a username (if present) and emit profile stats
-async function invalidateProfileCacheAndEmit(ownerUid, counts = {}) {
-  try {
-    // resolve username for cache key
-    const prof = await ClientProfile.findOne({ uid: ownerUid }).select("username").lean().catch(()=>null);
-    const uname = prof?.username;
-    if (redisClient && uname) {
-      await redisClient.del(`public:profile:${String(uname).toLowerCase()}`);
-    }
-  } catch (e) {
-    console.warn("[public/profile] invalidate failed:", e?.message || e);
-  }
-
-  try {
-    const io = getIO();
-    io.to(`profile:${ownerUid}`).emit("profile:stats", { ownerUid, ...counts });
-  } catch (e) {
-    console.warn("[public/profile] socket emit failed:", e?.message || e);
-  }
-}
-
-
-
 const router = express.Router();
 
 /* --------------------------- Auth helpers --------------------------- */
@@ -60,8 +36,8 @@ async function tryAuth(req, _res, next) {
   next();
 }
 
-
 /* --------------------------- Helpers --------------------------- */
+
 async function resolveTargetUid({ targetUid, proId }) {
   if (targetUid) return String(targetUid);
   if (proId) {
@@ -69,6 +45,50 @@ async function resolveTargetUid({ targetUid, proId }) {
     return pro?.ownerUid || null;
   }
   return null;
+}
+
+// recompute real followers count from Follow collection
+async function recomputeFollowersCount(targetUid) {
+  try {
+    const followers = await Follow.countDocuments({ targetUid });
+    await Pro.updateOne(
+      { ownerUid: targetUid },
+      { $set: { "metrics.followers": followers } }
+    ).catch(() => {});
+    return followers;
+  } catch {
+    return 0;
+  }
+}
+
+// helper: invalidate cache for a username (if present) and emit profile stats
+async function invalidateProfileCacheAndEmit(ownerUid, counts = {}) {
+  try {
+    // resolve username for cache key (use ownerUid, not uid)
+    const prof = await ClientProfile.findOne({ uid: ownerUid })
+      .select("username")
+      .lean()
+      .catch(() => null);
+
+    const uname = prof?.username;
+    if (redisClient && uname) {
+      await redisClient.del(
+        `public:profile:${String(uname).toLowerCase()}`
+      );
+    }
+  } catch (e) {
+    console.warn("[public/profile] invalidate failed:", e?.message || e);
+  }
+
+  try {
+    const io = getIO();
+    io.to(`profile:${ownerUid}`).emit("profile:stats", {
+      ownerUid,
+      ...counts,
+    });
+  } catch (e) {
+    console.warn("[public/profile] socket emit failed:", e?.message || e);
+  }
 }
 
 /* ============================== ROUTES ============================== */
@@ -79,37 +99,19 @@ router.post("/follow", requireAuth, async (req, res) => {
     const followerUid = req.user.uid;
     const targetUid = await resolveTargetUid(req.body || {});
     if (!targetUid) return res.status(400).json({ error: "target_required" });
-    if (targetUid === followerUid) return res.status(400).json({ error: "cannot_follow_self" });
+    if (targetUid === followerUid)
+      return res.status(400).json({ error: "cannot_follow_self" });
 
-    // create follow if not exists
     await Follow.updateOne(
       { followerUid, targetUid },
       { $setOnInsert: { followerUid, targetUid } },
       { upsert: true }
     );
 
-    // increment pro.metrics.followers if pro exists
-    let newFollowersCount = null;
-    try {
-      const updatedPro = await Pro.findOneAndUpdate(
-        { ownerUid: targetUid },
-        { $inc: { "metrics.followers": 1 } },
-        { new: true }
-      ).lean().catch(()=>null);
-      newFollowersCount = updatedPro?.metrics?.followers ?? null;
-    } catch (e) {
-      newFollowersCount = null;
-    }
-
-    if (newFollowersCount === null) {
-      try {
-        newFollowersCount = await Follow.countDocuments({ targetUid });
-      } catch (e) {
-        newFollowersCount = 0;
-      }
-    }
-
-    await invalidateProfileCacheAndEmit(targetUid, { followersCount: newFollowersCount });
+    const newFollowersCount = await recomputeFollowersCount(targetUid);
+    await invalidateProfileCacheAndEmit(targetUid, {
+      followersCount: newFollowersCount,
+    });
 
     return res.json({ ok: true, following: true, followers: newFollowersCount });
   } catch (e) {
@@ -117,7 +119,6 @@ router.post("/follow", requireAuth, async (req, res) => {
     return res.status(500).json({ error: "follow_failed" });
   }
 });
-
 
 // DELETE /api/follow  body: { targetUid? , proId? }
 router.delete("/follow", requireAuth, async (req, res) => {
@@ -128,30 +129,10 @@ router.delete("/follow", requireAuth, async (req, res) => {
 
     await Follow.deleteOne({ followerUid, targetUid });
 
-    // decrement pro.metrics.followers (prevent negative)
-    let newFollowersCount = null;
-    try {
-      const updatedPro = await Pro.findOneAndUpdate(
-        { ownerUid: targetUid },
-        { $inc: { "metrics.followers": -1 } },
-        { new: true }
-      ).lean().catch(()=>null);
-
-      if (updatedPro && updatedPro.metrics && updatedPro.metrics.followers < 0) {
-        await Pro.updateOne({ ownerUid: targetUid }, { $set: { "metrics.followers": 0 } });
-        newFollowersCount = 0;
-      } else {
-        newFollowersCount = updatedPro?.metrics?.followers ?? null;
-      }
-    } catch (e) {
-      newFollowersCount = null;
-    }
-
-    if (newFollowersCount === null) {
-      newFollowersCount = await Follow.countDocuments({ targetUid });
-    }
-
-    await invalidateProfileCacheAndEmit(targetUid, { followersCount: newFollowersCount });
+    const newFollowersCount = await recomputeFollowersCount(targetUid);
+    await invalidateProfileCacheAndEmit(targetUid, {
+      followersCount: newFollowersCount,
+    });
 
     return res.json({ ok: true, following: false, followers: newFollowersCount });
   } catch (e) {
@@ -159,7 +140,6 @@ router.delete("/follow", requireAuth, async (req, res) => {
     return res.status(500).json({ error: "unfollow_failed" });
   }
 });
-
 
 // GET /api/follow/state?targetUid=...&proId=...
 router.get("/follow/state", requireAuth, async (req, res) => {
@@ -200,6 +180,7 @@ router.get("/following", requireAuth, async (req, res) => {
 });
 
 /* -------------------- Aliases matching current UI calls -------------------- */
+
 // GET /api/follow/:uid/status
 router.get("/follow/:uid/status", tryAuth, async (req, res) => {
   const me = req.user?.uid || null;
@@ -214,7 +195,8 @@ router.post("/follow/:uid", requireAuth, async (req, res) => {
   try {
     const me = req.user.uid;
     const targetUid = String(req.params.uid);
-    if (me === targetUid) return res.status(400).json({ error: "cannot_follow_self" });
+    if (me === targetUid)
+      return res.status(400).json({ error: "cannot_follow_self" });
 
     await Follow.updateOne(
       { followerUid: me, targetUid },
@@ -222,23 +204,10 @@ router.post("/follow/:uid", requireAuth, async (req, res) => {
       { upsert: true }
     );
 
-    let newFollowersCount = null;
-    try {
-      const updatedPro = await Pro.findOneAndUpdate(
-        { ownerUid: targetUid },
-        { $inc: { "metrics.followers": 1 } },
-        { new: true }
-      ).lean().catch(()=>null);
-      newFollowersCount = updatedPro?.metrics?.followers ?? null;
-    } catch (e) {
-      newFollowersCount = null;
-    }
-
-    if (newFollowersCount === null) {
-      newFollowersCount = await Follow.countDocuments({ targetUid });
-    }
-
-    await invalidateProfileCacheAndEmit(targetUid, { followersCount: newFollowersCount });
+    const newFollowersCount = await recomputeFollowersCount(targetUid);
+    await invalidateProfileCacheAndEmit(targetUid, {
+      followersCount: newFollowersCount,
+    });
 
     return res.json({ ok: true, following: true, followers: newFollowersCount });
   } catch (e) {
@@ -247,37 +216,18 @@ router.post("/follow/:uid", requireAuth, async (req, res) => {
   }
 });
 
-
 // DELETE /api/follow/:uid
 router.delete("/follow/:uid", requireAuth, async (req, res) => {
   try {
     const me = req.user.uid;
     const targetUid = String(req.params.uid);
+
     await Follow.deleteOne({ followerUid: me, targetUid });
 
-    let newFollowersCount = null;
-    try {
-      const updatedPro = await Pro.findOneAndUpdate(
-        { ownerUid: targetUid },
-        { $inc: { "metrics.followers": -1 } },
-        { new: true }
-      ).lean().catch(()=>null);
-
-      if (updatedPro && updatedPro.metrics && updatedPro.metrics.followers < 0) {
-        await Pro.updateOne({ ownerUid: targetUid }, { $set: { "metrics.followers": 0 } });
-        newFollowersCount = 0;
-      } else {
-        newFollowersCount = updatedPro?.metrics?.followers ?? null;
-      }
-    } catch (e) {
-      newFollowersCount = null;
-    }
-
-    if (newFollowersCount === null) {
-      newFollowersCount = await Follow.countDocuments({ targetUid });
-    }
-
-    await invalidateProfileCacheAndEmit(targetUid, { followersCount: newFollowersCount });
+    const newFollowersCount = await recomputeFollowersCount(targetUid);
+    await invalidateProfileCacheAndEmit(targetUid, {
+      followersCount: newFollowersCount,
+    });
 
     return res.json({ ok: true, following: false, followers: newFollowersCount });
   } catch (e) {
@@ -286,13 +236,13 @@ router.delete("/follow/:uid", requireAuth, async (req, res) => {
   }
 });
 
-
 // GET /api/pros/:proId/follow/status
 router.get("/pros/:proId/follow/status", tryAuth, async (req, res) => {
   const me = req.user?.uid || null;
   const pro = await Pro.findById(req.params.proId).lean();
   const targetUid = pro?.ownerUid || null;
-  if (!me || !targetUid || me === targetUid) return res.json({ following: false });
+  if (!me || !targetUid || me === targetUid)
+    return res.json({ following: false });
   const exists = await Follow.exists({ followerUid: me, targetUid });
   return res.json({ following: !!exists });
 });
@@ -303,7 +253,8 @@ router.post("/pros/:proId/follow", requireAuth, async (req, res) => {
     const pro = await Pro.findById(req.params.proId).lean();
     if (!pro?.ownerUid) return res.status(404).json({ error: "pro_not_found" });
     const targetUid = pro.ownerUid;
-    if (me === targetUid) return res.status(400).json({ error: "cannot_follow_self" });
+    if (me === targetUid)
+      return res.status(400).json({ error: "cannot_follow_self" });
 
     await Follow.updateOne(
       { followerUid: me, targetUid },
@@ -311,15 +262,10 @@ router.post("/pros/:proId/follow", requireAuth, async (req, res) => {
       { upsert: true }
     );
 
-    const updatedPro = await Pro.findOneAndUpdate(
-      { ownerUid: targetUid },
-      { $inc: { "metrics.followers": 1 } },
-      { new: true }
-    ).lean().catch(()=>null);
-
-    const newFollowersCount = updatedPro?.metrics?.followers ?? (await Follow.countDocuments({ targetUid }));
-
-    await invalidateProfileCacheAndEmit(targetUid, { followersCount: newFollowersCount });
+    const newFollowersCount = await recomputeFollowersCount(targetUid);
+    await invalidateProfileCacheAndEmit(targetUid, {
+      followersCount: newFollowersCount,
+    });
 
     return res.json({ ok: true, following: true, followers: newFollowersCount });
   } catch (e) {
@@ -327,7 +273,6 @@ router.post("/pros/:proId/follow", requireAuth, async (req, res) => {
     return res.status(500).json({ error: "follow_failed" });
   }
 });
-
 
 router.delete("/pros/:proId/follow", requireAuth, async (req, res) => {
   try {
@@ -338,22 +283,10 @@ router.delete("/pros/:proId/follow", requireAuth, async (req, res) => {
 
     await Follow.deleteOne({ followerUid: me, targetUid });
 
-    const updatedPro = await Pro.findOneAndUpdate(
-      { ownerUid: targetUid },
-      { $inc: { "metrics.followers": -1 } },
-      { new: true }
-    ).lean().catch(()=>null);
-
-    let newFollowersCount = updatedPro?.metrics?.followers ?? null;
-    if (newFollowersCount !== null && newFollowersCount < 0) {
-      await Pro.updateOne({ ownerUid: targetUid }, { $set: { "metrics.followers": 0 } });
-      newFollowersCount = 0;
-    }
-    if (newFollowersCount === null) {
-      newFollowersCount = await Follow.countDocuments({ targetUid });
-    }
-
-    await invalidateProfileCacheAndEmit(targetUid, { followersCount: newFollowersCount });
+    const newFollowersCount = await recomputeFollowersCount(targetUid);
+    await invalidateProfileCacheAndEmit(targetUid, {
+      followersCount: newFollowersCount,
+    });
 
     return res.json({ ok: true, following: false, followers: newFollowersCount });
   } catch (e) {
@@ -361,7 +294,5 @@ router.delete("/pros/:proId/follow", requireAuth, async (req, res) => {
     return res.status(500).json({ error: "unfollow_failed" });
   }
 });
-
-
 
 export default router;

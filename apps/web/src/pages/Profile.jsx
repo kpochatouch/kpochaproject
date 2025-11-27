@@ -1,5 +1,6 @@
 // apps/web/src/pages/Profile.jsx
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 
 export default function Profile() {
@@ -8,26 +9,27 @@ export default function Profile() {
 
   // basic user
   const [me, setMe] = useState(null);
-  // client profile (old collection)
+  // unified client profile (/api/profile/me)
   const [clientProfile, setClientProfile] = useState(null);
   // private pro (from /api/pros/me) → owner-only, includes contact
   const [proPrivate, setProPrivate] = useState(null);
-  // public pro (from /api/barbers/:id) → what cards show
+  // public pro (from /api/barbers/:id) → what cards/public browse see
   const [proPublic, setProPublic] = useState(null);
 
   useEffect(() => {
     let mounted = true;
+
     (async () => {
       try {
         setLoading(true);
         setError("");
 
-        // 1) /api/me → tells us if user is pro
+        // 1) /api/me → base identity + role flags
         const { data: meData } = await api.get("/api/me");
         if (!mounted) return;
         setMe(meData);
 
-        // 2) client profile (may fail if route missing)
+        // 2) unified client profile (can fail silently)
         try {
           const { data: profData } = await api.get("/api/profile/me");
           if (mounted) setClientProfile(profData || null);
@@ -35,9 +37,9 @@ export default function Profile() {
           if (mounted) setClientProfile(null);
         }
 
-        // 3) if user is pro, get their private pro
+        // 3) pro data (if user is pro)
         if (meData?.pro?.id || meData?.isPro) {
-          // private
+          // private pro document
           try {
             const { data: proData } = await api.get("/api/pros/me");
             if (mounted) setProPrivate(proData || null);
@@ -45,7 +47,7 @@ export default function Profile() {
             if (mounted) setProPrivate(null);
           }
 
-          // public (card shape)
+          // public barber card shape
           const proId = meData?.pro?.id;
           if (proId) {
             try {
@@ -62,6 +64,7 @@ export default function Profile() {
         if (mounted) setLoading(false);
       }
     })();
+
     return () => {
       mounted = false;
     };
@@ -75,19 +78,13 @@ export default function Profile() {
 
   // unified display name
   const displayName =
-    me?.displayName ||
-    clientProfile?.fullName ||
-    me?.email ||
-    "Your Account";
+    me?.displayName || clientProfile?.fullName || me?.email || "Your Account";
 
   // unified avatar
   const avatarUrl =
-    clientProfile?.photoUrl ||
-    me?.photoUrl ||
-    me?.identity?.photoUrl ||
-    "";
+    clientProfile?.photoUrl || me?.photoUrl || me?.identity?.photoUrl || "";
 
-  // unified phone (user's own phone — this page is private to the owner)
+  // unified phone (private to owner)
   const phone =
     clientProfile?.phone ||
     clientProfile?.identity?.phone ||
@@ -102,10 +99,25 @@ export default function Profile() {
     "";
 
   const lga =
-  clientProfile?.lga ||
-  clientProfile?.identity?.lga ||
-  me?.lga ||
-  "";
+    clientProfile?.lga ||
+    clientProfile?.identity?.lga ||
+    clientProfile?.identity?.city ||
+    me?.lga ||
+    me?.identity?.city ||
+    "";
+
+  // optional username (for future link sharing) – this is SAFE to show
+  const username = clientProfile?.username || me?.username || "";
+
+    const kyc = clientProfile?.kyc || {};
+  const hasKyc =
+    !!kyc.idType || !!kyc.idUrl || !!kyc.selfieWithIdUrl;
+
+  const idVerifiedLabel = !clientProfile
+    ? "—"
+    : hasKyc
+    ? "Verified"
+    : "Not verified";
 
 
   const isPro = !!(me?.isPro || me?.pro);
@@ -124,20 +136,20 @@ export default function Profile() {
           </div>
         </div>
         <div className="flex gap-2">
-          <a
-            href="/settings"
+          <Link
+            to="/settings"
             className="text-sm px-3 py-1.5 rounded-lg border border-zinc-700 hover:bg-zinc-900"
             title="Open Settings"
           >
             Edit Profile →
-          </a>
-          <a
-            href="/wallet"
+          </Link>
+          <Link
+            to="/wallet"
             className="text-sm px-3 py-1.5 rounded-lg border border-zinc-700 hover:bg-zinc-900"
             title="Open Wallet"
           >
             Wallet →
-          </a>
+          </Link>
         </div>
       </div>
 
@@ -147,7 +159,11 @@ export default function Profile() {
           {error}
         </div>
       )}
-      {loading && <div className="text-zinc-400">Loading…</div>}
+
+      {loading && !error && (
+        <div className="text-zinc-400 mb-4">Loading…</div>
+      )}
+
       {!loading && !error && !me && (
         <div className="rounded-lg border border-zinc-800 px-4 py-6 text-zinc-400">
           No profile data found.
@@ -163,7 +179,11 @@ export default function Profile() {
               <ReadOnly label="Phone" value={phone || "—"} />
               <ReadOnly label="Preferred State" value={state || "—"} />
               <ReadOnly label="Preferred LGA / City" value={lga || "—"} />
-              <ReadOnly label="User ID" value={me.uid} mono />
+              {/* Username is OK to show; internal IDs stay hidden */}
+              <ReadOnly
+                label="Username"
+                value={username || "Not set"}
+              />
             </div>
 
             {/* Optional deactivation */}
@@ -180,12 +200,12 @@ export default function Profile() {
                   }
                 />
                 <div className="flex items-end">
-                  <a
-                    href="/deactivate"
+                  <Link
+                    to="/deactivate"
                     className="text-sm px-3 py-2 rounded-lg border border-zinc-700 hover:bg-zinc-900"
                   >
                     Request Deactivation
-                  </a>
+                  </Link>
                 </div>
               </div>
             )}
@@ -202,36 +222,22 @@ export default function Profile() {
                 value={clientProfile?.address || "—"}
               />
 
-              <ReadOnly
-                label="Means of ID"
-                value={
-                  clientProfile?.identity?.idType
-                    ? `${clientProfile.identity.idType}${
-                        clientProfile.identity.idNumber
-                          ? ` (${maskId(clientProfile.identity.idNumber)})`
-                          : ""
-                      }`
-                    : "—"
-                }
-              />
+                <ReadOnly
+                  label="Means of ID"
+                  value={kyc?.idType || "—"}
+                />
 
-              <ReadOnly
-                label="ID Verified"
-                value={
-                  clientProfile
-                    ? clientProfile.idVerified
-                      ? "Yes"
-                      : "Not verified"
-                    : "—"
-                }
-              />
+                <ReadOnly
+                  label="ID Verified"
+                  value={idVerifiedLabel}
+                />
             </div>
           </Section>
 
           {/* Pro sections */}
           <Section title="Professional Status">
             {isPro ? (
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between flex-wrap gap-3">
                 <div className="text-sm text-zinc-300 flex flex-wrap gap-2">
                   <span>✅ You are an approved professional.</span>
                   {me?.pro?.status && (
@@ -240,29 +246,29 @@ export default function Profile() {
                     </span>
                   )}
                 </div>
-                <a
-                  href="/pro"
+                <Link
+                  to="/pro-dashboard"
                   className="rounded-lg bg-gold text-black px-3 py-1.5 text-sm font-semibold hover:opacity-90"
                 >
                   Open Pro Dashboard
-                </a>
+                </Link>
               </div>
             ) : (
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between flex-wrap gap-3">
                 <div className="text-sm text-zinc-300">
                   You’re not a professional yet.
                 </div>
-                <a
-                  href="/become"
+                <Link
+                  to="/become"
                   className="rounded-lg border border-gold px-3 py-1.5 text-sm hover:bg-gold hover:text-black"
                 >
                   Become a Pro
-                </a>
+                </Link>
               </div>
             )}
           </Section>
 
-          {/* What the public sees about your pro */}
+          {/* What the public sees about your pro profile */}
           {isPro && (
             <Section
               title="Your Pro Profile (Public View)"
@@ -320,8 +326,6 @@ export default function Profile() {
                         </div>
                       </div>
                     )}
-
-                  {/* gallery/badges omitted here for brevity, but they can be listed */}
                 </div>
               ) : (
                 <p className="text-sm text-zinc-500">
@@ -331,11 +335,11 @@ export default function Profile() {
             </Section>
           )}
 
-          {/* Private pro details – only owner/admin should see */}
+          {/* Private pro details – only owner/admin should see (no raw IDs shown) */}
           {isPro && (
             <Section
               title="Pro Contact (Private)"
-              hint="Only you, admin, or booking counterpart should use these. We don’t show these on public cards."
+              hint="Only you, admin, or a booking counterpart should use these. We don’t show these on public cards."
             >
               {proPrivate ? (
                 <div className="grid sm:grid-cols-2 gap-4">
@@ -363,21 +367,12 @@ export default function Profile() {
                     label="Private Alt Phone"
                     value={proPrivate?.contactPrivate?.altPhone || "—"}
                   />
-                  <ReadOnly
-                    label="Pro ID"
-                    value={proPrivate?._id || me?.pro?.id || "—"}
-                    mono
-                  />
-                  <ReadOnly
-                    label="Owner UID"
-                    value={proPrivate?.ownerUid || "—"}
-                    mono
-                  />
+                  {/* Pro ID / Owner UID intentionally NOT rendered */}
                 </div>
               ) : (
                 <p className="text-sm text-zinc-500">
                   You are a pro, but we couldn’t load your private contact
-                  details.
+                  details yet.
                 </p>
               )}
             </Section>
@@ -392,19 +387,19 @@ export default function Profile() {
               />
               <ReadOnly label="Admin" value={me.isAdmin ? "Yes" : "No"} />
             </div>
-            <div className="flex gap-2 mt-4">
-              <a
-                href="/wallet"
+            <div className="flex gap-2 mt-4 flex-wrap">
+              <Link
+                to="/wallet"
                 className="rounded-lg bg-zinc-800 hover:bg-zinc-700 px-3 py-2 text-sm"
               >
                 Manage Wallet / PIN
-              </a>
-              <a
-                href="/settings"
+              </Link>
+              <Link
+                to="/settings"
                 className="rounded-lg border border-zinc-700 hover:bg-zinc-900 px-3 py-2 text-sm"
               >
                 Account Settings
-              </a>
+              </Link>
             </div>
           </Section>
         </div>

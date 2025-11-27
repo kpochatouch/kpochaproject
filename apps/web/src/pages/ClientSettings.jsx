@@ -1,7 +1,6 @@
 // apps/web/src/pages/ClientSettings.jsx
 import { useEffect, useMemo, useState } from "react";
-import { api } from "../lib/api";
-import { ensureClientProfile } from "../lib/api";
+import { api, ensureClientProfile } from "../lib/api";
 
 /* ---------- Cloudinary config ---------- */
 const CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || "";
@@ -291,10 +290,10 @@ export default function ClientSettings() {
       if (sessionId && typeof window !== "undefined") {
         window.dispatchEvent(
           new CustomEvent("aws-liveness:start", {
-            detail: {
-              sessionId,
-              back: "/client/settings", // come back here
-            },
+                      detail: {
+            sessionId,
+            back: "/settings", // come back here (SettingsSmart will route to ClientSettings)
+          },
           })
         );
         setShowLivenessNotice(true);
@@ -540,11 +539,6 @@ if (livenessProof) {
                   value={form.address}
                   onChange={(e) => onChangeField("address", e.target.value)}
                 />
-              </Field>
-              <Field label="User ID">
-                <div className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 font-mono break-all">
-                  {me?.uid || "—"}
-                </div>
               </Field>
             </div>
           </section>

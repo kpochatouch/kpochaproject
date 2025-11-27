@@ -16,6 +16,12 @@ import ServicePicker from "../components/ServicePicker.jsx";
 const CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || "";
 const UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET || "";
 
+/* ---------- username cooldown (3 months) ---------- */
+// Change USERNAME_COOLDOWN_DAYS to 180 if you want 6 months instead
+const USERNAME_COOLDOWN_DAYS = 90;
+const USERNAME_COOLDOWN_MS =
+  USERNAME_COOLDOWN_DAYS * 24 * 60 * 60 * 1000;
+
 /* ---------- helpers ---------- */
 const digitsOnly = (s = "") => String(s).replace(/\D/g, "");
 function formatMoneyForInput(s = "") {
@@ -86,6 +92,8 @@ export default function SettingsPage() {
   const [phone, setPhone] = useState("");
   const [avatarUrl, setAvatarUrl] = useState("");
   const [clientBio, setClientBio] = useState("");
+  const [username, setUsername] = useState("");
+  const [usernameLastChangedAt, setUsernameLastChangedAt] = useState(null);
 
   // location
   const [stateVal, setStateVal] = useState("");
@@ -334,6 +342,37 @@ export default function SettingsPage() {
             ""
         );
 
+                // username + last change time
+        const serverUsername =
+          clientData?.username ||
+          clientData?.identity?.username ||
+          meData?.username ||
+          "";
+
+        let lastUsernameChange =
+          clientData?.usernameLastChangedAt ||
+          clientData?.usernameChangedAt ||
+          null;
+
+        // fallback to localStorage if backend doesn't send it yet
+        if (!lastUsernameChange) {
+          try {
+            const stored = localStorage.getItem("kpocha:usernameLastChangedAt");
+            if (stored) {
+              const ts = Number(stored);
+              if (Number.isFinite(ts)) {
+                lastUsernameChange = new Date(ts).toISOString();
+              }
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+
+        setUsername(serverUsername || "");
+        setUsernameLastChangedAt(lastUsernameChange || null);
+
+
         if (proData) {
           setProfileVisible(
             Boolean(
@@ -573,6 +612,33 @@ export default function SettingsPage() {
     [hasPro, bankName, accountName, accountNumber, bvn]
   );
 
+  const profileUrl = useMemo(() => {
+    if (!username) return "";
+    const path = `/profile/${username}`;
+    if (typeof window === "undefined") return path;
+    return `${window.location.origin}${path}`;
+  }, [username]);
+
+  const { canEditUsername, nextUsernameChangeAt } = useMemo(() => {
+    if (!usernameLastChangedAt) {
+      return { canEditUsername: true, nextUsernameChangeAt: null };
+    }
+    const lastTs = new Date(usernameLastChangedAt).getTime();
+    if (!Number.isFinite(lastTs)) {
+      return { canEditUsername: true, nextUsernameChangeAt: null };
+    }
+    const now = Date.now();
+    if (now - lastTs >= USERNAME_COOLDOWN_MS) {
+      return { canEditUsername: true, nextUsernameChangeAt: null };
+    }
+    return {
+      canEditUsername: false,
+      nextUsernameChangeAt: new Date(lastTs + USERNAME_COOLDOWN_MS),
+    };
+  }, [usernameLastChangedAt]);
+
+
+
   /* ---------- liveness launcher ---------- */
   async function startAwsLivenessFlow() {
     try {
@@ -594,11 +660,30 @@ export default function SettingsPage() {
   /* ---------- saves ---------- */
 
   // general
-  const saveProfile = useCallback(async () => {
+    const saveProfile = useCallback(async () => {
     if (!canSaveProfile || savingProfile) return;
     clearMsg();
     setSavingProfile(true);
     try {
+      const trimmedUsername = (username || "").trim();
+
+      const prevUsername =
+        client?.username ||
+        client?.identity?.username ||
+        me?.username ||
+        "";
+
+      const usernameChanged =
+        trimmedUsername && trimmedUsername !== prevUsername;
+
+      if (usernameChanged && !canEditUsername) {
+        setErr(
+          "You can only change your username once every 3 months. (Adjustable in code to 6 months.)"
+        );
+        setSavingProfile(false);
+        return;
+      }
+
       const payload = {
         displayName,
         fullName: displayName,
@@ -607,8 +692,13 @@ export default function SettingsPage() {
         lga: lga.toUpperCase(),
         avatarUrl,
         photoUrl: avatarUrl,
-        bio: clientBio, 
+        bio: clientBio,
       };
+
+      if (trimmedUsername) {
+        payload.username = trimmedUsername;
+      }
+
 
       // attach one-shot liveness remember flag if present
 const livenessProof = takeAwsLivenessProof();
@@ -633,9 +723,10 @@ if (livenessProof) {
 }
 
 
-      setMe((prev) => ({
+                  setMe((prev) => ({
         ...(prev || {}),
         displayName,
+        username: trimmedUsername || prev?.username || "",
         identity: {
           ...(prev?.identity || {}),
           phone,
@@ -645,7 +736,20 @@ if (livenessProof) {
         },
       }));
 
+
+      if (usernameChanged) {
+        const ts = Date.now();
+        const iso = new Date(ts).toISOString();
+        setUsernameLastChangedAt(iso);
+        try {
+          localStorage.setItem("kpocha:usernameLastChangedAt", String(ts));
+        } catch {
+          /* ignore */
+        }
+      }
+
       flashOK("Profile saved.");
+
     } catch (e) {
       if (
         e?.response?.status === 403 &&
@@ -667,7 +771,7 @@ if (livenessProof) {
     } finally {
       setSavingProfile(false);
     }
-  }, [
+    }, [
     canSaveProfile,
     savingProfile,
     displayName,
@@ -677,9 +781,11 @@ if (livenessProof) {
     avatarUrl,
     clientBio,
     client,
-    appDoc,
     me,
+    username,
+    canEditUsername,
   ]);
+
 
   // pro details
   const saveProDetails = useCallback(async () => {
@@ -950,7 +1056,7 @@ if (livenessProof) {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <Input
                   label="Display Name"
                   value={displayName}
@@ -966,8 +1072,39 @@ if (livenessProof) {
               </div>
 
               <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <Input
+                  label="Username (profile link)"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  disabled={!canEditUsername || savingProfile}
+                  placeholder="e.g. kpochaqueen"
+                />
+                <ReadOnly
+                  label="Username change limit"
+                  value={
+                    canEditUsername
+                      ? "You can change your username now."
+                      : nextUsernameChangeAt
+                      ? `Next change: ${nextUsernameChangeAt.toLocaleDateString()}`
+                      : "Temporarily locked."
+                  }
+                />
+              </div>
+
+                          {username && profileUrl && (
+              <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <ReadOnly
+                  label="Public profile link"
+                  value={profileUrl}
+                />
+              </div>
+            )}
+
+
+              <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <ReadOnly label="Email" value={me?.email || ""} />
               </div>
+
 
               <div className="mt-3">
                 <Label>Short bio / about you</Label>

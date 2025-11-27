@@ -11,7 +11,7 @@ import { api } from "./lib/api";
 
 import Navbar from "./components/Navbar.jsx";
 import Footer from "./components/Footer.jsx";
-import ClickOutsideLayer from "./components/ClickOutsideLayer.jsx"; // add this
+import ClickOutsideLayer from "./components/ClickOutsideLayer.jsx";
 import RequireAuth from "./components/RequireAuth.jsx";
 import RouteLoader from "./components/RouteLoader.jsx";
 import { useMe } from "./context/MeContext.jsx";
@@ -46,8 +46,6 @@ const RiskLogs = lazy(() => import("./pages/RiskLogs.jsx"));
 const Chat = lazy(() => import("./pages/Chat.jsx"));
 const Compose = lazy(() => import("./pages/Compose.jsx"));
 const PostDetail = lazy(() => import("./pages/PostDetail.jsx"));
-
-// public profile
 const PublicProfile = lazy(() => import("./pages/PublicProfile.jsx"));
 
 /* ---------- Chatbase hook ---------- */
@@ -92,7 +90,11 @@ function RequireRole({ role, children }) {
     role === "admin" ? isAdmin : role === "pro" ? isPro : true;
 
   if (loading) return <RouteLoader />;
-  return allowed ? children : <Navigate to="/" replace state={{ from: loc }} />;
+  return allowed ? (
+    children
+  ) : (
+    <Navigate to="/" replace state={{ from: loc }} />
+  );
 }
 
 function WalletSmart() {
@@ -111,7 +113,7 @@ function SettingsSmart() {
  * FindProSmart: used when user taps "Find a Pro"
  * - If not logged in → send to /login
  * - If logged in but no client profile → /client/register
- * - Else → /browse (Discover page)
+ * - Else → /browse?tab=pros (Discover page, Pros tab)
  */
 function FindProSmart() {
   const navigate = useNavigate();
@@ -130,10 +132,12 @@ function FindProSmart() {
       try {
         const { data } = await api.get("/api/profile/client/me");
         if (!alive) return;
+
         if (!data) {
           navigate("/client/register", { replace: true });
         } else {
-          navigate("/browse", { replace: true });
+          // ✅ Go to Discover with Pros tab selected
+          navigate("/browse?tab=pros", { replace: true });
         }
       } catch {
         navigate("/client/register", { replace: true });
@@ -166,7 +170,9 @@ export default function App() {
       if (sessionId) {
         try {
           localStorage.setItem("kpocha:awsLivenessSession", sessionId);
-        } catch {}
+        } catch {
+          // ignore
+        }
       }
 
       navigate(`/aws-liveness?back=${encodeURIComponent(back)}`);
@@ -188,10 +194,11 @@ export default function App() {
   const hideChrome = location.pathname.startsWith("/aws-liveness");
 
   return (
-  <div className="min-h-screen flex flex-col bg-black text-white">
-      <ClickOutsideLayer /> {/* add this */}
-      {!hideChrome && <Navbar />}
+    <div className="min-h-screen flex flex-col bg-black text-white">
+      {/* global click → custom event used by menus/overlays */}
+      <ClickOutsideLayer />
 
+      {!hideChrome && <Navbar />}
 
       <main className={hideChrome ? "flex-1 bg-black" : "flex-1"}>
         <Suspense fallback={<RouteLoader full />}>
@@ -221,7 +228,7 @@ export default function App() {
               }
             />
 
-            {/* 🔐 Booking page must be authenticated */}
+            {/* Booking page must be authenticated */}
             <Route
               path="/book/:barberId"
               element={
@@ -232,72 +239,78 @@ export default function App() {
             />
 
             {/* Auth-required core pages */}
-<Route
-  path="/compose"
-  element={
-    <RequireAuth>
-      <Compose />
-    </RequireAuth>
-  }
-/>
-<Route
-  path="/bookings/:id"
-  element={
-    <RequireAuth>
-      <BookingDetails />
-    </RequireAuth>
-  }
-/>
-<Route
-  path="/bookings/:bookingId/chat"
-  element={
-    <RequireAuth>
-      <BookingChat />
-    </RequireAuth>
-  }
-/>
-{/* Review Page */}
-<Route
-  path="/review/:proId"
-  element={
-    <RequireAuth>
-      <LeaveReview />
-    </RequireAuth>
-  }
-/>
-<Route
-  path="/review-client/:clientUid"
-  element={
-    <RequireAuth>
-      <LeaveReview />
-    </RequireAuth>
-  }
-/>
+            <Route
+              path="/compose"
+              element={
+                <RequireAuth>
+                  <Compose />
+                </RequireAuth>
+              }
+            />
 
-<Route
-  path="/profile"
-  element={
+            <Route
+              path="/bookings/:id"
+              element={
+                <RequireAuth>
+                  <BookingDetails />
+                </RequireAuth>
+              }
+            />
+
+            <Route
+              path="/bookings/:bookingId/chat"
+              element={
+                <RequireAuth>
+                  <BookingChat />
+                </RequireAuth>
+              }
+            />
+
+            {/* Review Pages */}
+            <Route
+              path="/review/:proId"
+              element={
+                <RequireAuth>
+                  <LeaveReview />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/review-client/:clientUid"
+              element={
+                <RequireAuth>
+                  <LeaveReview />
+                </RequireAuth>
+              }
+            />
+
+            <Route
+              path="/profile"
+              element={
                 <RequireAuth>
                   <Profile />
                 </RequireAuth>
               }
             />
-  <Route
-    path="/wallet"
-    element={
-      <RequireAuth>
-        <WalletSmart />
-      </RequireAuth>
-    }
-  />
-  <Route
-    path="/my-bookings"
-    element={
-      <RequireAuth>
-        <ClientDashboard />
-      </RequireAuth>
-    }
-  />
+
+            <Route
+              path="/wallet"
+              element={
+                <RequireAuth>
+                  <WalletSmart />
+                </RequireAuth>
+              }
+            />
+
+            <Route
+              path="/my-bookings"
+              element={
+                <RequireAuth>
+                  <ClientDashboard />
+                </RequireAuth>
+              }
+            />
+
             <Route
               path="/settings"
               element={
@@ -306,6 +319,7 @@ export default function App() {
                 </RequireAuth>
               }
             />
+
             <Route
               path="/become"
               element={
@@ -314,6 +328,7 @@ export default function App() {
                 </RequireAuth>
               }
             />
+
             <Route
               path="/aws-liveness"
               element={
@@ -322,6 +337,7 @@ export default function App() {
                 </RequireAuth>
               }
             />
+
             <Route
               path="/client/register"
               element={
@@ -330,10 +346,13 @@ export default function App() {
                 </RequireAuth>
               }
             />
+
+            {/* legacy /register → client register */}
             <Route
               path="/register"
               element={<Navigate to="/client/register" replace />}
             />
+
             <Route
               path="/deactivate"
               element={
@@ -342,6 +361,7 @@ export default function App() {
                 </RequireAuth>
               }
             />
+
             <Route
               path="/chat"
               element={
@@ -360,6 +380,7 @@ export default function App() {
                 </RequireRole>
               }
             />
+
             <Route
               path="/admin"
               element={
@@ -368,6 +389,7 @@ export default function App() {
                 </RequireRole>
               }
             />
+
             <Route
               path="/admin/decline/:id"
               element={
@@ -376,6 +398,7 @@ export default function App() {
                 </RequireRole>
               }
             />
+
             <Route
               path="/risk-logs"
               element={

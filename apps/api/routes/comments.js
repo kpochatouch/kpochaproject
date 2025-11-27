@@ -7,6 +7,7 @@ import PostStats from "../models/PostStats.js";
 import Post from "../models/Post.js"; // 👈 make sure this is here
 import { ClientProfile } from "../models/Profile.js";
 import { getIO } from "../sockets/index.js";
+import { scoreFrom } from "../services/postScoring.js";
 
 const router = express.Router();
 
@@ -25,15 +26,6 @@ async function requireAuth(req, res, next) {
   }
 }
 
-// same scoring as posts.js
-function scoreFrom(stats = {}) {
-  const v = Number(stats.viewsCount || 0);
-  const l = Number(stats.likesCount || 0);
-  const c = Number(stats.commentsCount || 0);
-  const sh = Number(stats.sharesCount || 0);
-  const sv = Number(stats.savesCount || 0);
-  return l * 3 + c * 4 + sh * 5 + sv * 2 + v * 0.2;
-}
 
 // normalize a comment for client
 function shapeComment(c, profile = null) {

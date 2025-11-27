@@ -4,7 +4,6 @@ import { useParams, Link, useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import { useMe } from "../context/MeContext.jsx";
 
-// reusable action buttons
 import LikeButton from "../components/LikeButton.jsx";
 import ShareButton from "../components/ShareButton.jsx";
 import CommentToggle from "../components/CommentToggle.jsx";
@@ -23,6 +22,13 @@ function timeAgo(ts) {
   if (hrs < 24) return `${hrs}h`;
   const days = Math.floor(hrs / 24);
   return `${days}d`;
+}
+
+function formatTime(sec = 0) {
+  if (!isFinite(sec)) return "0:00";
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}:${s < 10 ? "0" : ""}${s}`;
 }
 
 export default function PostDetail() {
@@ -54,14 +60,18 @@ export default function PostDetail() {
 
   // media bits
   const videoRef = useRef(null);
-  const menuRef = useRef(null); // 👈 add this
+  const menuRef = useRef(null);
   const [muted, setMuted] = useState(true);
   const [userHasInteracted, setUserHasInteracted] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [seeking, setSeeking] = useState(false);
-  const playTriggeredByObserverRef = useRef(false);
-  const hasSentViewRef = useRef(false);
+
+  const lastTimeUpdateRef = useRef(0);       // UI throttle
+  const playTriggeredByObserverRef = useRef(false); // keep API same as FeedCard
+  const hasSentInitialViewRef = useRef(false);      // for non-video single view
+  const watchAccumRef = useRef(0);           // seconds watched since last tick
+  const lastWatchTsRef = useRef(0);          // timestamp for watch-time
 
   // ---------- fetch post ----------
   useEffect(() => {
@@ -80,10 +90,13 @@ export default function PostDetail() {
         if (on) setLoading(false);
       }
     })();
-    return () => { on = false; };
+    return () => {
+      on = false;
+    };
   }, [id]);
 
-    useEffect(() => {
+  // global menu close via custom "global-click" event
+  useEffect(() => {
     function onGlobalClick(e) {
       if (!menuOpen) return;
       if (!menuRef.current) return;
@@ -98,7 +111,6 @@ export default function PostDetail() {
     return () => window.removeEventListener("global-click", onGlobalClick);
   }, [menuOpen]);
 
-
   // ---------- initial stats ----------
   useEffect(() => {
     if (!id) return;
@@ -110,19 +122,42 @@ export default function PostDetail() {
         const srv = res?.data || {};
         setStats((prev) => ({
           ...prev,
-          viewsCount: Math.max(prev.viewsCount, srv.viewsCount ?? 0),
-          likesCount: Math.max(prev.likesCount, srv.likesCount ?? 0),
-          commentsCount: Math.max(prev.commentsCount, srv.commentsCount ?? 0),
-          sharesCount: Math.max(prev.sharesCount, srv.sharesCount ?? 0),
-          savesCount: Math.max(prev.savesCount, srv.savesCount ?? 0),
+          viewsCount:
+            typeof srv.viewsCount === "number"
+              ? srv.viewsCount
+              : prev.viewsCount,
+          likesCount:
+            typeof srv.likesCount === "number"
+              ? srv.likesCount
+              : prev.likesCount,
+          commentsCount:
+            typeof srv.commentsCount === "number"
+              ? srv.commentsCount
+              : prev.commentsCount,
+          sharesCount:
+            typeof srv.sharesCount === "number"
+              ? srv.sharesCount
+              : prev.sharesCount,
+          savesCount:
+            typeof srv.savesCount === "number"
+              ? srv.savesCount
+              : prev.savesCount,
           likedByMe:
-            typeof srv.likedByMe === "boolean" ? srv.likedByMe : prev.likedByMe,
+            typeof srv.likedByMe === "boolean"
+              ? srv.likedByMe
+              : prev.likedByMe,
           savedByMe:
-            typeof srv.savedByMe === "boolean" ? srv.savedByMe : prev.savedByMe,
+            typeof srv.savedByMe === "boolean"
+              ? srv.savedByMe
+              : prev.savedByMe,
         }));
-      } catch {}
+      } catch {
+        // ignore
+      }
     })();
-    return () => { on = false; };
+    return () => {
+      on = false;
+    };
   }, [id]);
 
   // ---------- load comments (detail defaults open) ----------
@@ -133,58 +168,88 @@ export default function PostDetail() {
       try {
         const res = await api.get(`/api/posts/${id}/comments`);
         if (on) setComments(res.data || []);
-      } catch {}
+      } catch {
+        // ignore
+      }
     })();
-    return () => { on = false; };
+    return () => {
+      on = false;
+    };
+  }, [id]);
+
+  // reset watch/initial view flags when post changes
+  useEffect(() => {
+    hasSentInitialViewRef.current = false;
+    watchAccumRef.current = 0;
+    lastWatchTsRef.current = 0;
+    lastTimeUpdateRef.current = 0;
+    setCurrentTime(0);
+    setDuration(0);
   }, [id]);
 
   function mergeStatsFromServer(partial) {
+    if (!partial || typeof partial !== "object") return;
     setStats((prev) => ({
       ...prev,
       viewsCount:
-        partial.viewsCount != null
-          ? Math.max(prev.viewsCount, partial.viewsCount)
+        typeof partial.viewsCount === "number"
+          ? partial.viewsCount
           : prev.viewsCount,
       likesCount:
-        partial.likesCount != null
-          ? Math.max(prev.likesCount, partial.likesCount)
+        typeof partial.likesCount === "number"
+          ? partial.likesCount
           : prev.likesCount,
       commentsCount:
-        partial.commentsCount != null
-          ? Math.max(prev.commentsCount, partial.commentsCount)
+        typeof partial.commentsCount === "number"
+          ? partial.commentsCount
           : prev.commentsCount,
       sharesCount:
-        partial.sharesCount != null
-          ? Math.max(prev.sharesCount, partial.sharesCount)
+        typeof partial.sharesCount === "number"
+          ? partial.sharesCount
           : prev.sharesCount,
       savesCount:
-        partial.savesCount != null
-          ? Math.max(prev.savesCount, partial.savesCount)
+        typeof partial.savesCount === "number"
+          ? partial.savesCount
           : prev.savesCount,
       likedByMe:
-        partial.likedByMe != null ? partial.likedByMe : prev.likedByMe,
+        typeof partial.likedByMe === "boolean"
+          ? partial.likedByMe
+          : prev.likedByMe,
       savedByMe:
-        partial.savedByMe != null ? partial.savedByMe : prev.savedByMe,
+        typeof partial.savedByMe === "boolean"
+          ? partial.savedByMe
+          : prev.savedByMe,
     }));
   }
 
-  async function sendViewOnce() {
-    if (hasSentViewRef.current || !id) return;
-    hasSentViewRef.current = true;
+  async function sendViewTick() {
+    if (!id) return;
     try {
       const res = await api.post(`/api/posts/${id}/view`);
-      const srv = res?.data || {};
+      mergeStatsFromServer(res?.data || {});
+    } catch {
       setStats((prev) => ({
         ...prev,
-        viewsCount:
-          srv.viewsCount != null
-            ? Math.max(prev.viewsCount, srv.viewsCount)
-            : prev.viewsCount + 1,
+        viewsCount: prev.viewsCount + 1,
       }));
-    } catch {
-      setStats((prev) => ({ ...prev, viewsCount: prev.viewsCount + 1 }));
     }
   }
+
+  async function sendInitialViewOnce() {
+    if (hasSentInitialViewRef.current || !id) return;
+    hasSentInitialViewRef.current = true;
+    await sendViewTick();
+  }
+
+  // For NON-video posts: send one view when loaded
+  useEffect(() => {
+    if (!post) return;
+    const media =
+      Array.isArray(post.media) && post.media.length ? post.media[0] : null;
+    const isVideo = media?.type === "video";
+    if (isVideo) return;
+    sendInitialViewOnce();
+  }, [post, id]);
 
   // ---------- actions ----------
   async function toggleLike() {
@@ -267,7 +332,9 @@ export default function PostDetail() {
           url,
         });
         return;
-      } catch { /* ignore */ }
+      } catch {
+        // ignore and fall back
+      }
     }
     try {
       await navigator.clipboard.writeText(url);
@@ -302,11 +369,14 @@ export default function PostDetail() {
     try {
       const res = await api.post(`/api/posts/${id}/comments`, { text: txt });
       const real = res?.data?.comment;
-      setComments((c) => [real, ...c.filter((cm) => cm._id !== tmpId)]);
+      setComments((c) => [real || optimistic, ...c.filter((cm) => cm._id !== tmpId)]);
       mergeStatsFromServer(res?.data || {});
     } catch {
       setComments((c) => c.filter((cm) => cm._id !== tmpId));
-      setStats((p) => ({ ...p, commentsCount: Math.max(0, p.commentsCount - 1) }));
+      setStats((p) => ({
+        ...p,
+        commentsCount: Math.max(0, p.commentsCount - 1),
+      }));
     }
   }
 
@@ -316,7 +386,10 @@ export default function PostDetail() {
     try {
       await api.delete(`/api/comments/${commentId}`);
       setComments((c) => c.filter((cm) => cm._id !== commentId));
-      setStats((p) => ({ ...p, commentsCount: Math.max(0, p.commentsCount - 1) }));
+      setStats((p) => ({
+        ...p,
+        commentsCount: Math.max(0, p.commentsCount - 1),
+      }));
     } catch {
       alert("Failed to delete comment");
     }
@@ -341,14 +414,18 @@ export default function PostDetail() {
     }
   }
 
+  // ---------- Video controls & watch-time ----------
+
   function onClickVideo() {
     const vid = videoRef.current;
     if (!vid) return;
     setUserHasInteracted(true);
+
     if (muted) {
       setMuted(false);
       vid.muted = false;
     }
+
     if (vid.paused) {
       playTriggeredByObserverRef.current = false;
       vid.play().catch(() => {});
@@ -358,9 +435,24 @@ export default function PostDetail() {
   }
 
   function onVideoPlay() {
-    // only count real user plays, not any possible auto-play
-    if (playTriggeredByObserverRef.current) return;
-    sendViewOnce();
+    // For detail page, we don't send a "one-time" view here.
+    // Watch-time is counted in onTimeUpdate.
+    if (playTriggeredByObserverRef.current) {
+      // if we ever use scroll-autoplay in future
+      return;
+    }
+
+    if (!userHasInteracted) {
+      setUserHasInteracted(true);
+    }
+
+    const now =
+      typeof performance !== "undefined" && performance.now
+        ? performance.now()
+        : Date.now();
+    if (!lastWatchTsRef.current) {
+      lastWatchTsRef.current = now;
+    }
   }
 
   function onToggleMute(e) {
@@ -382,28 +474,87 @@ export default function PostDetail() {
   }
 
   function onTimeUpdate() {
-    if (seeking) return;
     const vid = videoRef.current;
     if (!vid) return;
-    setCurrentTime(vid.currentTime || 0);
+
+    // UI update (throttled for slider/time label)
+    if (!seeking) {
+      const nowUi =
+        typeof performance !== "undefined" && performance.now
+          ? performance.now()
+          : Date.now();
+      if (nowUi - lastTimeUpdateRef.current >= 250) {
+        lastTimeUpdateRef.current = nowUi;
+        setCurrentTime(vid.currentTime || 0);
+      }
+    }
+
+    // Watch-time accumulation (only when playing)
+    if (vid.paused) {
+      lastWatchTsRef.current = 0;
+      return;
+    }
+
+    // Only count real viewing: user has interacted or not pure autoplay
+    if (playTriggeredByObserverRef.current && !userHasInteracted) return;
+
+    const now =
+      typeof performance !== "undefined" && performance.now
+        ? performance.now()
+        : Date.now();
+
+    if (!lastWatchTsRef.current) {
+      lastWatchTsRef.current = now;
+      return;
+    }
+
+    const deltaSec = (now - lastWatchTsRef.current) / 1000;
+    if (deltaSec <= 0) return;
+
+    lastWatchTsRef.current = now;
+    watchAccumRef.current += deltaSec;
+
+    // Every ~10s of watch-time → send a view tick
+    if (watchAccumRef.current >= 10) {
+      watchAccumRef.current = 0;
+      sendViewTick();
+    }
   }
 
-  function onSeekStart() { setSeeking(true); }
-  function onSeekChange(e) { setCurrentTime(Number(e.target.value || 0)); }
-  function onSeekCommit(e) {
-    const vid = videoRef.current;
-    const v = Number(e.target.value || 0);
-    if (vid) vid.currentTime = v;
+  function onSeekStart() {
+    setSeeking(true);
+  }
+
+  function onSeekChange(v) {
     setCurrentTime(v);
+  }
+
+  function onSeekCommit(v) {
+    const vid = videoRef.current;
+    if (!vid) {
+      setSeeking(false);
+      return;
+    }
+    const safe = Number.isFinite(v) ? v : 0;
+    vid.currentTime = safe;
+    setCurrentTime(safe);
     setSeeking(false);
+
+    // reset watch-time timestamp so we don't count a huge jump as "watched"
+    const now =
+      typeof performance !== "undefined" && performance.now
+        ? performance.now()
+        : Date.now();
+    lastWatchTsRef.current = now;
   }
 
   function jump(seconds) {
     const vid = videoRef.current;
     if (!vid) return;
+    const baseDuration = duration || vid.duration || 0;
     const next = Math.min(
       Math.max((vid.currentTime || 0) + seconds, 0),
-      duration || vid.duration || 0
+      baseDuration || 0
     );
     vid.currentTime = next;
     setCurrentTime(next);
@@ -420,7 +571,9 @@ export default function PostDetail() {
       if (vid.requestFullscreen) return void vid.requestFullscreen();
       const anyVid = /** @type {any} */ (vid);
       if (anyVid.webkitEnterFullscreen) return void anyVid.webkitEnterFullscreen();
-    } catch {}
+    } catch {
+      // ignore
+    }
   }
 
   // ---------- derived ----------
@@ -434,7 +587,7 @@ export default function PostDetail() {
     Array.isArray(post?.media) && post.media.length ? post.media[0] : null;
   const isVideo = media?.type === "video";
 
-  const pro = post?.pro || {};
+    const pro = post?.pro || {};
   const avatar = pro.photoUrl || post?.authorAvatar || "";
   const proName = pro.name || post?.authorName || "Professional";
   const lga = pro.lga || post?.lga || "";
@@ -444,7 +597,55 @@ export default function PostDetail() {
     post?.pro?.ownerUid ||
     post?.ownerUid ||
     post?.createdBy ||
+    post?.uid ||
+    post?.userId ||
+    post?._ownerUid ||
     null;
+
+
+  // derive username if present on payload
+  const postUsername =
+    (post?.username && String(post.username).trim()) ||
+    (post?.pro?.username && String(post.pro.username).trim()) ||
+    (post?.ownerUsername && String(post.ownerUsername).trim()) ||
+    null;
+
+  // Navigate to public profile (similar logic to FeedCard)
+  async function goToProfile() {
+    if (!post) return;
+
+    // If we already have a username, use it directly
+    if (postUsername) {
+      navigate(`/profile/${encodeURIComponent(postUsername)}`);
+      return;
+    }
+
+    // Fallback: try to resolve via UID
+    const uid =
+  followTargetUid ||
+  post?.proOwnerUid ||
+  post?.ownerUid ||
+  post?.createdBy ||
+  null;
+
+    if (!uid) return;
+
+    try {
+      const res = await api.get(
+        `/api/profile/public-by-uid/${encodeURIComponent(uid)}`
+      );
+      const data = res?.data;
+      if (data && data.profile && data.profile.username) {
+        navigate(`/profile/${encodeURIComponent(data.profile.username)}`);
+        return;
+      }
+    } catch {
+      // ignore, fall back to UID route
+    }
+
+    navigate(`/profile/${encodeURIComponent(uid)}`);
+  }
+
 
   // ---------- UI ----------
   if (loading) return <RouteLoader full />;
@@ -456,7 +657,9 @@ export default function PostDetail() {
           <div className="text-lg font-semibold mb-2">Post</div>
           <div className="text-sm text-gray-400">{error || "Not found"}</div>
           <div className="mt-4">
-            <Link to="/browse" className="text-gold">← Back to feed</Link>
+            <Link to="/browse" className="text-gold">
+              ← Back to feed
+            </Link>
           </div>
         </div>
       </div>
@@ -468,17 +671,34 @@ export default function PostDetail() {
       {/* header */}
       <div className="px-4 pt-4 pb-2 flex items-start justify-between gap-3">
         <div className="flex gap-3">
-          <div className="w-10 h-10 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center">
-            {avatar ? (
-              <img src={avatar} alt={proName} className="w-full h-full object-cover" />
-            ) : (
-              <span className="text-sm text-white">
-                {proName.slice(0, 1).toUpperCase()}
-              </span>
-            )}
-          </div>
-          <div>
-            <div className="text-sm font-semibold text-white truncate max-w-[120px]">{proName}</div>
+          <div
+  className="w-10 h-10 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center cursor-pointer"
+  onClick={goToProfile}
+  title="View profile"
+  role="button"
+  aria-label="View profile"
+>
+  {avatar ? (
+    <img
+      src={avatar}
+      alt={proName}
+      className="w-full h-full object-cover"
+    />
+  ) : (
+    <span className="text-sm text-white">
+      {proName.slice(0, 1).toUpperCase()}
+    </span>
+  )}
+</div>
+<div>
+  <div
+    className="text-sm font-semibold text-white truncate max-w-[120px] cursor-pointer"
+    onClick={goToProfile}
+    title="View profile"
+  >
+    {proName}
+  </div>
+
 
             <div className="text-xs text-gray-400">
               {lga || "Nigeria"} • {timeAgo(post.createdAt)}
@@ -497,32 +717,47 @@ export default function PostDetail() {
           )}
           <div className="relative" ref={menuRef}>
             <button
-  onClick={() => setMenuOpen((v) => !v)}
-  aria-label="Open post menu"
-  className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-800 text-white"
->
-  ⋯
-</button>
+              onClick={() => setMenuOpen((v) => !v)}
+              aria-label="Open post menu"
+              className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-800 text-white"
+              type="button"
+            >
+              ⋯
+            </button>
 
             {menuOpen && (
               <div className="absolute right-0 mt-2 w-56 bg-[#141414] border border-[#2a2a2a] rounded-lg shadow-lg z-30">
-                {/* Save/Unsave in the menu (your preference) */}
+                {/* Save/Unsave */}
                 <button
-                  onClick={() => { toggleSave(); setMenuOpen(false); }}
+                  onClick={() => {
+                    toggleSave();
+                    setMenuOpen(false);
+                  }}
                   className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
+                  type="button"
                 >
-                  {stats.savedByMe ? "Unsave post" : "Save post / Add to collection"}
+                  {stats.savedByMe
+                    ? "Unsave post"
+                    : "Save post / Add to collection"}
                 </button>
 
                 {/* Copy link */}
                 <button
                   onClick={() => {
                     const base = window.location.origin;
-                    navigator.clipboard?.writeText(`${base}/post/${id}`);
-                    alert("Link copied");
+                    const url = `${base}/post/${id}`;
+                    if (navigator.clipboard?.writeText) {
+                      navigator.clipboard
+                        .writeText(url)
+                        .then(() => alert("Link copied"))
+                        .catch(() => alert("Share link: " + url));
+                    } else {
+                      alert("Share link: " + url);
+                    }
                     setMenuOpen(false);
                   }}
                   className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
+                  type="button"
                 >
                   Copy link
                 </button>
@@ -533,31 +768,43 @@ export default function PostDetail() {
                     {post.commentsDisabled ? (
                       <button
                         onClick={async () => {
-                          await api.patch(`/api/posts/${id}/comments/enable`);
-                          setPost((p) => ({ ...p, commentsDisabled: false }));
-                          setMenuOpen(false);
+                          try {
+                            await api.patch(`/api/posts/${id}/comments/enable`);
+                            setPost((p) => ({ ...p, commentsDisabled: false }));
+                            setMenuOpen(false);
+                          } catch {
+                            alert("Failed to enable comments");
+                          }
                         }}
                         className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
+                        type="button"
                       >
                         Enable comments
                       </button>
                     ) : (
                       <button
                         onClick={async () => {
-                          await api.patch(`/api/posts/${id}/comments/disable`);
-                          setPost((p) => ({ ...p, commentsDisabled: true }));
-                          setShowComments(false);
-                          setMenuOpen(false);
+                          try {
+                            await api.patch(`/api/posts/${id}/comments/disable`);
+                            setPost((p) => ({ ...p, commentsDisabled: true }));
+                            setShowComments(false);
+                            setMenuOpen(false);
+                          } catch {
+                            alert("Failed to disable comments");
+                          }
                         }}
                         className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
+                        type="button"
                       >
                         Disable comments
                       </button>
                     )}
+
                     <button
                       onClick={handleHideOrDeletePost}
                       disabled={deleting}
                       className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b] text-red-300 disabled:opacity-50"
+                      type="button"
                     >
                       {deleting ? "Deleting…" : "Delete / Hide Post"}
                     </button>
@@ -567,6 +814,7 @@ export default function PostDetail() {
                     You can only hide your own post
                   </div>
                 )}
+
               </div>
             )}
           </div>
@@ -602,35 +850,45 @@ export default function PostDetail() {
                   onClick={onClickVideo}
                   className="absolute inset-0"
                   aria-label="Play video"
+                  type="button"
                 />
               )}
+
+              {/* quick controls */}
               <div className="absolute bottom-3 left-3 flex gap-2 z-[2]">
                 <button
                   onClick={onClickVideo}
                   className="bg-black/50 text-white text-xs px-3 py-1 rounded-full"
+                  type="button"
                 >
-                  {videoRef.current && !videoRef.current.paused ? "Pause" : "Play"}
+                  {videoRef.current && !videoRef.current.paused
+                    ? "Pause"
+                    : "Play"}
                 </button>
                 <button
                   onClick={onToggleMute}
                   className="bg-black/50 text-white text-xs px-3 py-1 rounded-full"
+                  type="button"
                 >
                   {muted ? "Unmute" : "Mute"}
                 </button>
               </div>
 
+              {/* bottom controls */}
               <div className="absolute inset-x-0 bottom-0 z-[2] px-3 pb-3 pt-6 bg-gradient-to-t from-black/70 via-black/20 to-transparent">
                 <div className="flex items-center justify-between gap-2 mb-2">
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => jump(-10)}
                       className="rounded-full bg-black/60 text-white text-xs px-3 py-1"
+                      type="button"
                     >
                       ⏪ 10s
                     </button>
                     <button
                       onClick={() => jump(+10)}
                       className="rounded-full bg-black/60 text-white text-xs px-3 py-1"
+                      type="button"
                     >
                       10s ⏩
                     </button>
@@ -642,6 +900,7 @@ export default function PostDetail() {
                     <button
                       onClick={toggleFullscreen}
                       className="rounded-md bg-black/60 text-white text-[11px] px-2 py-1 ml-2"
+                      type="button"
                     >
                       ⛶
                     </button>
@@ -653,11 +912,17 @@ export default function PostDetail() {
                   max={Math.max(1, duration || 0)}
                   step={0.1}
                   value={Math.min(currentTime, duration || 0)}
-                  onMouseDown={() => setSeeking(true)}
-                  onTouchStart={() => setSeeking(true)}
-                  onChange={onSeekChange}
-                  onMouseUp={onSeekCommit}
-                  onTouchEnd={onSeekCommit}
+                  onMouseDown={onSeekStart}
+                  onTouchStart={onSeekStart}
+                  onChange={(e) =>
+                    onSeekChange(Number(e.target.value || 0))
+                  }
+                  onMouseUp={(e) =>
+                    onSeekCommit(Number(e.target.value || 0))
+                  }
+                  onTouchEnd={(e) =>
+                    onSeekCommit(Number(e.target.value || 0))
+                  }
                   className="w-full accent-[#F5C542]"
                 />
               </div>
@@ -667,7 +932,7 @@ export default function PostDetail() {
               src={media.url}
               alt=""
               loading="lazy"
-              className="absolute inset-0 w/full h/full object-cover"
+              className="absolute inset-0 w-full h-full object-cover"
             />
           )}
         </div>
@@ -677,14 +942,16 @@ export default function PostDetail() {
       <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 text-xs text-gray-400 border-t border-[#1F1F1F]">
         <div className="flex flex-wrap gap-4">
           <div>{stats.likesCount} likes</div>
-          <button onClick={() => setShowComments((v) => !v)}>
+          <button onClick={() => setShowComments((v) => !v)} type="button">
             {stats.commentsCount} comments
           </button>
           <div>{stats.sharesCount} shares</div>
         </div>
         <div className="flex items-center gap-1">
-          <span role="img" aria-label="views">👁</span>
-          <span>View</span>
+          <span role="img" aria-label="views">
+            👁
+          </span>
+          <span>Views</span>
           <span>{stats.viewsCount}</span>
         </div>
       </div>
@@ -695,9 +962,14 @@ export default function PostDetail() {
         <CommentToggle onClick={() => setShowComments((v) => !v)} />
         <ShareButton onClick={handleShare} />
         {!isOwner ? (
-          <FollowButton targetUid={followTargetUid} proId={post?.proId || null} />
+          <FollowButton
+            targetUid={followTargetUid}
+            proId={post?.proId || null}
+          />
         ) : (
-          <ActionButton disabled className="text-gray-500 select-none">—</ActionButton>
+          <ActionButton disabled className="text-gray-500 select-none">
+            —
+          </ActionButton>
         )}
       </div>
 
@@ -706,16 +978,22 @@ export default function PostDetail() {
         <div className="px-4 py-3 border-t border-[#1F1F1F]">
           {!post?.commentsDisabled ? (
             <form onSubmit={submitComment} className="flex gap-2 mb-3">
-              <input
-                value={commentText}
-                onChange={(e) => setCommentText(e.target.value)}
-                placeholder="Write a comment..."
-                className="flex-1 bg-[#121212] border border-[#2b2b2b] rounded-full px-3 py-2 text-sm text-white"
-              />
-              <button className="text-sm bg-[#F5C542] text-black rounded-full px-3 py-1">
-                Post
-              </button>
-            </form>
+            <input
+              value={commentText}
+              onChange={(e) => setCommentText(e.target.value)}
+              placeholder={me ? "Write a comment..." : "Login to comment..."}
+              className="flex-1 bg-[#121212] border border-[#2b2b2b] rounded-full px-3 py-2 text-sm text-white"
+            />
+            <button
+              className="text-sm bg-[#F5C542] text-black rounded-full px-3 py-1"
+              type="submit"
+              disabled={!me}
+            >
+              Post
+            </button>
+
+          </form>
+
           ) : (
             <div className="text-xs text-red-400 mb-3">
               Comments are disabled for this post.
@@ -744,7 +1022,11 @@ export default function PostDetail() {
                     {c.text}
                   </div>
                   <div className="flex gap-3 items-center text-[10px] text-gray-500 mt-1">
-                    <span>{new Date(c.createdAt).toLocaleString()}</span>
+                    <span>
+                      {c.createdAt
+                        ? new Date(c.createdAt).toLocaleString()
+                        : ""}
+                    </span>
                     {me?.uid && me.uid === c.ownerUid && (
                       <button
                         type="button"
@@ -767,15 +1049,10 @@ export default function PostDetail() {
 
       {/* back link */}
       <div className="px-4 py-6">
-        <Link to="/browse" className="text-gold">← Back to feed</Link>
+        <Link to="/browse" className="text-gold">
+          ← Back to feed
+        </Link>
       </div>
     </div>
   );
-}
-
-function formatTime(sec = 0) {
-  if (!isFinite(sec)) return "0:00";
-  const m = Math.floor(sec / 60);
-  const s = Math.floor(sec % 60);
-  return `${m}:${s < 10 ? "0" : ""}${s}`;
 }

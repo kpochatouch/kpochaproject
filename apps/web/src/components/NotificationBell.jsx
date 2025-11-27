@@ -1,6 +1,6 @@
 // apps/web/src/components/NotificationBell.jsx
 import React, { useEffect, useState } from "react";
-import { connectSocket, registerSocketHandler } from "../lib/socket";
+import { connectSocket, registerSocketHandler } from "../lib/api";
 import {
   fetchNotifications,
   markAllSeen,

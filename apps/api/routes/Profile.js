@@ -11,6 +11,7 @@ import Post from "../models/Post.js";
 import PostStats from "../models/PostStats.js";
 import { proToBarber } from "../models.js";
 import { getIO } from "../sockets/index.js";
+import { computeProfileStats } from "../services/profileStatsService.js";
 
 const router = express.Router();
 

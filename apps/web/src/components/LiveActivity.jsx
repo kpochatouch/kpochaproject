@@ -1,43 +1,148 @@
-import React, { useEffect, useState } from 'react';
-import { api } from '../lib/api';
-import { connectSocket, registerSocketHandler } from '../lib/api';
+// apps/web/src/components/LiveActivity.jsx
+import React, { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { api, connectSocket, registerSocketHandler } from "../lib/api";
 
 export default function LiveActivity({ ownerUid }) {
   const [items, setItems] = useState([]);
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (!ownerUid) return;
     let mounted = true;
+
     (async () => {
       try {
-        const { data } = await api.get(`/api/activity/${encodeURIComponent(ownerUid)}?limit=20`);
-        if (mounted) setItems(data.items || []);
-      } catch (e) {}
+        const { data } = await api.get(
+          `/api/activity/${encodeURIComponent(ownerUid)}?limit=20`
+        );
+        if (!mounted) return;
+        setItems(Array.isArray(data.items) ? data.items : []);
+      } catch (e) {
+        console.warn("[LiveActivity] initial load failed", e?.message || e);
+      }
     })();
 
-    connectSocket();
-    const unregister = registerSocketHandler
-      ? registerSocketHandler('post:created', (payload) => {
-          if (!payload || payload.proOwnerUid !== ownerUid) return;
-          setItems((s)=>[{ kind: 'post', createdAt: payload.createdAt, payload }, ...s].slice(0,50));
-        })
-      : null;
+    try {
+      connectSocket();
+    } catch (e) {
+      console.warn("[LiveActivity] socket connect failed", e?.message || e);
+    }
 
-    return () => { mounted = false; unregister && unregister(); };
+    // when a new post is created by this owner, prepend a synthetic activity row
+    const unregister =
+      typeof registerSocketHandler === "function"
+        ? registerSocketHandler("post:created", (payload) => {
+            try {
+              if (!payload) return;
+              const owner =
+                payload.ownerUid ||
+                payload.proOwnerUid ||
+                payload.createdBy ||
+                null;
+              if (!owner || String(owner) !== String(ownerUid)) return;
+
+              const item = {
+                kind: "post",
+                createdAt: payload.createdAt || new Date().toISOString(),
+                targetPostId: payload._id || payload.id || null,
+                payload: {
+                  text: payload.text || "",
+                },
+              };
+
+              setItems((prev) => [item, ...prev].slice(0, 50));
+            } catch (err) {
+              console.warn("[LiveActivity] post:created handler failed", err);
+            }
+          })
+        : null;
+
+    return () => {
+      mounted = false;
+      if (unregister) unregister();
+    };
   }, [ownerUid]);
 
   if (!ownerUid) return null;
+
+  const handleClickPost = (postId) => {
+    if (!postId) return;
+    // ⚠️ If your post details route is different, just adjust this path.
+    navigate(`/post/${encodeURIComponent(postId)}`);
+  };
+
+  const formatLabel = (it) => {
+    const kind = it.kind || "";
+    if (kind === "post") return "New post";
+    if (kind === "comment") return "New comment";
+    if (kind === "follow") return "New follower";
+    if (kind === "booking") return "New booking";
+    return "Activity";
+  };
+
+  const formatText = (it) => {
+    const p = it.payload || {};
+    return (
+      p.text ||
+      p.body ||
+      p.message ||
+      p.title ||
+      "" // fallback: empty, we won't show JSON
+    );
+  };
+
   return (
-    <div className="rounded-lg border border-zinc-800 bg-black/40 p-3">
-      <h3 className="text-sm font-semibold mb-2">Live activity</h3>
-      {items.length === 0 && <div className="text-sm text-zinc-400">No recent activity</div>}
-      {items.slice(0,20).map((it, i) => (
-        <div key={i} className="text-sm text-zinc-200 py-1 border-b border-zinc-800">
-          <div className="text-xs text-zinc-400">{it.kind}</div>
-          <div>{(it.payload && (it.payload.text || it.payload.body)) || JSON.stringify(it.payload).slice(0,80)}</div>
-          <div className="text-xs text-zinc-500">{new Date(it.createdAt).toLocaleString()}</div>
-        </div>
-      ))}
+    <div className="space-y-2">
+      {items.length === 0 && (
+        <div className="text-xs text-zinc-500">No recent activity</div>
+      )}
+
+      {items.slice(0, 10).map((it, idx) => {
+      const label = formatLabel(it);
+      const text = formatText(it);
+      const ts = it.createdAt ? new Date(it.createdAt) : null;
+
+      // 🔑 Try to discover the post id from different shapes
+      const postId =
+        it.targetPostId ||
+        it.postId ||
+        it.targetId ||
+        (it.payload && (it.payload.postId || it.payload.targetPostId || it.payload._id)) ||
+        null;
+
+      const clickable = !!postId;
+
+      return (
+        <button
+          key={idx}
+          type="button"
+          onClick={() => (clickable ? handleClickPost(postId) : null)}
+          className={[
+            "w-full text-left rounded-md px-2 py-1.5",
+            "bg-zinc-950/40 border border-zinc-800/70",
+            clickable ? "hover:bg-zinc-900 cursor-pointer" : "cursor-default",
+          ].join(" ")}
+        >
+          <div className="text-[11px] uppercase tracking-wide text-zinc-500">
+            {label}
+          </div>
+
+          {text ? (
+            <div className="mt-0.5 text-xs text-zinc-200 line-clamp-2">
+              {text}
+            </div>
+          ) : null}
+
+          {ts && (
+            <div className="mt-0.5 text-[10px] text-zinc-600">
+              {ts.toLocaleString()}
+            </div>
+          )}
+        </button>
+      );
+    })}
+
     </div>
   );
 }

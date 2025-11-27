@@ -16,7 +16,7 @@ import FeedCard from "../components/FeedCard";
 import ErrorBoundary from "../components/ErrorBoundary";
 import SideMenu from "../components/SideMenu.jsx";
 import FeedComposer from "../components/FeedComposer.jsx";
-import { connectSocket, registerSocketHandler } from "../lib/socket";
+import { connectSocket, registerSocketHandler } from "../lib/api";
 import NotificationsBell from "../components/NotificationBell.jsx";
 
 /* ---------------- Main Browse page ---------------- */
@@ -25,14 +25,19 @@ export default function Browse() {
   const location = useLocation();
   const { me, isAdmin } = useMe();
 
-  const [tab, setTab] = useState("feed");
+  // derive initial tab from URL (?tab=pros) but default to "feed"
+  const [tab, setTab] = useState(() => {
+    const qs = new URLSearchParams(location.search);
+    const t = (qs.get("tab") || "").toLowerCase();
+    return t === "pros" ? "pros" : "feed";
+  });
 
   const [pros, setPros] = useState([]);
   const [loadingPros, setLoadingPros] = useState(false);
   const [errPros, setErrPros] = useState("");
 
   const [q, setQ] = useState("");
-  const [service, setService] = useState(""); // <- we will store the SERVICE NAME here
+  const [service, setService] = useState(""); // service NAME
   const [stateName, setStateName] = useState("");
   const [lga, setLga] = useState("");
 
@@ -60,9 +65,46 @@ export default function Browse() {
   const loadingMoreRef = useRef(loadingMore);
   const loadingFeedRef = useRef(loadingFeed);
 
-  useEffect(() => { hasMoreRef.current = hasMore; }, [hasMore]);
-  useEffect(() => { loadingMoreRef.current = loadingMore; }, [loadingMore]);
-  useEffect(() => { loadingFeedRef.current = loadingFeed; }, [loadingFeed]);
+  useEffect(() => {
+    hasMoreRef.current = hasMore;
+  }, [hasMore]);
+  useEffect(() => {
+    loadingMoreRef.current = loadingMore;
+  }, [loadingMore]);
+  useEffect(() => {
+    loadingFeedRef.current = loadingFeed;
+  }, [loadingFeed]);
+
+  const isFeedTab = tab === "feed";
+  const isProsTab = tab === "pros";
+
+  // helper to sync tab with URL
+  function setTabAndUrl(nextTab) {
+    setTab(nextTab);
+    const qs = new URLSearchParams(location.search);
+    if (nextTab === "feed") {
+      qs.delete("tab");
+    } else {
+      qs.set("tab", nextTab);
+    }
+    navigate(
+      { pathname: location.pathname, search: qs.toString() },
+      { replace: true }
+    );
+  }
+
+  // keep tab in sync if URL changes externally (back/forward etc.)
+  useEffect(() => {
+    const qs = new URLSearchParams(location.search);
+    const t = (qs.get("tab") || "").toLowerCase();
+    const desired = t === "pros" ? "pros" : "feed";
+    setTab((prev) => (prev === desired ? prev : desired));
+
+    // if ?post= is present, force feed tab (we'll extend this later if we ever auto-scroll)
+    if (qs.get("post")) {
+      setTab("feed");
+    }
+  }, [location.search]);
 
   // load geo
   useEffect(() => {
@@ -79,12 +121,14 @@ export default function Browse() {
         setLgasByState({ EDO: ["OREDO", "IKPOBA-OKHA", "EGOR", "OTHERS"] });
       }
     })();
-    return () => { on = false; };
+    return () => {
+      on = false;
+    };
   }, []);
 
   // fetch pros ONLY when tab = 'pros'
   useEffect(() => {
-    if (tab !== "pros") return;
+    if (!isProsTab) return;
     let on = true;
     setLoadingPros(true);
     setErrPros("");
@@ -98,8 +142,8 @@ export default function Browse() {
         const list = Array.isArray(data)
           ? data
           : Array.isArray(data?.items)
-            ? data.items
-            : [];
+          ? data.items
+          : [];
         setPros(list);
       } catch {
         if (!on) return;
@@ -108,8 +152,10 @@ export default function Browse() {
         if (on) setLoadingPros(false);
       }
     })();
-    return () => { on = false; };
-  }, [tab, lga, stateName]);
+    return () => {
+      on = false;
+    };
+  }, [isProsTab, lga, stateName]);
 
   // Normalize services for each pro -> array of lowercased service NAMES
   function svcArray(p) {
@@ -131,7 +177,7 @@ export default function Browse() {
     const term = q.trim().toLowerCase();
     const selectedState = (stateName || "").toUpperCase();
     const selectedLga = (lga || "").toUpperCase();
-    const selectedServiceName = (service || "").toLowerCase(); // <- service NAME
+    const selectedServiceName = (service || "").toLowerCase();
 
     return [...pros]
       .map((p) => {
@@ -147,7 +193,6 @@ export default function Browse() {
 
         const matchName = term ? name.includes(term) || desc.includes(term) : true;
 
-        // ✅ Now match by SERVICE NAME (from ServicePicker meta.name)
         const matchSvc = selectedServiceName
           ? servicesLC.includes(selectedServiceName)
           : true;
@@ -192,7 +237,6 @@ export default function Browse() {
         if (lga) params.lga = lga.toUpperCase();
 
         if (before) {
-          // try to parse as date; if valid, send ISO; otherwise use raw value
           try {
             const parsed = new Date(before);
             if (!isNaN(parsed.getTime())) {
@@ -206,7 +250,7 @@ export default function Browse() {
         }
 
         const r = await api
-          .get("/api/feed/public", { params })
+          .get("/api/posts/public", { params })
           .catch(() => ({ data: [] }));
 
         const list = Array.isArray(r.data)
@@ -218,7 +262,9 @@ export default function Browse() {
         if (append) {
           setFeed((prev) => {
             const existingIds = new Set(prev.map((f) => f._id || f.id));
-            const newItems = list.filter((it) => !existingIds.has(it._id || it.id));
+            const newItems = list.filter(
+              (it) => !existingIds.has(it._id || it.id)
+            );
             return newItems.length ? [...prev, ...newItems] : prev;
           });
         } else {
@@ -240,16 +286,12 @@ export default function Browse() {
 
   // initial load & when lga or tab changes
   useEffect(() => {
-    if (tab !== "feed") return;
+    if (!isFeedTab) return;
     setHasMore(true);
     fetchFeed({ append: false, before: null });
-  }, [fetchFeed, tab, lga]);
+  }, [fetchFeed, isFeedTab, lga]);
 
-  // force feed tab if ?post= is present
-  useEffect(() => {
-    const qs = new URLSearchParams(location.search);
-    if (qs.get("post")) setTab("feed");
-  }, [location.search]);
+  // force feed tab if ?post= is present (already handled in the URL sync effect)
 
   const loadMore = useCallback(async () => {
     if (!hasMoreRef.current || loadingMoreRef.current) return;
@@ -264,7 +306,7 @@ export default function Browse() {
 
   // Realtime feed socket handlers
   useEffect(() => {
-    if (tab !== "feed") return;
+    if (!isFeedTab) return;
 
     try {
       connectSocket();
@@ -276,7 +318,12 @@ export default function Browse() {
       try {
         if (!payload) return;
         if (lga) {
-          const postLga = (payload.lga || payload.ownerLga || payload.locationLga || "").toUpperCase();
+          const postLga = (
+            payload.lga ||
+            payload.ownerLga ||
+            payload.locationLga ||
+            ""
+          ).toUpperCase();
           if (postLga && postLga !== (lga || "").toUpperCase()) return;
         }
         setFeed((prev) => {
@@ -308,7 +355,10 @@ export default function Browse() {
           prev.map((p) => {
             const pid = p._id || p.id;
             if (!pid || String(pid) !== String(id)) return p;
-            return { ...p, stats: { ...(p.stats || {}), ...(payload.stats || payload) } };
+            return {
+              ...p,
+              stats: { ...(p.stats || {}), ...(payload.stats || payload) },
+            };
           })
         );
       } catch (err) {
@@ -340,13 +390,13 @@ export default function Browse() {
         unregisterStats && unregisterStats();
       } catch {}
     };
-  }, [tab, lga]);
+  }, [isFeedTab, lga]);
 
   // setup IntersectionObserver for automatic infinite scroll
   useEffect(() => {
     const sentinel = sentinelRef.current;
     if (!sentinel) return;
-    if (tab !== "feed") return;
+    if (!isFeedTab) return;
 
     if (observerRef.current) {
       observerRef.current.disconnect();
@@ -357,7 +407,11 @@ export default function Browse() {
       (entries) => {
         for (const entry of entries) {
           if (entry.isIntersecting) {
-            if (hasMoreRef.current && !loadingMoreRef.current && !loadingFeedRef.current) {
+            if (
+              hasMoreRef.current &&
+              !loadingMoreRef.current &&
+              !loadingFeedRef.current
+            ) {
               loadMore();
             }
           }
@@ -374,7 +428,7 @@ export default function Browse() {
         observerRef.current = null;
       }
     };
-  }, [tab, loadMore]);
+  }, [isFeedTab, loadMore]);
 
   function goBook(pro, chosenService) {
     const svcName = chosenService || service || null; // service NAME
@@ -382,8 +436,11 @@ export default function Browse() {
       ? pro.services.map((s) => (typeof s === "string" ? { name: s } : s))
       : [];
     const svcPrice = svcName
-      ? svcList.find((s) => String(s.name).toLowerCase() === String(svcName).toLowerCase())
-          ?.price
+      ? svcList.find(
+          (s) =>
+            String(s.name).toLowerCase() ===
+            String(svcName).toLowerCase()
+        )?.price
       : undefined;
 
     const proId = pro?.id || pro?._id;
@@ -393,7 +450,8 @@ export default function Browse() {
       state: {
         proId,
         serviceName: svcName || undefined,
-        amountNaira: typeof svcPrice !== "undefined" ? svcPrice : undefined,
+        amountNaira:
+          typeof svcPrice !== "undefined" ? svcPrice : undefined,
         country: "Nigeria",
         state: (stateName || "").toUpperCase(),
         lga: (lga || "").toUpperCase(),
@@ -401,9 +459,7 @@ export default function Browse() {
     });
   }
 
-  const token =
-    typeof window !== "undefined" ? localStorage.getItem("token") : null;
-  const canPostOnFeed = !!token;
+  const canPostOnFeed = !!me;
 
   return (
     <ErrorBoundary>
@@ -423,25 +479,27 @@ export default function Browse() {
             {/* 🔔 Notifications bell is always visible; badge shows only when there are unread items */}
             <NotificationsBell />
 
-            {/* existing tab pills */}
+            {/* tab pills */}
             <div className="inline-flex rounded-xl border border-zinc-800 overflow-hidden">
               <button
                 className={`px-4 py-2 text-sm border-r border-zinc-800 ${
-                  tab === "feed"
+                  isFeedTab
                     ? "bg-gold text-black font-semibold"
                     : "hover:bg-zinc-900"
                 }`}
-                onClick={() => setTab("feed")}
+                onClick={() => setTabAndUrl("feed")}
+                type="button"
               >
                 Feed
               </button>
               <button
                 className={`px-4 py-2 text-sm ${
-                  tab === "pros"
+                  isProsTab
                     ? "bg-gold text-black font-semibold"
                     : "hover:bg-zinc-900"
                 }`}
-                onClick={() => setTab("pros")}
+                onClick={() => setTabAndUrl("pros")}
+                type="button"
               >
                 Pros
               </button>
@@ -449,9 +507,8 @@ export default function Browse() {
           </div>
         </div>
 
-
         {/* filters — only show on Pros tab */}
-        {tab === "pros" && (
+        {isProsTab && (
           <div className="flex flex-wrap items-center gap-2 mb-6">
             <input
               value={q}
@@ -461,10 +518,12 @@ export default function Browse() {
             />
 
             <div className="w-56 max-w-full">
-              {/* ✅ Use ServicePicker meta.name so Browse filters by NAME, not id */}
+              {/* ServicePicker meta.name = service NAME filter */}
               <ServicePicker
                 value={service}
-                onChange={(_value, meta) => setService(meta?.name || "")}
+                onChange={(_value, meta) =>
+                  setService(meta?.name || "")
+                }
                 placeholder="All services"
                 includeOther={false}
               />
@@ -504,6 +563,7 @@ export default function Browse() {
             <button
               onClick={clearFilters}
               className="rounded-lg border border-zinc-700 px-3 py-2 text-sm"
+              type="button"
             >
               Clear
             </button>
@@ -511,7 +571,7 @@ export default function Browse() {
         )}
 
         {/* content */}
-        {tab === "pros" ? (
+        {isProsTab ? (
           <>
             {errPros && (
               <div className="mb-4 rounded border border-red-800 bg-red-900/30 text-red-100 px-3 py-2">
@@ -581,16 +641,23 @@ export default function Browse() {
                   </div>
 
                   {/* invisible sentinel */}
-                  <div ref={sentinelRef} className="h-1 w-full" aria-hidden />
+                  <div
+                    ref={sentinelRef}
+                    className="h-1 w-full"
+                    aria-hidden
+                  />
 
                   <div className="mt-6 flex justify-center">
                     {loadingMore ? (
-                      <div className="text-sm text-zinc-400">Loading…</div>
+                      <div className="text-sm text-zinc-400">
+                        Loading…
+                      </div>
                     ) : hasMore ? (
                       <button
                         onClick={loadMore}
                         className="flex items-center gap-2 px-4 py-2 rounded-md border border-zinc-700 hover:bg-zinc-900"
                         aria-label="Load more posts"
+                        type="button"
                       >
                         <svg
                           xmlns="http://www.w3.org/2000/svg"
@@ -624,7 +691,7 @@ export default function Browse() {
             </div>
 
             {/* RIGHT ADS */}
-            <div className="hidden lg:block w-56 self-start lg:sticky lg:top-20">
+            <div className="hidden lg:block w-56 self-start lg:top-20 lg:sticky">
               <div className="space-y-4">
                 {isAdmin ? (
                   <div className="rounded-lg border border-zinc-800 bg-black/40 p-3 space-y-2">
@@ -648,7 +715,9 @@ export default function Browse() {
                         if (!file) return;
                         const localUrl = URL.createObjectURL(file);
                         setAdminAdUrl(localUrl);
-                        setAdMsg("Local preview (not uploaded to backend)");
+                        setAdMsg(
+                          "Local preview (not uploaded to backend)"
+                        );
                       }}
                       className="w-full text-[10px] text-zinc-400"
                     />
@@ -658,9 +727,13 @@ export default function Browse() {
                           if (!adminAdUrl.trim())
                             return setAdMsg("Paste a media URL first.");
                           setAdMsg("Previewing…");
-                          setTimeout(() => setAdMsg("Preview ready"), 300);
+                          setTimeout(
+                            () => setAdMsg("Preview ready"),
+                            300
+                          );
                         }}
                         className="flex-1 rounded-md border border-zinc-700 px-2 py-1 text-xs hover:bg-zinc-900"
+                        type="button"
                       >
                         Preview
                       </button>
@@ -675,7 +748,9 @@ export default function Browse() {
                               media: [
                                 {
                                   url: adminAdUrl.trim(),
-                                  type: /\.(mp4|mov|webm)$/i.test(adminAdUrl)
+                                  type: /\.(mp4|mov|webm)$/i.test(
+                                    adminAdUrl
+                                  )
                                     ? "video"
                                     : "image",
                                 },
@@ -696,6 +771,7 @@ export default function Browse() {
                           }
                         }}
                         className="flex-1 rounded-md bg-gold text-black px-2 py-1 text-xs font-semibold"
+                        type="button"
                       >
                         Publish
                       </button>

@@ -49,6 +49,7 @@ import followRoutes from "./routes/follow.js";
 import notificationsRoutes from "./routes/notifications.js";
 import matcherRouter from "./routes/matcher.js";
 import { createNotification } from "./services/notificationService.js";
+import activityRoutes from "./routes/activity.js";
 
 
 dotenv.config();
@@ -1127,22 +1128,30 @@ app.use("/api", walletWithAuth(requireAuth, requireAdmin));
 app.use("/api", pinRoutes({ requireAuth, Application }));
 app.use("/api", profileRouter);
 
-// Ensure posts always carry a canonical ownerUid (place BEFORE mounting postsRouter)
-app.use("/api/posts", requireAuth, (req, res, next) => {
-  try {
-    // only enforce for mutating requests
-    if (["POST", "PUT", "PATCH"].includes(req.method)) {
-      req.body = req.body || {};
-      // prefer explicit ownerUid (if body set by admin), otherwise set from req.user
-      if (!req.body.ownerUid) req.body.ownerUid = req.user?.uid || null;
-      if (!req.body.createdBy) req.body.createdBy = req.user?.uid || req.body.createdBy || null;
-      // keep proOwnerUid/proId if present — do not override
-    }
-  } catch (e) {
-    // do not break on middleware errors — proceed
-    console.warn("[posts:ownerUid-middleware] warn:", e?.message || e);
+// Ensure posts always carry a canonical ownerUid for WRITE requests only
+// (GET /api/posts/... stays PUBLIC)
+app.use("/api/posts", (req, res, next) => {
+  const needsAuthForWrite = ["POST", "PUT", "PATCH", "DELETE"].includes(req.method);
+
+  if (!needsAuthForWrite) {
+    // public GETs - no auth required
+    return next();
   }
-  next();
+
+  // For writes, require auth, then attach ownerUid/createdBy
+  return requireAuth(req, res, () => {
+    try {
+      req.body = req.body || {};
+      if (!req.body.ownerUid) req.body.ownerUid = req.user?.uid || null;
+      if (!req.body.createdBy) {
+        req.body.createdBy = req.user?.uid || req.body.createdBy || null;
+      }
+      // proOwnerUid/proId are left alone if the router sets them
+    } catch (e) {
+      console.warn("[posts:ownerUid-middleware] warn:", e?.message || e);
+    }
+    next();
+  });
 });
 
 
@@ -1156,6 +1165,7 @@ app.use("/api", payoutRoutes({ requireAuth, Application }));
 app.use("/api", riskRoutes({ requireAuth, requireAdmin, Application }));
 app.use("/api", awsLivenessRoutes({ requireAuth }));
 app.use("/api", notificationsRoutes);
+app.use("/api", activityRoutes);
 
 
 

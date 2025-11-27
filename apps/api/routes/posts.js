@@ -6,6 +6,7 @@ import { Pro } from "../models.js";
 import Post from "../models/Post.js";
 import PostStats from "../models/PostStats.js";
 import redisClient from "../redis.js";
+import { scoreFrom } from "../services/postScoring.js";
 
 /* --------------------------- Auth middleware --------------------------- */
 async function requireAuth(req, res, next) {
@@ -33,7 +34,6 @@ async function tryAuth(req, _res, next) {
   } catch {}
   next();
 }
-
 
 /* ------------------------------- Helpers ------------------------------- */
 const isObjId = (v) => typeof v === "string" && /^[0-9a-fA-F]{24}$/.test(v);
@@ -70,20 +70,8 @@ function sanitizePostForClient(p) {
 }
 
 
-
-function scoreFrom(stats) {
-  const s = stats || {};
-  const v = Number(s.viewsCount || 0);
-  const l = Number(s.likesCount || 0);
-  const c = Number(s.commentsCount || 0);
-  const sh = Number(s.sharesCount || 0);
-  const sv = Number(s.savesCount || 0);
-  return l * 3 + c * 4 + sh * 5 + sv * 2 + v * 0.2;
-}
-
 /* ============================== ROUTER ============================== */
 const router = express.Router();
-
 
 // GET /posts?ownerUid=...  (compat for public profile pages)
 router.get("/posts", async (req, res) => {
@@ -119,7 +107,6 @@ router.get("/posts", async (req, res) => {
   }
 });
 
-
 /* -------------------------------------------------------------------- */
 /* CREATE                                                               */
 /* -------------------------------------------------------------------- */
@@ -151,27 +138,26 @@ router.post("/posts", requireAuth, async (req, res) => {
     const lgaFinal = toUpper(lga || proDoc.lga || "");
 
     const post = await Post.create({
-  // canonical owner UID — used by profile pages & follow logic
-  ownerUid: req.user.uid,
-  // for backward compatibility / pro-specific fields
-  proOwnerUid: req.user.uid,
-  createdBy: req.user.uid, 
-  proId: proDoc._id,
-  pro: {
-    _id: proDoc._id,
-    name: proDoc.name || "Professional",
-    lga: proDoc.lga || "",
-    photoUrl: proDoc.photoUrl || proDoc.avatarUrl || "",
-  },
-  text,
-  media,
-  tags,
-  lga: lgaFinal,
-  isPublic: !!isPublic,
-  // createdBy is handy for older payload shapes
-  createdBy: req.user.uid,
-});
-
+      // canonical owner UID — used by profile pages & follow logic
+      ownerUid: req.user.uid,
+      // for backward compatibility / pro-specific fields
+      proOwnerUid: req.user.uid,
+      createdBy: req.user.uid,
+      proId: proDoc._id,
+      pro: {
+        _id: proDoc._id,
+        name: proDoc.name || "Professional",
+        lga: proDoc.lga || "",
+        photoUrl: proDoc.photoUrl || proDoc.avatarUrl || "",
+      },
+      text,
+      media,
+      tags,
+      lga: lgaFinal,
+      isPublic: !!isPublic,
+      // createdBy is handy for older payload shapes
+      createdBy: req.user.uid,
+    });
 
     // make sure stats doc exists
     await PostStats.findOneAndUpdate(
@@ -190,10 +176,11 @@ router.post("/posts", requireAuth, async (req, res) => {
 /* -------------------------------------------------------------------- */
 /* PUBLIC FEED                                                          */
 /* -------------------------------------------------------------------- */
-router.get("/feed/public", async (req, res) => {
+// NOTE: path changed from "/feed/public" → "/posts/public" to match frontend
+router.get("/posts/public", async (req, res) => {
   try {
     const { lga = "", limit = 20, before = null } = req.query;
-    const q = { isPublic: true, hidden: { $ne: true } };
+    const q = { isPublic: true, hidden: { $ne: true }, deleted: { $ne: true } };
     if (lga) q.lga = toUpper(String(lga));
     if (before) q.createdAt = { $lt: new Date(before) };
 
@@ -215,7 +202,11 @@ router.get("/posts/author/:uid", async (req, res) => {
     const uid = String(req.params.uid || "");
     if (!uid) return res.status(400).json({ error: "uid_required" });
 
-    const items = await Post.find({ proOwnerUid: uid, hidden: { $ne: true } })
+    const items = await Post.find({
+      proOwnerUid: uid,
+      hidden: { $ne: true },
+      deleted: { $ne: true },
+    })
       .sort({ createdAt: -1 })
       .limit(200)
       .lean();
@@ -230,17 +221,19 @@ router.get("/posts/author/:uid", async (req, res) => {
 /* my posts */
 router.get("/posts/me", requireAuth, async (req, res) => {
   try {
-    const items = await Post.find({ proOwnerUid: req.user.uid })
+    const items = await Post.find({
+      proOwnerUid: req.user.uid,
+      deleted: { $ne: true },
+    })
       .sort({ createdAt: -1 })
       .limit(100)
       .lean();
-    return res.json(items.map(sanitizePostForClient));
+  return res.json(items.map(sanitizePostForClient));
   } catch (err) {
     console.error("[posts:me] error:", err);
     return res.status(500).json({ error: "posts_load_failed" });
   }
 });
-
 
 // ── READ: single post (public) ─────────────────────────────────────────
 router.get("/posts/:id", tryAuth, async (req, res) => {
@@ -258,33 +251,6 @@ router.get("/posts/:id", tryAuth, async (req, res) => {
     return res.status(500).json({ error: "post_load_failed" });
   }
 });
-
-// ── READ: post stats (public-ish; reflects liked/saved if logged in) ──
-router.get("/posts/:id/stats", tryAuth, async (req, res) => {
-  try {
-    const { id } = req.params;
-    if (!isObjId(id)) return res.status(400).json({ error: "invalid_id" });
-
-    const s = await PostStats.findOne({
-      postId: new mongoose.Types.ObjectId(id),
-    }).lean();
-
-    const me = req.user?.uid;
-    return res.json({
-      viewsCount: s?.viewsCount || 0,
-      likesCount: s?.likesCount || 0,
-      commentsCount: s?.commentsCount || 0,
-      sharesCount: s?.sharesCount || 0,
-      savesCount: s?.savesCount || 0,
-      likedByMe: me ? (s?.likedBy || []).includes(me) : false,
-      savedByMe: me ? (s?.savedBy || []).includes(me) : false,
-    });
-  } catch (err) {
-    console.error("[posts:stats] error:", err);
-    return res.status(500).json({ error: "stats_load_failed" });
-  }
-});
-
 
 /* -------------------------------------------------------------------- */
 /* OWNER / MODERATION ACTIONS                                           */
@@ -454,7 +420,6 @@ router.delete("/posts/:id/like", requireAuth, async (req, res) => {
  * VIEW with Redis de-dup
  */
 router.post("/posts/:id/view", tryAuth, async (req, res) => {
-
   try {
     const { id } = req.params;
     if (!isObjId(id)) return res.status(400).json({ error: "invalid_id" });
@@ -469,7 +434,7 @@ router.post("/posts/:id/view", tryAuth, async (req, res) => {
       const redisKey = `post:view:${id}:${viewerId}`;
       try {
         const setRes = await redisClient.set(redisKey, "1", {
-          EX: 600,
+          EX: 10,
           NX: true,
         });
         if (setRes !== "OK") {
@@ -636,7 +601,7 @@ router.get("/posts/trending", async (req, res) => {
   try {
     const { lga = "", limit = 20 } = req.query;
     const lim = Math.max(1, Math.min(Number(limit) || 20, 50));
-    const q = { isPublic: true, hidden: { $ne: true } };
+    const q = { isPublic: true, hidden: { $ne: true }, deleted: { $ne: true } };
     if (lga) q.lga = toUpper(String(lga));
 
     const topStats = await PostStats.find({})

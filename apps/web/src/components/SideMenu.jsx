@@ -30,11 +30,11 @@ export default function SideMenu({ me }) {
 
   const pathname = location.pathname;
   const search = location.search || "";
-  const isFeed = pathname === "/browse" && !search.includes("tab=pros");
-  const isBrowsePros =
-    pathname === "/browse" && search.includes("tab=pros");
 
-      const baseNav = [
+  const isFeed = pathname === "/browse" && !search.includes("tab=pros");
+  const isBrowsePros = pathname === "/browse" && search.includes("tab=pros");
+
+  const baseNav = [
     {
       key: "feed",
       label: "Feed",
@@ -48,7 +48,7 @@ export default function SideMenu({ me }) {
       active: isBrowsePros,
     },
 
-    // Instant Request – only when logged in
+    // Instant Request – only when logged in (feature is optional for this flow)
     me && {
       key: "instant",
       label: "Instant Request",
@@ -69,7 +69,7 @@ export default function SideMenu({ me }) {
       active: pathname === "/profile",
     },
 
-    // ✅ NEW: My Bookings (client bookings)
+    // My Bookings (client bookings)
     me && {
       key: "bookings",
       label: "My Bookings",
@@ -90,29 +90,28 @@ export default function SideMenu({ me }) {
       active: pathname === "/settings",
     },
 
-    // ✅ Only show Become a Pro when user is not already a pro
-    me && !isPro && {
-      key: "pro",
-      label: "Become a Pro",
-      to: "/become",
-      active: pathname === "/become",
-    },
+    // Only show Become a Pro when user is not already a pro
+    me &&
+      !isPro && {
+        key: "pro",
+        label: "Become a Pro",
+        to: "/become",
+        active: pathname === "/become",
+      },
   ].filter(Boolean);
-
-
 
   const socialNav = [
     {
       key: "chat",
       label: "Chat",
       to: "/chat",
-      disabled: true,
+      disabled: true, // reserved for future
     },
     {
       key: "foryou",
       label: "For You",
       to: "/browse",
-      disabled: true,
+      disabled: true, // reserved for future
     },
   ];
 
@@ -153,6 +152,7 @@ export default function SideMenu({ me }) {
     <>
       {/* mobile toggle */}
       <button
+        type="button"
         onClick={() => setOpen((o) => !o)}
         className="lg:hidden mb-3 rounded-lg border border-zinc-700 px-3 py-1 text-sm bg-black/50"
       >
@@ -185,6 +185,7 @@ export default function SideMenu({ me }) {
             {/* collapse toggle */}
             <div className="hidden lg:flex justify-end mb-1">
               <button
+                type="button"
                 onClick={() => setCollapsed((c) => !c)}
                 className="rounded-md border border-zinc-700 px-2 py-1 text-[11px] text-zinc-300 hover:bg-zinc-900"
                 title={collapsed ? "Expand" : "Collapse"}
@@ -205,7 +206,9 @@ export default function SideMenu({ me }) {
                 icon={icons[item.key]}
                 active={item.active}
                 collapsed={collapsed}
-                onClick={() => item.onClick ? item.onClick() : go(item.to)}
+                onClick={() =>
+                  item.onClick ? item.onClick() : go(item.to)
+                }
               />
             ))}
 
@@ -293,6 +296,7 @@ function MenuButton({
 }) {
   return (
     <button
+      type="button"
       onClick={!disabled ? onClick : undefined}
       className={`w-full flex items-center gap-2 px-2 py-2 rounded-lg text-sm
         ${active ? "bg-zinc-900 text-gold" : "text-zinc-200 hover:bg-zinc-900"}
@@ -303,7 +307,9 @@ function MenuButton({
         <img
           src={icon}
           alt=""
-          className={`w-5 h-5 object-contain ${collapsed ? "" : "shrink-0"}`}
+          className={`w-5 h-5 object-contain ${
+            collapsed ? "" : "shrink-0"
+          }`}
         />
       ) : (
         <span className="w-5 h-5 rounded bg-zinc-700 inline-block" />

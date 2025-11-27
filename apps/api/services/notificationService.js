@@ -1,61 +1,76 @@
-import mongoose from 'mongoose';
-import redisClient from '../redis.js';
-import { getIO } from '../sockets/index.js';
+// apps/api/services/notificationService.js
+import redisClient from "../redis.js";
+import { getIO } from "../sockets/index.js";
+import Notification from "../models/Notification.js";
 
-let Notification;
-try {
-  Notification = (await import('../models/Notification.js')).default;
-} catch (e) {
-  // fallback: use mongoose collection if model file not available
-  try {
-    Notification = mongoose.model('Notification');
-  } catch {
-    const Schema = new mongoose.Schema({
-      toUid: String,
-      fromUid: String,
-      type: String,
-      title: String,
-      body: String,
-      data: mongoose.Schema.Types.Mixed,
-      read: { type: Boolean, default: false },
-    }, { timestamps: true, collection: 'notifications' });
-    Notification = mongoose.models.Notification || mongoose.model('Notification', Schema);
-  }
-}
+/**
+ * createNotification
+ *
+ * Canonical shape is:
+ *  - ownerUid: who will receive this notification (REQUIRED)
+ *  - actorUid: who triggered it (optional)
+ *  - type: string label, e.g. "post_like", "follow", "booking_created"
+ *  - data: arbitrary payload (postId, bookingId, message, etc.)
+ *  - meta: optional extra info (priority, category, etc.)
+ *
+ * For backward compatibility, it also accepts:
+ *  - toUid  -> ownerUid
+ *  - fromUid -> actorUid
+ *  - title/body -> merged into data.title / data.body
+ */
+export async function createNotification({
+  ownerUid,
+  actorUid = null,
+  type = "generic",
+  data = {},
+  meta = {},
+  // legacy names:
+  toUid,
+  fromUid,
+  title = "",
+  body = "",
+} = {}) {
+  const finalOwnerUid = ownerUid || toUid;
+  const finalActorUid = actorUid || fromUid;
 
-export async function createNotification({ toUid, fromUid = null, type = 'generic', title = '', body = '', data = {} } = {}) {
-  if (!toUid) throw new Error('toUid required');
+  if (!finalOwnerUid) throw new Error("ownerUid (or toUid) required");
+
+  const dataPayload = {
+    ...data,
+    ...(title ? { title } : {}),
+    ...(body ? { body } : {}),
+  };
 
   const doc = await Notification.create({
-    toUid,
-    fromUid,
+    ownerUid: finalOwnerUid,
+    actorUid: finalActorUid || "",
     type,
-    title,
-    body,
-    data,
-    read: false,
+    seen: false,
+    data: dataPayload,
+    meta,
   });
 
   // increment unread counter in Redis (optional)
   try {
     if (redisClient) {
-      const key = `notifications:unread:${toUid}`;
+      const key = `notifications:unread:${finalOwnerUid}`;
       await redisClient.incr(key);
     }
   } catch (e) {
-    console.warn('[notificationService] redis incr failed', e?.message || e);
+    console.warn("[notificationService] redis incr failed", e?.message || e);
   }
 
   // emit socket event if sockets available
   try {
     const io = getIO();
     if (io) {
-      io.to(`user:${toUid}`).emit('notification:received', {
+      io.to(`user:${finalOwnerUid}`).emit("notification:received", {
         id: String(doc._id),
         type: doc.type,
-        title: doc.title,
-        body: doc.body,
+        seen: doc.seen,
         data: doc.data,
+        meta: doc.meta,
+        actorUid: doc.actorUid,
         createdAt: doc.createdAt,
       });
     }
@@ -67,26 +82,30 @@ export async function createNotification({ toUid, fromUid = null, type = 'generi
 }
 
 export async function markRead(notificationId, readerUid = null) {
-  if (!notificationId) throw new Error('notificationId required');
+  if (!notificationId) throw new Error("notificationId required");
   const n = await Notification.findById(notificationId);
-  if (!n) throw new Error('not_found');
+  if (!n) throw new Error("not_found");
 
-  if (readerUid && n.toUid !== readerUid) {
-    // don't allow marking others' notifications (enforce in route too)
-    throw new Error('forbidden');
+  if (readerUid && n.ownerUid !== readerUid) {
+    // don't allow marking others' notifications
+    throw new Error("forbidden");
   }
 
-  if (!n.read) {
-    n.read = true;
+  if (!n.seen) {
+    n.seen = true;
     await n.save();
 
-    // decrement redis counter
+    // decrement redis counter (clamped at 0)
     try {
       if (redisClient) {
-        const key = `notifications:unread:${n.toUid}`;
-        await redisClient.decr(key).catch(()=>{});
+        const key = `notifications:unread:${n.ownerUid}`;
+        const current = Number((await redisClient.get(key)) || "0");
+        const next = current > 0 ? current - 1 : 0;
+        await redisClient.set(key, String(next));
       }
-    } catch {}
+    } catch (e) {
+      // ignore redis errors
+    }
   }
   return n;
 }
@@ -94,6 +113,7 @@ export async function markRead(notificationId, readerUid = null) {
 export async function unreadCount(uid) {
   if (!uid) return 0;
 
+  // try Redis first
   try {
     if (redisClient) {
       const key = `notifications:unread:${uid}`;
@@ -106,17 +126,26 @@ export async function unreadCount(uid) {
 
   // fallback to DB count
   try {
-    return await Notification.countDocuments({ toUid: uid, read: { $ne: true } });
+    return await Notification.countDocuments({ ownerUid: uid, seen: false });
   } catch (e) {
     return 0;
   }
 }
 
-export async function listNotifications(uid, { limit = 50, before } = {}) {
-  if (!uid) throw new Error('uid required');
-  const q = { toUid: uid };
+export async function listNotifications(
+  uid,
+  { limit = 50, before = null, unreadOnly = false } = {}
+) {
+  if (!uid) throw new Error("uid required");
+  const q = { ownerUid: uid };
   if (before) q.createdAt = { $lt: new Date(before) };
-  const items = await Notification.find(q).sort({ createdAt: -1 }).limit(Math.max(1, Math.min(200, Number(limit || 50)))).lean();
+  if (unreadOnly) q.seen = false;
+
+  const items = await Notification.find(q)
+    .sort({ createdAt: -1 })
+    .limit(Math.max(1, Math.min(200, Number(limit || 50))))
+    .lean();
+
   return items;
 }
 
