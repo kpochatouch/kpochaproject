@@ -1,95 +1,81 @@
 // apps/web/src/components/NotificationBell.jsx
-import React, { useEffect, useState } from "react";
-import { connectSocket, registerSocketHandler } from "../lib/api";
-import {
-  fetchNotifications,
-  markAllSeen,
-} from "../lib/notifications";
+import React, { useState } from "react";
+import useNotifications from "../hooks/useNotifications";
 
 export default function NotificationBell() {
+  const { items, unread, markAll } = useNotifications();
   const [open, setOpen] = useState(false);
-  const [items, setItems] = useState([]);
-  const [unread, setUnread] = useState(0);
 
-  // Load initial notifications
-  useEffect(() => {
-    let alive = true;
-    (async () => {
+  async function handleToggle() {
+    const willOpen = !open;
+    setOpen(willOpen);
+
+    // When opening and we have unread, mark all as read
+    if (willOpen && unread > 0) {
       try {
-        const list = await fetchNotifications({ unreadOnly: false, limit: 30 });
-        if (!alive) return;
-        setItems(list);
-        setUnread(list.filter((it) => !it.read).length);
+        await markAll();
       } catch (e) {
-        console.warn("fetch notifications", e);
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  // Realtime socket listener
-  useEffect(() => {
-    connectSocket(); // safe, idempotent
-
-    // 🔥 FIX: backend emits "notification:received"
-    const offNotif = registerSocketHandler(
-      "notification:received",
-      (payload) => {
-        setItems((prev) => [payload, ...prev]);
-        setUnread((n) => n + 1);
-      }
-    );
-
-    return () => {
-      offNotif && offNotif();
-    };
-  }, []);
-
-  async function handleOpen() {
-    setOpen((v) => !v);
-    if (!open && unread > 0) {
-      try {
-        await markAllSeen();
-        setItems((it) => it.map((i) => ({ ...i, read: true })));
-        setUnread(0);
-      } catch (e) {
-        console.warn(e);
+        console.warn("[NotificationBell] markAll failed:", e?.message || e);
       }
     }
   }
 
   return (
     <div className="relative">
-      <button onClick={handleOpen} className="relative">
-        🔔
+      <button
+        onClick={handleToggle}
+        type="button"
+        className="relative inline-flex items-center justify-center w-9 h-9 rounded-full border border-zinc-800 bg-black/40 hover:bg-zinc-900 transition"
+      >
+        <span aria-hidden="true">🔔</span>
         {unread > 0 && (
-          <span className="absolute -top-1 -right-1 text-xs bg-red-600 rounded-full px-1 py-0.5">
-            {unread}
+          <span className="absolute -top-1 -right-1 text-[10px] bg-red-600 text-white rounded-full px-1.5 py-0.5 leading-none font-semibold">
+            {unread > 99 ? "99+" : unread}
           </span>
         )}
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-2 w-72 max-h-80 overflow-auto bg-black border border-zinc-800 rounded-lg p-2">
+        <div className="absolute right-0 mt-2 w-80 max-h-80 overflow-auto bg-black border border-zinc-800 rounded-xl p-2 shadow-lg z-40">
           {items.length === 0 ? (
-            <div className="text-xs text-zinc-500">No notifications</div>
+            <div className="text-xs text-zinc-500 px-2 py-3 text-center">
+              No notifications yet.
+            </div>
           ) : (
-            items.map((n) => (
-              <div
-                key={n._id || n.id}
-                className={`p-2 rounded ${
-                  n.read ? "opacity-80" : "bg-zinc-900/40"
-                }`}
-              >
-                <div className="text-sm font-semibold">{n.title}</div>
-                <div className="text-xs text-zinc-400">{n.body}</div>
-                <div className="text-[10px] text-zinc-500 mt-1">
-                  {new Date(n.createdAt).toLocaleString()}
-                </div>
-              </div>
-            ))
+            <div className="space-y-1">
+              {items.map((n) => {
+                const id = n._id || n.id;
+                const createdAt = n.createdAt ? new Date(n.createdAt) : null;
+                const timeText = createdAt
+                  ? createdAt.toLocaleString()
+                  : "";
+
+                return (
+                  <div
+                    key={id}
+                    className={`p-2 rounded-md text-xs ${
+                      n.read ? "opacity-80" : "bg-zinc-900/40"
+                    }`}
+                  >
+                    {n.title && (
+                      <div className="text-[11px] font-semibold mb-0.5">
+                        {n.title}
+                      </div>
+                    )}
+                    {n.body && (
+                      <div className="text-[11px] text-zinc-300">
+                        {n.body}
+                      </div>
+                    )}
+                    {timeText && (
+                      <div className="text-[10px] text-zinc-500 mt-1">
+                        {timeText}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
       )}

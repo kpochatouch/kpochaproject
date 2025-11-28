@@ -9,9 +9,17 @@ import Notification from "../models/Notification.js";
  * Canonical shape is:
  *  - ownerUid: who will receive this notification (REQUIRED)
  *  - actorUid: who triggered it (optional)
- *  - type: string label, e.g. "post_like", "follow", "booking_created"
- *  - data: arbitrary payload (postId, bookingId, message, etc.)
+ *  - type: string label, e.g. "post_like", "follow", "booking_created", "chat_message"
+ *  - data: arbitrary payload (postId, bookingId, message, room, etc.)
  *  - meta: optional extra info (priority, category, etc.)
+ *
+ * For "chat_message" we expect callers (e.g. sockets) to pass:
+ *  - type: "chat_message"
+ *  - data: {
+ *      room,        // "dm:uidA:uidB"
+ *      fromUid,     // sender UID
+ *      bodyPreview, // text.slice(0, 140)
+ *    }
  *
  * For backward compatibility, it also accepts:
  *  - toUid  -> ownerUid

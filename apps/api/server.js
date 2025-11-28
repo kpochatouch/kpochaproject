@@ -50,6 +50,7 @@ import notificationsRoutes from "./routes/notifications.js";
 import matcherRouter from "./routes/matcher.js";
 import { createNotification } from "./services/notificationService.js";
 import activityRoutes from "./routes/activity.js";
+import chatRoutes from "./routes/chat.js";
 
 
 dotenv.config();
@@ -1166,7 +1167,7 @@ app.use("/api", riskRoutes({ requireAuth, requireAdmin, Application }));
 app.use("/api", awsLivenessRoutes({ requireAuth }));
 app.use("/api", notificationsRoutes);
 app.use("/api", activityRoutes);
-
+app.use("/api", chatRoutes({ requireAuth }));
 
 
 // admin pros

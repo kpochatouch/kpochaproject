@@ -1,6 +1,7 @@
 // apps/web/src/components/SideMenu.jsx
 import { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
+import useNotifications from "../hooks/useNotifications"; // <- unread badge
 
 const icons = {
   feed: "/menu/feed.png",
@@ -21,6 +22,7 @@ const icons = {
 export default function SideMenu({ me }) {
   const navigate = useNavigate();
   const location = useLocation();
+  const { unread = 0 } = useNotifications(); // use unread from hook
 
   const [open, setOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
@@ -102,21 +104,23 @@ export default function SideMenu({ me }) {
   ].filter(Boolean);
 
   const socialNav = [
-  {
-    key: "chat",
-    label: "Chat",
-    to: "/chat",
-    disabled: true, // still reserved
-  },
-  {
-    key: "foryou",
-    label: "For You",
-    to: "/for-you",         // 👈 go to For You route
-    active: isForYou,       // 👈 highlight when active
-    disabled: false,        // 👈 now clickable
-  },
-];
-
+    {
+      key: "chat",
+      label: "Chat",
+      // route changed to inbox (full inbox view). Keep active for /chat legacy too.
+      to: "/inbox",
+      active: pathname.startsWith("/inbox") || pathname.startsWith("/chat"),
+      disabled: false,
+      badge: unread || 0,
+    },
+    {
+      key: "foryou",
+      label: "For You",
+      to: "/for-you",
+      active: isForYou,
+      disabled: false,
+    },
+  ];
 
   const proNav = isPro
     ? [
@@ -221,17 +225,17 @@ export default function SideMenu({ me }) {
               </div>
             )}
             {socialNav.map((item) => (
-            <MenuButton
-              key={item.key}
-              label={item.label}
-              icon={icons[item.key]}
-              active={item.active}            // 👈 add this
-              collapsed={collapsed}
-              disabled={item.disabled}
-              onClick={() => !item.disabled && go(item.to)}
-            />
-          ))}
-
+              <MenuButton
+                key={item.key}
+                label={item.label}
+                icon={icons[item.key]}
+                active={item.active} // 👈 add this
+                collapsed={collapsed}
+                disabled={item.disabled}
+                badge={item.badge}
+                onClick={() => !item.disabled && go(item.to)}
+              />
+            ))}
 
             {proNav.length ? (
               <>
@@ -298,6 +302,7 @@ function MenuButton({
   active = false,
   disabled = false,
   collapsed = false,
+  badge = 0,
 }) {
   return (
     <button
@@ -312,15 +317,22 @@ function MenuButton({
         <img
           src={icon}
           alt=""
-          className={`w-5 h-5 object-contain ${
-            collapsed ? "" : "shrink-0"
-          }`}
+          className={`w-5 h-5 object-contain ${collapsed ? "" : "shrink-0"}`}
         />
       ) : (
         <span className="w-5 h-5 rounded bg-zinc-700 inline-block" />
       )}
       {!collapsed && <span className="flex-1 text-left">{label}</span>}
+
+      {/* small active dot */}
       {active && !collapsed ? <span className="text-[8px]">●</span> : null}
+
+      {/* badge (for unread counts, etc) */}
+      {!collapsed && badge > 0 && (
+        <span className="ml-2 bg-red-600 text-white text-[10px] rounded-full px-1.5 py-0.5 font-semibold">
+          {badge > 99 ? "99+" : badge}
+        </span>
+      )}
     </button>
   );
 }

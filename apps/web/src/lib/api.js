@@ -1,7 +1,7 @@
-// apps/web/src/lib/api.js
 import axios from "axios";
 import { getAuth, onAuthStateChanged } from "firebase/auth";
-import io from "socket.io-client"; 
+import io from "socket.io-client";
+
 /* =========================================
    BASE URL (normalize, no trailing slash, no /api suffix)
    ========================================= */
@@ -27,7 +27,6 @@ export const api = axios.create({
   },
   withCredentials: true, // 👈 allow cookie (anonId) to be sent and received
 });
-
 
 /* =========================================
    AUTH HANDLING
@@ -306,8 +305,61 @@ export function joinBookingRoom(bookingId, who = "user") {
   });
 }
 
+/* =========================
+   CHAT (DM + Inbox)
+   ========================= */
 
+/**
+ * Get DM history between the logged-in user and a peer.
+ * Backend: GET /api/chat/with/:peerUid
+ * Returns: { room, items: [...] }
+ */
+export async function getChatWith(peerUid, params = {}) {
+  if (!peerUid) throw new Error("peerUid required");
+  const { data } = await api.get(
+    `/api/chat/with/${encodeURIComponent(peerUid)}`,
+    { params }
+  );
+  return data; // { room, items }
+}
 
+/**
+ * Inbox list: one entry per peer, with unreadCount.
+ * Backend: GET /api/chat/inbox
+ * Returns: { items: [ { peerUid, room, lastBody, lastFromUid, lastAt, unreadCount }, ... ] }
+ */
+export async function getChatInbox() {
+  const { data } = await api.get("/api/chat/inbox");
+  return data;
+}
+
+/**
+ * Mark a specific DM thread as read.
+ * Backend: PUT /api/chat/thread/:peerUid/read
+ * Returns: { ok: true, updatedCount }
+ */
+export async function markThreadRead(peerUid) {
+  if (!peerUid) throw new Error("peerUid required");
+  const { data } = await api.put(
+    `/api/chat/thread/${encodeURIComponent(peerUid)}/read`
+  );
+  return data;
+}
+
+/**
+ * Mark any room as read (DM or booking).
+ * Backend: PUT /api/chat/room/:room/read
+ * Example room values:
+ *   - dm:<uidA>:<uidB>
+ *   - booking:<bookingId>
+ */
+export async function markRoomRead(room) {
+  if (!room) throw new Error("room required");
+  const { data } = await api.put(
+    `/api/chat/room/${encodeURIComponent(room)}/read`
+  );
+  return data;
+}
 
 /* Notification REST API helpers */
 export async function listNotifications({ limit = 50, before = null } = {}) {
@@ -328,7 +380,9 @@ export async function getNotificationsCounts() {
 }
 
 export async function markNotificationRead(id) {
-  const { data } = await api.put(`/api/notifications/${encodeURIComponent(id)}/read`);
+  const { data } = await api.put(
+    `/api/notifications/${encodeURIComponent(id)}/read`
+  );
   return data;
 }
 
@@ -337,6 +391,11 @@ export async function markAllNotificationsRead() {
   return data;
 }
 
+// Aliases for a more semantic naming style
+export const fetchNotifications = listNotifications;
+export const fetchNotificationCounts = getNotificationsCounts;
+export const markNotificationSeen = markNotificationRead;
+export const markAllNotificationsSeen = markAllNotificationsRead;
 
 /* small helper to drop empties */
 function stripEmpty(obj = {}) {
@@ -475,10 +534,9 @@ export async function createInstantBooking(payload) {
   return data;
 }
 export async function setBookingReference(bookingId, paystackReference) {
-  const { data } = await api.put(
-    `/api/bookings/${bookingId}/reference`,
-    { paystackReference }
-  );
+  const { data } = await api.put(`/api/bookings/${bookingId}/reference`, {
+    paystackReference,
+  });
   return data.ok === true;
 }
 export async function getMyBookings() {
@@ -506,10 +564,7 @@ export async function acceptBooking(id) {
   return data.booking;
 }
 export async function declineBooking(id, payload = {}) {
-  const { data } = await api.put(
-    `/api/bookings/${id}/decline`,
-    payload
-  );
+  const { data } = await api.put(`/api/bookings/${id}/decline`, payload);
   return data.booking;
 }
 export async function completeBooking(id, payload = {}) {
@@ -595,7 +650,6 @@ export async function getMyReviewOnClient(clientUid) {
   return data; // null or review
 }
 
-
 /* =========================================
    WALLET (client + pro)
    ========================================= */
@@ -649,7 +703,6 @@ export async function payBookingWithWallet(bookingId) {
   });
   return data;
 }
-
 
 /* =========================================
    PIN
@@ -713,9 +766,7 @@ export async function getClientProfileForBooking(clientUid, bookingId) {
   return data;
 }
 export async function getClientProfileAdmin(clientUid) {
-  const { data } = await api.get(
-    `/api/profile/client/${clientUid}/admin`
-  );
+  const { data } = await api.get(`/api/profile/client/${clientUid}/admin`);
   return data;
 }
 
@@ -727,25 +778,24 @@ export async function updateProProfile(payload) {
 export async function getPublicProProfile(proId) {
   const { data } = await api.get(`/api/profile/pro/${proId}`);
   return data;
-
 }
 
 export async function getPublicProfile(username) {
   if (!username) throw new Error("username required");
-  const { data } = await api.get(`/api/profile/public/${encodeURIComponent(username)}`);
+  const { data } = await api.get(
+    `/api/profile/public/${encodeURIComponent(username)}`
+  );
   return data; // { ok: true, profile, posts: { items, cursor } }
 }
 
-// -- insert this immediately after getPublicProfile --
-
+// GET public profile by UID (same shape as getPublicProfile)
 export async function getPublicProfileByUid(uid) {
   if (!uid) throw new Error("uid required");
   const { data } = await api.get(
     `/api/profile/public-by-uid/${encodeURIComponent(uid)}`
   );
-  return data; // same shape: { ok: true, profile, posts: { items, cursor } }
+  return data; // { ok: true, profile, posts: { items, cursor } }
 }
-
 
 export async function getProProfileAdmin(proId) {
   const { data } = await api.get(`/api/profile/pro/${proId}/admin`);
@@ -756,4 +806,3 @@ export async function ensureClientProfile() {
   const { data } = await api.post("/api/profile/ensure");
   return data;
 }
-
