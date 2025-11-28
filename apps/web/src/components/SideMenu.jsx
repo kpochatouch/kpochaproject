@@ -33,6 +33,7 @@ export default function SideMenu({ me }) {
 
   const isFeed = pathname === "/browse" && !search.includes("tab=pros");
   const isBrowsePros = pathname === "/browse" && search.includes("tab=pros");
+  const isForYou = pathname.startsWith("/for-you");
 
   const baseNav = [
     {
@@ -101,19 +102,21 @@ export default function SideMenu({ me }) {
   ].filter(Boolean);
 
   const socialNav = [
-    {
-      key: "chat",
-      label: "Chat",
-      to: "/chat",
-      disabled: true, // reserved for future
-    },
-    {
-      key: "foryou",
-      label: "For You",
-      to: "/browse",
-      disabled: true, // reserved for future
-    },
-  ];
+  {
+    key: "chat",
+    label: "Chat",
+    to: "/chat",
+    disabled: true, // still reserved
+  },
+  {
+    key: "foryou",
+    label: "For You",
+    to: "/for-you",         // 👈 go to For You route
+    active: isForYou,       // 👈 highlight when active
+    disabled: false,        // 👈 now clickable
+  },
+];
+
 
   const proNav = isPro
     ? [
@@ -218,15 +221,17 @@ export default function SideMenu({ me }) {
               </div>
             )}
             {socialNav.map((item) => (
-              <MenuButton
-                key={item.key}
-                label={item.label}
-                icon={icons[item.key]}
-                collapsed={collapsed}
-                disabled={item.disabled}
-                onClick={() => !item.disabled && go(item.to)}
-              />
-            ))}
+            <MenuButton
+              key={item.key}
+              label={item.label}
+              icon={icons[item.key]}
+              active={item.active}            // 👈 add this
+              collapsed={collapsed}
+              disabled={item.disabled}
+              onClick={() => !item.disabled && go(item.to)}
+            />
+          ))}
+
 
             {proNav.length ? (
               <>

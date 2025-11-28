@@ -66,6 +66,17 @@ export default function LiveActivity({ ownerUid }) {
 
   if (!ownerUid) return null;
 
+  // 🚫 For PUBLIC profile, hide private activity:
+  // - bookings (should be private)
+  // - comments (often tied to private posts/clients)
+  const visibleItems = items.filter((it) => {
+    if (!it) return false;
+    if (it.kind === "booking") return false;
+    if (it.kind === "comment") return false;
+    return true; // keep "post", "follow", etc.
+  });
+
+
   const handleClickPost = (postId) => {
     if (!postId) return;
     // ⚠️ If your post details route is different, just adjust this path.
@@ -94,55 +105,61 @@ export default function LiveActivity({ ownerUid }) {
 
   return (
     <div className="space-y-2">
-      {items.length === 0 && (
+      {visibleItems.length === 0 && (
         <div className="text-xs text-zinc-500">No recent activity</div>
       )}
 
-      {items.slice(0, 10).map((it, idx) => {
-      const label = formatLabel(it);
-      const text = formatText(it);
-      const ts = it.createdAt ? new Date(it.createdAt) : null;
 
-      // 🔑 Try to discover the post id from different shapes
-      const postId =
-        it.targetPostId ||
-        it.postId ||
-        it.targetId ||
-        (it.payload && (it.payload.postId || it.payload.targetPostId || it.payload._id)) ||
-        null;
+      {visibleItems.slice(0, 10).map((it, idx) => {
+  const label = formatLabel(it);
+  const text = formatText(it);
+  const ts = it.createdAt ? new Date(it.createdAt) : null;
 
-      const clickable = !!postId;
+  // Only treat activity of kind "post" as pointing to a post.
+  let postId = null;
 
-      return (
-        <button
-          key={idx}
-          type="button"
-          onClick={() => (clickable ? handleClickPost(postId) : null)}
-          className={[
-            "w-full text-left rounded-md px-2 py-1.5",
-            "bg-zinc-950/40 border border-zinc-800/70",
-            clickable ? "hover:bg-zinc-900 cursor-pointer" : "cursor-default",
-          ].join(" ")}
-        >
-          <div className="text-[11px] uppercase tracking-wide text-zinc-500">
-            {label}
-          </div>
+  if (it.kind === "post") {
+    const p = it.payload || {};
+    postId =
+      it.targetPostId ||
+      it.postId ||
+      p.postId ||
+      p._id ||
+      p.id ||
+      null;
+  }
 
-          {text ? (
-            <div className="mt-0.5 text-xs text-zinc-200 line-clamp-2">
-              {text}
-            </div>
-          ) : null}
+  const clickable = it.kind === "post" && !!postId;
 
-          {ts && (
-            <div className="mt-0.5 text-[10px] text-zinc-600">
-              {ts.toLocaleString()}
-            </div>
-          )}
-        </button>
-      );
-    })}
+  return (
+    <button
+      key={idx}
+      type="button"
+      onClick={() => (clickable ? handleClickPost(postId) : null)}
+      className={[
+        "w-full text-left rounded-md px-2 py-1.5",
+        "bg-zinc-950/40 border border-zinc-800/70",
+        clickable ? "hover:bg-zinc-900 cursor-pointer" : "cursor-default",
+      ].join(" ")}
+    >
+      <div className="text-[11px] uppercase tracking-wide text-zinc-500">
+        {label}
+      </div>
 
+      {text ? (
+        <div className="mt-0.5 text-xs text-zinc-200 line-clamp-2">
+          {text}
+        </div>
+      ) : null}
+
+      {ts && (
+        <div className="mt-0.5 text-[10px] text-zinc-600">
+          {ts.toLocaleString()}
+        </div>
+      )}
+    </button>
+  );
+})}
     </div>
   );
 }

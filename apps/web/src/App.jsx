@@ -47,6 +47,7 @@ const Chat = lazy(() => import("./pages/Chat.jsx"));
 const Compose = lazy(() => import("./pages/Compose.jsx"));
 const PostDetail = lazy(() => import("./pages/PostDetail.jsx"));
 const PublicProfile = lazy(() => import("./pages/PublicProfile.jsx"));
+const ForYou = lazy(() => import("./pages/ForYou.jsx"));
 
 /* ---------- Chatbase hook ---------- */
 function useChatbase() {
@@ -207,7 +208,26 @@ export default function App() {
             <Route path="/" element={<Home />} />
             <Route path="/browse" element={<Browse />} />
             <Route path="/post/:id" element={<PostDetail />} />
+
+            <Route
+              path="/for-you"
+              element={
+                <RequireAuth>
+                  <ForYou />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/for-you/:id"
+              element={
+                <RequireAuth>
+                  <ForYou />
+                </RequireAuth>
+              }
+            />
+
             <Route path="/login" element={<Login />} />
+
             <Route path="/signup" element={<Signup />} />
             <Route path="/legal" element={<Legal />} />
             <Route path="/legal/*" element={<Legal />} />

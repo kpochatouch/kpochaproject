@@ -103,6 +103,10 @@ export default function Navbar() {
     Browse
   </NavLink>
 
+   <NavLink to="/for-you" className={navLinkClass}>
+    For You
+  </NavLink>
+
   {/* Instant Request (desktop) - WILDCARD MODE */}
 {token && (
   <button
@@ -214,6 +218,14 @@ export default function Navbar() {
         className={navLinkClass}
       >
         Browse
+      </NavLink>
+
+      <NavLink
+        to="/for-you"
+        onClick={() => setOpen(false)}
+        className={navLinkClass}
+      >
+        For You
       </NavLink>
 
       {/* Instant Request (mobile) - WILDCARD MODE */}

@@ -252,6 +252,118 @@ router.get("/posts/:id", tryAuth, async (req, res) => {
   }
 });
 
+// NEXT video for For You
+router.get("/posts/:id/next", tryAuth, async (req, res) => {
+  try {
+    const id = req.params.id;
+    const current = await Post.findById(id).lean();
+    if (!current) return res.json({ next: null, queue: [] });
+
+    const viewerUid = req.user?.uid || null;
+
+    const baseFilter = {
+      isPublic: true,
+      hidden: { $ne: true },
+      deleted: { $ne: true },
+      media: { $elemMatch: { type: "video" } },
+      _id: { $ne: current._id }, // never return the same post again
+    };
+
+    // 1. Same pro (other videos from this stylist)
+    const samePro = await Post.find({
+      ...baseFilter,
+      proOwnerUid: current.proOwnerUid,
+    })
+      .sort({ createdAt: -1 })
+      .limit(5)
+      .lean();
+
+    // 2. Same LGA (local content)
+    const sameLga = await Post.find({
+      ...baseFilter,
+      lga: current.lga,
+    })
+      .sort({ createdAt: -1 })
+      .limit(10)
+      .lean();
+
+    // 3. Videos this viewer has liked (from stats)
+    let likedPosts = [];
+    if (viewerUid) {
+      const likedStats = await PostStats.find({
+        likedBy: viewerUid,
+      })
+        .sort({ updatedAt: -1 })
+        .limit(50)
+        .lean();
+
+      const likedIds = likedStats.map((s) => s.postId);
+      if (likedIds.length) {
+        likedPosts = await Post.find({
+          ...baseFilter,
+          _id: { $in: likedIds, $ne: current._id },
+        }).lean();
+      }
+    }
+
+    // 4. Global trending (by trendingScore)
+    const topStats = await PostStats.find({})
+      .sort({ trendingScore: -1 })
+      .limit(100)
+      .lean();
+
+    const trendingIds = topStats.map((s) => s.postId);
+    let trendingPosts = [];
+    if (trendingIds.length) {
+      trendingPosts = await Post.find({
+        ...baseFilter,
+        _id: { $in: trendingIds },
+      }).lean();
+
+      const order = new Map(trendingIds.map((pid, idx) => [String(pid), idx]));
+      trendingPosts.sort(
+        (a, b) =>
+          (order.get(String(a._id)) ?? 0) - (order.get(String(b._id)) ?? 0)
+      );
+    }
+
+    // 5. Global recent fallback (in case stats are empty)
+    const recentGlobal = await Post.find(baseFilter)
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .lean();
+
+    // Build final queue (dedup by _id, keep order)
+    const queueRaw = [
+      ...samePro,
+      ...sameLga,
+      ...likedPosts,
+      ...trendingPosts,
+      ...recentGlobal,
+    ];
+
+    const seen = new Set();
+    const queue = [];
+    for (const p of queueRaw) {
+      const key = String(p._id);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      queue.push(p);
+    }
+
+    const next = queue[0] || null;
+
+    return res.json({
+      next: next ? sanitizePostForClient(next) : null,
+      queue: queue.map(sanitizePostForClient),
+    });
+  } catch (e) {
+    console.error("[posts:next] error", e?.message || e);
+    return res.json({ next: null, queue: [] });
+  }
+});
+
+
 /* -------------------------------------------------------------------- */
 /* OWNER / MODERATION ACTIONS                                           */
 /* -------------------------------------------------------------------- */
@@ -593,6 +705,91 @@ router.delete("/posts/:id/save", requireAuth, async (req, res) => {
     return res.status(500).json({ error: "unsave_failed" });
   }
 });
+
+// --------------------------------------------------------------------
+// FOR YOU START (first video for /for-you without :id)
+// --------------------------------------------------------------------
+router.get("/posts/for-you/start", tryAuth, async (req, res) => {
+  try {
+    const { lga = "" } = req.query;
+    const viewerUid = req.user?.uid || null;
+
+    const baseQuery = {
+      isPublic: true,
+      hidden: { $ne: true },
+      deleted: { $ne: true },
+      media: { $elemMatch: { type: "video" } },
+    };
+    if (lga) baseQuery.lga = toUpper(String(lga));
+
+    let candidateIds = [];
+
+    // 1. videos this viewer has liked
+    if (viewerUid) {
+      const likedStats = await PostStats.find({ likedBy: viewerUid })
+        .sort({ updatedAt: -1 })
+        .limit(50)
+        .lean();
+      candidateIds.push(...likedStats.map((s) => s.postId));
+    }
+
+    // 2. top trending videos
+    const topStats = await PostStats.find({})
+      .sort({ trendingScore: -1 })
+      .limit(100)
+      .lean();
+    candidateIds.push(...topStats.map((s) => s.postId));
+
+    // dedupe candidate IDs
+    const seenIds = new Set();
+    candidateIds = candidateIds.filter((pid) => {
+      const key = String(pid);
+      if (seenIds.has(key)) return false;
+      seenIds.add(key);
+      return true;
+    });
+
+    let posts = [];
+    if (candidateIds.length) {
+      posts = await Post.find({
+        _id: { $in: candidateIds },
+        ...baseQuery,
+      }).lean();
+
+      const order = new Map(
+        candidateIds.map((pid, idx) => [String(pid), idx])
+      );
+      posts.sort(
+        (a, b) =>
+          (order.get(String(a._id)) ?? 0) - (order.get(String(b._id)) ?? 0)
+      );
+    }
+
+    // 3. fallback – newest video posts if nothing matched
+    if (!posts.length) {
+      posts = await Post.find(baseQuery)
+        .sort({ createdAt: -1 })
+        .limit(20)
+        .lean();
+    }
+
+    if (!posts.length) {
+      return res.json({ post: null, next: null });
+    }
+
+    const primary = posts[0];
+    const next = posts[1] || null;
+
+    return res.json({
+      post: sanitizePostForClient(primary),
+      next: next ? sanitizePostForClient(next) : null,
+    });
+  } catch (err) {
+    console.error("[posts:for-you:start] error:", err);
+    return res.status(500).json({ error: "for_you_start_failed" });
+  }
+});
+
 
 /* -------------------------------------------------------------------- */
 /* TRENDING                                                             */
