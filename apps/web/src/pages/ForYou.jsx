@@ -1,5 +1,5 @@
 // apps/web/src/pages/ForYou.jsx
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import { useMe } from "../context/MeContext.jsx";
@@ -26,18 +26,195 @@ function formatTime(sec = 0) {
   return `${m}:${s < 10 ? "0" : ""}${s}`;
 }
 
+/**
+ * PARENT: vertical "For You" feed
+ * - Loads first post (from :id or /for-you/start)
+ * - Loads the next one
+ * - On scroll-near-bottom, keeps loading next posts
+ */
 export default function ForYou() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { me } = useMe();
 
+  const [feedPosts, setFeedPosts] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [post, setPost] = useState(null);
   const [error, setError] = useState("");
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [endOfFeed, setEndOfFeed] = useState(false);
 
-  // next recommended post (for next/prev/swipe)
-  const [nextPost, setNextPost] = useState(null);
-  const [loadingNext, setLoadingNext] = useState(false);
+  // initial load (first + next)
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadInitial() {
+      setLoading(true);
+      setError("");
+      setFeedPosts([]);
+      setEndOfFeed(false);
+
+      try {
+        let firstPost = null;
+
+        if (id) {
+          const { data } = await api.get(`/api/posts/${id}`);
+          firstPost = data || null;
+        } else {
+          const { data } = await api.get("/api/posts/for-you/start");
+          firstPost = data?.post || data?.start || null;
+        }
+
+        if (!firstPost || !firstPost._id) {
+          throw new Error("No videos available right now.");
+        }
+
+        const posts = [firstPost];
+
+        // try to pre-fetch the very next post
+        try {
+          const resNext = await api.get(`/api/posts/${firstPost._id}/next`);
+          const nxt = resNext?.data?.next || null;
+          if (nxt && nxt._id && nxt._id !== firstPost._id) {
+            posts.push(nxt);
+          }
+        } catch {
+          // ignore – we'll still show the first post
+        }
+
+        if (!cancelled) {
+          setFeedPosts(posts);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err?.message || "Unable to load For You feed.");
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    loadInitial();
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
+  // load the "next" post based on the last item in the feed
+  const loadMore = useCallback(async () => {
+    if (loadingMore || endOfFeed) return;
+    if (!feedPosts.length) return;
+
+    const last = feedPosts[feedPosts.length - 1];
+    if (!last || !last._id) return;
+
+    setLoadingMore(true);
+    try {
+      const res = await api.get(`/api/posts/${last._id}/next`);
+      const nxt = res?.data?.next || null;
+
+      if (!nxt || !nxt._id || nxt._id === last._id) {
+        setEndOfFeed(true);
+        return;
+      }
+
+      // avoid duplicates
+      const already = feedPosts.some((p) => p._id === nxt._id);
+      if (already) {
+        setEndOfFeed(true);
+        return;
+      }
+
+      setFeedPosts((prev) => [...prev, nxt]);
+    } catch {
+      setEndOfFeed(true);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [feedPosts, loadingMore, endOfFeed]);
+
+  // window scroll listener → when close to bottom, loadMore()
+  useEffect(() => {
+    function onScroll() {
+      if (loadingMore || endOfFeed) return;
+
+      const doc = document.documentElement;
+      const scrollBottom = window.innerHeight + window.scrollY;
+      const threshold = doc.scrollHeight - 600; // px from bottom
+
+      if (scrollBottom >= threshold) {
+        loadMore();
+      }
+    }
+
+    window.addEventListener("scroll", onScroll);
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [loadMore, loadingMore, endOfFeed]);
+
+  if (loading) return <RouteLoader full />;
+
+  if (error) {
+    return (
+      <div className="max-w-xl mx-auto p-4">
+        <div className="bg-[#151515] border border-[#2a2a2a] rounded-xl p-6">
+          <div className="text-lg font-semibold mb-2">For You</div>
+          <div className="text-sm text-gray-400">{error}</div>
+          <div className="mt-4">
+            <Link to="/browse" className="text-gold">
+              ← Back to feed
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!feedPosts.length) {
+    return (
+      <div className="max-w-xl mx-auto p-4">
+        <div className="bg-[#151515] border border-[#2a2a2a] rounded-xl p-6">
+          <div className="text-lg font-semibold mb-2">For You</div>
+          <div className="text-sm text-gray-400">No videos available right now.</div>
+          <div className="mt-4">
+            <Link to="/browse" className="text-gold">
+              ← Back to feed
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-xl mx-auto pb-16">
+      {feedPosts.map((post) => (
+        <ForYouPost key={post._id} post={post} me={me} navigate={navigate} />
+      ))}
+
+      {loadingMore && (
+        <div className="px-4 py-3 text-[11px] text-gray-500">Loading more…</div>
+      )}
+
+      {endOfFeed && (
+        <div className="px-4 py-4 text-[11px] text-gray-600 text-center">
+          You&apos;ve reached the end for now.
+        </div>
+      )}
+
+      <div className="px-4 py-6">
+        <Link to="/browse" className="text-gold">
+          ← Back to feed
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * CHILD: single post in the For You feed
+ * (all the video player + side buttons, comments, etc.)
+ */
+function ForYouPost({ post, me, navigate }) {
+  const id = post?._id;
 
   const [stats, setStats] = useState({
     viewsCount: 0,
@@ -57,7 +234,7 @@ export default function ForYou() {
   const [loadingLike, setLoadingLike] = useState(false);
   const [loadingSave, setLoadingSave] = useState(false);
 
-  // media bits (video only here)
+  // media bits (video)
   const videoRef = useRef(null);
   const menuRef = useRef(null);
   const [muted, setMuted] = useState(true);
@@ -71,85 +248,15 @@ export default function ForYou() {
   const watchAccumRef = useRef(0);
   const lastWatchTsRef = useRef(0);
 
-  // swipe up/down state
-  const touchStartYRef = useRef(null);
-  const touchStartXRef = useRef(null);
-
-  // controls visibility (play/pause, mute, scrub bar)
   const [showControls, setShowControls] = useState(false);
-
-  // previous video stack for For You navigation
-  const historyRef = useRef([]); // stack of previous ids
   const [videoError, setVideoError] = useState("");
+  const [broken, setBroken] = useState(false);
 
-  // If no :id in the URL, bootstrap from a starting recommended video
-  useEffect(() => {
-    if (id) return; // we already have an id, no need to bootstrap
-
-    let alive = true;
-    setLoading(true);
-    setError("");
-
-    (async () => {
-      try {
-        const { data } = await api.get("/api/posts/for-you/start");
-        const start = data?.post || data?.start || null;
-        const next = data?.next || null;
-
-        if (!alive) return;
-
-        if (start && start._id) {
-          navigate(`/for-you/${start._id}`, {
-            replace: true,
-            state: { bootstrapNext: next || null },
-          });
-        } else {
-          setError("No videos available right now.");
-          setLoading(false);
-        }
-      } catch (err) {
-        if (!alive) return;
-        setError("Unable to load For You feed.");
-        setLoading(false);
-      }
-    })();
-
-    return () => {
-      alive = false;
-    };
-  }, [id, navigate]);
-
-  // ---------- fetch post ----------
+  // load stats for this post
   useEffect(() => {
     if (!id) return;
     let on = true;
-    setLoading(true);
-    setError("");
-    setVideoError("");
-    setPost(null);
 
-    (async () => {
-      try {
-        const { data } = await api.get(`/api/posts/${id}`);
-        if (!on) return;
-        setPost(data || null);
-      } catch {
-        if (!on) return;
-        setError("Post not found.");
-      } finally {
-        if (on) setLoading(false);
-      }
-    })();
-
-    return () => {
-      on = false;
-    };
-  }, [id]);
-
-  // load stats
-  useEffect(() => {
-    if (!id) return;
-    let on = true;
     (async () => {
       try {
         const res = await api.get(`/api/posts/${id}/stats`);
@@ -190,12 +297,13 @@ export default function ForYou() {
         // ignore
       }
     })();
+
     return () => {
       on = false;
     };
   }, [id]);
 
-  // load comments
+  // load comments for this post
   useEffect(() => {
     if (!id) return;
     let on = true;
@@ -212,37 +320,7 @@ export default function ForYou() {
     };
   }, [id]);
 
-  // load next recommended post
-  useEffect(() => {
-    if (!id) return;
-    let active = true;
-
-    setLoadingNext(true);
-    setNextPost(null);
-
-    (async () => {
-      try {
-        const res = await api.get(`/api/posts/${id}/next`);
-        if (!active) return;
-        const nxt = res?.data?.next || null;
-        if (nxt && nxt._id && nxt._id !== id) {
-          setNextPost(nxt);
-        } else {
-          setNextPost(null);
-        }
-      } catch {
-        if (active) setNextPost(null);
-      } finally {
-        if (active) setLoadingNext(false);
-      }
-    })();
-
-    return () => {
-      active = false;
-    };
-  }, [id]);
-
-  // reset watch + timers on post change
+  // reset watchers when post changes
   useEffect(() => {
     watchAccumRef.current = 0;
     lastWatchTsRef.current = 0;
@@ -252,6 +330,7 @@ export default function ForYou() {
     setUserHasInteracted(false);
     setMuted(true);
     setShowControls(false);
+    setVideoError("");
   }, [id]);
 
   // click-outside to close menu
@@ -315,7 +394,7 @@ export default function ForYou() {
     }
   }
 
-  // ---------- LIKE / SAVE / SHARE ----------
+  // LIKE / SAVE / SHARE
   async function toggleLike() {
     if (!me) return alert("Login to like");
     if (!id || loadingLike) return;
@@ -407,7 +486,7 @@ export default function ForYou() {
     }
   }
 
-  // ---------- COMMENTS ----------
+  // COMMENTS
   async function submitComment(e) {
     e?.preventDefault();
     if (!me) return alert("Login to comment");
@@ -481,7 +560,7 @@ export default function ForYou() {
     }
   }
 
-  // ---------- VIDEO CONTROLS ----------
+  // VIDEO CONTROLS
   function onClickVideo() {
     const vid = videoRef.current;
     if (!vid) return;
@@ -531,7 +610,6 @@ export default function ForYou() {
     if (!vid) return;
     setDuration(vid.duration || 0);
 
-    // auto-play muted on load
     vid.muted = true;
     setMuted(true);
     vid.play().catch(() => {});
@@ -541,7 +619,6 @@ export default function ForYou() {
     const vid = videoRef.current;
     if (!vid) return;
 
-    // UI update (throttled)
     if (!seeking) {
       const nowUi =
         typeof performance !== "undefined" && performance.now
@@ -553,7 +630,6 @@ export default function ForYou() {
       }
     }
 
-    // watch-time accumulation
     if (vid.paused) {
       lastWatchTsRef.current = 0;
       return;
@@ -579,8 +655,6 @@ export default function ForYou() {
       watchAccumRef.current = 0;
       sendViewTick();
     }
-
-    // video just loops – no auto-jump
   }
 
   function onSeekStart() {
@@ -630,8 +704,9 @@ export default function ForYou() {
         return;
       }
       if (vid.requestFullscreen) return void vid.requestFullscreen();
-      const anyVid = /** @type {any} */ (vid);
-      if (anyVid.webkitEnterFullscreen) return void anyVid.webkitEnterFullscreen();
+      const anyVid = vid;
+      if (anyVid.webkitEnterFullscreen)
+        return void anyVid.webkitEnterFullscreen();
     } catch {
       // ignore
     }
@@ -639,59 +714,16 @@ export default function ForYou() {
 
   function handleVideoError() {
     console.warn("Video failed to load");
-    setVideoError("This video cannot be played. You can go Next or Back.");
+    // This will likely include the old Cloudinary-suspended videos
+    setVideoError("This video cannot be played (it may have been removed).");
+    setBroken(true);
   }
 
-  // swipe up/down → next / previous
-  function handleSwipeStart(e) {
-    const t = e.touches?.[0];
-    if (!t) return;
-    touchStartYRef.current = t.clientY;
-    touchStartXRef.current = t.clientX;
-  }
-
-  function handleSwipeEnd(e) {
-    const t = e.changedTouches?.[0];
-    if (!t) return;
-
-    const startY = touchStartYRef.current;
-    const startX = touchStartXRef.current;
-    if (startY == null || startX == null) return;
-
-    const dy = startY - t.clientY;
-    const dx = t.clientX - startX;
-
-    const minDistance = 60;
-    if (Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > minDistance) {
-      if (dy > 0) {
-        // swipe up → next
-        goNextManual();
-      } else {
-        // swipe down → previous
-        goPrevManual();
-      }
-    }
-
-    touchStartYRef.current = null;
-    touchStartXRef.current = null;
-  }
-
-  // desktop hover → show playback controls (play/pause/mute/seek)
   function handleMouseEnter() {
     setShowControls(true);
   }
   function handleMouseLeave() {
     setShowControls(false);
-  }
-
-  // scroll wheel → next / previous (vertical feel)
-  function handleWheel(e) {
-    if (Math.abs(e.deltaY) < 40) return;
-    if (e.deltaY > 0) {
-      goNextManual();
-    } else {
-      goPrevManual();
-    }
   }
 
   // ---------- derived ----------
@@ -704,6 +736,11 @@ export default function ForYou() {
   const media =
     Array.isArray(post?.media) && post.media.length ? post.media[0] : null;
   const isVideo = media?.type === "video";
+
+  const videoSrc =
+    (media && (media.url || media.secure_url || media.path)) ||
+    post.videoUrl ||
+    "";
 
   const pro = post?.pro || {};
   const avatar = pro.photoUrl || post?.authorAvatar || "";
@@ -759,55 +796,19 @@ export default function ForYou() {
     navigate(`/profile/${encodeURIComponent(uid)}`);
   }
 
-  // If this post is not a video: skip to next video (For You behaviour)
-  useEffect(() => {
-    if (!post) return;
-    if (isVideo) return;
-    if (nextPost && nextPost._id) {
-      historyRef.current.push(id);
-      navigate(`/for-you/${nextPost._id}`, { replace: true });
-    }
-  }, [post, isVideo, nextPost, navigate, id]);
-
-  function goNextManual() {
-    if (nextPost && nextPost._id && nextPost._id !== id) {
-      if (id) historyRef.current.push(id);
-      navigate(`/for-you/${nextPost._id}`);
-    }
+   if (!isVideo || !media || !videoSrc) {
+    // skip non-video posts or posts with no usable URL
+    return null;
   }
 
-  function goPrevManual() {
-    const prevId = historyRef.current.pop();
-    if (prevId) {
-      navigate(`/for-you/${prevId}`);
-    } else {
-      navigate(-1);
-    }
-  }
-
-  // ---------- UI ----------
-  if (loading) return <RouteLoader full />;
-
-  if (error || !post) {
-    return (
-      <div className="max-w-xl mx-auto p-4">
-        <div className="bg-[#151515] border border-[#2a2a2a] rounded-xl p-6">
-          <div className="text-lg font-semibold mb-2">For You</div>
-          <div className="text-sm text-gray-400">
-            {error || "Post not found"}
-          </div>
-          <div className="mt-4">
-            <Link to="/browse" className="text-gold">
-              ← Back to feed
-            </Link>
-          </div>
-        </div>
-      </div>
-    );
+  if (broken) {
+    // skip videos that failed to load (e.g. old Cloudinary-suspended ones)
+    return null;
   }
 
   return (
-    <div className="max-w-xl mx-auto">
+    <article className="mb-10">
+
       {/* header (profile + book) */}
       <div className="px-4 pt-4 pb-2 flex items-start justify-between gap-3">
         <div className="flex gap-3">
@@ -924,216 +925,193 @@ export default function ForYou() {
         <div className="px-4 pb-3 text-sm text-white">{post.text}</div>
       )}
 
-      {/* media – FOR YOU = video only, skip non-video in effect above */}
-      {isVideo && media && (
-        <div
-          className="relative w-full bg-black overflow-hidden aspect-[4/5] sm:aspect-[4/5] lg:aspect-[3/4] xl:aspect-[1/1] max-h-[80vh]"
-          onTouchStart={handleSwipeStart}
-          onTouchEnd={handleSwipeEnd}
-          onMouseEnter={handleMouseEnter}
-          onMouseLeave={handleMouseLeave}
-          onWheel={handleWheel}
-        >
-          <video
-            ref={videoRef}
-            src={media.url}
-            className="absolute inset-0 w-full h-full object-cover"
-            muted={muted}
-            loop
-            playsInline
-            preload="metadata"
-            controls={false}
-            onClick={onClickVideo}
-            onPlay={onVideoPlay}
-            onLoadedMetadata={onLoadedMetadata}
-            onTimeUpdate={onTimeUpdate}
-            onError={handleVideoError}
-          />
+      {/* VIDEO + SIDE ACTIONS */}
+      <div
+        className="relative w-full bg-black overflow-hidden aspect-[4/5] sm:aspect-[4/5] lg:aspect-[3/4] xl:aspect-[1/1] max-h-[80vh]"
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+      >
+        <video
+          ref={videoRef}
+          src={videoSrc}
+          className="absolute inset-0 w-full h-full object-cover"
+          muted={muted}
+          loop
+          playsInline
+          preload="metadata"
+          controls={false}
+          onClick={onClickVideo}
+          onPlay={onVideoPlay}
+          onLoadedMetadata={onLoadedMetadata}
+          onTimeUpdate={onTimeUpdate}
+          onError={handleVideoError}
+        />
 
-          {/* NEXT / PREV arrows (center right) */}
-          <div className="absolute right-3 top-1/2 -translate-y-1/2 flex flex-col gap-3 z-[3]">
-            <button
-              onClick={goPrevManual}
-              className="bg-black/70 text-white text-xs px-3 py-2 rounded-full"
-              type="button"
+        {/* SIDE ACTIONS like TikTok / Reels */}
+        <div className="absolute right-3 bottom-4 flex flex-col items-center gap-4 z-[3]">
+          {/* Like */}
+          <button
+            type="button"
+            onClick={toggleLike}
+            disabled={loadingLike}
+            className="w-10 h-10 rounded-full bg-black/60 flex items-center justify-center"
+          >
+            <span
+              className={
+                stats.likedByMe ? "text-[#F5C542] text-lg" : "text-white text-lg"
+              }
             >
-              ⬇ Prev
-            </button>
-            {nextPost && nextPost._id && (
+              ♥
+            </span>
+          </button>
+          <div className="text-[11px] text-white">
+            {stats.likesCount ?? 0}
+          </div>
+
+          {/* Comments toggle */}
+          <button
+            type="button"
+            onClick={() => setShowComments((v) => !v)}
+            className="w-10 h-10 rounded-full bg-black/60 flex items-center justify-center"
+          >
+            <span className="text-white text-lg">💬</span>
+          </button>
+          <div className="text-[11px] text-white">
+            {stats.commentsCount ?? 0}
+          </div>
+
+          {/* Save */}
+          <button
+            type="button"
+            onClick={toggleSave}
+            disabled={loadingSave}
+            className="w-10 h-10 rounded-full bg-black/60 flex items-center justify-center"
+          >
+            <span
+              className={
+                stats.savedByMe ? "text-[#F5C542] text-lg" : "text-white text-lg"
+              }
+            >
+              🔖
+            </span>
+          </button>
+          <div className="text-[11px] text-white">
+            {stats.savesCount ?? 0}
+          </div>
+
+          {/* Share */}
+          <button
+            type="button"
+            onClick={handleShare}
+            className="w-10 h-10 rounded-full bg-black/60 flex items-center justify-center"
+          >
+            <span className="text-white text-lg">↗</span>
+          </button>
+          <div className="text-[11px] text-white">
+            {stats.sharesCount ?? 0}
+          </div>
+
+          {/* Views (eye) */}
+          <div className="flex flex-col items-center gap-1 mt-1">
+            <div className="w-10 h-10 rounded-full bg-black/40 flex items-center justify-center">
+              <span className="text-white text-base">👁</span>
+            </div>
+            <div className="text-[11px] text-white">
+              {stats.viewsCount ?? 0}
+            </div>
+          </div>
+        </div>
+
+        {/* initial tap overlay to start audio */}
+        {!userHasInteracted && (
+          <button
+            onClick={onClickVideo}
+            className="absolute inset-0"
+            aria-label="Play video"
+            type="button"
+          />
+        )}
+
+        {/* playback controls (appear on hover / tap) */}
+        {showControls && (
+          <>
+            {/* quick controls */}
+            <div className="absolute bottom-3 left-3 flex gap-2 z-[2]">
               <button
-                onClick={goNextManual}
-                className="bg-black/70 text-white text-xs px-3 py-2 rounded-full"
+                onClick={onClickVideo}
+                className="bg-black/50 text-white text-xs px-3 py-1 rounded-full"
                 type="button"
               >
-                Next ⬆
+                {videoRef.current && !videoRef.current.paused
+                  ? "Pause"
+                  : "Play"}
               </button>
-            )}
-          </div>
-
-          {/* SIDE ACTIONS like TikTok / Reels */}
-          <div className="absolute right-3 bottom-4 flex flex-col items-center gap-4 z-[3]">
-            {/* Like */}
-            <button
-              type="button"
-              onClick={toggleLike}
-              disabled={loadingLike}
-              className="w-10 h-10 rounded-full bg-black/60 flex items-center justify-center"
-            >
-              <span
-                className={
-                  stats.likedByMe ? "text-[#F5C542] text-lg" : "text-white text-lg"
-                }
+              <button
+                onClick={onToggleMute}
+                className="bg-black/50 text-white text-xs px-3 py-1 rounded-full"
+                type="button"
               >
-                ♥
-              </span>
-            </button>
-            <div className="text-[11px] text-white">
-              {stats.likesCount ?? 0}
+                {muted ? "Unmute" : "Mute"}
+              </button>
             </div>
 
-            {/* Comments toggle */}
-            <button
-              type="button"
-              onClick={() => setShowComments((v) => !v)}
-              className="w-10 h-10 rounded-full bg-black/60 flex items-center justify-center"
-            >
-              <span className="text-white text-lg">💬</span>
-            </button>
-            <div className="text-[11px] text-white">
-              {stats.commentsCount ?? 0}
-            </div>
-
-            {/* Save */}
-            <button
-              type="button"
-              onClick={toggleSave}
-              disabled={loadingSave}
-              className="w-10 h-10 rounded-full bg-black/60 flex items-center justify-center"
-            >
-              <span
-                className={
-                  stats.savedByMe ? "text-[#F5C542] text-lg" : "text-white text-lg"
-                }
-              >
-                🔖
-              </span>
-            </button>
-            <div className="text-[11px] text-white">
-              {stats.savesCount ?? 0}
-            </div>
-
-            {/* Share */}
-            <button
-              type="button"
-              onClick={handleShare}
-              className="w-10 h-10 rounded-full bg-black/60 flex items-center justify-center"
-            >
-              <span className="text-white text-lg">↗</span>
-            </button>
-            <div className="text-[11px] text-white">
-              {stats.sharesCount ?? 0}
-            </div>
-
-            {/* Views (eye) */}
-            <div className="flex flex-col items-center gap-1 mt-1">
-              <div className="w-10 h-10 rounded-full bg-black/40 flex items-center justify-center">
-                <span className="text-white text-base">👁</span>
-              </div>
-              <div className="text-[11px] text-white">
-                {stats.viewsCount ?? 0}
-              </div>
-            </div>
-          </div>
-
-          {/* initial tap overlay to start audio */}
-          {!userHasInteracted && (
-            <button
-              onClick={onClickVideo}
-              className="absolute inset-0"
-              aria-label="Play video"
-              type="button"
-            />
-          )}
-
-          {/* playback controls (appear on hover / tap) */}
-          {showControls && (
-            <>
-              {/* quick controls */}
-              <div className="absolute bottom-3 left-3 flex gap-2 z-[2]">
-                <button
-                  onClick={onClickVideo}
-                  className="bg-black/50 text-white text-xs px-3 py-1 rounded-full"
-                  type="button"
-                >
-                  {videoRef.current && !videoRef.current.paused ? "Pause" : "Play"}
-                </button>
-                <button
-                  onClick={onToggleMute}
-                  className="bg-black/50 text-white text-xs px-3 py-1 rounded-full"
-                  type="button"
-                >
-                  {muted ? "Unmute" : "Mute"}
-                </button>
-              </div>
-
-              {/* bottom seek + time + fullscreen */}
-              <div className="absolute inset-x-0 bottom-0 z-[2] px-3 pb-3 pt-6 bg-gradient-to-t from-black/70 via-black/20 to-transparent">
-                <div className="flex items-center justify-between gap-2 mb-2">
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => jump(-10)}
-                      className="rounded-full bg-black/60 text-white text-xs px-3 py-1"
-                      type="button"
-                    >
-                      ⏪ 10s
-                    </button>
-                    <button
-                      onClick={() => jump(+10)}
-                      className="rounded-full bg-black/60 text-white text-xs px-3 py-1"
-                      type="button"
-                    >
-                      10s ⏩
-                    </button>
-                  </div>
-                  <div className="flex items-center gap-2 text-[11px] text-white/90">
-                    <span>
-                      {formatTime(currentTime)} / {formatTime(duration)}
-                    </span>
-                    <button
-                      onClick={toggleFullscreen}
-                      className="rounded-md bg-black/60 text-white text-[11px] px-2 py-1 ml-2"
-                      type="button"
-                    >
-                      ⛶
-                    </button>
-                  </div>
+            {/* bottom seek + time + fullscreen */}
+            <div className="absolute inset-x-0 bottom-0 z-[2] px-3 pb-3 pt-6 bg-gradient-to-t from-black/70 via-black/20 to-transparent">
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => jump(-10)}
+                    className="rounded-full bg-black/60 text-white text-xs px-3 py-1"
+                    type="button"
+                  >
+                    ⏪ 10s
+                  </button>
+                  <button
+                    onClick={() => jump(+10)}
+                    className="rounded-full bg-black/60 text-white text-xs px-3 py-1"
+                    type="button"
+                  >
+                    10s ⏩
+                  </button>
                 </div>
-                <input
-                  type="range"
-                  min={0}
-                  max={Math.max(1, duration || 0)}
-                  step={0.1}
-                  value={Math.min(currentTime, duration || 0)}
-                  onMouseDown={onSeekStart}
-                  onTouchStart={onSeekStart}
-                  onChange={(e) => onSeekChange(Number(e.target.value || 0))}
-                  onMouseUp={(e) => onSeekCommit(Number(e.target.value || 0))}
-                  onTouchEnd={(e) => onSeekCommit(Number(e.target.value || 0))}
-                  className="w-full accent-[#F5C542]"
-                />
+                <div className="flex items-center gap-2 text-[11px] text-white/90">
+                  <span>
+                    {formatTime(currentTime)} / {formatTime(duration)}
+                  </span>
+                  <button
+                    onClick={toggleFullscreen}
+                    className="rounded-md bg-black/60 text-white text-[11px] px-2 py-1 ml-2"
+                    type="button"
+                  >
+                    ⛶
+                  </button>
+                </div>
               </div>
-            </>
-          )}
-
-          {videoError && (
-            <div className="absolute inset-x-0 bottom-16 px-4">
-              <div className="bg-red-600/80 text-xs text-white px-3 py-2 rounded-lg">
-                {videoError}
-              </div>
+              <input
+                type="range"
+                min={0}
+                max={Math.max(1, duration || 0)}
+                step={0.1}
+                value={Math.min(currentTime, duration || 0)}
+                onMouseDown={onSeekStart}
+                onTouchStart={onSeekStart}
+                onChange={(e) => onSeekChange(Number(e.target.value || 0))}
+                onMouseUp={(e) => onSeekCommit(Number(e.target.value || 0))}
+                onTouchEnd={(e) => onSeekCommit(Number(e.target.value || 0))}
+                className="w-full accent-[#F5C542]"
+              />
             </div>
-          )}
-        </div>
-      )}
+          </>
+        )}
+
+        {videoError && (
+          <div className="absolute inset-x-0 bottom-16 px-4">
+            <div className="bg-red-600/80 text-xs text-white px-3 py-2 rounded-lg">
+              {videoError}
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* comments */}
       {showComments && (
@@ -1206,18 +1184,6 @@ export default function ForYou() {
           </div>
         </div>
       )}
-
-      {loadingNext && (
-        <div className="px-4 pt-2 text-[11px] text-zinc-500">
-          Preparing next video…
-        </div>
-      )}
-
-      <div className="px-4 py-6">
-        <Link to="/browse" className="text-gold">
-          ← Back to feed
-        </Link>
-      </div>
-    </div>
+    </article>
   );
 }
