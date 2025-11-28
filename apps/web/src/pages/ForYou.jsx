@@ -713,11 +713,10 @@ function ForYouPost({ post, me, navigate }) {
   }
 
   function handleVideoError() {
-    console.warn("Video failed to load");
-    // This will likely include the old Cloudinary-suspended videos
-    setVideoError("This video cannot be played (it may have been removed).");
-    setBroken(true);
-  }
+  console.warn("Video failed to load");
+  setVideoError("This video cannot be played (it may have been removed).");
+}
+
 
   function handleMouseEnter() {
     setShowControls(true);
@@ -734,13 +733,33 @@ function ForYouPost({ post, me, navigate }) {
       post?.createdBy === me.uid);
 
   const media =
-    Array.isArray(post?.media) && post.media.length ? post.media[0] : null;
-  const isVideo = media?.type === "video";
+  Array.isArray(post?.media) && post.media.length ? post.media[0] : null;
 
-  const videoSrc =
-    (media && (media.url || media.secure_url || media.path)) ||
-    post.videoUrl ||
-    "";
+const videoSrc =
+  (media && (media.url || media.secure_url || media.path)) ||
+  post.videoUrl ||
+  "";
+
+const isVideo = (() => {
+  if (!media) return false;
+  if (media.type === "video") return true;
+
+  const u = String(
+    media.url || media.secure_url || media.path || ""
+  ).toLowerCase();
+
+  if (!u) return false;
+
+  // treat common video URLs as video even if type is missing
+  return (
+    u.endsWith(".mp4") ||
+    u.endsWith(".mov") ||
+    u.endsWith(".webm") ||
+    u.endsWith(".mkv") ||
+    u.includes("/video/")
+  );
+})();
+
 
   const pro = post?.pro || {};
   const avatar = pro.photoUrl || post?.authorAvatar || "";
@@ -796,15 +815,11 @@ function ForYouPost({ post, me, navigate }) {
     navigate(`/profile/${encodeURIComponent(uid)}`);
   }
 
-   if (!isVideo || !media || !videoSrc) {
-    // skip non-video posts or posts with no usable URL
-    return null;
-  }
-
-  if (broken) {
-    // skip videos that failed to load (e.g. old Cloudinary-suspended ones)
-    return null;
-  }
+// This lets all videos (including old / broken Cloudinary ones) show up.
+if (!videoSrc) {
+  // nothing to play at all, skip it
+  return null;
+}
 
   return (
     <article className="mb-10">

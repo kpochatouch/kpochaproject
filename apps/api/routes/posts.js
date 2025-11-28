@@ -44,6 +44,28 @@ const todayStr = () => new Date().toISOString().slice(0, 10); // YYYY-MM-DD
 // what we send to frontend
 function sanitizePostForClient(p) {
   const obj = typeof p.toObject === "function" ? p.toObject() : { ...p };
+
+  const mediaNorm = Array.isArray(obj.media)
+    ? obj.media
+        .map((m) => {
+          const url = m?.url || m?.secure_url || m?.path || "";
+          if (!url) return null;
+
+          const lowerUrl = String(url).toLowerCase();
+          const isVideo =
+            m?.type === "video" ||
+            lowerUrl.endsWith(".mp4") ||
+            lowerUrl.endsWith(".mov") ||
+            lowerUrl.endsWith(".webm");
+
+          return {
+            url,
+            type: isVideo ? "video" : "image",
+          };
+        })
+        .filter(Boolean)
+    : [];
+
   return {
     _id: obj._id,
     pro: obj.pro,
@@ -57,17 +79,18 @@ function sanitizePostForClient(p) {
       (obj.pro && (obj.pro.ownerUid || obj.pro._id)) ||
       null,
     text: obj.text,
-    media: obj.media,
+    media: mediaNorm,
     tags: obj.tags || [],
     lga: obj.lga,
     isPublic: !!obj.isPublic,
     hidden: !!obj.hidden,
-    commentsDisabled: !!obj.commentsDisabled, // 👈 important for FeedCard
+    commentsDisabled: !!obj.commentsDisabled,
     createdAt: obj.createdAt,
     authorName: obj.pro?.name || "Professional",
     authorAvatar: obj.pro?.photoUrl || "",
   };
 }
+
 
 
 /* ============================== ROUTER ============================== */
@@ -261,13 +284,14 @@ router.get("/posts/:id/next", tryAuth, async (req, res) => {
 
     const viewerUid = req.user?.uid || null;
 
-    const baseFilter = {
-      isPublic: true,
-      hidden: { $ne: true },
-      deleted: { $ne: true },
-      media: { $elemMatch: { type: "video" } },
-      _id: { $ne: current._id }, // never return the same post again
-    };
+        const baseFilter = {
+  isPublic: true,
+  hidden: { $ne: true },
+  deleted: { $ne: true },
+  _id: { $ne: current._id }, // never return the same post again
+};
+
+
 
     // 1. Same pro (other videos from this stylist)
     const samePro = await Post.find({
@@ -714,12 +738,13 @@ router.get("/posts/for-you/start", tryAuth, async (req, res) => {
     const { lga = "" } = req.query;
     const viewerUid = req.user?.uid || null;
 
-    const baseQuery = {
-      isPublic: true,
-      hidden: { $ne: true },
-      deleted: { $ne: true },
-      media: { $elemMatch: { type: "video" } },
-    };
+        const baseQuery = {
+  isPublic: true,
+  hidden: { $ne: true },
+  deleted: { $ne: true },
+};
+
+
     if (lga) baseQuery.lga = toUpper(String(lga));
 
     let candidateIds = [];
