@@ -22,7 +22,6 @@ const Browse = lazy(() => import("./pages/Browse.jsx"));
 const BookService = lazy(() => import("./pages/BookService.jsx"));
 const BookingDetails = lazy(() => import("./pages/BookingDetails.jsx"));
 const BookingChat = lazy(() => import("./pages/BookingChat.jsx"));
-const InstantRequest = lazy(() => import("./pages/InstantRequest.jsx"));
 const Wallet = lazy(() => import("./pages/Wallet.jsx"));
 const ClientWallet = lazy(() => import("./pages/ClientWallet.jsx"));
 const ClientDashboard = lazy(() => import("./pages/ClientDashboard.jsx"));
@@ -239,15 +238,6 @@ export default function App() {
             {/* Entry to “Find a Pro” flow */}
             <Route path="/find" element={<FindProSmart />} />
 
-            {/* Booking flows */}
-            <Route
-              path="/instant-request"
-              element={
-                <RequireAuth>
-                  <InstantRequest />
-                </RequireAuth>
-              }
-            />
 
             {/* Booking page must be authenticated */}
             <Route

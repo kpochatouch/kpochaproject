@@ -111,18 +111,6 @@ export default function Navbar() {
             For You
           </NavLink>
 
-          {/* Instant Request (desktop) - WILDCARD MODE */}
-          {token && (
-            <button
-              onClick={() =>
-                window.location.assign("/instant-request#wildcard")
-              }
-              className={navLinkClass}
-            >
-              Instant Request
-            </button>
-          )}
-
           {token && (
             <NavLink to="/my-bookings" className={navLinkClass}>
               My Bookings
@@ -254,19 +242,6 @@ export default function Navbar() {
             >
               For You
             </NavLink>
-
-            {/* Instant Request (mobile) - WILDCARD MODE */}
-            {token && (
-              <button
-                onClick={() => {
-                  setOpen(false);
-                  window.location.assign("/instant-request#wildcard");
-                }}
-                className={navLinkClass}
-              >
-                Instant Request
-              </button>
-            )}
 
             {token && (
               <NavLink

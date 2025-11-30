@@ -12,26 +12,19 @@ import {
 export default function useNotifications() {
   const [items, setItems] = useState([]);
   const [unread, setUnread] = useState(0);
-  const mounted = useRef(true);
+  const mounted = useRef(false);
 
-  // Load initial notifications from backend
   useEffect(() => {
     mounted.current = true;
 
     (async () => {
       try {
-        // listNotifications() already calls /api/notifications
         const list = await listNotifications({ limit: 50 });
-        if (mounted.current) {
-          // ensure array
-          const arr = Array.isArray(list) ? list : [];
-          setItems(arr);
-        }
+        const arr = Array.isArray(list) ? list : Array.isArray(list?.items) ? list.items : [];
+        if (mounted.current) setItems(arr);
 
         const counts = await getNotificationsCounts();
-        if (mounted.current) {
-          setUnread(Number(counts?.unread || 0));
-        }
+        if (mounted.current) setUnread(Number(counts?.unread || 0));
       } catch (e) {
         console.warn("[useNotifications] init load failed:", e?.message || e);
       }
@@ -42,35 +35,53 @@ export default function useNotifications() {
     };
   }, []);
 
-  // Realtime notifications via sockets
+  // Realtime notifications via sockets.
+  // Accept both 'notification:new' and 'notification:received' server events.
   useEffect(() => {
-    connectSocket(); // safe, idempotent
+    connectSocket();
 
-    // backend emits "notification:received"
-    const off = registerSocketHandler("notification:received", (payload) => {
+    const handler = (payload) => {
       if (!payload) return;
 
-      setItems((prev) => [payload, ...prev].slice(0, 100));
+      // Normalize id field
+      const id = payload.id || payload._id || (payload.data && payload.data.id) || null;
+      const normalized = { id, ...payload };
 
-      // if backend already marks it read, don't increment
-      const alreadyRead = !!payload.read;
+      setItems((prev) => {
+        // avoid duplicates: check id
+        if (id && prev.some((p) => String(p.id || p._id) === String(id))) {
+          // replace existing item if server sent updated payload
+          return prev.map((p) =>
+            String(p.id || p._id) === String(id) ? { ...p, ...normalized } : p
+          );
+        }
+        return [normalized, ...prev].slice(0, 200);
+      });
+
+      // update unread counter only if backend indicates it's unread
+      const alreadyRead = !!payload.read || !!payload.seen;
       if (!alreadyRead) {
         setUnread((u) => u + 1);
       }
-    });
+    };
+
+    const off1 = registerSocketHandler("notification:received", handler);
+    const off2 = registerSocketHandler("notification:new", handler);
 
     return () => {
-      off && off();
+      try { off1 && off1(); } catch {}
+      try { off2 && off2(); } catch {}
     };
   }, []);
 
-  // Mark a single notification as read
   async function markRead(id) {
     if (!id) return;
     try {
       await apiMarkNotificationRead(id);
       setItems((s) =>
-        s.map((it) => (it._id === id || it.id === id ? { ...it, read: true } : it))
+        s.map((it) =>
+          String(it.id || it._id) === String(id) ? { ...it, read: true, seen: true } : it
+        )
       );
       setUnread((u) => Math.max(0, u - 1));
     } catch (e) {
@@ -78,11 +89,10 @@ export default function useNotifications() {
     }
   }
 
-  // Mark all notifications as read
   async function markAll() {
     try {
       await apiMarkAllNotificationsRead();
-      setItems((s) => s.map((it) => ({ ...it, read: true })));
+      setItems((s) => s.map((it) => ({ ...it, read: true, seen: true })));
       setUnread(0);
     } catch (e) {
       console.warn("[useNotifications] markAll failed:", e?.message || e);

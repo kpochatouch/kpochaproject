@@ -1,6 +1,10 @@
+// apps/web/src/lib/api.js
+// Axios + Firebase auth integration + Socket.IO client helpers
+// Production-ready helpers for chat, call (audio/video), signaling, notifications, bookings, etc.
+
 import axios from "axios";
 import { getAuth, onAuthStateChanged } from "firebase/auth";
-import io from "socket.io-client";
+import { io as ioClient } from "socket.io-client";
 
 /* =========================================
    BASE URL (normalize, no trailing slash, no /api suffix)
@@ -18,28 +22,33 @@ if (!ROOT) {
 ROOT = ROOT.replace(/\/+$/, "");
 if (/\/api$/i.test(ROOT)) ROOT = ROOT.replace(/\/api$/i, "");
 
-// Points to server root. Your paths below already start with "/api/...".
+/* =========================
+   AXIOS client
+   - baseURL points at root (we call /api/... everywhere)
+   - withCredentials=true so anonId cookie sent
+   ========================= */
 export const api = axios.create({
   baseURL: ROOT,
   headers: {
     "Content-Type": "application/json",
     Accept: "application/json",
   },
-  withCredentials: true, // 👈 allow cookie (anonId) to be sent and received
+  withCredentials: true,
 });
 
 /* =========================================
-   AUTH HANDLING
-   - we keep listening to Firebase changes
-   - we refresh token on each request if possible
-   - we still support manual setAuthToken() (your Login.jsx uses it)
+   AUTH HANDLING (Firebase)
+   - listens to auth state changes
+   - attempts to fetch fresh ID token before each request
+   - supports manual setAuthToken() (used by Login.jsx)
    ========================================= */
 let firebaseAuth = null;
 let authListenerStarted = false;
-// latest token we heard from Firebase (or manual setter)
 let latestToken = null;
 
-// start a persistent listener so sign-out/sign-in later also updates tokens
+// optional hook for token changes
+export let onTokenChange = null;
+
 function ensureAuthListener() {
   if (authListenerStarted) return;
   authListenerStarted = true;
@@ -48,12 +57,12 @@ function ensureAuthListener() {
     onAuthStateChanged(firebaseAuth, async (user) => {
       if (user) {
         try {
-          const t = await user.getIdToken();
+          const t = await user.getIdToken(); // not forced
           latestToken = t;
-          // keep parity with your manual setter
           try {
             localStorage.setItem("token", t);
           } catch {}
+          if (typeof onTokenChange === "function") onTokenChange(t);
         } catch {
           // ignore
         }
@@ -62,24 +71,23 @@ function ensureAuthListener() {
         try {
           localStorage.removeItem("token");
         } catch {}
+        if (typeof onTokenChange === "function") onTokenChange(null);
       }
     });
   } catch {
-    // firebase not available (SSR / build) — we just skip
+    // firebase not available (SSR/build)
   }
 }
 ensureAuthListener();
 
 api.interceptors.request.use(async (config) => {
-  // make sure listener is running
   ensureAuthListener();
 
-  // 1) if we have firebase and a current user, ask for a fresh token
+  // 1) Try to get fresh token from Firebase (if available)
   if (firebaseAuth) {
     const user = firebaseAuth.currentUser;
     if (user) {
       try {
-        // getIdToken() (no force) will refresh if needed
         const fresh = await user.getIdToken();
         if (fresh) {
           latestToken = fresh;
@@ -87,32 +95,30 @@ api.interceptors.request.use(async (config) => {
           return config;
         }
       } catch {
-        // fall through to latestToken/localStorage
+        // ignore and fall back
       }
     }
   }
 
-  // 2) if we have a token from the listener, use it
+  // 2) Use latestToken if present
   if (latestToken) {
     config.headers.Authorization = `Bearer ${latestToken}`;
     return config;
   }
 
-  // 3) fallback to localStorage token (used by your Login.jsx)
+  // 3) Fallback to localStorage-saved token (used by some login flows)
   try {
     const t = localStorage.getItem("token");
     if (t) {
       latestToken = t;
       config.headers.Authorization = `Bearer ${t}`;
     }
-  } catch {
-    // ignore
-  }
+  } catch {}
 
   return config;
 });
 
-// manual override used in Login.jsx after sign-in
+/* manual override used by Login.jsx after sign-in */
 export function setAuthToken(token) {
   if (!token) {
     try {
@@ -125,243 +131,432 @@ export function setAuthToken(token) {
     } catch {}
     latestToken = token;
   }
+  // notify socket about token change (socket will refresh auth on next connect)
+  if (typeof onTokenChange === "function") onTokenChange(latestToken);
 }
 
 /* =========================
-   NOTIFICATIONS + SOCKET
+   SOCKET + NOTIFICATIONS + CALLS + WEBRTC
    ========================= */
+
+/*
+  Design notes:
+  - socket is connected to ROOT (server root)
+  - auth for socket is provided as a function that returns an object (token header)
+  - when token changes (onTokenChange), we refresh socket.auth and reconnect if needed
+  - we keep a registry of listeners so components can register/unregister handlers
+  - we expose helpers for chat sends (socket with REST fallback), call lifecycle, webrtc signaling
+*/
 
 let socket = null;
 let socketConnected = false;
-let socketListeners = new Map(); // event -> Set(handlers)
-let reconnectDelayMs = 2000;
-let wiredEvents = new Set(); // events that already have socket.on attached
+let wiredEvents = new Set();
+let socketListeners = new Map(); // event -> Set(fn)
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 12;
+const BASE_RECONNECT_DELAY = 1000;
 
-// Internal: build auth header token getter (reuses latestToken)
-function _getAuthHeader() {
+/* helper: return auth object for socket.io (object or function allowed)
+   socket.io client accepts either auth: { token } or auth: () => ({ token }) */
+function _getAuthPayload() {
+  // prefer latestToken, fallback to localStorage
   if (!latestToken) {
     try {
       const t = localStorage.getItem("token");
       if (t) latestToken = t;
     } catch {}
   }
-  return latestToken ? { Authorization: `Bearer ${latestToken}` } : {};
+
+  if (latestToken) return { token: latestToken };
+  return {};
 }
 
-// Generic dispatcher → call all handlers for a given event
-function forwardEventToListeners(event, payload) {
+/* generic dispatcher: forwards payload to registered handlers */
+function _dispatch(event, payload) {
   const set = socketListeners.get(event);
   if (!set || !set.size) return;
-  set.forEach((fn) => {
+  for (const fn of Array.from(set)) {
     try {
       fn(payload);
     } catch (e) {
-      console.warn(`[socket] handler for ${event} failed`, e?.message || e);
+      console.warn(`[socket] handler ${event} failed:`, e?.message || e);
     }
-  });
+  }
 }
 
-// Ensure we have socket.on(event, ...) wired exactly once
-function ensureSocketEvent(event) {
+/* ensure socket has one .on for the event which forwards to registered handlers */
+function _ensureWire(event) {
   if (!socket || wiredEvents.has(event)) return;
   wiredEvents.add(event);
-  socket.on(event, (payload) => {
-    forwardEventToListeners(event, payload);
-  });
+  socket.on(event, (payload) => _dispatch(event, payload));
 }
 
-export function connectSocket({ onNotification, onBookingAccepted } = {}) {
-  // allow multiple callers and multiple handlers
-  if (onNotification) {
-    if (!socketListeners.has("notification:received")) {
-      socketListeners.set("notification:received", new Set());
+/* graceful reconnect delay */
+function _reconnectWithBackoff() {
+  if (!socket) return;
+  reconnectAttempts++;
+  if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
+    console.warn("[socket] max reconnect attempts reached");
+    return;
+  }
+  const delay = Math.min(60_000, BASE_RECONNECT_DELAY * Math.pow(1.5, reconnectAttempts));
+  setTimeout(() => {
+    try {
+      if (socket && !socket.connected) socket.connect();
+    } catch (e) {
+      console.warn("[socket] reconnect attempt failed:", e?.message || e);
     }
+  }, delay);
+}
+
+/* reconnect on token change: update auth payload and reconnect */
+onTokenChange = (newToken) => {
+  latestToken = newToken;
+  if (!socket) return;
+  try {
+    socket.auth = _getAuthPayload();
+    if (!socket.connected) {
+      socket.connect();
+    }
+  } catch (e) {
+    console.warn("[socket] auth refresh failed:", e?.message || e);
+  }
+};
+
+/* connectSocket: idempotent, registers optional callbacks */
+export function connectSocket({ onNotification, onBookingAccepted, onCallEvent } = {}) {
+  // add listeners to registry (idempotent) — add directly to socketListeners to avoid recursion
+  if (onNotification) {
+    if (!socketListeners.has("notification:received")) socketListeners.set("notification:received", new Set());
     socketListeners.get("notification:received").add(onNotification);
   }
-
   if (onBookingAccepted) {
-    if (!socketListeners.has("booking:accepted")) {
-      socketListeners.set("booking:accepted", new Set());
-    }
+    if (!socketListeners.has("booking:accepted")) socketListeners.set("booking:accepted", new Set());
     socketListeners.get("booking:accepted").add(onBookingAccepted);
-    // make sure this event is wired on the socket
-    if (socket) ensureSocketEvent("booking:accepted");
+  }
+  if (onCallEvent) {
+    if (!socketListeners.has("call:status")) socketListeners.set("call:status", new Set());
+    socketListeners.get("call:status").add(onCallEvent);
   }
 
-  // if already connected return socket
-  if (socketConnected && socket) return socket;
+  if (socket && socketConnected) return socket;
 
   try {
-    const url = ROOT; // server root
-
     const opts = {
       autoConnect: false,
       transports: ["websocket", "polling"],
-      auth: () => _getAuthHeader(),
+      path: "/socket.io",
+      auth: () => _getAuthPayload(),
+      // allow browser to choose appropriate headers
     };
 
-    socket = io(url, opts);
+    socket = ioClient(ROOT, opts);
 
     socket.on("connect", () => {
       socketConnected = true;
-      // wire any already-registered events (except notification:received, see below)
-      for (const event of socketListeners.keys()) {
-        if (event === "notification:received") continue; // bridged below
-        ensureSocketEvent(event);
+      reconnectAttempts = 0;
+
+       wiredEvents.clear();
+
+      // wire already-registered events
+      for (const ev of socketListeners.keys()) {
+        _ensureWire(ev);
+      }
+      // common server events we want always
+      _ensureWire("notification:new");
+      _ensureWire("notification:received");
+      _ensureWire("chat:message");
+      _ensureWire("presence:join");
+      _ensureWire("presence:leave");
+      _ensureWire("call:initiate");
+      _ensureWire("call:accepted");
+      _ensureWire("call:ended");
+      _ensureWire("call:missed");
+      _ensureWire("booking:accepted");
+      _ensureWire("webrtc:offer");
+      _ensureWire("webrtc:answer");
+      _ensureWire("webrtc:ice");
+    });
+
+    socket.on("disconnect", (reason) => {
+      socketConnected = false;
+      // do not clear listeners — keep registry for next connect
+      if (reason === "io server disconnect") {
+        // server forced disconnect – try to reconnect manually
+        try { socket.connect(); } catch {}
+      } else {
+        _reconnectWithBackoff();
       }
     });
 
-    socket.on("disconnect", () => {
+    socket.on("connect_error", (err) => {
       socketConnected = false;
+      console.warn("[socket] connect_error:", err?.message || err);
+      _reconnectWithBackoff();
     });
 
-    // notifications have a special bridge: server may emit "notification:new"
-    // but UI listens on "notification:received"
-    const notifHandler = (payload) => {
-      forwardEventToListeners("notification:received", payload);
-    };
-
-    socket.on("notification:new", notifHandler);
-    socket.on("notification:received", notifHandler); // just in case backend already uses this
+    // bridge notification events -> unified "notification:received"
+    socket.on("notification:new", (payload) => _dispatch("notification:received", payload));
+    socket.on("notification:received", (payload) => _dispatch("notification:received", payload));
 
     socket.connect();
   } catch (e) {
     console.warn("[socket] connect failed:", e?.message || e);
-    // try reconnect later
-    setTimeout(() => {
-      try {
-        if (!socketConnected) connectSocket({ onNotification, onBookingAccepted });
-      } catch {}
-    }, reconnectDelayMs);
+    _reconnectWithBackoff();
   }
 
   return socket;
 }
 
-/**
- * disconnectSocket() - removes all handlers and disconnects socket
- */
+/** disconnect and clear handlers */
 export function disconnectSocket() {
   try {
     if (socket) {
       socket.removeAllListeners();
       socket.disconnect();
-      socket = null;
-      socketConnected = false;
     }
-    socketListeners.clear();
-    wiredEvents.clear();
   } catch (e) {
     console.warn("[socket] disconnect failed:", e?.message || e);
+  } finally {
+    socket = null;
+    socketConnected = false;
+    wiredEvents.clear();
+    socketListeners.clear();
   }
 }
 
-// registerSocketHandler(event, fn) - returns unregister function
+/** registerSocketHandler(event, fn): returns unregister() */
 export function registerSocketHandler(event, fn) {
   if (typeof event !== "string" || typeof fn !== "function") return () => {};
-
-  if (!socketListeners.has(event)) {
-    socketListeners.set(event, new Set());
-  }
+  if (!socketListeners.has(event)) socketListeners.set(event, new Set());
   socketListeners.get(event).add(fn);
 
-  // ensure socket connected so server can send events
-  if (!socketConnected) {
-    connectSocket();
-  } else if (event !== "notification:received") {
-    // notifications are wired via special bridge above
-    ensureSocketEvent(event);
-  }
+  // ensure socket exists and event wired
+  if (!socketConnected) connectSocket();
+  else _ensureWire(event);
 
   return () => {
     try {
-      const set = socketListeners.get(event);
-      if (set) set.delete(fn);
+      const s = socketListeners.get(event);
+      if (s) s.delete(fn);
     } catch {}
   };
 }
 
-// Join booking room so chat + WebRTC can use booking:<id>
+/* Helper: join booking room (for chat + webrtc) */
 export function joinBookingRoom(bookingId, who = "user") {
   if (!bookingId) return Promise.reject(new Error("bookingId required"));
-
-  // ensure socket exists
   if (!socketConnected) connectSocket();
-
   return new Promise((resolve, reject) => {
-    try {
-      if (!socket) return reject(new Error("socket_not_ready"));
-      socket.emit(
-        "join:booking",
-        { bookingId, who },
-        (resp) => {
-          if (resp && resp.ok) resolve(resp);
-          else reject(new Error(resp?.error || "join_failed"));
-        }
-      );
-    } catch (e) {
-      reject(e);
-    }
+    if (!socket) return reject(new Error("socket_not_ready"));
+    socket.emit("join:booking", { bookingId, who }, (resp) => {
+      if (resp && resp.ok) resolve(resp);
+      else reject(new Error(resp?.error || "join_failed"));
+    });
   });
 }
 
+/* -----------------------
+   Chat send: prefer socket, fallback to REST
+   - returns { ok, id, existing } or throws
+   ----------------------- */
+export async function sendChatMessage({ room, text = "", meta = {}, clientId = null }) {
+  if (!room) throw new Error("room required");
+  if ((!text || !text.trim()) && (!meta?.attachments || meta.attachments.length === 0)) {
+    throw new Error("message_empty");
+  }
+
+  // prefer socket for realtime acks
+  if (socket && socket.connected) {
+    return new Promise((resolve, reject) => {
+      try {
+        socket.emit(
+          "chat:message",
+          { room, text, meta, clientId },
+          (ack) => {
+            if (!ack) return reject(new Error("no_ack"));
+            if (ack.ok) return resolve(ack);
+            return reject(new Error(ack.error || "send_failed"));
+          }
+        );
+      } catch (e) {
+        // fallthrough to REST
+        console.warn("[chat] socket send failed, falling back to REST:", e?.message || e);
+        _sendChatMessageRest({ room, text, meta, clientId }).then(resolve).catch(reject);
+      }
+    });
+  }
+
+  // fallback: REST endpoint (server should accept same payload)
+  return _sendChatMessageRest({ room, text, meta, clientId });
+}
+
+async function _sendChatMessageRest({ room, text, meta = {}, clientId = null }) {
+  const payload = { room, text, meta, clientId };
+  // backend may expose an endpoint like POST /api/chat/send or POST /api/chat/room/:room/message
+  // we call POST /api/chat/room/:room/message (safe default)
+  try {
+    const { data } = await api.post(`/api/chat/room/${encodeURIComponent(room)}/message`, payload);
+    return data;
+  } catch (err) {
+    // Try alternative endpoint (older backend): /api/chat
+    try {
+      const { data } = await api.post("/api/chat", payload);
+      return data;
+    } catch (e) {
+      const msg = err?.response?.data?.error || err?.message || "send_failed";
+      throw new Error(msg);
+    }
+  }
+}
+
+/* -----------------------
+   CALLS (audio/video)
+   - initiateCall -> tries socket emit 'call:initiate' (ack) then returns server record (id, callId, room)
+   - updateCallStatus -> emit 'call:status' (socket) and also call REST fallback
+   ----------------------- */
+
+export async function initiateCall({ receiverUid, callType = "audio", meta = {}, room = null, callId = null } = {}) {
+  if (!receiverUid) throw new Error("receiverUid required");
+
+  // try socket first
+  if (socket && socket.connected) {
+    return new Promise((resolve, reject) => {
+      try {
+        socket.emit(
+          "call:initiate",
+          { receiverUid, callType, meta, room, callId },
+          (ack) => {
+            if (!ack) return reject(new Error("no_ack"));
+            if (ack.ok) return resolve(ack);
+            return reject(new Error(ack.error || "call_init_failed"));
+          }
+        );
+      } catch (e) {
+        console.warn("[call] socket initiate failed, falling back to REST:", e?.message || e);
+        _initiateCallRest({ receiverUid, callType, meta, room, callId }).then(resolve).catch(reject);
+      }
+    });
+  }
+
+  return _initiateCallRest({ receiverUid, callType, meta, room, callId });
+}
+
+async function _initiateCallRest(payload) {
+  // backend has POST /api/call
+  try {
+    const { data } = await api.post("/api/call", payload);
+    return data;
+  } catch (e) {
+    throw new Error(e?.response?.data?.error || e?.message || "call_init_failed");
+  }
+}
+
+export async function updateCallStatus({ id = null, callId = null, status, meta = {} } = {}) {
+  if (!status) throw new Error("status required");
+  const body = { status, meta, id, callId };
+
+  // prefer socket: emit call:status
+  if (socket && socket.connected) {
+    return new Promise((resolve, reject) => {
+      try {
+        socket.emit("call:status", body, (ack) => {
+          if (!ack) return reject(new Error("no_ack"));
+          if (ack.ok) return resolve(ack);
+          return reject(new Error(ack.error || "call_status_failed"));
+        });
+      } catch (e) {
+        console.warn("[call] socket status failed, falling back to REST:", e?.message || e);
+        _updateCallStatusRest({ id, callId, status, meta }).then(resolve).catch(reject);
+      }
+    });
+  }
+
+  return _updateCallStatusRest({ id, callId, status, meta });
+}
+
+async function _updateCallStatusRest({ id = null, callId = null, status, meta = {} } = {}) {
+  try {
+    // backend: PUT /api/call/:id/status OR PUT /api/call/:callId/status (both allowed by server)
+    if (id) {
+      const { data } = await api.put(`/api/call/${encodeURIComponent(String(id))}/status`, { status, meta });
+      return data;
+    } else if (callId) {
+      const { data } = await api.put(`/api/call/${encodeURIComponent(String(callId))}/status`, { status, meta });
+      return data;
+    } else {
+      throw new Error("id_or_callId_required");
+    }
+  } catch (e) {
+    throw new Error(e?.response?.data?.error || e?.message || "call_status_failed");
+  }
+}
+
+/* -----------------------
+   WEBRTC signaling helpers (emit & register)
+   - emitWebRTC(event, room, payload) for offer/answer/ice
+   - registerSocketHandler for webrtc events already wired
+   ----------------------- */
+
+export function emitWebRTC(event, { room, payload } = {}) {
+  if (!["webrtc:offer", "webrtc:answer", "webrtc:ice"].includes(event)) {
+    throw new Error("invalid_webrtc_event");
+  }
+  if (!room || !payload) throw new Error("room_and_payload_required");
+
+  if (socket && socket.connected) {
+    socket.emit(event, { room, payload }, (ack) => {
+      // optional ack handling; typically webrtc signaling acks aren't used
+    });
+    return true;
+  }
+
+  // if socket not available, caller should ensure connectSocket() before calling
+  throw new Error("socket_not_connected");
+}
+
 /* =========================
-   CHAT (DM + Inbox)
+   REST helpers (kept from original file)
+   - most of your previous REST functions copied unchanged
    ========================= */
 
-/**
- * Get DM history between the logged-in user and a peer.
- * Backend: GET /api/chat/with/:peerUid
- * Returns: { room, items: [...] }
- */
+/* Chat / Inbox / Thread helpers */
 export async function getChatWith(peerUid, params = {}) {
   if (!peerUid) throw new Error("peerUid required");
-  const { data } = await api.get(
-    `/api/chat/with/${encodeURIComponent(peerUid)}`,
-    { params }
-  );
-  return data; // { room, items }
+  const { data } = await api.get(`/api/chat/with/${encodeURIComponent(peerUid)}`, { params });
+  return data;
 }
-
 /**
- * Inbox list: one entry per peer, with unreadCount.
- * Backend: GET /api/chat/inbox
- * Returns: { items: [ { peerUid, room, lastBody, lastFromUid, lastAt, unreadCount }, ... ] }
+ * getChatInbox(options)
+ * options:
+ *   - cursor: string | null   (pagination cursor / timestamp)
+ *   - limit: number
+ *   - q: string               (optional search)
+ *
+ * Returns whatever the backend provides (array OR { items, cursor, hasMore }).
  */
-export async function getChatInbox() {
-  const { data } = await api.get("/api/chat/inbox");
+export async function getChatInbox({ cursor = null, limit = 40, q = "" } = {}) {
+  const params = {};
+  if (cursor) params.cursor = cursor;
+  if (limit) params.limit = Number(limit || 40);
+  if (q) params.q = q;
+
+  const { data } = await api.get("/api/chat/inbox", { params });
   return data;
 }
 
-/**
- * Mark a specific DM thread as read.
- * Backend: PUT /api/chat/thread/:peerUid/read
- * Returns: { ok: true, updatedCount }
- */
 export async function markThreadRead(peerUid) {
   if (!peerUid) throw new Error("peerUid required");
-  const { data } = await api.put(
-    `/api/chat/thread/${encodeURIComponent(peerUid)}/read`
-  );
+  const { data } = await api.put(`/api/chat/thread/${encodeURIComponent(peerUid)}/read`);
   return data;
 }
-
-/**
- * Mark any room as read (DM or booking).
- * Backend: PUT /api/chat/room/:room/read
- * Example room values:
- *   - dm:<uidA>:<uidB>
- *   - booking:<bookingId>
- */
 export async function markRoomRead(room) {
   if (!room) throw new Error("room required");
-  const { data } = await api.put(
-    `/api/chat/room/${encodeURIComponent(room)}/read`
-  );
+  const { data } = await api.put(`/api/chat/room/${encodeURIComponent(room)}/read`);
   return data;
 }
 
-/* Notification REST API helpers */
+/* Notifications */
 export async function listNotifications({ limit = 50, before = null } = {}) {
   const params = {};
   if (limit) params.limit = limit;
@@ -369,7 +564,6 @@ export async function listNotifications({ limit = 50, before = null } = {}) {
   const { data } = await api.get("/api/notifications", { params });
   return data;
 }
-
 export async function getNotificationsCounts() {
   try {
     const { data } = await api.get("/api/notifications/counts");
@@ -378,26 +572,118 @@ export async function getNotificationsCounts() {
     return { unread: 0 };
   }
 }
-
 export async function markNotificationRead(id) {
-  const { data } = await api.put(
-    `/api/notifications/${encodeURIComponent(id)}/read`
-  );
+  const { data } = await api.put(`/api/notifications/${encodeURIComponent(id)}/read`);
   return data;
 }
-
 export async function markAllNotificationsRead() {
   const { data } = await api.put("/api/notifications/read-all");
   return data;
 }
 
-// Aliases for a more semantic naming style
-export const fetchNotifications = listNotifications;
-export const fetchNotificationCounts = getNotificationsCounts;
-export const markNotificationSeen = markNotificationRead;
-export const markAllNotificationsSeen = markAllNotificationsRead;
+/* Basic / profile / bundle helpers */
+export async function getMe() {
+  const { data } = await api.get("/api/me");
+  return data;
+}
+export async function getProMe() {
+  try {
+    const { data } = await api.get("/api/pros/me");
+    return data;
+  } catch {
+    return null;
+  }
+}
+export async function loadMeBundle() {
+  const [meRes, clientRes, proRes] = await Promise.allSettled([getMe(), getClientProfile(), getProMe()]);
+  const me = meRes.status === "fulfilled" ? meRes.value : null;
+  const client = clientRes.status === "fulfilled" ? clientRes.value : null;
+  const pro = proRes.status === "fulfilled" ? proRes.value : null;
+  return { me, client, pro };
+}
 
-/* small helper to drop empties */
+/* Geo */
+export async function getNgGeo() { const { data } = await api.get("/api/geo/ng"); return data; }
+export async function getNgStates() { const { data } = await api.get("/api/geo/ng/states"); return data; }
+export async function getNgLgas(stateName) { const { data } = await api.get(`/api/geo/ng/lgas/${encodeURIComponent(stateName)}`); return data; }
+export async function reverseGeocode({ lat, lon }) { const { data } = await api.get("/api/geo/rev", { params: { lat, lon } }); return data; }
+
+/* Browsing pros */
+export async function listBarbers(params = {}) { const { data } = await api.get("/api/barbers", { params }); return data; }
+export async function getBarber(id) { const { data } = await api.get(`/api/barbers/${id}`); return data; }
+export async function listNearbyBarbers({ lat, lon, radiusKm = 25 }) { const { data } = await api.get("/api/barbers/nearby", { params: { lat, lon, radiusKm } }); return data; }
+
+/* Feed */
+export async function listPublicFeed(params = {}) { const { data } = await api.get("/api/posts/public", { params }); return data; }
+export async function createPost(payload) { const { data } = await api.post("/api/posts", payload); return data; }
+
+/* Payments (Paystack) */
+export async function verifyPayment({ bookingId, reference }) {
+  const { data } = await api.post("/api/payments/verify", { bookingId, reference });
+  return data;
+}
+export async function initPayment({ bookingId, amountKobo, email }) {
+  const { data } = await api.post("/api/payments/init", { bookingId, amountKobo, email });
+  return data;
+}
+
+/* Bookings client */
+export async function createBooking(payload) { const { data } = await api.post("/api/bookings", payload); return data.booking; }
+export async function createInstantBooking(payload) { const { data } = await api.post("/api/bookings/instant", payload); return data; }
+export async function setBookingReference(bookingId, paystackReference) { const { data } = await api.put(`/api/bookings/${bookingId}/reference`, { paystackReference }); return data.ok === true; }
+export async function getMyBookings() { const { data } = await api.get("/api/bookings/me"); return data; }
+export async function getBooking(id) { const { data } = await api.get(`/api/bookings/${id}`); return data; }
+export async function cancelBooking(id) { const { data } = await api.put(`/api/bookings/${id}/cancel`); return data.booking; }
+
+/* Bookings - pro */
+export async function getProBookings() { const { data } = await api.get("/api/bookings/pro/me"); return data; }
+export async function acceptBooking(id) { const { data } = await api.put(`/api/bookings/${id}/accept`); return data.booking; }
+export async function declineBooking(id, payload = {}) { const { data } = await api.put(`/api/bookings/${id}/decline`, payload); return data.booking; }
+export async function completeBooking(id, payload = {}) { const { data } = await api.put(`/api/bookings/${id}/complete`, payload); return data.booking; }
+
+/* Reviews (unchanged) */
+export async function createProReview(opts) { const { data } = await api.post("/api/reviews", opts); return data; }
+export async function getProReviews(proId) { const { data } = await api.get(`/api/reviews/pro/${encodeURIComponent(proId)}`); return data; }
+export async function getMyReviewOnPro(proId) { const { data } = await api.get(`/api/reviews/pro/${encodeURIComponent(proId)}/me`); return data; }
+export async function createClientReview(opts) { const { data } = await api.post("/api/reviews/client", opts); return data; }
+export async function getClientReviews(clientUid) { const { data } = await api.get(`/api/reviews/client/${encodeURIComponent(clientUid)}`); return data; }
+export async function getMyReviewOnClient(clientUid) { const { data } = await api.get(`/api/reviews/client/${encodeURIComponent(clientUid)}/me`); return data; }
+
+/* Wallet */
+export async function getWalletMe() { const { data } = await api.get("/api/wallet/me"); return data; }
+export async function initWalletTopup(amountKobo) { const { data } = await api.get("/api/wallet/topup/init", { params: { amountKobo } }); return data; }
+export async function verifyWalletTopup(reference) { const { data } = await api.get("/api/wallet/topup/verify", { params: { reference } }); return data; }
+export async function withdrawPendingToAvailable({ amountKobo, pin }) { const { data } = await api.post("/api/wallet/withdraw-pending", { amountKobo, pin }); return data; }
+export async function withdrawToBank({ amountKobo, pin }) { const { data } = await api.post("/api/wallet/withdraw", { amountKobo, pin }); return data; }
+export const getMyWallet = getWalletMe;
+export async function getMyTransactions() { const data = await getWalletMe(); return data?.transactions || []; }
+export async function getClientWalletMe() { const { data } = await api.get("/api/wallet/client/me"); return data; }
+export async function payBookingWithWallet(bookingId) { const { data } = await api.post("/api/wallet/pay-booking", { bookingId }); return data; }
+
+/* PIN */
+export async function setWithdrawPin(pin) { const { data } = await api.post("/api/pin/me/set", { pin }); return data; }
+export async function resetWithdrawPin(currentPin, newPin) { const { data } = await api.put("/api/pin/me/reset", { currentPin, newPin }); return data; }
+
+/* Settings */
+export async function getSettings() { const { data } = await api.get("/api/settings"); return data; }
+export async function getAdminSettings() { const { data } = await api.get("/api/settings/admin"); return data; }
+export async function updateSettings(payload) { const { data } = await api.put("/api/settings", payload); return data; }
+
+/* Pro / profile / applications */
+export async function submitProApplication(payload) { const { data } = await api.post("/api/applications", payload); return data; }
+export async function getClientProfile() { const { data } = await api.get("/api/profile/me"); return data; }
+export async function updateClientProfile(payload) { const clean = stripEmpty(payload); const { data } = await api.put("/api/profile/me", clean); return data; }
+export const saveClientProfile = updateClientProfile;
+export async function getClientProfileForBooking(clientUid, bookingId) { const { data } = await api.get(`/api/profile/client/${clientUid}/for-booking/${encodeURIComponent(bookingId)}`); return data; }
+export async function getClientProfileAdmin(clientUid) { const { data } = await api.get(`/api/profile/client/${clientUid}/admin`); return data; }
+export async function updateProProfile(payload) { const { data } = await api.put("/api/profile/pro/me", payload); return data; }
+export async function getPublicProProfile(proId) { const { data } = await api.get(`/api/profile/pro/${proId}`); return data; }
+export async function getPublicProfile(username) { if (!username) throw new Error("username required"); const { data } = await api.get(`/api/profile/public/${encodeURIComponent(username)}`); return data; }
+export async function getPublicProfileByUid(uid) { if (!uid) throw new Error("uid required"); const { data } = await api.get(`/api/profile/public-by-uid/${encodeURIComponent(uid)}`); return data; }
+export async function getProProfileAdmin(proId) { const { data } = await api.get(`/api/profile/pro/${proId}/admin`); return data; }
+export async function ensureClientProfile() { const { data } = await api.post("/api/profile/ensure"); return data; }
+
+/* helpers */
 function stripEmpty(obj = {}) {
   const out = {};
   for (const [k, v] of Object.entries(obj)) {
@@ -408,401 +694,49 @@ function stripEmpty(obj = {}) {
   return out;
 }
 
-/* =========================================
-   BASIC / COMMON
-   ========================================= */
-export async function getMe() {
-  const { data } = await api.get("/api/me");
-  return data;
-}
+/* aliases kept for compatibility */
+export const fetchNotifications = listNotifications;
+export const fetchNotificationCounts = getNotificationsCounts;
+export const markNotificationSeen = markNotificationRead;
+export const markAllNotificationsSeen = markAllNotificationsRead;
 
-/**
- * Pro self – we are adding this now so we can bundle me+client+pro
- */
-export async function getProMe() {
-  try {
-    const { data } = await api.get("/api/pros/me");
-    return data;
-  } catch (e) {
-    // not a pro yet → return null instead of throwing
-    return null;
-  }
-}
+/* default export (convenience) */
+export default {
+  api,
 
-/**
- * Unified bundle:
- * - /api/me → firebase uid + email
- * - /api/profile/me → client profile
- * - /api/pros/me → pro doc (if exists)
- */
-export async function loadMeBundle() {
-  const [meRes, clientRes, proRes] = await Promise.allSettled([
-    getMe(),
-    getClientProfile(),
-    getProMe(),
-  ]);
+  // auth
+  ensureAuthListener,
+  setAuthToken,
 
-  const me = meRes.status === "fulfilled" ? meRes.value : null;
-  const client = clientRes.status === "fulfilled" ? clientRes.value : null;
-  const pro = proRes.status === "fulfilled" ? proRes.value : null;
+  // socket
+  connectSocket,
+  disconnectSocket,
+  registerSocketHandler,
+  joinBookingRoom,
 
-  return { me, client, pro };
-}
+  // chat
+  sendChatMessage,
+  getChatWith,
+  getChatInbox,
+  markThreadRead,
+  markRoomRead,
 
-/* =========================================
-   NIGERIA GEO
-   ========================================= */
-export async function getNgGeo() {
-  const { data } = await api.get("/api/geo/ng");
-  return data;
-}
-export async function getNgStates() {
-  const { data } = await api.get("/api/geo/ng/states");
-  return data;
-}
-export async function getNgLgas(stateName) {
-  const { data } = await api.get(
-    `/api/geo/ng/lgas/${encodeURIComponent(stateName)}`
-  );
-  return data;
-}
-export async function reverseGeocode({ lat, lon }) {
-  const { data } = await api.get("/api/geo/rev", {
-    params: { lat, lon },
-  });
-  return data;
-}
+  // notifications
+  listNotifications,
+  getNotificationsCounts,
+  markNotificationRead,
+  markAllNotificationsRead,
 
-/* =========================================
-   BROWSE: PROS
-   ========================================= */
-export async function listBarbers(params = {}) {
-  const { data } = await api.get("/api/barbers", { params });
-  return data;
-}
-export async function getBarber(id) {
-  const { data } = await api.get(`/api/barbers/${id}`);
-  return data;
-}
-export async function listNearbyBarbers({ lat, lon, radiusKm = 25 }) {
-  const { data } = await api.get(`/api/barbers/nearby`, {
-    params: { lat, lon, radiusKm },
-  });
-  return data;
-}
+  // calls / webrtc
+  initiateCall,
+  updateCallStatus,
+  emitWebRTC,
 
-/* =========================================
-   FEED
-   ========================================= */
-export async function listPublicFeed(params = {}) {
-  const { data } = await api.get("/api/posts/public", { params });
-  return data;
-}
-export async function createPost(payload) {
-  const { data } = await api.post("/api/posts", payload);
-  return data;
-}
+  // bundle + profiles
+  getMe,
+  getClientProfile,
+  updateClientProfile,
+  ensureClientProfile,
+  loadMeBundle,
 
-/* =========================================
-   PAYMENTS (Paystack)
-   ========================================= */
-export async function verifyPayment({ bookingId, reference }) {
-  const { data } = await api.post("/api/payments/verify", {
-    bookingId,
-    reference,
-  });
-  return data;
-}
-export async function initPayment({ bookingId, amountKobo, email }) {
-  const { data } = await api.post("/api/payments/init", {
-    bookingId,
-    amountKobo,
-    email,
-  });
-  return data;
-}
-
-/* =========================================
-   BOOKINGS — CLIENT
-   ========================================= */
-export async function createBooking(payload) {
-  const { data } = await api.post("/api/bookings", payload);
-  return data.booking;
-}
-export async function createInstantBooking(payload) {
-  const { data } = await api.post("/api/bookings/instant", payload);
-  return data;
-}
-export async function setBookingReference(bookingId, paystackReference) {
-  const { data } = await api.put(`/api/bookings/${bookingId}/reference`, {
-    paystackReference,
-  });
-  return data.ok === true;
-}
-export async function getMyBookings() {
-  const { data } = await api.get("/api/bookings/me");
-  return data;
-}
-export async function getBooking(id) {
-  const { data } = await api.get(`/api/bookings/${id}`);
-  return data;
-}
-export async function cancelBooking(id) {
-  const { data } = await api.put(`/api/bookings/${id}/cancel`);
-  return data.booking;
-}
-
-/* =========================================
-   BOOKINGS — PRO OWNER
-   ========================================= */
-export async function getProBookings() {
-  const { data } = await api.get("/api/bookings/pro/me");
-  return data;
-}
-export async function acceptBooking(id) {
-  const { data } = await api.put(`/api/bookings/${id}/accept`);
-  return data.booking;
-}
-export async function declineBooking(id, payload = {}) {
-  const { data } = await api.put(`/api/bookings/${id}/decline`, payload);
-  return data.booking;
-}
-export async function completeBooking(id, payload = {}) {
-  const { data } = await api.put(`/api/bookings/${id}/complete`, payload);
-  return data.booking;
-}
-
-/* =========================================
-   REVIEWS
-   ========================================= */
-
-/** Client → Pro: create a review for a pro */
-export async function createProReview({
-  proId,
-  rating,
-  title,
-  comment,
-  photos = [],
-  bookingId,
-}) {
-  const payload = {
-    proId,
-    rating,
-    title,
-    comment,
-    photos,
-  };
-  if (bookingId) payload.bookingId = bookingId;
-  const { data } = await api.post("/api/reviews", payload);
-  return data;
-}
-
-/** Client → Pro: get all public reviews for a pro */
-export async function getProReviews(proId) {
-  const { data } = await api.get(
-    `/api/reviews/pro/${encodeURIComponent(proId)}`
-  );
-  return data;
-}
-
-/** Client → Pro: get MY review on a pro (one per client/pro) */
-export async function getMyReviewOnPro(proId) {
-  const { data } = await api.get(
-    `/api/reviews/pro/${encodeURIComponent(proId)}/me`
-  );
-  return data; // null or review
-}
-
-/** Pro → Client: create a review about a client */
-export async function createClientReview({
-  clientUid,
-  rating,
-  title,
-  comment,
-  photos = [],
-  bookingId,
-}) {
-  const payload = {
-    clientUid,
-    rating,
-    title,
-    comment,
-    photos,
-  };
-  if (bookingId) payload.bookingId = bookingId;
-  const { data } = await api.post("/api/reviews/client", payload);
-  return data;
-}
-
-/** Pro → Client: get all public reviews about a client */
-export async function getClientReviews(clientUid) {
-  const { data } = await api.get(
-    `/api/reviews/client/${encodeURIComponent(clientUid)}`
-  );
-  return data; // array
-}
-
-/** Pro → Client: get MY review on a specific client */
-export async function getMyReviewOnClient(clientUid) {
-  const { data } = await api.get(
-    `/api/reviews/client/${encodeURIComponent(clientUid)}/me`
-  );
-  return data; // null or review
-}
-
-/* =========================================
-   WALLET (client + pro)
-   ========================================= */
-export async function getWalletMe() {
-  const { data } = await api.get("/api/wallet/me");
-  return data;
-}
-export async function initWalletTopup(amountKobo) {
-  const { data } = await api.get("/api/wallet/topup/init", {
-    params: { amountKobo },
-  });
-  return data;
-}
-
-export async function verifyWalletTopup(reference) {
-  const { data } = await api.get("/api/wallet/topup/verify", {
-    params: { reference },
-  });
-  return data;
-}
-
-export async function withdrawPendingToAvailable({ amountKobo, pin }) {
-  const { data } = await api.post("/api/wallet/withdraw-pending", {
-    amountKobo,
-    pin,
-  });
-  return data;
-}
-export async function withdrawToBank({ amountKobo, pin }) {
-  const { data } = await api.post("/api/wallet/withdraw", {
-    amountKobo,
-    pin,
-  });
-  return data;
-}
-export const getMyWallet = getWalletMe;
-export async function getMyTransactions() {
-  const data = await getWalletMe();
-  return data?.transactions || [];
-}
-
-/* Client wallet (credits/refunds) */
-export async function getClientWalletMe() {
-  const { data } = await api.get("/api/wallet/client/me");
-  return data;
-}
-
-export async function payBookingWithWallet(bookingId) {
-  const { data } = await api.post("/api/wallet/pay-booking", {
-    bookingId,
-  });
-  return data;
-}
-
-/* =========================================
-   PIN
-   ========================================= */
-export async function setWithdrawPin(pin) {
-  const { data } = await api.post("/api/pin/me/set", { pin });
-  return data;
-}
-export async function resetWithdrawPin(currentPin, newPin) {
-  const { data } = await api.put("/api/pin/me/reset", {
-    currentPin,
-    newPin,
-  });
-  return data;
-}
-
-/* =========================================
-   SETTINGS
-   ========================================= */
-export async function getSettings() {
-  const { data } = await api.get("/api/settings");
-  return data;
-}
-export async function getAdminSettings() {
-  const { data } = await api.get("/api/settings/admin");
-  return data;
-}
-export async function updateSettings(payload) {
-  const { data } = await api.put("/api/settings", payload);
-  return data;
-}
-
-/* =========================================
-   PRO APPLICATIONS / PROFILES
-   ========================================= */
-export async function submitProApplication(payload) {
-  const { data } = await api.post("/api/applications", payload);
-  return data;
-}
-
-/* Unified Client Profile (one UID per user) */
-export async function getClientProfile() {
-  const { data } = await api.get("/api/profile/me");
-  return data;
-}
-export async function updateClientProfile(payload) {
-  const clean = stripEmpty(payload);
-  const { data } = await api.put("/api/profile/me", clean);
-  return data;
-}
-
-export const saveClientProfile = updateClientProfile;
-
-/* Optional booking/admin helpers */
-export async function getClientProfileForBooking(clientUid, bookingId) {
-  const { data } = await api.get(
-    `/api/profile/client/${clientUid}/for-booking/${encodeURIComponent(
-      bookingId
-    )}`
-  );
-  return data;
-}
-export async function getClientProfileAdmin(clientUid) {
-  const { data } = await api.get(`/api/profile/client/${clientUid}/admin`);
-  return data;
-}
-
-/* Pro extras */
-export async function updateProProfile(payload) {
-  const { data } = await api.put("/api/profile/pro/me", payload);
-  return data;
-}
-export async function getPublicProProfile(proId) {
-  const { data } = await api.get(`/api/profile/pro/${proId}`);
-  return data;
-}
-
-export async function getPublicProfile(username) {
-  if (!username) throw new Error("username required");
-  const { data } = await api.get(
-    `/api/profile/public/${encodeURIComponent(username)}`
-  );
-  return data; // { ok: true, profile, posts: { items, cursor } }
-}
-
-// GET public profile by UID (same shape as getPublicProfile)
-export async function getPublicProfileByUid(uid) {
-  if (!uid) throw new Error("uid required");
-  const { data } = await api.get(
-    `/api/profile/public-by-uid/${encodeURIComponent(uid)}`
-  );
-  return data; // { ok: true, profile, posts: { items, cursor } }
-}
-
-export async function getProProfileAdmin(proId) {
-  const { data } = await api.get(`/api/profile/pro/${proId}/admin`);
-  return data;
-}
-
-export async function ensureClientProfile() {
-  const { data } = await api.post("/api/profile/ensure");
-  return data;
-}
+};

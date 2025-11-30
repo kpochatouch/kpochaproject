@@ -1,6 +1,7 @@
 // apps/api/routes/chat.js
 import express from "express";
 import ChatMessage from "../models/ChatMessage.js";
+import * as chatService from "../services/chatService.js";
 
 /**
  * Helper: canonical DM room
@@ -34,6 +35,14 @@ export default function chatRoutes({ requireAuth }) {
     try {
       const room = String(req.params.room || "").trim();
       if (!room) return res.status(400).json({ error: "room_required" });
+
+      const meUid = req.user.uid;
+      if (room.startsWith("dm:")) {
+        const parts = room.split(":");
+        if (!parts.includes(meUid)) {
+          return res.status(403).json({ error: "not_allowed" });
+        }
+      }
 
       const limit = Math.min(100, Math.max(1, Number(req.query.limit || 50)));
       const before = req.query.before || null;
@@ -128,8 +137,10 @@ export default function chatRoutes({ requireAuth }) {
 
       // Fetch recent messages where I'm either sender or receiver
       const docs = await ChatMessage.find({
-        $or: [{ fromUid: meUid }, { toUid: meUid }],
-      })
+      room: /^dm:/, // only direct messages
+      $or: [{ fromUid: meUid }, { toUid: meUid }],
+    })
+
         .sort({ createdAt: -1 })
         .limit(500)
         .lean();
@@ -245,6 +256,68 @@ export default function chatRoutes({ requireAuth }) {
       res.status(500).json({ error: "server_error" });
     }
   });
+
+  /**
+ * POST /api/chat/room/:room/message
+ * Body: { text, meta, clientId }
+ *
+ * REST fallback for sending chat messages (used when socket is unavailable)
+ */
+router.post("/chat/room/:room/message", requireAuth, async (req, res) => {
+  try {
+    const room = String(req.params.room || "").trim();
+    if (!room) return res.status(400).json({ error: "room_required" });
+
+    const { text = "", meta = {}, clientId = null } = req.body || {};
+    const attachmentsRaw = Array.isArray(meta.attachments) ? meta.attachments : [];
+
+    if ((!text || !String(text).trim()) && attachmentsRaw.length === 0) {
+      return res.status(400).json({ error: "message_empty" });
+    }
+
+    const fromUid = req.user.uid;
+    // Determine toUid for dm rooms
+    let toUid = null;
+    const parts = room.split(":");
+    if (parts[0] === "dm" && parts.length === 3) {
+      const [, a, b] = parts;
+      toUid = fromUid === a ? b : fromUid === b ? a : null;
+    }
+
+    const attachments = attachmentsRaw.map((a) => ({
+      url: a.url,
+      type: a.type || "file",
+      name: a.name || "",
+      size: a.size || 0,
+    }));
+
+    const res2 = await chatService.saveMessage({
+      room,
+      fromUid,
+      toUid,
+      clientId,
+      body: String(text || ""),
+      attachments,
+      meta,
+    });
+
+    const payload = res2.message || null;
+
+    // Try to emit via sockets so live clients see it (best-effort)
+    try {
+      const { getIO } = await import("../sockets/index.js");
+      const io = getIO && getIO();
+      if (io && payload) io.to(room).emit("chat:message", payload);
+    } catch (e) {
+      console.warn("[chat:post] emit failed:", e?.message || e);
+    }
+
+    return res.json({ ok: true, id: payload?.id, existing: !!res2.existing, message: payload });
+  } catch (err) {
+    console.error("[POST /chat/room/:room/message] error:", err?.stack || err);
+    return res.status(500).json({ error: "send_failed" });
+  }
+});
 
   return router;
 }

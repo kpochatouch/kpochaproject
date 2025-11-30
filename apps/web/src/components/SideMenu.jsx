@@ -51,19 +51,6 @@ export default function SideMenu({ me }) {
       active: isBrowsePros,
     },
 
-    // Instant Request – only when logged in (feature is optional for this flow)
-    me && {
-      key: "instant",
-      label: "Instant Request",
-      icon: icons.instant,
-      active: pathname === "/instant-request",
-      onClick: () => {
-        navigate("/instant-request", {
-          state: { mode: "wildcard" },
-        });
-        setOpen(false);
-      },
-    },
 
     me && {
       key: "profile",

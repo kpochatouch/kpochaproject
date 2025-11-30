@@ -14,7 +14,8 @@ export default function CallSheet({ room, me, open, onClose }) {
   // setup signaling when modal opens
   useEffect(() => {
     if (!open || !room) return;
-    const s = new SignalingClient(room, me);
+    const sc = new SignalingClient(room, "caller");
+    sc.connect();
     setSig(s);
     return () => {
       try {
