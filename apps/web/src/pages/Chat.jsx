@@ -100,19 +100,23 @@ export default function Chat() {
         const roomFromApi = data?.room || null;
         const rawItems = Array.isArray(data?.items) ? data.items : [];
 
-        const normalized = rawItems.map((m) => ({
-          room: m.room,
-          body: m.body || "",
-          from: m.fromUid || m.from || "peer",
-          at: m.createdAt || m.at || Date.now(),
-          meta: {
-            ...(m.meta || {}),
-            attachments: m.attachments || [],
-          },
-          isMe:
-            (m.fromUid && m.fromUid === myUid) ||
-            m.from === myLabel,
-        }));
+        const normalized = rawItems.map((m) => {
+          const fromUid = m.fromUid || m.from || null;
+          return {
+            room: m.room,
+            body: m.body || "",
+            fromUid,
+            sender: m.sender || null, // server-provided sender object { uid, displayName, photoUrl }
+            clientId: m.clientId || null,
+            at: m.createdAt || m.at || Date.now(),
+            meta: {
+              ...(m.meta || {}),
+              attachments: m.attachments || [],
+            },
+            isMe: Boolean(fromUid && myUid && fromUid === myUid),
+          };
+        });
+
 
         setRoom(roomFromApi);
         setInitialMessages(normalized);
@@ -250,10 +254,12 @@ export default function Chat() {
         <ChatPane
           socket={socket}
           room={room}
-          me={myLabel}
-          toUid={peerUid}             // ✅ DM target
+          meUid={myUid}              // pass authoritative uid for dedupe/isMe
+          myLabel={myLabel}          // keep the display label available if needed
+          toUid={peerUid}
           initialMessages={initialMessages}
         />
+
       </div>
 
       <CallSheet

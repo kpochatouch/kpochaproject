@@ -4,6 +4,7 @@ import admin from "firebase-admin";
 import mongoose from "mongoose";
 import { Booking } from "../models/Booking.js";
 import { Pro } from "../models.js";
+import Thread from "../models/Thread.js";
 
 import redisClient from "../redis.js";
 import { getIO } from "../sockets/index.js";
@@ -134,7 +135,8 @@ async function resolveClientName(uid, fallbackName = "") {
   }
 
   try {
-    const prof = await ClientProfile.findOne({ ownerUid: uid })
+    // Profiles are keyed by `uid` (not ownerUid). Use .lean() for speed.
+    const prof = await ClientProfile.findOne({ uid: uid })
       .select("fullName displayName firstName lastName")
       .lean();
     if (!prof) return "";
@@ -145,10 +147,12 @@ async function resolveClientName(uid, fallbackName = "") {
       [prof.firstName, prof.lastName].filter(Boolean).join(" ") ||
       ""
     ).trim();
-  } catch {
+  } catch (err) {
+    console.warn("[bookings] resolveClientName failed:", err?.message || err);
     return "";
   }
 }
+
 
 /* ============================== ROUTES ============================== */
 
@@ -241,6 +245,30 @@ router.post("/bookings", requireAuth, async (req, res) => {
         notifyErr?.message || notifyErr
       );
     }
+
+    // create booking thread + snapshot (best-effort)
+try {
+  const room = `booking:${b._id.toString()}`;
+
+  // touchLastMessage will create a minimal thread if missing.
+  await Thread.touchLastMessage(room, {
+    lastMessageId: null,
+    lastMessageAt: b.createdAt || new Date(),
+    lastMessagePreview: "Booking created",
+    lastMessageFrom: req.user?.uid || null,
+    incrementFor: b.proOwnerUid ? [String(b.proOwnerUid)] : null,
+  }).catch(() => null);
+
+  // get mongoose doc so we can add participants (instance helper)
+  const t = await Thread.findOne({ room }).catch(() => null);
+  if (t) {
+    if (b.proOwnerUid) await t.addParticipant(String(b.proOwnerUid)).catch(() => null);
+    if (b.clientUid) await t.addParticipant(String(b.clientUid)).catch(() => null);
+  }
+} catch (e) {
+  console.warn("[bookings:create] ensure booking thread failed:", e?.message || e);
+}
+
 
 
     res.json({ ok: true, booking: sanitizeBookingFor(req, b) });
@@ -419,6 +447,29 @@ router.post("/bookings/instant", requireAuth, async (req, res) => {
         notifyErr?.message || notifyErr
       );
     }
+
+    // create booking thread + snapshot (best-effort)
+try {
+  const room = `booking:${b._id.toString()}`;
+
+  await Thread.touchLastMessage(room, {
+    lastMessageId: null,
+    lastMessageAt: b.createdAt || new Date(),
+    lastMessagePreview: "Instant booking requested",
+    lastMessageFrom: req.user?.uid || null,
+    incrementFor: b.proOwnerUid ? [String(b.proOwnerUid)] : null,
+  }).catch(() => null);
+
+  const t = await Thread.findOne({ room }).catch(() => null);
+  if (t) {
+    if (b.proOwnerUid) await t.addParticipant(String(b.proOwnerUid)).catch(() => null);
+    if (b.clientUid) await t.addParticipant(String(b.clientUid)).catch(() => null);
+  }
+} catch (e) {
+  console.warn("[bookings:instant] ensure booking thread failed:", e?.message || e);
+}
+
+
 
 
     // For card, FE will open Paystack and then call /api/payments/verify
@@ -634,6 +685,28 @@ router.put("/bookings/:id/accept", requireAuth, async (req, res) => {
       );
     }
     // --- end socket block ---
+
+    // ensure booking thread exists and add participants (best-effort)
+try {
+  const room = `booking:${b._id.toString()}`;
+
+  await Thread.touchLastMessage(room, {
+    lastMessageId: null,
+    lastMessageAt: b.acceptedAt || new Date(),
+    lastMessagePreview: "Booking accepted",
+    lastMessageFrom: req.user?.uid || null,
+    incrementFor: b.clientUid ? [String(b.clientUid)] : null,
+  }).catch(() => null);
+
+  const t = await Thread.findOne({ room }).catch(() => null);
+  if (t) {
+    if (b.clientUid) await t.addParticipant(String(b.clientUid)).catch(() => null);
+    if (b.proOwnerUid) await t.addParticipant(String(b.proOwnerUid)).catch(() => null);
+  }
+} catch (e) {
+  console.warn("[bookings:accept] ensure booking thread failed:", e?.message || e);
+}
+
 
     // 🔔 Notify client that pro accepted
     try {

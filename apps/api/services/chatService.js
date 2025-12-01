@@ -1,5 +1,6 @@
 // apps/api/services/chatService.js
 import ChatMessage from "../models/ChatMessage.js";
+import Thread from "../models/Thread.js";
 import { createNotification } from "./notificationService.js";
 
 /**
@@ -91,6 +92,67 @@ export async function saveMessage({
   }
 
   const payload = buildPayloadFromDoc(doc);
+
+  // 2.b) Update Thread snapshot & unread counters (best-effort)
+  (async () => {
+    try {
+      // compute lastPreview: prefer message text, otherwise indicate attachment
+      const lastPreview = (function () {
+        const text = String(body || "").trim();
+        if (text.length) return text.slice(0, 255);
+        if (payload?.attachments && payload.attachments.length) return "[attachment]";
+        return "";
+      })();
+
+      // increment unread for recipients:
+      let incrementFor = null;
+      if (String(room).startsWith("dm:")) {
+        const parts = String(room).split(":");
+        if (parts.length >= 3) {
+          const uidA = parts[1];
+          const uidB = parts[2];
+          const recipient = uidA === fromUid ? uidB : uidB === fromUid ? uidA : null;
+          if (recipient && recipient !== fromUid) incrementFor = [recipient];
+        }
+      } else if (toUid) {
+        incrementFor = [toUid];
+      } else if (String(room).startsWith("booking:")) {
+        incrementFor = null; 
+      }
+
+      // ensure DM/booking threads have canonical participants where possible
+try {
+  if (String(room).startsWith("dm:")) {
+    const parts = String(room).split(":");
+    if (parts.length >= 3) {
+      await Thread.getOrCreateDMThread(parts[1], parts[2]).catch(() => null);
+    }
+  } else if (String(room).startsWith("booking:")) {
+    const bookingId = String(room).split(":")[1];
+    if (bookingId) await Thread.getOrCreateBookingThread(bookingId).catch(() => null);
+  }
+} catch (e) {
+  // best-effort
+  console.warn("[chatService] ensure thread participants failed:", e?.message || e);
+}
+
+
+      await Thread.touchLastMessage(room, {
+        lastMessageId: doc._id,
+        lastMessageAt: doc.createdAt || new Date(),
+        lastMessagePreview: lastPreview,
+        lastMessageFrom: fromUid,
+        incrementFor,
+      }).catch((err) => {
+        console.warn("[chatService] Thread.touchLastMessage failed:", err?.message || err);
+      });
+    } catch (err) {
+      console.warn("[chatService] thread update error:", err?.message || err);
+    }
+  })().catch((err) => {
+    console.warn("[chatService] unexpected thread update error:", err?.message || err);
+  });
+
 
   // 3) emit to room
   try {
@@ -200,10 +262,57 @@ export async function getMessages(room, { limit = 50, before = null } = {}) {
 /**
  * getInbox(uid)
  * - returns [ { room, peerUid, lastBody, lastFromUid, lastAt, unreadCount } ]
+ *
+ * Prefer Thread collection for fast inbox. Fallback to scanning ChatMessage if Thread not present.
  */
 export async function getInbox(uid) {
   if (!uid) throw new Error("uid required");
 
+  // Try to use Thread collection first (fast)
+  try {
+    const threads = await Thread.find({ participants: uid, archived: { $ne: true } })
+  .sort({ lastMessageAt: -1 })
+  .limit(200)
+  .lean();
+
+    if (Array.isArray(threads) && threads.length) {
+      const out = threads.map((t) => {
+        let peerUid = null;
+        if (t.type === "dm" || String(t.room).startsWith("dm:")) {
+          const parts = String(t.room).split(":");
+          if (parts.length >= 3) {
+            const a = parts[1];
+            const b = parts[2];
+            peerUid = a === uid ? b : b === uid ? a : null;
+          }
+        } else if (t.type === "booking") {
+          // for booking threads, peerUid is ambiguous; leave null or set booking id
+          peerUid = null;
+        } else {
+          // group/system etc.
+          peerUid = null;
+        }
+
+        const unreadCount = (t.unreadCounts && Number(t.unreadCounts[uid] || 0)) || 0;
+
+        return {
+          room: t.room,
+          peerUid,
+          lastBody: t.lastMessagePreview || "",
+          lastFromUid: t.lastMessageFrom || "",
+          lastAt: t.lastMessageAt || t.updatedAt || t.createdAt,
+          unreadCount: Number(unreadCount || 0),
+        };
+      });
+
+      return out;
+    }
+  } catch (e) {
+    console.warn("[chatService] getInbox(thread) failed, falling back:", e?.message || e);
+    // fallback to message-scan below
+  }
+
+  // Fallback: original behaviour (scan ChatMessage rooms)
   const rooms = await ChatMessage.find({
     $or: [{ fromUid: uid }, { toUid: uid }],
   })
@@ -272,6 +381,15 @@ export async function markThreadRead(peerUid, uid) {
       },
       { $addToSet: { seenBy: uid } }
     );
+
+    // also update Thread unreadCounts (best-effort)
+    try {
+      await Thread.markRead(roomA, uid).catch(() => Thread.markRead(roomB, uid).catch(() => null));
+    } catch (err) {
+      // non-fatal
+      console.warn("[chatService] Thread.markRead failed:", err?.message || err);
+    }
+
     return { ok: true, updated: res?.modifiedCount ?? res?.nModified ?? 0 };
   } catch (e) {
     console.warn("[chatService] markThreadRead failed:", e?.message || e);
@@ -292,6 +410,14 @@ export async function markRoomRead(room, uid) {
       { room, toUid: uid, seenBy: { $ne: uid } },
       { $addToSet: { seenBy: uid } }
     );
+
+    // also update Thread unreadCounts (best-effort)
+    try {
+      await Thread.markRead(room, uid).catch(() => null);
+    } catch (err) {
+      console.warn("[chatService] Thread.markRead(room) failed:", err?.message || err);
+    }
+
     return { ok: true, updated: res?.modifiedCount ?? res?.nModified ?? 0 };
   } catch (e) {
     console.warn("[chatService] markRoomRead failed:", e?.message || e);

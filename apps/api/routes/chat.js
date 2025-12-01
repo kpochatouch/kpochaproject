@@ -1,7 +1,10 @@
 // apps/api/routes/chat.js
 import express from "express";
 import ChatMessage from "../models/ChatMessage.js";
+import Thread from "../models/Thread.js";
 import * as chatService from "../services/chatService.js";
+import { ClientProfile } from "../models/Profile.js";
+import { Pro } from "../models.js";
 
 /**
  * Helper: canonical DM room
@@ -62,7 +65,63 @@ export default function chatRoutes({ requireAuth }) {
         .limit(limit)
         .lean();
 
-      res.json({ items: items.reverse() });
+        // optionally mark thread read when user opens it
+    try {
+      await Thread.markRead(room, meUid).catch(() => null);
+    } catch (err) {
+      console.warn("[chat:room] Thread.markRead failed:", err?.message || err);
+    }
+
+    // Enrich messages with sender profile so frontend can show names/avatars
+    try {
+      const reversed = items.reverse(); // oldest -> newest
+      const uids = [...new Set(reversed.map((m) => m.fromUid).filter(Boolean))];
+
+      const profileMap = {};
+      if (uids.length) {
+        const clients = await ClientProfile.find({ uid: { $in: uids } })
+          .select("uid fullName displayName photoUrl username")
+          .lean()
+          .catch(() => []);
+        clients.forEach((c) => {
+          profileMap[c.uid] = {
+            uid: c.uid,
+            displayName: c.displayName || c.fullName || c.username || "",
+            photoUrl: c.photoUrl || "",
+          };
+        });
+
+        // fallback: try Pro documents for any missing uids
+        const missing = uids.filter((u) => !profileMap[u]);
+        if (missing.length) {
+          const pros = await Pro.find({ ownerUid: { $in: missing } })
+            .select("ownerUid name photoUrl")
+            .lean()
+            .catch(() => []);
+          pros.forEach((p) => {
+            profileMap[p.ownerUid] = {
+              uid: p.ownerUid,
+              displayName: p.name || "",
+              photoUrl: p.photoUrl || "",
+            };
+          });
+        }
+      }
+
+      const enriched = reversed.map((m) => ({
+        ...m,
+        fromUid: m.fromUid || null,
+        clientId: m.clientId || null,
+        sender: profileMap[m.fromUid] || null,
+      }));
+
+      return res.json({ items: enriched });
+    } catch (err) {
+      // graceful fallback: return raw reversed items if enrichment fails
+      console.warn("[chat:room] sender enrichment failed:", err?.message || err);
+      return res.json({ items: items.reverse() });
+    }
+
     } catch (e) {
       console.error("GET /chat/room error:", e);
       res.status(500).json({ error: "server_error" });
@@ -103,7 +162,61 @@ export default function chatRoutes({ requireAuth }) {
         .limit(limit)
         .lean();
 
-      res.json({ items: items.reverse(), room });
+      // optionally mark thread read when user opens it
+      try {
+        await Thread.markRead(room, meUid).catch(() => null);
+      } catch (err) {
+        console.warn("[chat:room] Thread.markRead failed:", err?.message || err);
+      }
+
+      // Enrich messages with sender profile for frontend
+      try {
+        const reversed = items.reverse(); // oldest -> newest
+        const uids = [...new Set(reversed.map((m) => m.fromUid).filter(Boolean))];
+
+        const profileMap = {};
+        if (uids.length) {
+          const clients = await ClientProfile.find({ uid: { $in: uids } })
+            .select("uid fullName displayName photoUrl username")
+            .lean()
+            .catch(() => []);
+          clients.forEach((c) => {
+            profileMap[c.uid] = {
+              uid: c.uid,
+              displayName: c.displayName || c.fullName || c.username || "",
+              photoUrl: c.photoUrl || "",
+            };
+          });
+
+          const missing = uids.filter((u) => !profileMap[u]);
+          if (missing.length) {
+            const pros = await Pro.find({ ownerUid: { $in: missing } })
+              .select("ownerUid name photoUrl")
+              .lean()
+              .catch(() => []);
+            pros.forEach((p) => {
+              profileMap[p.ownerUid] = {
+                uid: p.ownerUid,
+                displayName: p.name || "",
+                photoUrl: p.photoUrl || "",
+              };
+            });
+          }
+        }
+
+        const enriched = reversed.map((m) => ({
+          ...m,
+          fromUid: m.fromUid || null,
+          clientId: m.clientId || null,
+          sender: profileMap[m.fromUid] || null,
+        }));
+
+        return res.json({ items: enriched, room });
+      } catch (err) {
+        console.warn("[chat:with] sender enrichment failed:", err?.message || err);
+        return res.json({ items: items.reverse(), room });
+      }
+
     } catch (e) {
       console.error("GET /chat/with error:", e);
       res.status(500).json({ error: "server_error" });
@@ -132,60 +245,17 @@ export default function chatRoutes({ requireAuth }) {
    * }
    */
   router.get("/chat/inbox", requireAuth, async (req, res) => {
-    try {
-      const meUid = req.user.uid;
+  try {
+    const meUid = req.user.uid;
+    const items = await chatService.getInbox(meUid);
+    // chatService.getInbox returns the array format expected by FE
+    return res.json({ items });
+  } catch (e) {
+    console.error("GET /chat/inbox error:", e);
+    return res.status(500).json({ error: "server_error" });
+  }
+});
 
-      // Fetch recent messages where I'm either sender or receiver
-      const docs = await ChatMessage.find({
-      room: /^dm:/, // only direct messages
-      $or: [{ fromUid: meUid }, { toUid: meUid }],
-    })
-
-        .sort({ createdAt: -1 })
-        .limit(500)
-        .lean();
-
-      const byPeer = new Map();
-
-      for (const m of docs) {
-        const {
-          room,
-          fromUid,
-          toUid,
-          body = "",
-          createdAt,
-          updatedAt,
-          seenBy = [],
-        } = m;
-
-        const peerUid = fromUid === meUid ? toUid : fromUid;
-        if (!peerUid) continue;
-
-        // Initialize thread entry on first encounter (docs are newest first)
-        if (!byPeer.has(peerUid)) {
-          byPeer.set(peerUid, {
-            peerUid,
-            room: buildDmRoom(meUid, peerUid),
-            lastBody: body,
-            lastFromUid: fromUid,
-            lastAt: createdAt || updatedAt,
-            unreadCount: 0,
-          });
-        }
-
-        // Unread logic: messages sent TO me, where I am not in seenBy
-        if (toUid === meUid && Array.isArray(seenBy) && !seenBy.includes(meUid)) {
-          const t = byPeer.get(peerUid);
-          t.unreadCount += 1;
-        }
-      }
-
-      res.json({ items: Array.from(byPeer.values()) });
-    } catch (e) {
-      console.error("GET /chat/inbox error:", e);
-      res.status(500).json({ error: "server_error" });
-    }
-  });
 
   /**
    * Mark one DM thread as read for the logged-in user
@@ -216,6 +286,14 @@ export default function chatRoutes({ requireAuth }) {
           $addToSet: { seenBy: meUid },
         }
       );
+
+      // sync thread unreadCounts
+try {
+  await Thread.markRead(room, meUid).catch(() => null);
+} catch (err) {
+  console.warn("[chat:thread/read] Thread.markRead failed:", err?.message || err);
+}
+
 
       res.json({ ok: true, updatedCount: result.modifiedCount || 0 });
     } catch (e) {
@@ -250,6 +328,14 @@ export default function chatRoutes({ requireAuth }) {
         }
       );
 
+      // sync thread unreadCounts
+try {
+  await Thread.markRead(room, meUid).catch(() => null);
+} catch (err) {
+  console.warn("[chat:room/read] Thread.markRead failed:", err?.message || err);
+}
+
+
       res.json({ ok: true, updatedCount: result.modifiedCount || 0 });
     } catch (e) {
       console.error("PUT /chat/room/:room/read error:", e);
@@ -257,7 +343,7 @@ export default function chatRoutes({ requireAuth }) {
     }
   });
 
-  /**
+/**
  * POST /api/chat/room/:room/message
  * Body: { text, meta, clientId }
  *
@@ -303,21 +389,63 @@ router.post("/chat/room/:room/message", requireAuth, async (req, res) => {
 
     const payload = res2.message || null;
 
-    // Try to emit via sockets so live clients see it (best-effort)
+    // Ensure a Thread exists and update participants (best-effort)
     try {
-      const { getIO } = await import("../sockets/index.js");
-      const io = getIO && getIO();
-      if (io && payload) io.to(room).emit("chat:message", payload);
-    } catch (e) {
-      console.warn("[chat:post] emit failed:", e?.message || e);
+      if (String(room).startsWith("dm:")) {
+        // ensure the DM Thread exists and has both participants
+        const parts = room.split(":");
+        if (parts.length >= 3) {
+          const a = parts[1];
+          const b = parts[2];
+          await Thread.getOrCreateDMThread(a, b).catch(() => null);
+        }
+      } else if (String(room).startsWith("booking:")) {
+        // ensure booking thread exists (participants can be added later when booking accepted)
+        const bookingId = room.split(":")[1];
+        if (bookingId) {
+          await Thread.getOrCreateBookingThread(bookingId).catch(() => null);
+        }
+      }
+      // Let chatService touchLastMessage handle snapshot/unread (it already does)
+    } catch (err) {
+      console.warn("[chat:post] ensure Thread failed:", err?.message || err);
     }
 
-    return res.json({ ok: true, id: payload?.id, existing: !!res2.existing, message: payload });
-  } catch (err) {
-    console.error("[POST /chat/room/:room/message] error:", err?.stack || err);
-    return res.status(500).json({ error: "send_failed" });
+    // Update Thread snapshot & unread counters (best-effort)
+try {
+  const lastPreview = String(payload?.body || "").slice(0, 255);
+  let incrementFor = null;
+
+  // For DM -> increment unread for the other participant only
+  if (String(room).startsWith("dm:")) {
+    const parts = room.split(":");
+    if (parts.length >= 3) {
+      const a = parts[1];
+      const b = parts[2];
+      const recipient = a === fromUid ? b : b === fromUid ? a : null;
+      if (recipient && recipient !== fromUid) incrementFor = [recipient];
+    }
+  }
+
+  await Thread.touchLastMessage(room, {
+    lastMessageId: payload?.id || null,
+    lastMessageAt: payload?.createdAt ? new Date(payload.createdAt) : new Date(),
+    lastMessagePreview: lastPreview,
+    lastMessageFrom: fromUid,
+    incrementFor, // null => thread participants except sender
+  }).catch(() => null);
+} catch (err) {
+  console.warn("[chat:post] Thread.touchLastMessage failed:", err?.message || err);
+}
+
+
+    // Return success response for REST fallback
+    return res.json({ ok: true, message: payload });
+  } catch (e) {
+    console.error("POST /chat/room/:room/message error:", e);
+    return res.status(500).json({ error: "server_error" });
   }
 });
 
-  return router;
+return router;
 }

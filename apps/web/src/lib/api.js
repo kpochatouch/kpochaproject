@@ -5,6 +5,17 @@
 import axios from "axios";
 import { getAuth, onAuthStateChanged } from "firebase/auth";
 import { io as ioClient } from "socket.io-client";
+import { v4 as uuidv4 } from "uuid";
+
+/* ------------------------
+   Helper: canonical DM room
+   ------------------------ */
+export function createDMRoom(uidA, uidB) {
+  if (!uidA || !uidB) return `dm:${uidA || uidB}`;
+  if (uidA === uidB) return `dm:${uidA}`;
+  return uidA < uidB ? `dm:${uidA}:${uidB}` : `dm:${uidB}:${uidA}`;
+}
+
 
 /* =========================================
    BASE URL (normalize, no trailing slash, no /api suffix)
@@ -366,30 +377,32 @@ export async function sendChatMessage({ room, text = "", meta = {}, clientId = n
     throw new Error("message_empty");
   }
 
+  // ensure clientId exists (server dedupe expects this)
+  if (!clientId) clientId = `c_${uuidv4()}`;
+
+  const payload = { room, text, meta, clientId };
+
   // prefer socket for realtime acks
   if (socket && socket.connected) {
     return new Promise((resolve, reject) => {
       try {
-        socket.emit(
-          "chat:message",
-          { room, text, meta, clientId },
-          (ack) => {
-            if (!ack) return reject(new Error("no_ack"));
-            if (ack.ok) return resolve(ack);
-            return reject(new Error(ack.error || "send_failed"));
-          }
-        );
+        socket.emit("chat:message", payload, (ack) => {
+          if (!ack) return reject(new Error("no_ack"));
+          if (ack.ok) return resolve({ ...ack, clientId });
+          return reject(new Error(ack.error || "send_failed"));
+        });
       } catch (e) {
         // fallthrough to REST
         console.warn("[chat] socket send failed, falling back to REST:", e?.message || e);
-        _sendChatMessageRest({ room, text, meta, clientId }).then(resolve).catch(reject);
+        _sendChatMessageRest(payload).then((d) => resolve({ ...d, clientId })).catch(reject);
       }
     });
   }
 
   // fallback: REST endpoint (server should accept same payload)
-  return _sendChatMessageRest({ room, text, meta, clientId });
+  return _sendChatMessageRest(payload).then((d) => ({ ...d, clientId }));
 }
+
 
 async function _sendChatMessageRest({ room, text, meta = {}, clientId = null }) {
   const payload = { room, text, meta, clientId };
