@@ -114,6 +114,8 @@ export default function Chat() {
               attachments: m.attachments || [],
             },
             isMe: Boolean(fromUid && myUid && fromUid === myUid),
+            seenBy: Array.isArray(m.seenBy) ? m.seenBy : [],
+            toUid: m.toUid || null,
           };
         });
 

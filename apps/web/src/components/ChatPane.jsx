@@ -50,8 +50,8 @@ function formatDateLabel(at) {
 export default function ChatPane({
   socket,
   room,
-  meUid = null,      // authoritative uid (pass from Chat.jsx)
-  myLabel = "You",   // optional display label
+  meUid = null,
+  myLabel = "You",
   toUid = null,
   peerUid = null,
   peerProfile = null,
@@ -62,16 +62,30 @@ export default function ChatPane({
   const [uploading, setUploading] = useState(false);
   const endRef = useRef(null);
 
-  // Normalize initial messages when room / history changes
+  // ---------- hydrate initial messages with proper status ----------
   useEffect(() => {
-    const normalized = (initialMessages || []).map((m) => ({
-      ...m,
-      status: m.status || (m.isMe ? "sent" : "received"),
-    }));
-    setMsgs(normalized);
-  }, [room, initialMessages]);
+    const normalized = (initialMessages || []).map((m) => {
+      let status = m.status;
 
-  // mark room read (when room changes)
+      if (!status) {
+        if (m.isMe) {
+          const seen =
+            Array.isArray(m.seenBy) &&
+            peerUid &&
+            m.seenBy.includes(peerUid);
+          // from history: at least delivered; upgrade to seen if seenBy has peer
+          status = seen ? "seen" : "delivered";
+        } else {
+          status = "received";
+        }
+      }
+
+      return { ...m, status };
+    });
+    setMsgs(normalized);
+  }, [room, initialMessages, peerUid]);
+
+  // ---------- mark room read when I open it ----------
   useEffect(() => {
     if (!room) return;
     (async () => {
@@ -83,7 +97,7 @@ export default function ChatPane({
     })();
   }, [room]);
 
-  // Listen for incoming messages and normalize them
+  // ---------- socket listeners ----------
   useEffect(() => {
     if (!socket) return;
 
@@ -99,6 +113,18 @@ export default function ChatPane({
       const at = m.createdAt || m.ts || Date.now();
       const meta = m.meta || { attachments: m.attachments || [] };
       const isMe = Boolean(fromUid && meUid && fromUid === meUid);
+      const seenBy = Array.isArray(m.seenBy) ? m.seenBy : [];
+
+      let status;
+      if (isMe) {
+        const seen =
+          peerUid && Array.isArray(seenBy) && seenBy.includes(peerUid);
+        // live echo from server => definitely delivered to server,
+        // upgrade to seen if peerUid is in seenBy
+        status = seen ? "seen" : "delivered";
+      } else {
+        status = "received";
+      }
 
       return {
         id,
@@ -110,7 +136,8 @@ export default function ChatPane({
         at,
         meta,
         isMe,
-        status: isMe ? "sent" : "received",
+        seenBy,
+        status,
       };
     }
 
@@ -125,7 +152,13 @@ export default function ChatPane({
           );
           if (idx !== -1) {
             const copy = [...prev];
-            copy[idx] = { ...copy[idx], ...n, _confirmed: true };
+            copy[idx] = {
+              ...copy[idx],
+              ...n,
+              _confirmed: true,
+              // when server echo arrives, treat as delivered/seen
+              status: n.status,
+            };
             return copy;
           }
         }
@@ -150,13 +183,14 @@ export default function ChatPane({
         socket.off("chat:message", onMsg);
       } catch {}
     };
-  }, [socket, meUid]);
+  }, [socket, meUid, peerUid]);
 
-  // Auto-scroll
+  // ---------- auto scroll ----------
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [msgs]);
 
+  // ---------- uploads ----------
   async function uploadFileToCloudinary(file) {
     const { data: sign } = await api.post("/api/uploads/sign", {
       folder: "kpocha/chat",
@@ -230,6 +264,7 @@ export default function ChatPane({
           isMe: true,
           _optimistic: true,
           status: "pending",
+          seenBy: meUid ? [meUid] : [],
         },
       ]);
 
@@ -242,7 +277,7 @@ export default function ChatPane({
             )
           );
         } else {
-          // optimistic: mark as sent (server message will also come in and overwrite)
+          // server accepted → single white tick = sent
           setMsgs((prev) =>
             prev.map((m) =>
               m.clientId === clientId ? { ...m, status: "sent" } : m
@@ -259,6 +294,7 @@ export default function ChatPane({
     }
   }
 
+  // ---------- text send ----------
   function send() {
     const body = String(text || "").trim();
     if (!body || !socket || !room) return;
@@ -287,7 +323,8 @@ export default function ChatPane({
         meta: {},
         isMe: true,
         _optimistic: true,
-        status: "pending",
+        status: "pending", // • sending…
+        seenBy: meUid ? [meUid] : [],
       },
     ]);
 
@@ -299,6 +336,7 @@ export default function ChatPane({
           )
         );
       } else {
+        // server accepted → sent (one white tick)
         setMsgs((prev) =>
           prev.map((m) =>
             m.clientId === clientId ? { ...m, status: "sent" } : m
@@ -324,17 +362,14 @@ export default function ChatPane({
           let avatarUrl = "";
 
           if (isMe) {
-            // for my own messages, always "You"
             displayName = "You";
           } else if (m.sender && (m.sender.displayName || m.sender.name)) {
-            // trust backend-enriched sender object when present
             displayName = m.sender.displayName || m.sender.name;
             avatarUrl = m.sender.avatarUrl || m.sender.photoUrl || "";
           } else if (
             peerProfile &&
             (!peerUid || !m.fromUid || m.fromUid === peerUid)
           ) {
-            // fallback: we know this is a DM and have peer profile from Chat header
             displayName =
               peerProfile.displayName ||
               peerProfile.fullName ||
@@ -342,7 +377,6 @@ export default function ChatPane({
               "Unknown";
             avatarUrl = peerProfile.avatarUrl || peerProfile.photoUrl || "";
           } else {
-            // truly unknown (rare)
             displayName = "Unknown";
           }
 
@@ -356,11 +390,33 @@ export default function ChatPane({
           const prev = i > 0 ? msgs[i - 1] : null;
           const showDateHeader = !prev || !sameDay(prev?.at, m.at);
 
-          let statusText = "";
+          // ---------- status → ticks ----------
+          let statusNode = null;
           if (isMe) {
-            if (m.status === "pending") statusText = "• sending";
-            else if (m.status === "sent") statusText = "✓ sent";
-            else if (m.status === "failed") statusText = "⚠ failed";
+            if (m.status === "pending") {
+              statusNode = (
+                <span className="text-zinc-500 text-[10px]">sending…</span>
+              );
+            } else if (m.status === "failed") {
+              statusNode = (
+                <span className="text-red-500 text-[10px]">⟳ failed</span>
+              );
+            } else if (m.status === "sent") {
+              // one white tick
+              statusNode = (
+                <span className="text-zinc-400 text-[11px]">✓</span>
+              );
+            } else if (m.status === "delivered") {
+              // two white ticks
+              statusNode = (
+                <span className="text-zinc-100 text-[11px]">✓✓</span>
+              );
+            } else if (m.status === "seen") {
+              // two gold ticks
+              statusNode = (
+                <span className="text-amber-400 text-[11px]">✓✓</span>
+              );
+            }
           }
 
           return (
@@ -378,7 +434,6 @@ export default function ChatPane({
                   isMe ? "justify-end" : "justify-start"
                 }`}
               >
-                {/* peer avatar on the left for their messages */}
                 {!isMe && (
                   <div className="mr-2 mt-1">
                     {avatarUrl ? (
@@ -457,20 +512,10 @@ export default function ChatPane({
                     </div>
                   )}
 
-                  {/* time + status line */}
+                  {/* time + ticks */}
                   <div className="mt-1 flex items-center justify-end gap-2 text-[10px] text-zinc-400">
                     {timeLabel && <span>{timeLabel}</span>}
-                    {statusText && (
-                      <span
-                        className={
-                          m.status === "failed"
-                            ? "text-red-500"
-                            : "text-zinc-400"
-                        }
-                      >
-                        {statusText}
-                      </span>
-                    )}
+                    {statusNode}
                   </div>
                 </div>
               </div>
