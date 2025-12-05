@@ -367,6 +367,33 @@ export function joinBookingRoom(bookingId, who = "user") {
   });
 }
 
+// Ensure socket is connected before we try to send chat.
+// If it can't connect in time, we reject and caller falls back to REST.
+async function ensureSocketReady(timeoutMs = 8000) {
+  // already connected
+  if (socket && socket.connected) return socket;
+
+  // start or retry connection
+  connectSocket();
+
+  return await new Promise((resolve, reject) => {
+    const start = Date.now();
+
+    function check() {
+      if (socket && socket.connected) {
+        return resolve(socket);
+      }
+      if (Date.now() - start >= timeoutMs) {
+        return reject(new Error("socket_timeout"));
+      }
+      setTimeout(check, 200);
+    }
+
+    check();
+  });
+}
+
+
 /* -----------------------
    Chat send: prefer socket, fallback to REST
    - returns { ok, id, existing } or throws
@@ -382,25 +409,30 @@ export async function sendChatMessage({ room, text = "", meta = {}, clientId = n
 
   const payload = { room, text, meta, clientId };
 
-  // prefer socket for realtime acks
-  if (socket && socket.connected) {
-    return new Promise((resolve, reject) => {
+  // 1️⃣ Try to make sure socket is ready
+  try {
+    const s = await ensureSocketReady(6000); // wait up to 6s for connect
+
+    return await new Promise((resolve, reject) => {
       try {
-        socket.emit("chat:message", payload, (ack) => {
+        s.emit("chat:message", payload, (ack) => {
           if (!ack) return reject(new Error("no_ack"));
           if (ack.ok) return resolve({ ...ack, clientId });
           return reject(new Error(ack.error || "send_failed"));
         });
       } catch (e) {
-        // fallthrough to REST
-        console.warn("[chat] socket send failed, falling back to REST:", e?.message || e);
-        _sendChatMessageRest(payload).then((d) => resolve({ ...d, clientId })).catch(reject);
+        console.warn("[chat] socket emit failed, falling back to REST:", e?.message || e);
+        _sendChatMessageRest(payload)
+          .then((d) => resolve({ ...d, clientId }))
+          .catch(reject);
       }
     });
+  } catch (e) {
+    // 2️⃣ Socket couldn't get ready in time → REST fallback
+    console.warn("[chat] socket not ready, using REST:", e?.message || e);
+    const data = await _sendChatMessageRest(payload);
+    return { ...data, clientId };
   }
-
-  // fallback: REST endpoint (server should accept same payload)
-  return _sendChatMessageRest(payload).then((d) => ({ ...d, clientId }));
 }
 
 
