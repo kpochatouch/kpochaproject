@@ -116,15 +116,16 @@ export default function ChatPane({
       const seenBy = Array.isArray(m.seenBy) ? m.seenBy : [];
 
       let status;
-      if (isMe) {
-        const seen =
-          peerUid && Array.isArray(seenBy) && seenBy.includes(peerUid);
-        // live echo from server => definitely delivered to server,
-        // upgrade to seen if peerUid is in seenBy
-        status = seen ? "seen" : "delivered";
-      } else {
-        status = "received";
-      }
+      if (m.isMe) {
+  const seen =
+    Array.isArray(m.seenBy) &&
+    peerUid &&
+    m.seenBy.includes(peerUid);
+  // after reload: at least sent; upgrade to seen if seenBy has peer
+  status = seen ? "seen" : "sent";
+} else {
+  status = "received";
+}
 
       return {
         id,
@@ -294,59 +295,61 @@ export default function ChatPane({
     }
   }
 
-  // ---------- text send ----------
-  function send() {
-    const body = String(text || "").trim();
-    if (!body || !socket || !room) return;
+    // ---------- text send ----------
+    function send() {
+      const body = String(text || "").trim();
+      if (!body || !socket || !room) return;
 
-    const now = Date.now();
-    const clientId = generateClientId();
-    const payload = {
-      room,
-      body,
-      clientId,
-      ts: now,
-      ...(toUid ? { toUid } : {}),
-    };
-
-    // optimistic UI
-    setMsgs((x) => [
-      ...x,
-      {
-        id: `local:${clientId}`,
-        clientId,
+      const now = Date.now();
+      const clientId = generateClientId();
+      const payload = {
         room,
         body,
-        fromUid: meUid || null,
-        sender: { displayName: myLabel || "You" },
-        at: now,
-        meta: {},
-        isMe: true,
-        _optimistic: true,
-        status: "pending", // • sending…
-        seenBy: meUid ? [meUid] : [],
-      },
-    ]);
+        clientId,
+        ts: now,
+        ...(toUid ? { toUid } : {}),
+      };
 
-    socket.emit("chat:message", payload, (ack) => {
-      if (!ack || !ack.ok) {
-        setMsgs((prev) =>
-          prev.map((m) =>
-            m.clientId === clientId ? { ...m, status: "failed" } : m
-          )
-        );
-      } else {
-        // server accepted → sent (one white tick)
-        setMsgs((prev) =>
-          prev.map((m) =>
-            m.clientId === clientId ? { ...m, status: "sent" } : m
-          )
-        );
-      }
-    });
+      // optimistic UI
+      setMsgs((x) => [
+        ...x,
+        {
+          id: `local:${clientId}`,
+          clientId,
+          room,
+          body,
+          fromUid: meUid || null,
+          sender: { displayName: myLabel || "You" },
+          at: now,
+          meta: {},
+          isMe: true,
+          _optimistic: true,
+          status: "pending", // start as sending…
+          seenBy: meUid ? [meUid] : [],
+        },
+      ]);
 
-    setText("");
-  }
+         socket.emit("chat:message", payload, (ack) => {
+        if (ack && ack.ok === false) {
+          // mark as failed
+          setMsgs((prev) =>
+            prev.map((m) =>
+              m.clientId === clientId ? { ...m, status: "failed" } : m
+            )
+          );
+        } else if (ack && ack.ok) {
+          // server accepted → single white tick = sent
+          setMsgs((prev) =>
+            prev.map((m) =>
+              m.clientId === clientId ? { ...m, status: "sent" } : m
+            )
+          );
+        }
+        // if no ack => keep pending, wait for "chat:message" echo
+      });
+      setText("");
+    }
+
 
   return (
     <div className="flex flex-col h-full">
