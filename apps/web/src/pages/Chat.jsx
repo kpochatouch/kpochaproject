@@ -255,12 +255,14 @@ export default function Chat() {
           socket={socket}
           room={room}
           meUid={myUid}              // pass authoritative uid for dedupe/isMe
-          myLabel={myLabel}          // keep the display label available if needed
+          myLabel={myLabel}          // display label for "You"
           toUid={peerUid}
+          peerUid={peerUid}          // NEW: tell ChatPane who the peer is
+          peerProfile={peerProfile}  // NEW: let ChatPane show name + avatar
           initialMessages={initialMessages}
         />
-
       </div>
+
 
       <CallSheet
         room={room}

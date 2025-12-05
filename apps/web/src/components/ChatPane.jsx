@@ -12,6 +12,8 @@ export default function ChatPane({
   meUid = null,      // authoritative uid (pass from Chat.jsx)
   myLabel = "You",   // optional display label
   toUid = null,
+  peerUid = null,         // NEW
+  peerProfile = null,     // NEW: { displayName, avatarUrl }
   initialMessages = [],
 }) {
   const [msgs, setMsgs] = useState(initialMessages || []);
@@ -41,7 +43,10 @@ export default function ChatPane({
 
     function normalizeIncoming(m) {
       const fromUid = m.fromUid || m.from || null;
-      const id = m.id || m._id || `srv:${fromUid || "x"}:${m.createdAt || m.ts || Date.now()}`;
+      const id =
+        m.id ||
+        m._id ||
+        `srv:${fromUid || "x"}:${m.createdAt || m.ts || Date.now()}`;
       const clientId = m.clientId || null;
       const sender = m.sender || null;
       const body = m.body || m.text || "";
@@ -57,7 +62,9 @@ export default function ChatPane({
       setMsgs((prev) => {
         // 1) if server returned clientId and we have optimistic msg => replace it
         if (n.clientId) {
-          const idx = prev.findIndex((x) => x.clientId && x.clientId === n.clientId);
+          const idx = prev.findIndex(
+            (x) => x.clientId && x.clientId === n.clientId
+          );
           if (idx !== -1) {
             const copy = [...prev];
             copy[idx] = { ...copy[idx], ...n, _confirmed: true };
@@ -66,7 +73,11 @@ export default function ChatPane({
         }
 
         // 2) avoid exact id dupes
-        if (prev.some((x) => x.id === n.id || (n.clientId && x.clientId === n.clientId))) {
+        if (
+          prev.some(
+            (x) => x.id === n.id || (n.clientId && x.clientId === n.clientId)
+          )
+        ) {
           return prev;
         }
 
@@ -106,10 +117,13 @@ export default function ChatPane({
     if (sign.public_id) form.append("public_id", sign.public_id);
     if (sign.tags) form.append("tags", sign.tags);
 
-    const res = await fetch(`https://api.cloudinary.com/v1_1/${sign.cloudName}/auto/upload`, {
-      method: "POST",
-      body: form,
-    });
+    const res = await fetch(
+      `https://api.cloudinary.com/v1_1/${sign.cloudName}/auto/upload`,
+      {
+        method: "POST",
+        body: form,
+      }
+    );
 
     if (!res.ok) throw new Error("cloudinary_upload_failed");
     const json = await res.json();
@@ -126,7 +140,11 @@ export default function ChatPane({
       const now = Date.now();
       const attachment = {
         url,
-        type: file.type.startsWith("image/") ? "image" : file.type.startsWith("video/") ? "video" : "file",
+        type: file.type.startsWith("image/")
+          ? "image"
+          : file.type.startsWith("video/")
+          ? "video"
+          : "file",
         name: file.name,
         size: file.size,
       };
@@ -208,53 +226,126 @@ export default function ChatPane({
       <div className="flex-1 overflow-y-auto space-y-2 p-3 border border-zinc-800 rounded-xl">
         {msgs.map((m, i) => {
           const isMe = Boolean(m.isMe);
-          const attachments = Array.isArray(m.meta?.attachments) ? m.meta.attachments : [];
+          const attachments = Array.isArray(m.meta?.attachments)
+            ? m.meta.attachments
+            : [];
 
-          // Prefer server-enriched sender.displayName, then sender.name, then fromUid/from, then a short uid
-        const displayName = isMe
-          ? "You"
-          : (
-              m.sender?.displayName
-              || m.sender?.name
-              || m.fromUid
-              || m.from
-              || (m.fromUid ? `${String(m.fromUid).slice(0,6)}…` : "Peer")
-            );
+          // ---------- decide which name + avatar to show ----------
+          let displayName;
+          let avatarUrl = "";
 
-        return (
-          <div
-            key={m.id || i}
-            className={`max-w-[80%] px-3 py-2 rounded-xl ${isMe ? "bg-zinc-800 ml-auto" : "bg-zinc-900"}`}
-            data-chat-message
-          >
-            <div className="text-xs text-zinc-400">{displayName}</div>
+          if (isMe) {
+            // for my own messages, always "You"
+            displayName = "You";
+          } else if (m.sender && (m.sender.displayName || m.sender.name)) {
+            // trust backend-enriched sender object when present
+            displayName = m.sender.displayName || m.sender.name;
+            avatarUrl = m.sender.avatarUrl || m.sender.photoUrl || "";
+          } else if (
+            peerProfile &&
+            (!peerUid || !m.fromUid || m.fromUid === peerUid)
+          ) {
+            // fallback: we know this is a DM and have peer profile from Chat header
+            displayName =
+              peerProfile.displayName ||
+              peerProfile.fullName ||
+              peerProfile.username ||
+              "Unknown";
+            avatarUrl = peerProfile.avatarUrl || peerProfile.photoUrl || "";
+          } else {
+            // truly unknown (should be rare in your system)
+            displayName = "Unknown";
+          }
 
-              {m.body && <div className="text-sm whitespace-pre-wrap">{m.body}</div>}
+          const initial =
+            displayName && displayName.length
+              ? displayName.slice(0, 1).toUpperCase()
+              : "?";
 
-              {attachments.length > 0 && (
-                <div className="mt-2 space-y-1">
-                  {attachments.map((att, idx) => {
-                    if (!att || !att.url) return null;
-                    const type = att.type || "";
-                    const name = att.name || "Attachment";
-                    if (type.startsWith("image")) {
-                      return (
-                        <a key={idx} href={att.url} target="_blank" rel="noreferrer" className="block rounded-md overflow-hidden border border-zinc-700">
-                          <img src={att.url} alt={name} className="max-h-48 max-w-full object-cover" />
-                        </a>
-                      );
-                    }
-                    if (type.startsWith("video")) {
-                      return <video key={idx} src={att.url} controls className="max-h-48 max-w-full rounded-md border border-zinc-700" />;
-                    }
-                    return (
-                      <a key={idx} href={att.url} target="_blank" rel="noreferrer" className="text-xs underline text-zinc-200 break-all">
-                        {name}
-                      </a>
-                    );
-                  })}
+          return (
+            <div
+              key={m.id || i}
+              className={`flex ${
+                isMe ? "justify-end" : "justify-start"
+              }`}
+            >
+              {/* peer avatar on the left for their messages */}
+              {!isMe && (
+                <div className="mr-2 mt-1">
+                  {avatarUrl ? (
+                    <img
+                      src={avatarUrl}
+                      alt={displayName}
+                      className="w-8 h-8 rounded-full object-cover border border-zinc-700"
+                    />
+                  ) : (
+                    <div className="w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center text-[11px]">
+                      {initial}
+                    </div>
+                  )}
                 </div>
               )}
+
+              <div
+                className={`max-w-[80%] px-3 py-2 rounded-xl ${
+                  isMe ? "bg-zinc-800 ml-2" : "bg-zinc-900"
+                }`}
+                data-chat-message
+              >
+                <div className="text-xs text-zinc-400">{displayName}</div>
+
+                {m.body && (
+                  <div className="text-sm whitespace-pre-wrap">{m.body}</div>
+                )}
+
+                {attachments.length > 0 && (
+                  <div className="mt-2 space-y-1">
+                    {attachments.map((att, idx) => {
+                      if (!att || !att.url) return null;
+                      const type = att.type || "";
+                      const name = att.name || "Attachment";
+                      if (type.startsWith("image")) {
+                        return (
+                          <a
+                            key={idx}
+                            href={att.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="block rounded-md overflow-hidden border border-zinc-700"
+                          >
+                            <img
+                              src={att.url}
+                              alt={name}
+                              className="max-h-48 max-w-full object-cover"
+                            />
+                          </a>
+                        );
+                      }
+                      if (type.startsWith("video")) {
+                        return (
+                          <video
+                            key={idx}
+                            src={att.url}
+                            controls
+                            className="max-h-48 max-w-full rounded-md border border-zinc-700"
+                          />
+                        );
+                      }
+                      return (
+                        <a
+                          key={idx}
+                          href={att.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-xs underline text-zinc-200 break-all"
+                        >
+                          {name}
+                        </a>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
           );
         })}
@@ -264,11 +355,27 @@ export default function ChatPane({
       <div className="mt-2 flex gap-2 items-center">
         <label className="text-xs px-3 py-2 rounded-lg border border-zinc-800 cursor-pointer">
           {uploading ? "Uploading…" : "Attach file"}
-          <input type="file" className="hidden" onChange={handleFileChange} disabled={uploading} />
+          <input
+            type="file"
+            className="hidden"
+            onChange={handleFileChange}
+            disabled={uploading}
+          />
         </label>
 
-        <input className="flex-1 bg-black border border-zinc-800 rounded-lg px-3 py-2" value={text} onChange={(e) => setText(e.target.value)} placeholder="Type a message…" />
-        <button className="px-4 py-2 rounded-lg bg-gold text-black font-semibold" onClick={send} type="button">Send</button>
+        <input
+          className="flex-1 bg-black border border-zinc-800 rounded-lg px-3 py-2"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="Type a message…"
+        />
+        <button
+          className="px-4 py-2 rounded-lg bg-gold text-black font-semibold"
+          onClick={send}
+          type="button"
+        >
+          Send
+        </button>
       </div>
     </div>
   );

@@ -2,6 +2,8 @@
 import ChatMessage from "../models/ChatMessage.js";
 import Thread from "../models/Thread.js";
 import { createNotification } from "./notificationService.js";
+import { ClientProfile } from "../models/Profile.js";
+import { Pro } from "../models.js";
 
 /**
  * chatService
@@ -44,8 +46,65 @@ function buildPayloadFromDoc(doc) {
     attachments: doc.attachments || [],
     createdAt: doc.createdAt || doc.created_at || new Date(),
     seenBy: Array.isArray(doc.seenBy) ? doc.seenBy : [],
+    clientId: doc.clientId || null,
   };
 }
+
+async function attachSender(payload) {
+  if (!payload || !payload.fromUid) return payload;
+  const uid = payload.fromUid;
+
+  try {
+    // 1) Try unified client profile
+    let client = await ClientProfile.findOne({ uid })
+      .select("uid fullName displayName username photoUrl identity")
+      .lean()
+      .catch(() => null);
+
+    if (client) {
+      payload.sender = {
+        uid,
+        displayName:
+          client.displayName ||
+          client.fullName ||
+          client.username ||
+          null,
+        photoUrl:
+          client.photoUrl ||
+          (client.identity && client.identity.photoUrl) ||
+          null,
+      };
+      return payload;
+    }
+
+    // 2) Fallback to Pro document
+    const pro = await Pro.findOne({ ownerUid: uid })
+      .select("ownerUid name username photoUrl")
+      .lean()
+      .catch(() => null);
+
+    if (pro) {
+      payload.sender = {
+        uid,
+        displayName: pro.name || pro.username || null,
+        photoUrl: pro.photoUrl || null,
+      };
+      return payload;
+    }
+
+    // 3) Last fallback: keep uid only, no displayName
+    payload.sender = {
+      uid,
+      displayName: null,
+      photoUrl: null,
+    };
+  } catch (e) {
+    console.warn("[chatService] attachSender failed:", e?.message || e);
+  }
+
+  return payload;
+}
+
 
 export async function saveMessage({
   room,
@@ -64,7 +123,10 @@ export async function saveMessage({
     if (clientId) {
       const existing = await ChatMessage.findOne({ room, fromUid, clientId }).lean();
       if (existing) {
-        return { ok: true, existing: true, message: buildPayloadFromDoc(existing) };
+        // build payload from existing doc and attach sender
+        let payload = buildPayloadFromDoc(existing);
+        await attachSender(payload);
+        return { ok: true, existing: true, message: payload };
       }
     }
   } catch (e) {
@@ -72,7 +134,7 @@ export async function saveMessage({
     console.warn("[chatService] dedupe check failed:", e?.message || e);
   }
 
-  // 2) create
+  // 2) create new message document
   let doc = null;
   try {
     const created = await ChatMessage.create({
@@ -91,7 +153,9 @@ export async function saveMessage({
     throw e;
   }
 
-  const payload = buildPayloadFromDoc(doc);
+  // Build payload and attach sender BEFORE we emit
+  let payload = buildPayloadFromDoc(doc);
+  await attachSender(payload);
 
   // 2.b) Update Thread snapshot & unread counters (best-effort)
   (async () => {
@@ -117,25 +181,24 @@ export async function saveMessage({
       } else if (toUid) {
         incrementFor = [toUid];
       } else if (String(room).startsWith("booking:")) {
-        incrementFor = null; 
+        incrementFor = null;
       }
 
       // ensure DM/booking threads have canonical participants where possible
-try {
-  if (String(room).startsWith("dm:")) {
-    const parts = String(room).split(":");
-    if (parts.length >= 3) {
-      await Thread.getOrCreateDMThread(parts[1], parts[2]).catch(() => null);
-    }
-  } else if (String(room).startsWith("booking:")) {
-    const bookingId = String(room).split(":")[1];
-    if (bookingId) await Thread.getOrCreateBookingThread(bookingId).catch(() => null);
-  }
-} catch (e) {
-  // best-effort
-  console.warn("[chatService] ensure thread participants failed:", e?.message || e);
-}
-
+      try {
+        if (String(room).startsWith("dm:")) {
+          const parts = String(room).split(":");
+          if (parts.length >= 3) {
+            await Thread.getOrCreateDMThread(parts[1], parts[2]).catch(() => null);
+          }
+        } else if (String(room).startsWith("booking:")) {
+          const bookingId = String(room).split(":")[1];
+          if (bookingId) await Thread.getOrCreateBookingThread(bookingId).catch(() => null);
+        }
+      } catch (e) {
+        // best-effort
+        console.warn("[chatService] ensure thread participants failed:", e?.message || e);
+      }
 
       await Thread.touchLastMessage(room, {
         lastMessageId: doc._id,
@@ -153,8 +216,7 @@ try {
     console.warn("[chatService] unexpected thread update error:", err?.message || err);
   });
 
-
-  // 3) emit to room
+  // 3) emit to room — payload already has sender attached
   try {
     const io = getIO();
     io?.to(room).emit("chat:message", payload);
@@ -188,7 +250,10 @@ try {
               },
             });
           } catch (e) {
-            console.warn("[chatService] createNotification(chat_message) failed:", e?.message || e);
+            console.warn(
+              "[chatService] createNotification(chat_message) failed:",
+              e?.message || e
+            );
           }
 
           // also emit a DM-specific incoming event
@@ -215,7 +280,10 @@ try {
           data: { room, fromUid, bodyPreview: (body || "").slice(0, 140) },
         });
       } catch (e) {
-        console.warn("[chatService] createNotification(chat_message) failed:", e?.message || e);
+        console.warn(
+          "[chatService] createNotification(chat_message) failed:",
+          e?.message || e
+        );
       }
       try {
         const io = getIO();
@@ -235,6 +303,7 @@ try {
 
   return { ok: true, existing: false, message: payload };
 }
+
 
 /**
  * getMessages(room, { limit = 50, before = null })

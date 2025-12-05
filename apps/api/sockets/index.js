@@ -245,73 +245,18 @@ export default function attachSockets(httpServer) {
           clientId: msg.clientId || null,
         });
 
+        // chatService.saveMessage already:
+        //  - builds payload
+        //  - attaches sender
+        //  - emits "chat:message" to the room
         const payload = res.message;
-
-        // Enrich payload with sender object so clients don't need to fetch profiles.
-        // sender: { uid, displayName, photoUrl }
-        try {
-          if (payload && payload.fromUid) {
-            const senderUid = payload.fromUid;
-
-            // Try client profile first
-            let client = null;
-            try {
-              client = await ClientProfile.findOne({ uid: senderUid })
-                .select("fullName displayName photoUrl username")
-                .lean()
-                .catch(() => null);
-            } catch { client = null; }
-
-            if (client) {
-              payload.sender = {
-                uid: senderUid,
-                displayName:
-                  client.displayName ||
-                  client.fullName ||
-                  client.username ||
-                  null,
-                photoUrl: client.photoUrl || null,
-              };
-            } else {
-              // Fall back to Pro doc
-              let pro = null;
-              try {
-                pro = await Pro.findOne({ ownerUid: senderUid })
-                  .select("name photoUrl username")
-                  .lean()
-                  .catch(() => null);
-              } catch { pro = null; }
-
-              if (pro) {
-                payload.sender = {
-                  uid: senderUid,
-                  displayName: pro.name || pro.username || null,
-                  photoUrl: pro.photoUrl || null,
-                };
-              } else {
-                // last fallback
-                payload.sender = {
-                  uid: senderUid,
-                  displayName: null,
-                  photoUrl: null,
-                };
-              }
-            }
-          }
-        } catch (e) {
-          console.warn(
-            "[sockets] sender enrichment failed:",
-            e?.message || e
-          );
-        }
-
-        if (payload) safeEmit(r, "chat:message", payload);
 
         return ack?.({
           ok: true,
           id: payload?.id,
           existing: !!res.existing,
         });
+
 
       } catch (err) {
         console.warn("[chat:message] error:", err?.message || err);

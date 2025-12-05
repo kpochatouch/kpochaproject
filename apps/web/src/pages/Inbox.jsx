@@ -2,11 +2,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-    connectSocket,
+  connectSocket,
   registerSocketHandler,
   getChatInbox,
   markThreadRead,
   markRoomRead,
+  getPublicProfileByUid,        // NEW
 } from "../lib/api";
 import { useMe } from "../context/MeContext.jsx";
 import InboxList from "../components/Inbox.jsx"; // or the correct relative path
@@ -75,7 +76,6 @@ function normalizeThread(raw = {}, currentUid) {
     peerProfile.fullName ||
     peerProfile.username ||
     raw.peerName ||
-    peerUid ||
     "Unknown user";
 
   const avatarUrl = peerProfile.avatarUrl || peerProfile.photoUrl || raw.avatarUrl || "";
@@ -245,15 +245,17 @@ useEffect(() => {
           }
 
           // new thread
-          updatedThread = {
-            peerUid,
-            room: room || null,
-            unread: fromUid === myUid ? 0 : 1,
-            lastBody: body,
-            lastAt: at,
-            displayName: peerUid,
-            avatarUrl: "",
-          };
+            updatedThread = {
+              peerUid,
+              room: room || null,
+              unread: fromUid === myUid ? 0 : 1,
+              lastBody: body,
+              lastAt: at,
+              // we do NOT know their profile name yet → show clear "Unknown user"
+              displayName: "Unknown user",
+              avatarUrl: "",
+            };
+
 
           return [updatedThread, ...prev].slice(0, MAX_THREADS);
         });
@@ -279,6 +281,61 @@ useEffect(() => {
       return haystack.includes(term);
     });
   }, [threads, debouncedSearch]);
+
+    // Hydrate threads that still show "Unknown user" using public profiles
+  useEffect(() => {
+    let cancelled = false;
+
+    async function hydrateMissingProfiles() {
+      // find threads that have a peerUid but no proper displayName yet
+      const missing = threads.filter(
+        (t) =>
+          t.peerUid &&
+          (!t.displayName || t.displayName === "Unknown user")
+      );
+
+      if (!missing.length) return;
+
+      const uniqueUids = [...new Set(missing.map((t) => t.peerUid))];
+      const updates = {};
+
+      for (const uid of uniqueUids) {
+        try {
+          const data = await getPublicProfileByUid(uid);
+          const p = data?.profile || data;
+          if (!p) continue;
+
+          updates[uid] = {
+            displayName:
+              p.displayName ||
+              p.fullName ||
+              p.username ||
+              "Unknown user",
+            avatarUrl: p.avatarUrl || p.photoUrl || "",
+          };
+        } catch (e) {
+          // ignore failures for individual users
+          console.warn("[Inbox] hydrate profile failed for", uid, e?.message || e);
+        }
+      }
+
+      if (cancelled) return;
+      if (!Object.keys(updates).length) return;
+
+      setThreads((prev) =>
+        prev.map((t) =>
+          updates[t.peerUid] ? { ...t, ...updates[t.peerUid] } : t
+        )
+      );
+    }
+
+    hydrateMissingProfiles();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [threads]);
+
 
   async function openThread(t) {
     if (!t || !t.peerUid) return;
