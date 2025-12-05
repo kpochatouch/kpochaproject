@@ -99,13 +99,13 @@ export default function attachSockets(httpServer) {
      Connection / Auth
   --------------------------------------------------- */
   io.on("connection", (socket) => {
-    const hinted =
+        const hinted =
       socket.handshake.auth?.uid ||
       socket.handshake.query?.uid ||
       null;
 
     // authReady promise: handlers await this so they always
-    // see the final verified socket.data.uid
+    // see the final verified socket.data.uid + profile info
     const authReady = (async () => {
       try {
         const provided =
@@ -115,25 +115,50 @@ export default function attachSockets(httpServer) {
           null;
 
         let uid = hinted;
+        let displayName = null;
+        let photoUrl = null;
 
         if (provided) {
-          const raw = typeof provided === "string" && provided.startsWith("Bearer ")
-            ? provided.slice(7)
-            : provided;
+          const raw =
+            typeof provided === "string" && provided.startsWith("Bearer ")
+              ? provided.slice(7)
+              : provided;
+
           try {
             const decoded = await admin.auth().verifyIdToken(raw);
+
             uid = decoded.uid;
+            displayName = decoded.name || decoded.email || null;
+            photoUrl = decoded.picture || null;
+
+            socket.data = socket.data || {};
             socket.data.firebaseUser = decoded;
             socket.data.authenticated = true;
+            socket.data.uid = uid;
+            socket.data.displayName = displayName;
+            socket.data.photoUrl = photoUrl;
+
             // console.log("[sockets] verified uid on connect:", decoded.uid);
           } catch (e) {
             console.warn("[socket] token verify failed:", e?.message || e);
           }
         }
 
+        // fallback to hinted uid if token was missing/invalid
         socket.data = socket.data || {};
-        socket.data.uid = uid;
-        if (uid) socket.join(userRoom(uid));
+        if (!socket.data.uid && uid) {
+          socket.data.uid = uid;
+        }
+        if (!socket.data.displayName && displayName) {
+          socket.data.displayName = displayName;
+        }
+        if (!socket.data.photoUrl && photoUrl) {
+          socket.data.photoUrl = photoUrl;
+        }
+
+        if (socket.data.uid) {
+          socket.join(userRoom(socket.data.uid));
+        }
       } catch (e) {
         console.warn("[socket] auth error:", e?.message || e);
       }
@@ -201,7 +226,7 @@ export default function attachSockets(httpServer) {
       ack?.({ ok: true });
     });
 
-    /* ---------------------------------------------------
+        /* ---------------------------------------------------
        Chat
     --------------------------------------------------- */
     socket.on("chat:message", async (msg = {}, ack) => {
@@ -218,7 +243,11 @@ export default function attachSockets(httpServer) {
           return ack?.({ ok: false, error: "message_empty" });
         }
 
-        const fromUid = socket.data.uid || msg.fromUid || hinted || socket.id;
+        // we want a real uid here, not socket.id
+        const fromUid = socket.data.uid || hinted;
+        if (!fromUid) {
+          return ack?.({ ok: false, error: "no_uid" });
+        }
 
         // determine DM peer
         let toUid = null;
@@ -235,6 +264,7 @@ export default function attachSockets(httpServer) {
           size: a.size || 0,
         }));
 
+        // persist message
         const res = await chatService.saveMessage({
           room: r,
           fromUid,
@@ -245,19 +275,52 @@ export default function attachSockets(httpServer) {
           clientId: msg.clientId || null,
         });
 
-        // chatService.saveMessage already:
-        //  - builds payload
-        //  - attaches sender
-        //  - emits "chat:message" to the room
-        const payload = res.message;
+        // Whatever chatService returns, we normalize it for the frontend
+        const raw = res?.message || {};
+        const firebaseUser = socket.data.firebaseUser || {};
+
+        const senderDisplayName =
+          socket.data.displayName ||
+          firebaseUser.name ||
+          firebaseUser.email ||
+          raw.sender?.displayName ||
+          "Someone";
+
+        const senderPhotoUrl =
+          socket.data.photoUrl ||
+          firebaseUser.picture ||
+          raw.sender?.photoUrl ||
+          "";
+
+        const normalized = {
+          // id: db id, fallback to clientId, fallback to generated
+          id:
+            raw.id ||
+            (raw._id && raw._id.toString && raw._id.toString()) ||
+            msg.clientId ||
+            `tmp:${Date.now()}`,
+          room: r,
+          body: raw.body ?? text,
+          fromUid: raw.fromUid || fromUid,
+          toUid: raw.toUid || toUid,
+          clientId: raw.clientId || msg.clientId || null,
+          meta: raw.meta || meta,
+          createdAt: raw.createdAt || new Date().toISOString(),
+          sender: {
+            uid: fromUid,
+            displayName: senderDisplayName,
+            photoUrl: senderPhotoUrl,
+          },
+        };
+
+        // Emit to everyone in the room (including sender)
+        io.to(r).emit("chat:message", normalized);
 
         return ack?.({
           ok: true,
-          id: payload?.id,
-          existing: !!res.existing,
+          id: normalized.id,
+          existing: !!res?.existing,
         });
-
-
       } catch (err) {
         console.warn("[chat:message] error:", err?.message || err);
         return ack?.({ ok: false, error: "save_failed" });
