@@ -453,10 +453,26 @@ export async function markThreadRead(peerUid, uid) {
 
     // also update Thread unreadCounts (best-effort)
     try {
-      await Thread.markRead(roomA, uid).catch(() => Thread.markRead(roomB, uid).catch(() => null));
+      await Thread.markRead(roomA, uid).catch(() =>
+        Thread.markRead(roomB, uid).catch(() => null)
+      );
     } catch (err) {
       // non-fatal
       console.warn("[chatService] Thread.markRead failed:", err?.message || err);
+    }
+
+    // 🔥 LIVE "SEEN" UPDATE: emit to both possible dm rooms
+    try {
+      const io = getIO();
+      if (io) {
+        io.to(roomA).emit("chat:seen", { room: roomA, seenBy: uid });
+        io.to(roomB).emit("chat:seen", { room: roomB, seenBy: uid });
+      }
+    } catch (err) {
+      console.warn(
+        "[chatService] emit chat:seen (thread) failed:",
+        err?.message || err
+      );
     }
 
     return { ok: true, updated: res?.modifiedCount ?? res?.nModified ?? 0 };
@@ -465,6 +481,7 @@ export async function markThreadRead(peerUid, uid) {
     return { ok: false, error: e?.message || e };
   }
 }
+
 
 /**
  * markRoomRead(room, uid)
@@ -487,12 +504,26 @@ export async function markRoomRead(room, uid) {
       console.warn("[chatService] Thread.markRead(room) failed:", err?.message || err);
     }
 
+    // 🔥 LIVE "SEEN" UPDATE for this room (DM or booking)
+    try {
+      const io = getIO();
+      if (io) {
+        io.to(room).emit("chat:seen", { room, seenBy: uid });
+      }
+    } catch (err) {
+      console.warn(
+        "[chatService] emit chat:seen (room) failed:",
+        err?.message || err
+      );
+    }
+
     return { ok: true, updated: res?.modifiedCount ?? res?.nModified ?? 0 };
   } catch (e) {
     console.warn("[chatService] markRoomRead failed:", e?.message || e);
     return { ok: false, error: e?.message || e };
   }
 }
+
 
 export default {
   setGetIO,

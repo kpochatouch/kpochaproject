@@ -97,7 +97,7 @@ export default function ChatPane({
     })();
   }, [room]);
 
-  // ---------- socket listeners ----------
+    // ---------- socket listeners ----------
   useEffect(() => {
     if (!socket) return;
 
@@ -116,16 +116,16 @@ export default function ChatPane({
       const seenBy = Array.isArray(m.seenBy) ? m.seenBy : [];
 
       let status;
-      if (m.isMe) {
-  const seen =
-    Array.isArray(m.seenBy) &&
-    peerUid &&
-    m.seenBy.includes(peerUid);
-  // after reload: at least sent; upgrade to seen if seenBy has peer
-  status = seen ? "seen" : "sent";
-} else {
-  status = "received";
-}
+      if (isMe) {
+        // this is MY message coming back from the server
+        const seen =
+          peerUid && Array.isArray(seenBy) && seenBy.includes(peerUid);
+        // server echo = at least sent; upgrade to seen if peer has read
+        status = seen ? "seen" : "sent";
+      } else {
+        // message from the other person
+        status = "received";
+      }
 
       return {
         id,
@@ -153,12 +153,26 @@ export default function ChatPane({
           );
           if (idx !== -1) {
             const copy = [...prev];
+            const existing = copy[idx];
+
+            let nextStatus = n.status;
+
+            // If it's my own message, never downgrade from a "better" status
+            if (existing.isMe) {
+              const order = ["pending", "sent", "delivered", "seen"];
+              const existingRank = order.indexOf(existing.status || "pending");
+              const incomingRank = order.indexOf(n.status || "pending");
+
+              if (existingRank > incomingRank) {
+                nextStatus = existing.status;
+              }
+            }
+
             copy[idx] = {
-              ...copy[idx],
+              ...existing,
               ...n,
               _confirmed: true,
-              // when server echo arrives, treat as delivered/seen
-              status: n.status,
+              status: nextStatus,
             };
             return copy;
           }
@@ -177,14 +191,55 @@ export default function ChatPane({
       });
     }
 
+    // 🔥 NEW: live "seen" listener
+    function onSeen(evt) {
+      if (!evt || !evt.room || !evt.seenBy) return;
+      // only handle events for the current room
+      if (evt.room !== room) return;
+
+      const viewerUid = evt.seenBy;
+
+      setMsgs((prev) => {
+        // if the viewer is not the peer we’re chatting with, ignore
+        if (!peerUid || viewerUid !== peerUid) return prev;
+
+        const order = ["pending", "sent", "delivered", "seen"];
+        const seenRank = order.indexOf("seen");
+
+        return prev.map((m) => {
+          if (!m.isMe) return m;
+
+          const currentRank = order.indexOf(m.status || "pending");
+          if (currentRank >= seenRank) {
+            // already seen (or better) → no change
+            return m;
+          }
+
+          // upgrade to seen + merge seenBy
+          const nextSeenBy = Array.isArray(m.seenBy)
+            ? Array.from(new Set([...m.seenBy, viewerUid]))
+            : [viewerUid];
+
+          return {
+            ...m,
+            status: "seen",
+            seenBy: nextSeenBy,
+          };
+        });
+      });
+    }
+
     socket.on("chat:message", onMsg);
+    socket.on("chat:seen", onSeen);
 
     return () => {
       try {
         socket.off("chat:message", onMsg);
+        socket.off("chat:seen", onSeen);
       } catch {}
     };
-  }, [socket, meUid, peerUid]);
+  }, [socket, meUid, peerUid, room]);
+
 
   // ---------- auto scroll ----------
   useEffect(() => {
