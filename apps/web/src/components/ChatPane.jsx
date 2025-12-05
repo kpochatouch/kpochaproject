@@ -6,23 +6,69 @@ function generateClientId() {
   return `c_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 }
 
+function toDate(value) {
+  if (!value) return null;
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  return d;
+}
+
+function sameDay(a, b) {
+  const da = toDate(a);
+  const db = toDate(b);
+  if (!da || !db) return false;
+  return (
+    da.getFullYear() === db.getFullYear() &&
+    da.getMonth() === db.getMonth() &&
+    da.getDate() === db.getDate()
+  );
+}
+
+function formatTimeLabel(at) {
+  const d = toDate(at);
+  if (!d) return "";
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function formatDateLabel(at) {
+  const d = toDate(at);
+  if (!d) return "";
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+
+  if (sameDay(d, today)) return "Today";
+  if (sameDay(d, yesterday)) return "Yesterday";
+
+  return d.toLocaleDateString([], {
+    day: "2-digit",
+    month: "short",
+    year: d.getFullYear() === today.getFullYear() ? undefined : "numeric",
+  });
+}
+
 export default function ChatPane({
   socket,
   room,
   meUid = null,      // authoritative uid (pass from Chat.jsx)
   myLabel = "You",   // optional display label
   toUid = null,
-  peerUid = null,         // NEW
-  peerProfile = null,     // NEW: { displayName, avatarUrl }
+  peerUid = null,
+  peerProfile = null,
   initialMessages = [],
 }) {
-  const [msgs, setMsgs] = useState(initialMessages || []);
+  const [msgs, setMsgs] = useState([]);
   const [text, setText] = useState("");
   const [uploading, setUploading] = useState(false);
   const endRef = useRef(null);
 
+  // Normalize initial messages when room / history changes
   useEffect(() => {
-    setMsgs(initialMessages || []);
+    const normalized = (initialMessages || []).map((m) => ({
+      ...m,
+      status: m.status || (m.isMe ? "sent" : "received"),
+    }));
+    setMsgs(normalized);
   }, [room, initialMessages]);
 
   // mark room read (when room changes)
@@ -31,7 +77,7 @@ export default function ChatPane({
     (async () => {
       try {
         await api.put(`/api/chat/room/${encodeURIComponent(room)}/read`);
-      } catch (e) {
+      } catch {
         // ignore
       }
     })();
@@ -53,7 +99,19 @@ export default function ChatPane({
       const at = m.createdAt || m.ts || Date.now();
       const meta = m.meta || { attachments: m.attachments || [] };
       const isMe = Boolean(fromUid && meUid && fromUid === meUid);
-      return { id, clientId, room: m.room, body, fromUid, sender, at, meta, isMe };
+
+      return {
+        id,
+        clientId,
+        room: m.room,
+        body,
+        fromUid,
+        sender,
+        at,
+        meta,
+        isMe,
+        status: isMe ? "sent" : "received",
+      };
     }
 
     function onMsg(m) {
@@ -87,9 +145,6 @@ export default function ChatPane({
 
     socket.on("chat:message", onMsg);
 
-    // debug log (temporary) — comment out if noisy
-    socket.on("chat:debug", (d) => console.debug("[chat:debug]", d));
-
     return () => {
       try {
         socket.off("chat:message", onMsg);
@@ -97,6 +152,7 @@ export default function ChatPane({
     };
   }, [socket, meUid]);
 
+  // Auto-scroll
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [msgs]);
@@ -173,10 +229,27 @@ export default function ChatPane({
           meta: { attachments: [attachment] },
           isMe: true,
           _optimistic: true,
+          status: "pending",
         },
       ]);
 
-      socket.emit("chat:message", payload);
+      socket.emit("chat:message", payload, (ack) => {
+        if (!ack || !ack.ok) {
+          // mark as failed
+          setMsgs((prev) =>
+            prev.map((m) =>
+              m.clientId === clientId ? { ...m, status: "failed" } : m
+            )
+          );
+        } else {
+          // optimistic: mark as sent (server message will also come in and overwrite)
+          setMsgs((prev) =>
+            prev.map((m) =>
+              m.clientId === clientId ? { ...m, status: "sent" } : m
+            )
+          );
+        }
+      });
     } catch (err) {
       console.error("upload failed", err);
       alert("Upload failed");
@@ -214,10 +287,26 @@ export default function ChatPane({
         meta: {},
         isMe: true,
         _optimistic: true,
+        status: "pending",
       },
     ]);
 
-    socket.emit("chat:message", payload);
+    socket.emit("chat:message", payload, (ack) => {
+      if (!ack || !ack.ok) {
+        setMsgs((prev) =>
+          prev.map((m) =>
+            m.clientId === clientId ? { ...m, status: "failed" } : m
+          )
+        );
+      } else {
+        setMsgs((prev) =>
+          prev.map((m) =>
+            m.clientId === clientId ? { ...m, status: "sent" } : m
+          )
+        );
+      }
+    });
+
     setText("");
   }
 
@@ -253,7 +342,7 @@ export default function ChatPane({
               "Unknown";
             avatarUrl = peerProfile.avatarUrl || peerProfile.photoUrl || "";
           } else {
-            // truly unknown (should be rare in your system)
+            // truly unknown (rare)
             displayName = "Unknown";
           }
 
@@ -262,89 +351,128 @@ export default function ChatPane({
               ? displayName.slice(0, 1).toUpperCase()
               : "?";
 
+          const timeLabel = formatTimeLabel(m.at);
+          const dateLabel = formatDateLabel(m.at);
+          const prev = i > 0 ? msgs[i - 1] : null;
+          const showDateHeader = !prev || !sameDay(prev?.at, m.at);
+
+          let statusText = "";
+          if (isMe) {
+            if (m.status === "pending") statusText = "• sending";
+            else if (m.status === "sent") statusText = "✓ sent";
+            else if (m.status === "failed") statusText = "⚠ failed";
+          }
+
           return (
-            <div
-              key={m.id || i}
-              className={`flex ${
-                isMe ? "justify-end" : "justify-start"
-              }`}
-            >
-              {/* peer avatar on the left for their messages */}
-              {!isMe && (
-                <div className="mr-2 mt-1">
-                  {avatarUrl ? (
-                    <img
-                      src={avatarUrl}
-                      alt={displayName}
-                      className="w-8 h-8 rounded-full object-cover border border-zinc-700"
-                    />
-                  ) : (
-                    <div className="w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center text-[11px]">
-                      {initial}
-                    </div>
-                  )}
+            <div key={m.id || i}>
+              {showDateHeader && (
+                <div className="w-full flex justify-center my-2">
+                  <span className="text-[10px] text-zinc-400 px-3 py-0.5 rounded-full bg-zinc-900/60">
+                    {dateLabel}
+                  </span>
                 </div>
               )}
 
               <div
-                className={`max-w-[80%] px-3 py-2 rounded-xl ${
-                  isMe ? "bg-zinc-800 ml-2" : "bg-zinc-900"
+                className={`flex ${
+                  isMe ? "justify-end" : "justify-start"
                 }`}
-                data-chat-message
               >
-                <div className="text-xs text-zinc-400">{displayName}</div>
-
-                {m.body && (
-                  <div className="text-sm whitespace-pre-wrap">{m.body}</div>
+                {/* peer avatar on the left for their messages */}
+                {!isMe && (
+                  <div className="mr-2 mt-1">
+                    {avatarUrl ? (
+                      <img
+                        src={avatarUrl}
+                        alt={displayName}
+                        className="w-8 h-8 rounded-full object-cover border border-zinc-700"
+                      />
+                    ) : (
+                      <div className="w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center text-[11px]">
+                        {initial}
+                      </div>
+                    )}
+                  </div>
                 )}
 
-                {attachments.length > 0 && (
-                  <div className="mt-2 space-y-1">
-                    {attachments.map((att, idx) => {
-                      if (!att || !att.url) return null;
-                      const type = att.type || "";
-                      const name = att.name || "Attachment";
-                      if (type.startsWith("image")) {
+                <div
+                  className={`max-w-[80%] px-3 py-2 rounded-xl ${
+                    isMe ? "bg-zinc-800 ml-2" : "bg-zinc-900"
+                  }`}
+                  data-chat-message
+                >
+                  <div className="text-xs text-zinc-400">{displayName}</div>
+
+                  {m.body && (
+                    <div className="text-sm whitespace-pre-wrap">
+                      {m.body}
+                    </div>
+                  )}
+
+                  {attachments.length > 0 && (
+                    <div className="mt-2 space-y-1">
+                      {attachments.map((att, idx) => {
+                        if (!att || !att.url) return null;
+                        const type = att.type || "";
+                        const name = att.name || "Attachment";
+                        if (type.startsWith("image")) {
+                          return (
+                            <a
+                              key={idx}
+                              href={att.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="block rounded-md overflow-hidden border border-zinc-700"
+                            >
+                              <img
+                                src={att.url}
+                                alt={name}
+                                className="max-h-48 max-w-full object-cover"
+                              />
+                            </a>
+                          );
+                        }
+                        if (type.startsWith("video")) {
+                          return (
+                            <video
+                              key={idx}
+                              src={att.url}
+                              controls
+                              className="max-h-48 max-w-full rounded-md border border-zinc-700"
+                            />
+                          );
+                        }
                         return (
                           <a
                             key={idx}
                             href={att.url}
                             target="_blank"
                             rel="noreferrer"
-                            className="block rounded-md overflow-hidden border border-zinc-700"
+                            className="text-xs underline text-zinc-200 break-all"
                           >
-                            <img
-                              src={att.url}
-                              alt={name}
-                              className="max-h-48 max-w-full object-cover"
-                            />
+                            {name}
                           </a>
                         );
-                      }
-                      if (type.startsWith("video")) {
-                        return (
-                          <video
-                            key={idx}
-                            src={att.url}
-                            controls
-                            className="max-h-48 max-w-full rounded-md border border-zinc-700"
-                          />
-                        );
-                      }
-                      return (
-                        <a
-                          key={idx}
-                          href={att.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-xs underline text-zinc-200 break-all"
-                        >
-                          {name}
-                        </a>
-                      );
-                    })}
+                      })}
+                    </div>
+                  )}
+
+                  {/* time + status line */}
+                  <div className="mt-1 flex items-center justify-end gap-2 text-[10px] text-zinc-400">
+                    {timeLabel && <span>{timeLabel}</span>}
+                    {statusText && (
+                      <span
+                        className={
+                          m.status === "failed"
+                            ? "text-red-500"
+                            : "text-zinc-400"
+                        }
+                      >
+                        {statusText}
+                      </span>
+                    )}
                   </div>
-                )}
+                </div>
               </div>
             </div>
           );
@@ -364,15 +492,16 @@ export default function ChatPane({
         </label>
 
         <input
-          className="flex-1 bg-black border border-zinc-800 rounded-lg px-3 py-2"
+          className="flex-1 bg-black border border-zinc-800 rounded-lg px-3 py-2 text-sm"
           value={text}
           onChange={(e) => setText(e.target.value)}
           placeholder="Type a message…"
         />
         <button
-          className="px-4 py-2 rounded-lg bg-gold text-black font-semibold"
+          className="px-4 py-2 rounded-lg bg-gold text-black font-semibold text-sm"
           onClick={send}
           type="button"
+          disabled={!text.trim() || !room || !socket}
         >
           Send
         </button>
