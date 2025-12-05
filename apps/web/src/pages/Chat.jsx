@@ -19,7 +19,7 @@ function useQuery() {
 export default function Chat() {
   const navigate = useNavigate();
   const query = useQuery();
-  const { me: currentUser, loading: meLoading } = useMe();
+  const { me: currentUser } = useMe();
 
   const [socket, setSocket] = useState(null);
   const [room, setRoom] = useState(null);
@@ -166,30 +166,22 @@ export default function Chat() {
   }, [room, myLabel]);
 
   // ---------- guards ----------
-if (meLoading) {
-  return (
-    <div className="max-w-4xl mx-auto px-4 py-10">
-      <p className="text-sm text-zinc-400">Loading your account…</p>
-    </div>
-  );
-}
-
-if (!currentUser) {
-  return (
-    <div className="max-w-4xl mx-auto px-4 py-10">
-      <p className="text-sm text-zinc-300">
-        Please log in to use chat.
-      </p>
-      <button
-        type="button"
-        onClick={() => navigate("/login")}
-        className="mt-3 px-4 py-2 rounded-lg bg-gold text-black font-semibold"
-      >
-        Go to login
-      </button>
-    </div>
-  );
-}
+  if (!currentUser) {
+    return (
+      <div className="max-w-4xl mx-auto px-4 py-10">
+        <p className="text-sm text-zinc-300">
+          Please log in to use chat.
+        </p>
+        <button
+          type="button"
+          onClick={() => navigate("/login")}
+          className="mt-3 px-4 py-2 rounded-lg bg-gold text-black font-semibold"
+        >
+          Go to login
+        </button>
+      </div>
+    );
+  }
 
   if (!peerUid) {
     return (

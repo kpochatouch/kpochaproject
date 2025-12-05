@@ -1,36 +1,27 @@
 // apps/web/src/hooks/useSocket.js
 import { useEffect, useRef } from "react";
-import { connectSocket, disconnectSocket, registerSocketHandler } from "../lib/api";
+import { registerSocketHandler } from "../lib/api";
 
 /**
- * useSocket(initialHandlers = {}, options = { autoConnect: true })
+ * SAFE useSocket
  *
- * - initialHandlers: { "event:name": fn, ... } handlers to register on mount
- * - returns:
- *    - addHandler(event, fn) -> unregisterFn
- *    - removeHandler(unregisterFn) -> void
- *    - close() -> disconnect socket (cleans up all handlers)
+ * - ONLY manages handlers for this component.
+ * - Does NOT call connectSocket()
+ * - Does NOT call disconnectSocket()
  *
- * This hook simply ensures handlers are registered and unregistered when the
- * component mounts/unmounts. It relies on your api.connectSocket()/registerSocketHandler().
+ * Socket connection lifecycle stays fully owned by api.js.
  */
-export default function useSocket(initialHandlers = {}, options = { autoConnect: true }) {
+export default function useSocket(initialHandlers = {}) {
   const unregistersRef = useRef(new Set());
 
   useEffect(() => {
-    if (options?.autoConnect !== false) {
-      connectSocket();
-    }
-
     // register initial handlers
-    const created = [];
     try {
       for (const [evt, fn] of Object.entries(initialHandlers || {})) {
         if (typeof fn === "function") {
           const off = registerSocketHandler(evt, fn);
           if (typeof off === "function") {
             unregistersRef.current.add(off);
-            created.push(off);
           }
         }
       }
@@ -49,7 +40,7 @@ export default function useSocket(initialHandlers = {}, options = { autoConnect:
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, []); // run once on mount
 
   function addHandler(event, fn) {
     if (!event || typeof fn !== "function") return () => {};
@@ -67,17 +58,6 @@ export default function useSocket(initialHandlers = {}, options = { autoConnect:
     } catch {}
   }
 
-  function close() {
-    try {
-      for (const off of Array.from(unregistersRef.current)) {
-        try { off(); } catch {}
-      }
-      unregistersRef.current.clear();
-      disconnectSocket();
-    } catch (e) {
-      console.warn("[useSocket] close failed:", e?.message || e);
-    }
-  }
-
-  return { addHandler, removeHandler, close };
+  // No close() that disconnects global socket.
+  return { addHandler, removeHandler };
 }
