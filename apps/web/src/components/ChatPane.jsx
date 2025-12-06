@@ -385,6 +385,7 @@ export default function ChatPane({
       ]);
 
          socket.emit("chat:message", payload, (ack) => {
+        console.log("chat:message ack = ", ack);
         if (ack && ack.ok === false) {
           // mark as failed
           setMsgs((prev) =>
