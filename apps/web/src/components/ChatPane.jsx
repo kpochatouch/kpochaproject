@@ -103,13 +103,13 @@ useEffect(() => {
     const isMe = Boolean(fromUid && meUid && fromUid === meUid);
     const seenBy = Array.isArray(m.seenBy) ? m.seenBy : [];
 
-    let status;
+        let status;
     if (isMe) {
       // this is MY message coming back from the server
       const seen =
         peerUid && Array.isArray(seenBy) && seenBy.includes(peerUid);
-      // server echo = at least sent; upgrade to seen if peer has read
-      status = seen ? "seen" : "sent";
+      // server echo = at least delivered; upgrade to seen if peer has read
+      status = seen ? "seen" : "delivered";
     } else {
       // message from the other person
       status = "received";
@@ -230,8 +230,21 @@ useEffect(() => {
     });
   }
 
+
   socket.on("chat:message", onMsg);
   socket.on("chat:seen", onSeen);
+
+  function handleKeyDown(e) {
+      if (e.key === "Enter") {
+        if (e.shiftKey) {
+          // Shift+Enter → allow newline in textarea (do nothing special)
+          return;
+        }
+        // Enter alone → send
+        e.preventDefault();
+        send();
+      }
+    }
 
   return () => {
     try {
@@ -596,11 +609,14 @@ useEffect(() => {
           />
         </label>
 
-        <input
-          className="flex-1 bg-black border border-zinc-800 rounded-lg px-3 py-2 text-sm"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder="Type a message…"
+                <textarea
+                className="flex-1 bg-black border border-zinc-800 rounded-lg px-3 py-2 text-sm resize-none leading-snug"
+                rows={1}
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Type a message…"
+
         />
         <button
           className="px-4 py-2 rounded-lg bg-gold text-black font-semibold text-sm"
