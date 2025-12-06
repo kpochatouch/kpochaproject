@@ -85,175 +85,158 @@ export default function ChatPane({
     setMsgs(normalized);
   }, [room, initialMessages, peerUid]);
 
+  // ---------- socket listeners ----------
+  useEffect(() => {
+    if (!socket) return;
 
-useEffect(() => {
-  if (!socket) return;
+    function normalizeIncoming(m) {
+      const fromUid = m.fromUid || m.from || null;
+      const id =
+        m.id ||
+        m._id ||
+        `srv:${fromUid || "x"}:${m.createdAt || m.ts || Date.now()}`;
+      const clientId = m.clientId || null;
+      const sender = m.sender || null;
+      const body = m.body || m.text || "";
+      const at = m.createdAt || m.ts || Date.now();
+      const meta = m.meta || { attachments: m.attachments || [] };
+      const isMe = Boolean(fromUid && meUid && fromUid === meUid);
+      const seenBy = Array.isArray(m.seenBy) ? m.seenBy : [];
 
-  function normalizeIncoming(m) {
-    const fromUid = m.fromUid || m.from || null;
-    const id =
-      m.id ||
-      m._id ||
-      `srv:${fromUid || "x"}:${m.createdAt || m.ts || Date.now()}`;
-    const clientId = m.clientId || null;
-    const sender = m.sender || null;
-    const body = m.body || m.text || "";
-    const at = m.createdAt || m.ts || Date.now();
-    const meta = m.meta || { attachments: m.attachments || [] };
-    const isMe = Boolean(fromUid && meUid && fromUid === meUid);
-    const seenBy = Array.isArray(m.seenBy) ? m.seenBy : [];
+      let status;
+      if (isMe) {
+        // this is MY message coming back from the server
+        const seen =
+          peerUid && Array.isArray(seenBy) && seenBy.includes(peerUid);
+        // server echo = at least delivered; upgrade to seen if peer has read
+        status = seen ? "seen" : "delivered";
+      } else {
+        // message from the other person
+        status = "received";
+      }
 
-        let status;
-    if (isMe) {
-      // this is MY message coming back from the server
-      const seen =
-        peerUid && Array.isArray(seenBy) && seenBy.includes(peerUid);
-      // server echo = at least delivered; upgrade to seen if peer has read
-      status = seen ? "seen" : "delivered";
-    } else {
-      // message from the other person
-      status = "received";
+      return {
+        id,
+        clientId,
+        room: m.room,
+        body,
+        fromUid,
+        sender,
+        at,
+        meta,
+        isMe,
+        seenBy,
+        status,
+      };
     }
 
-    return {
-      id,
-      clientId,
-      room: m.room,
-      body,
-      fromUid,
-      sender,
-      at,
-      meta,
-      isMe,
-      seenBy,
-      status,
-    };
-  }
+    function onMsg(m) {
+      const n = normalizeIncoming(m);
 
-  // ⬇⬇⬇ REPLACED onMsg (use this version) ⬇⬇⬇
-  function onMsg(m) {
-    const n = normalizeIncoming(m);
+      setMsgs((prev) => {
+        // 1) if server returned clientId and we have optimistic msg => replace it
+        if (n.clientId) {
+          const idx = prev.findIndex(
+            (x) => x.clientId && x.clientId === n.clientId
+          );
+          if (idx !== -1) {
+            const copy = [...prev];
+            const existing = copy[idx];
 
-    setMsgs((prev) => {
-      // 1) if server returned clientId and we have optimistic msg => replace it
-      if (n.clientId) {
-        const idx = prev.findIndex(
-          (x) => x.clientId && x.clientId === n.clientId
-        );
-        if (idx !== -1) {
-          const copy = [...prev];
-          const existing = copy[idx];
+            let nextStatus = n.status;
 
-          let nextStatus = n.status;
+            // If it's my own message, never downgrade from a "better" status
+            if (existing.isMe) {
+              const order = ["pending", "sent", "delivered", "seen"];
+              const existingRank = order.indexOf(existing.status || "pending");
+              const incomingRank = order.indexOf(n.status || "pending");
 
-          // If it's my own message, never downgrade from a "better" status
-          if (existing.isMe) {
-            const order = ["pending", "sent", "delivered", "seen"];
-            const existingRank = order.indexOf(existing.status || "pending");
-            const incomingRank = order.indexOf(n.status || "pending");
-
-            if (existingRank > incomingRank) {
-              nextStatus = existing.status;
+              if (existingRank > incomingRank) {
+                nextStatus = existing.status;
+              }
             }
+
+            copy[idx] = {
+              ...existing,
+              ...n,
+              _confirmed: true,
+              status: nextStatus,
+            };
+            return copy;
+          }
+        }
+
+        // 2) avoid exact id dupes
+        if (
+          prev.some(
+            (x) => x.id === n.id || (n.clientId && x.clientId === n.clientId)
+          )
+        ) {
+          return prev;
+        }
+
+        return [...prev, n];
+      });
+
+      // 🔥 if this is a message from the other person, mark room read via socket
+      try {
+        const fromUid = n.fromUid || n.from;
+        const isFromPeer = fromUid && peerUid && fromUid === peerUid;
+
+        if (!n.isMe && isFromPeer && room && socket) {
+          socket.emit("chat:read", { room }, () => {
+            // optional ack
+          });
+        }
+      } catch (e) {
+        console.warn("[ChatPane] chat:read emit failed", e);
+      }
+    }
+
+    // live "seen" listener
+    function onSeen(evt) {
+      if (!evt || !evt.room || !evt.seenBy) return;
+      if (evt.room !== room) return;
+
+      const viewerUid = evt.seenBy;
+
+      setMsgs((prev) => {
+        if (!peerUid || viewerUid !== peerUid) return prev;
+
+        const order = ["pending", "sent", "delivered", "seen"];
+        const seenRank = order.indexOf("seen");
+
+        return prev.map((m) => {
+          if (!m.isMe) return m;
+
+          const currentRank = order.indexOf(m.status || "pending");
+          if (currentRank >= seenRank) {
+            return m;
           }
 
-          copy[idx] = {
-            ...existing,
-            ...n,
-            _confirmed: true,
-            status: nextStatus,
+          const nextSeenBy = Array.isArray(m.seenBy)
+            ? Array.from(new Set([...m.seenBy, viewerUid]))
+            : [viewerUid];
+
+          return {
+            ...m,
+            status: "seen",
+            seenBy: nextSeenBy,
           };
-          return copy;
-        }
-      }
-
-      // 2) avoid exact id dupes
-      if (
-        prev.some(
-          (x) => x.id === n.id || (n.clientId && x.clientId === n.clientId)
-        )
-      ) {
-        return prev;
-      }
-
-      return [...prev, n];
-    });
-
-    // 🔥 NEW: if this is a message from the other person, mark room read via socket
-    try {
-      const fromUid = n.fromUid || n.from;
-      const isFromPeer = fromUid && peerUid && fromUid === peerUid;
-
-      if (!n.isMe && isFromPeer && room && socket) {
-        socket.emit("chat:read", { room }, () => {
-          // optional ack handler; can be empty
-          // console.log("chat:read ack", ack);
         });
-      }
-    } catch (e) {
-      console.warn("[ChatPane] chat:read emit failed", e);
-    }
-  }
-  // ⬆⬆⬆ END of new onMsg ⬆⬆⬆
-
-  // keep onSeen exactly as you already have it
-  function onSeen(evt) {
-    if (!evt || !evt.room || !evt.seenBy) return;
-    if (evt.room !== room) return;
-
-    const viewerUid = evt.seenBy;
-
-    setMsgs((prev) => {
-      if (!peerUid || viewerUid !== peerUid) return prev;
-
-      const order = ["pending", "sent", "delivered", "seen"];
-      const seenRank = order.indexOf("seen");
-
-      return prev.map((m) => {
-        if (!m.isMe) return m;
-
-        const currentRank = order.indexOf(m.status || "pending");
-        if (currentRank >= seenRank) {
-          return m;
-        }
-
-        const nextSeenBy = Array.isArray(m.seenBy)
-          ? Array.from(new Set([...m.seenBy, viewerUid]))
-          : [viewerUid];
-
-        return {
-          ...m,
-          status: "seen",
-          seenBy: nextSeenBy,
-        };
       });
-    });
-  }
-
-  function handleKeyDown(e) {
-      if (e.key === "Enter") {
-        if (e.shiftKey) {
-          // Shift+Enter → allow newline in textarea (do nothing special)
-          return;
-        }
-        // Enter alone → send
-        e.preventDefault();
-        send();
-      }
     }
 
+    socket.on("chat:message", onMsg);
+    socket.on("chat:seen", onSeen);
 
-  socket.on("chat:message", onMsg);
-  socket.on("chat:seen", onSeen);
-
-  return () => {
-    try {
-      socket.off("chat:message", onMsg);
-      socket.off("chat:seen", onSeen);
-    } catch {}
-  };
-}, [socket, meUid, peerUid, room]);
-
+    return () => {
+      try {
+        socket.off("chat:message", onMsg);
+        socket.off("chat:seen", onSeen);
+      } catch {}
+    };
+  }, [socket, meUid, peerUid, room]);
 
   // ---------- auto scroll ----------
   useEffect(() => {
@@ -364,62 +347,73 @@ useEffect(() => {
     }
   }
 
-    // ---------- text send ----------
-    function send() {
-      const body = String(text || "").trim();
-      if (!body || !socket || !room) return;
+  // ---------- text send ----------
+  function send() {
+    const body = String(text || "").trim();
+    if (!body || !socket || !room) return;
 
-      const now = Date.now();
-      const clientId = generateClientId();
-      const payload = {
+    const now = Date.now();
+    const clientId = generateClientId();
+    const payload = {
+      room,
+      body,
+      clientId,
+      ts: now,
+      ...(toUid ? { toUid } : {}),
+    };
+
+    // optimistic UI
+    setMsgs((x) => [
+      ...x,
+      {
+        id: `local:${clientId}`,
+        clientId,
         room,
         body,
-        clientId,
-        ts: now,
-        ...(toUid ? { toUid } : {}),
-      };
+        fromUid: meUid || null,
+        sender: { displayName: myLabel || "You" },
+        at: now,
+        meta: {},
+        isMe: true,
+        _optimistic: true,
+        status: "pending", // start as sending…
+        seenBy: meUid ? [meUid] : [],
+      },
+    ]);
 
-      // optimistic UI
-      setMsgs((x) => [
-        ...x,
-        {
-          id: `local:${clientId}`,
-          clientId,
-          room,
-          body,
-          fromUid: meUid || null,
-          sender: { displayName: myLabel || "You" },
-          at: now,
-          meta: {},
-          isMe: true,
-          _optimistic: true,
-          status: "pending", // start as sending…
-          seenBy: meUid ? [meUid] : [],
-        },
-      ]);
+    socket.emit("chat:message", payload, (ack) => {
+      console.log("chat:message ack = ", ack);
+      if (ack && ack.ok === false) {
+        // mark as failed
+        setMsgs((prev) =>
+          prev.map((m) =>
+            m.clientId === clientId ? { ...m, status: "failed" } : m
+          )
+        );
+      } else if (ack && ack.ok) {
+        // server accepted → single white tick = sent
+        setMsgs((prev) =>
+          prev.map((m) =>
+            m.clientId === clientId ? { ...m, status: "sent" } : m
+          )
+        );
+      }
+      // if no ack => keep pending, wait for "chat:message" echo
+    });
+    setText("");
+  }
 
-         socket.emit("chat:message", payload, (ack) => {
-        console.log("chat:message ack = ", ack);
-        if (ack && ack.ok === false) {
-          // mark as failed
-          setMsgs((prev) =>
-            prev.map((m) =>
-              m.clientId === clientId ? { ...m, status: "failed" } : m
-            )
-          );
-        } else if (ack && ack.ok) {
-          // server accepted → single white tick = sent
-          setMsgs((prev) =>
-            prev.map((m) =>
-              m.clientId === clientId ? { ...m, status: "sent" } : m
-            )
-          );
-        }
-        // if no ack => keep pending, wait for "chat:message" echo
-      });
-      setText("");
+  // ---------- keyboard handler (Enter = send, Shift+Enter = newline) ----------
+  function handleKeyDown(e) {
+    if (e.key === "Enter") {
+      if (e.shiftKey) {
+        // allow newline in textarea
+        return;
+      }
+      e.preventDefault();
+      send();
     }
-
+  }
 
   return (
     <div className="flex flex-col h-full">
@@ -609,14 +603,13 @@ useEffect(() => {
           />
         </label>
 
-                <textarea
-                className="flex-1 bg-black border border-zinc-800 rounded-lg px-3 py-2 text-sm resize-none leading-snug"
-                rows={1}
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Type a message…"
-
+        <textarea
+          className="flex-1 bg-black border border-zinc-800 rounded-lg px-3 py-2 text-sm resize-none leading-snug"
+          rows={1}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="Type a message…"
         />
         <button
           className="px-4 py-2 rounded-lg bg-gold text-black font-semibold text-sm"
