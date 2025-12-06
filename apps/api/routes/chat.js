@@ -438,7 +438,6 @@ try {
   console.warn("[chat:post] Thread.touchLastMessage failed:", err?.message || err);
 }
 
-
     // Return success response for REST fallback
     return res.json({ ok: true, message: payload });
   } catch (e) {
@@ -446,6 +445,79 @@ try {
     return res.status(500).json({ error: "server_error" });
   }
 });
+
+  /**
+   * POST /api/chat/message/:id/star
+   * Toggle star for the logged-in user on a specific message.
+   */
+  router.post("/chat/message/:id/star", requireAuth, async (req, res) => {
+    try {
+      const meUid = req.user.uid;
+      const id = String(req.params.id || "").trim();
+      if (!id) return res.status(400).json({ error: "messageId_required" });
+
+      const result = await chatService.toggleStar(id, meUid);
+      return res.json(result);
+    } catch (e) {
+      console.error("POST /chat/message/:id/star error:", e);
+      return res.status(500).json({ error: "server_error" });
+    }
+  });
+
+  /**
+   * POST /api/chat/message/:id/pin
+   * Toggle pin for the logged-in user on a specific message.
+   */
+  router.post("/chat/message/:id/pin", requireAuth, async (req, res) => {
+    try {
+      const meUid = req.user.uid;
+      const id = String(req.params.id || "").trim();
+      if (!id) return res.status(400).json({ error: "messageId_required" });
+
+      const result = await chatService.togglePin(id, meUid);
+      return res.json(result);
+    } catch (e) {
+      console.error("POST /chat/message/:id/pin error:", e);
+      return res.status(500).json({ error: "server_error" });
+    }
+  });
+
+  /**
+   * POST /api/chat/message/:id/react
+   * Body: { emoji: "❤️" } or { emoji: null } to clear.
+   */
+  router.post("/chat/message/:id/react", requireAuth, async (req, res) => {
+    try {
+      const meUid = req.user.uid;
+      const id = String(req.params.id || "").trim();
+      if (!id) return res.status(400).json({ error: "messageId_required" });
+
+      const { emoji = null } = req.body || {};
+      const result = await chatService.toggleReaction(id, meUid, emoji || null);
+      return res.json(result);
+    } catch (e) {
+      console.error("POST /chat/message/:id/react error:", e);
+      return res.status(500).json({ error: "server_error" });
+    }
+  });
+
+  /**
+   * POST /api/chat/message/:id/delete-for-me
+   * Marks a message as deleted for this user only (others still see it).
+   */
+  router.post("/chat/message/:id/delete-for-me", requireAuth, async (req, res) => {
+    try {
+      const meUid = req.user.uid;
+      const id = String(req.params.id || "").trim();
+      if (!id) return res.status(400).json({ error: "messageId_required" });
+
+      const result = await chatService.deleteForMe(id, meUid);
+      return res.json(result);
+    } catch (e) {
+      console.error("POST /chat/message/:id/delete-for-me error:", e);
+      return res.status(500).json({ error: "server_error" });
+    }
+  });
 
 return router;
 }

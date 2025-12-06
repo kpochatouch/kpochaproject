@@ -15,6 +15,10 @@ import { Pro } from "../models.js";
  *  - getInbox(uid)
  *  - markThreadRead(peerUid, uid)
  *  - markRoomRead(room, uid)
+ *  - toggleStar(messageId, uid)
+ *  - togglePin(messageId, uid)
+ *  - toggleReaction(messageId, uid, emoji)
+ *  - deleteForMe(messageId, uid)
  */
 
 let _getIO = () => null;
@@ -104,7 +108,6 @@ async function attachSender(payload) {
 
   return payload;
 }
-
 
 export async function saveMessage({
   room,
@@ -304,7 +307,6 @@ export async function saveMessage({
   return { ok: true, existing: false, message: payload };
 }
 
-
 /**
  * getMessages(room, { limit = 50, before = null })
  * - returns messages sorted ascending by createdAt (oldest first)
@@ -340,9 +342,9 @@ export async function getInbox(uid) {
   // Try to use Thread collection first (fast)
   try {
     const threads = await Thread.find({ participants: uid, archived: { $ne: true } })
-  .sort({ lastMessageAt: -1 })
-  .limit(200)
-  .lean();
+      .sort({ lastMessageAt: -1 })
+      .limit(200)
+      .lean();
 
     if (Array.isArray(threads) && threads.length) {
       const out = threads.map((t) => {
@@ -391,7 +393,10 @@ export async function getInbox(uid) {
   const out = [];
   for (const r of rooms) {
     try {
-      const last = await ChatMessage.find({ room: r }).sort({ createdAt: -1 }).limit(1).lean();
+      const last = await ChatMessage.find({ room: r })
+        .sort({ createdAt: -1 })
+        .limit(1)
+        .lean();
       const lastDoc = last && last[0] ? last[0] : null;
       if (!lastDoc) continue;
 
@@ -482,7 +487,6 @@ export async function markThreadRead(peerUid, uid) {
   }
 }
 
-
 /**
  * markRoomRead(room, uid)
  * - marks all messages in a room as seen by uid
@@ -524,6 +528,129 @@ export async function markRoomRead(room, uid) {
   }
 }
 
+/* -------------------------------------------------
+   ⭐ NEW: Star / Pin / React / Delete-for-me helpers
+   (stored in doc.meta so no schema change needed)
+-------------------------------------------------- */
+
+export async function toggleStar(messageId, uid) {
+  if (!messageId) throw new Error("messageId required");
+  if (!uid) throw new Error("uid required");
+
+  const doc = await ChatMessage.findById(messageId);
+  if (!doc) throw new Error("message_not_found");
+
+  const meta = doc.meta || {};
+  const prev = Array.isArray(meta.starredBy) ? meta.starredBy : [];
+
+  if (prev.includes(uid)) {
+    meta.starredBy = prev.filter((x) => x !== uid);
+  } else {
+    meta.starredBy = [...prev, uid];
+  }
+
+  doc.meta = meta;
+  await doc.save();
+
+  let payload = buildPayloadFromDoc(doc);
+  await attachSender(payload);
+
+  const io = getIO();
+  io?.to(doc.room).emit("chat:update", payload);
+
+  return { ok: true, message: payload };
+}
+
+export async function togglePin(messageId, uid) {
+  if (!messageId) throw new Error("messageId required");
+  if (!uid) throw new Error("uid required");
+
+  const doc = await ChatMessage.findById(messageId);
+  if (!doc) throw new Error("message_not_found");
+
+  const meta = doc.meta || {};
+  const prev = Array.isArray(meta.pinnedBy) ? meta.pinnedBy : [];
+
+  if (prev.includes(uid)) {
+    meta.pinnedBy = prev.filter((x) => x !== uid);
+  } else {
+    meta.pinnedBy = [...prev, uid];
+  }
+
+  doc.meta = meta;
+  await doc.save();
+
+  let payload = buildPayloadFromDoc(doc);
+  await attachSender(payload);
+
+  const io = getIO();
+  io?.to(doc.room).emit("chat:update", payload);
+
+  return { ok: true, message: payload };
+}
+
+export async function toggleReaction(messageId, uid, emoji) {
+  if (!messageId) throw new Error("messageId required");
+  if (!uid) throw new Error("uid required");
+
+  const doc = await ChatMessage.findById(messageId);
+  if (!doc) throw new Error("message_not_found");
+
+  const meta = doc.meta || {};
+  const myReactions =
+    meta.myReactions && typeof meta.myReactions === "object"
+      ? meta.myReactions
+      : {};
+
+  if (!emoji) {
+    // clear my reaction
+    delete myReactions[uid];
+  } else {
+    // set/replace my reaction
+    myReactions[uid] = emoji;
+  }
+
+  meta.myReactions = myReactions;
+  doc.meta = meta;
+  await doc.save();
+
+  let payload = buildPayloadFromDoc(doc);
+  await attachSender(payload);
+
+  const io = getIO();
+  io?.to(doc.room).emit("chat:update", payload);
+
+  return { ok: true, message: payload };
+}
+
+export async function deleteForMe(messageId, uid) {
+  if (!messageId) throw new Error("messageId required");
+  if (!uid) throw new Error("uid required");
+
+  const doc = await ChatMessage.findById(messageId);
+  if (!doc) throw new Error("message_not_found");
+
+  const meta = doc.meta || {};
+  const prev = Array.isArray(meta.deletedFor) ? meta.deletedFor : [];
+
+  if (!prev.includes(uid)) {
+    meta.deletedFor = [...prev, uid];
+    doc.meta = meta;
+    await doc.save();
+  }
+
+  let payload = buildPayloadFromDoc(doc);
+  await attachSender(payload);
+
+  const io = getIO();
+  io?.to(doc.room).emit("chat:update", payload);
+
+  return { ok: true, message: payload };
+}
+
+/* -------------------------------------------------
+   Default export
+-------------------------------------------------- */
 
 export default {
   setGetIO,
@@ -532,4 +659,8 @@ export default {
   getInbox,
   markThreadRead,
   markRoomRead,
+  toggleStar,
+  togglePin,
+  toggleReaction,
+  deleteForMe,
 };
