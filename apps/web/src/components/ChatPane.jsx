@@ -258,15 +258,6 @@ export default function ChatPane({
     };
   }, [socket, meUid, peerUid, room]);
 
-  // ---------- close menu on global click (ClickOutsideLayer) ----------
-  useEffect(() => {
-    function onGlobalClick() {
-      if (menu) setMenu(null);
-    }
-    window.addEventListener("global-click", onGlobalClick);
-    return () => window.removeEventListener("global-click", onGlobalClick);
-  }, [menu]);
-
   // ---------- auto scroll ---------->
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -359,21 +350,33 @@ export default function ChatPane({
       ]);
 
       socket.emit("chat:message", payload, (ack) => {
-        if (!ack || !ack.ok) {
-          setMsgs((prev) =>
-            prev.map((m) =>
-              m.clientId === clientId ? { ...m, status: "failed" } : m
-            )
-          );
-        } else {
-          // ack from server = SENT (single tick)
-          setMsgs((prev) =>
-            prev.map((m) =>
-              m.clientId === clientId ? { ...m, status: "sent" } : m
-            )
-          );
+  if (!ack || !ack.ok) {
+    setMsgs((prev) =>
+      prev.map((m) =>
+        m.clientId === clientId ? { ...m, status: "failed" } : m
+      )
+    );
+  } else {
+    // ack from server = SENT (single tick)
+    // but never downgrade from delivered/seen back to sent
+    setMsgs((prev) => {
+      const order = ["pending", "sent", "delivered", "seen"];
+      const sentRank = order.indexOf("sent");
+
+      return prev.map((m) => {
+        if (m.clientId !== clientId || !m.isMe) return m;
+
+        const currentRank = order.indexOf(m.status || "pending");
+        if (currentRank >= sentRank) {
+          // already sent or better (delivered/seen) → keep it
+          return m;
         }
+        return { ...m, status: "sent" };
       });
+    });
+  }
+});
+
     } catch (err) {
       console.error("upload failed", err);
       alert("Upload failed");
@@ -428,22 +431,34 @@ export default function ChatPane({
     ]);
 
     socket.emit("chat:message", payload, (ack) => {
-      console.log("chat:message ack = ", ack);
-      if (ack && ack.ok === false) {
-        setMsgs((prev) =>
-          prev.map((m) =>
-            m.clientId === clientId ? { ...m, status: "failed" } : m
-          )
-        );
-      } else if (ack && ack.ok) {
-        // ack from server = SENT (single tick)
-        setMsgs((prev) =>
-          prev.map((m) =>
-            m.clientId === clientId ? { ...m, status: "sent" } : m
-          )
-        );
-      }
+  console.log("chat:message ack = ", ack);
+  if (ack && ack.ok === false) {
+    setMsgs((prev) =>
+      prev.map((m) =>
+        m.clientId === clientId ? { ...m, status: "failed" } : m
+      )
+    );
+  } else if (ack && ack.ok) {
+    // ack from server = SENT (single tick)
+    // but don't downgrade from delivered/seen
+    setMsgs((prev) => {
+      const order = ["pending", "sent", "delivered", "seen"];
+      const sentRank = order.indexOf("sent");
+
+      return prev.map((m) => {
+        if (m.clientId !== clientId || !m.isMe) return m;
+
+        const currentRank = order.indexOf(m.status || "pending");
+        if (currentRank >= sentRank) {
+          // e.g., already delivered or seen
+          return m;
+        }
+        return { ...m, status: "sent" };
+      });
     });
+  }
+});
+
     setText("");
     setReplyTo(null);
   }
