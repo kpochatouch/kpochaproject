@@ -85,160 +85,161 @@ export default function ChatPane({
     setMsgs(normalized);
   }, [room, initialMessages, peerUid]);
 
-  // ---------- mark room read when I open it ----------
-  useEffect(() => {
-    if (!room) return;
-    (async () => {
-      try {
-        await api.put(`/api/chat/room/${encodeURIComponent(room)}/read`);
-      } catch {
-        // ignore
-      }
-    })();
-  }, [room]);
 
-    // ---------- socket listeners ----------
-  useEffect(() => {
-    if (!socket) return;
+useEffect(() => {
+  if (!socket) return;
 
-    function normalizeIncoming(m) {
-      const fromUid = m.fromUid || m.from || null;
-      const id =
-        m.id ||
-        m._id ||
-        `srv:${fromUid || "x"}:${m.createdAt || m.ts || Date.now()}`;
-      const clientId = m.clientId || null;
-      const sender = m.sender || null;
-      const body = m.body || m.text || "";
-      const at = m.createdAt || m.ts || Date.now();
-      const meta = m.meta || { attachments: m.attachments || [] };
-      const isMe = Boolean(fromUid && meUid && fromUid === meUid);
-      const seenBy = Array.isArray(m.seenBy) ? m.seenBy : [];
+  function normalizeIncoming(m) {
+    const fromUid = m.fromUid || m.from || null;
+    const id =
+      m.id ||
+      m._id ||
+      `srv:${fromUid || "x"}:${m.createdAt || m.ts || Date.now()}`;
+    const clientId = m.clientId || null;
+    const sender = m.sender || null;
+    const body = m.body || m.text || "";
+    const at = m.createdAt || m.ts || Date.now();
+    const meta = m.meta || { attachments: m.attachments || [] };
+    const isMe = Boolean(fromUid && meUid && fromUid === meUid);
+    const seenBy = Array.isArray(m.seenBy) ? m.seenBy : [];
 
-      let status;
-      if (isMe) {
-        // this is MY message coming back from the server
-        const seen =
-          peerUid && Array.isArray(seenBy) && seenBy.includes(peerUid);
-        // server echo = at least sent; upgrade to seen if peer has read
-        status = seen ? "seen" : "sent";
-      } else {
-        // message from the other person
-        status = "received";
-      }
-
-      return {
-        id,
-        clientId,
-        room: m.room,
-        body,
-        fromUid,
-        sender,
-        at,
-        meta,
-        isMe,
-        seenBy,
-        status,
-      };
+    let status;
+    if (isMe) {
+      // this is MY message coming back from the server
+      const seen =
+        peerUid && Array.isArray(seenBy) && seenBy.includes(peerUid);
+      // server echo = at least sent; upgrade to seen if peer has read
+      status = seen ? "seen" : "sent";
+    } else {
+      // message from the other person
+      status = "received";
     }
 
-    function onMsg(m) {
-      const n = normalizeIncoming(m);
-
-      setMsgs((prev) => {
-        // 1) if server returned clientId and we have optimistic msg => replace it
-        if (n.clientId) {
-          const idx = prev.findIndex(
-            (x) => x.clientId && x.clientId === n.clientId
-          );
-          if (idx !== -1) {
-            const copy = [...prev];
-            const existing = copy[idx];
-
-            let nextStatus = n.status;
-
-            // If it's my own message, never downgrade from a "better" status
-            if (existing.isMe) {
-              const order = ["pending", "sent", "delivered", "seen"];
-              const existingRank = order.indexOf(existing.status || "pending");
-              const incomingRank = order.indexOf(n.status || "pending");
-
-              if (existingRank > incomingRank) {
-                nextStatus = existing.status;
-              }
-            }
-
-            copy[idx] = {
-              ...existing,
-              ...n,
-              _confirmed: true,
-              status: nextStatus,
-            };
-            return copy;
-          }
-        }
-
-        // 2) avoid exact id dupes
-        if (
-          prev.some(
-            (x) => x.id === n.id || (n.clientId && x.clientId === n.clientId)
-          )
-        ) {
-          return prev;
-        }
-
-        return [...prev, n];
-      });
-    }
-
-    // 🔥 NEW: live "seen" listener
-    function onSeen(evt) {
-      if (!evt || !evt.room || !evt.seenBy) return;
-      // only handle events for the current room
-      if (evt.room !== room) return;
-
-      const viewerUid = evt.seenBy;
-
-      setMsgs((prev) => {
-        // if the viewer is not the peer we’re chatting with, ignore
-        if (!peerUid || viewerUid !== peerUid) return prev;
-
-        const order = ["pending", "sent", "delivered", "seen"];
-        const seenRank = order.indexOf("seen");
-
-        return prev.map((m) => {
-          if (!m.isMe) return m;
-
-          const currentRank = order.indexOf(m.status || "pending");
-          if (currentRank >= seenRank) {
-            // already seen (or better) → no change
-            return m;
-          }
-
-          // upgrade to seen + merge seenBy
-          const nextSeenBy = Array.isArray(m.seenBy)
-            ? Array.from(new Set([...m.seenBy, viewerUid]))
-            : [viewerUid];
-
-          return {
-            ...m,
-            status: "seen",
-            seenBy: nextSeenBy,
-          };
-        });
-      });
-    }
-
-    socket.on("chat:message", onMsg);
-    socket.on("chat:seen", onSeen);
-
-    return () => {
-      try {
-        socket.off("chat:message", onMsg);
-        socket.off("chat:seen", onSeen);
-      } catch {}
+    return {
+      id,
+      clientId,
+      room: m.room,
+      body,
+      fromUid,
+      sender,
+      at,
+      meta,
+      isMe,
+      seenBy,
+      status,
     };
-  }, [socket, meUid, peerUid, room]);
+  }
+
+  // ⬇⬇⬇ REPLACED onMsg (use this version) ⬇⬇⬇
+  function onMsg(m) {
+    const n = normalizeIncoming(m);
+
+    setMsgs((prev) => {
+      // 1) if server returned clientId and we have optimistic msg => replace it
+      if (n.clientId) {
+        const idx = prev.findIndex(
+          (x) => x.clientId && x.clientId === n.clientId
+        );
+        if (idx !== -1) {
+          const copy = [...prev];
+          const existing = copy[idx];
+
+          let nextStatus = n.status;
+
+          // If it's my own message, never downgrade from a "better" status
+          if (existing.isMe) {
+            const order = ["pending", "sent", "delivered", "seen"];
+            const existingRank = order.indexOf(existing.status || "pending");
+            const incomingRank = order.indexOf(n.status || "pending");
+
+            if (existingRank > incomingRank) {
+              nextStatus = existing.status;
+            }
+          }
+
+          copy[idx] = {
+            ...existing,
+            ...n,
+            _confirmed: true,
+            status: nextStatus,
+          };
+          return copy;
+        }
+      }
+
+      // 2) avoid exact id dupes
+      if (
+        prev.some(
+          (x) => x.id === n.id || (n.clientId && x.clientId === n.clientId)
+        )
+      ) {
+        return prev;
+      }
+
+      return [...prev, n];
+    });
+
+    // 🔥 NEW: if this is a message from the other person, mark room read via socket
+    try {
+      const fromUid = n.fromUid || n.from;
+      const isFromPeer = fromUid && peerUid && fromUid === peerUid;
+
+      if (!n.isMe && isFromPeer && room && socket) {
+        socket.emit("chat:read", { room }, () => {
+          // optional ack handler; can be empty
+          // console.log("chat:read ack", ack);
+        });
+      }
+    } catch (e) {
+      console.warn("[ChatPane] chat:read emit failed", e);
+    }
+  }
+  // ⬆⬆⬆ END of new onMsg ⬆⬆⬆
+
+  // keep onSeen exactly as you already have it
+  function onSeen(evt) {
+    if (!evt || !evt.room || !evt.seenBy) return;
+    if (evt.room !== room) return;
+
+    const viewerUid = evt.seenBy;
+
+    setMsgs((prev) => {
+      if (!peerUid || viewerUid !== peerUid) return prev;
+
+      const order = ["pending", "sent", "delivered", "seen"];
+      const seenRank = order.indexOf("seen");
+
+      return prev.map((m) => {
+        if (!m.isMe) return m;
+
+        const currentRank = order.indexOf(m.status || "pending");
+        if (currentRank >= seenRank) {
+          return m;
+        }
+
+        const nextSeenBy = Array.isArray(m.seenBy)
+          ? Array.from(new Set([...m.seenBy, viewerUid]))
+          : [viewerUid];
+
+        return {
+          ...m,
+          status: "seen",
+          seenBy: nextSeenBy,
+        };
+      });
+    });
+  }
+
+  socket.on("chat:message", onMsg);
+  socket.on("chat:seen", onSeen);
+
+  return () => {
+    try {
+      socket.off("chat:message", onMsg);
+      socket.off("chat:seen", onSeen);
+    } catch {}
+  };
+}, [socket, meUid, peerUid, room]);
 
 
   // ---------- auto scroll ----------

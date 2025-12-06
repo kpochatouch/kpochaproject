@@ -264,6 +264,37 @@ export default function attachSockets(httpServer) {
       }
     });
 
+        // 🔥 NEW: mark messages in a room as read via socket (no HTTP)
+    socket.on("chat:read", async (payload = {}, ack) => {
+      await authReady;
+      try {
+        const r = roomName(
+          (payload && payload.room) || socket.data.room || ""
+        );
+        if (!r) {
+          ack?.({ ok: false, error: "room_required" });
+          return;
+        }
+
+        const uid = socket.data.uid || hinted;
+        if (!uid) {
+          ack?.({ ok: false, error: "no_uid" });
+          return;
+        }
+
+        // use your existing chatService.markRoomRead
+        const res = await chatService.markRoomRead(r, uid);
+
+        // markRoomRead itself already emits "chat:seen" to that room,
+        // which your ChatPane is listening for.
+        ack?.({ ok: true, updated: res?.updated ?? 0 });
+      } catch (err) {
+        console.warn("[socket] chat:read failed:", err?.message || err);
+        ack?.({ ok: false, error: "mark_read_failed" });
+      }
+    });
+
+
     /* ---------------------------------------------------
        WebRTC signaling
     --------------------------------------------------- */
