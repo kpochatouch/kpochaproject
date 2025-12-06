@@ -198,41 +198,24 @@ export default function ChatPane({
     }
 
     // live "seen" listener
-    function onSeen(evt) {
-      if (!evt || !evt.room || !evt.seenBy) return;
-      if (evt.room !== room) return;
+function onSeen(evt) {
+  if (!evt || !evt.room) return;
+  if (evt.room !== room) return;
 
-      const viewerUid = evt.seenBy;
+  setMsgs((prev) => {
+    return prev.map((m) => {
+      // only touch my own messages
+      if (!m.isMe) return m;
+      if (m.status === "seen") return m;
 
-      setMsgs((prev) => {
-        const order = ["pending", "sent", "delivered", "seen"];
-        const seenRank = order.indexOf("seen");
+      return {
+        ...m,
+        status: "seen",
+      };
+    });
+  });
+}
 
-        return prev.map((m) => {
-          if (!m.isMe) return m;
-
-          // Only treat as "seen" if someone OTHER THAN ME viewed it
-          if (!viewerUid || (meUid && viewerUid === meUid)) {
-            return m;
-          }
-
-          const currentRank = order.indexOf(m.status || "pending");
-          if (currentRank >= seenRank) {
-            return m;
-          }
-
-          const nextSeenBy = Array.isArray(m.seenBy)
-            ? Array.from(new Set([...m.seenBy, viewerUid]))
-            : [viewerUid];
-
-          return {
-            ...m,
-            status: "seen",
-            seenBy: nextSeenBy,
-          };
-        });
-      });
-    }
 
     socket.on("chat:message", onMsg);
     socket.on("chat:seen", onSeen);
