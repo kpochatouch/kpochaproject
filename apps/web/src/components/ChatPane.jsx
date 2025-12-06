@@ -230,10 +230,6 @@ useEffect(() => {
     });
   }
 
-
-  socket.on("chat:message", onMsg);
-  socket.on("chat:seen", onSeen);
-
   function handleKeyDown(e) {
       if (e.key === "Enter") {
         if (e.shiftKey) {
@@ -245,6 +241,10 @@ useEffect(() => {
         send();
       }
     }
+
+
+  socket.on("chat:message", onMsg);
+  socket.on("chat:seen", onSeen);
 
   return () => {
     try {
