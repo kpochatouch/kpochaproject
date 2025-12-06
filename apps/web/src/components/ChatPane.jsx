@@ -53,7 +53,7 @@ export default function ChatPane({
   meUid = null,
   myLabel = "You",
   toUid = null,
-  peerUid = null,
+  peerUid = null, // still used for names/avatars
   peerProfile = null,
   initialMessages = [],
 }) {
@@ -61,6 +61,7 @@ export default function ChatPane({
   const [text, setText] = useState("");
   const [uploading, setUploading] = useState(false);
   const endRef = useRef(null);
+  const textareaRef = useRef(null);
 
   // ---------- hydrate initial messages with proper status ----------
   useEffect(() => {
@@ -69,11 +70,13 @@ export default function ChatPane({
 
       if (!status) {
         if (m.isMe) {
+          const seenBy = Array.isArray(m.seenBy) ? m.seenBy : [];
+          // "seen" = any viewer that is not me
           const seen =
-            Array.isArray(m.seenBy) &&
-            peerUid &&
-            m.seenBy.includes(peerUid);
-          // from history: at least delivered; upgrade to seen if seenBy has peer
+            seenBy.length > 0 &&
+            seenBy.some((uid) => uid && meUid && uid !== meUid);
+
+          // from history: at least delivered; upgrade to seen if any other uid
           status = seen ? "seen" : "delivered";
         } else {
           status = "received";
@@ -83,7 +86,7 @@ export default function ChatPane({
       return { ...m, status };
     });
     setMsgs(normalized);
-  }, [room, initialMessages, peerUid]);
+  }, [room, initialMessages, meUid]);
 
   // ---------- socket listeners ----------
   useEffect(() => {
@@ -107,8 +110,9 @@ export default function ChatPane({
       if (isMe) {
         // this is MY message coming back from the server
         const seen =
-          peerUid && Array.isArray(seenBy) && seenBy.includes(peerUid);
-        // server echo = at least delivered; upgrade to seen if peer has read
+          seenBy.length > 0 &&
+          seenBy.some((uid) => uid && meUid && uid !== meUid);
+        // server echo = at least delivered; upgrade to seen if someone else has read
         status = seen ? "seen" : "delivered";
       } else {
         // message from the other person
@@ -178,7 +182,7 @@ export default function ChatPane({
         return [...prev, n];
       });
 
-      // 🔥 if this is a message from the other person, mark room read via socket
+      // optional: if this is a message from the other person, tell server we read it
       try {
         const fromUid = n.fromUid || n.from;
         const isFromPeer = fromUid && peerUid && fromUid === peerUid;
@@ -201,13 +205,16 @@ export default function ChatPane({
       const viewerUid = evt.seenBy;
 
       setMsgs((prev) => {
-        if (!peerUid || viewerUid !== peerUid) return prev;
-
         const order = ["pending", "sent", "delivered", "seen"];
         const seenRank = order.indexOf("seen");
 
         return prev.map((m) => {
           if (!m.isMe) return m;
+
+          // Only treat as "seen" if someone OTHER THAN ME viewed it
+          if (!viewerUid || (meUid && viewerUid === meUid)) {
+            return m;
+          }
 
           const currentRank = order.indexOf(m.status || "pending");
           if (currentRank >= seenRank) {
@@ -242,6 +249,15 @@ export default function ChatPane({
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [msgs]);
+
+  // ---------- auto-grow textarea up to ~6–7 lines ----------
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    const maxHeight = 7 * 22; // roughly 7 lines * 22px line-height
+    el.style.height = Math.min(el.scrollHeight, maxHeight) + "px";
+  }, [text]);
 
   // ---------- uploads ----------
   async function uploadFileToCloudinary(file) {
@@ -398,7 +414,7 @@ export default function ChatPane({
           )
         );
       }
-      // if no ack => keep pending, wait for "chat:message" echo
+      // if no ack => keep pending, wait for "chat:message" echo (which will move to delivered/seen)
     });
     setText("");
   }
@@ -604,6 +620,7 @@ export default function ChatPane({
         </label>
 
         <textarea
+          ref={textareaRef}
           className="flex-1 bg-black border border-zinc-800 rounded-lg px-3 py-2 text-sm resize-none leading-snug"
           rows={1}
           value={text}
@@ -611,6 +628,7 @@ export default function ChatPane({
           onKeyDown={handleKeyDown}
           placeholder="Type a message…"
         />
+
         <button
           className="px-4 py-2 rounded-lg bg-gold text-black font-semibold text-sm"
           onClick={send}
