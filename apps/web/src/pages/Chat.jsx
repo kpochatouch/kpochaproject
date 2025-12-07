@@ -341,6 +341,8 @@ if (!currentUser) {
   callId={callState.callId}
   callType={callState.callType}
   me={myLabel}
+  peerName={peerName}
+  peerAvatar={peerAvatar}
   open={callState.open}
   onClose={handleCallClose}
 />
