@@ -83,16 +83,24 @@ export default function BookingChat() {
 
   // ---- Socket connection (shared with chat + call) ----
   const socket = useMemo(() => {
-    if (!room) return null;
-    try {
-      const s = connectSocket();
-      // join the booking room on connect
-      s.emit("join:booking", { bookingId, who: myLabel });
-      return s;
-    } catch {
-      return null;
-    }
-  }, [room, bookingId, myLabel]);
+  if (!room) return null;
+  try {
+    const s = connectSocket();
+    // join the booking room on connect
+    s.emit("join:booking", { bookingId, who: myLabel });
+
+    // after join, mark the booking chat as read
+    // (chat:read uses socket.data.room if room isn't passed)
+    s.emit("chat:read", {}, (ack) => {
+      console.log("booking chat:read ack =", ack);
+    });
+
+    return s;
+  } catch {
+    return null;
+  }
+}, [room, bookingId, myLabel]);
+
 
   useEffect(() => {
     return () => {
@@ -151,7 +159,17 @@ export default function BookingChat() {
       )}
 
       {/* Chat uses the shared socket + booking room */}
-      <ChatPane socket={socket} room={room} me={myLabel} />
+      <ChatPane
+  socket={socket}
+  room={room}
+  meUid={me?.uid || me?.ownerUid || me?._id || me?.id || me?.userId || null}
+  myLabel={myLabel}
+  // booking chat is usually between exactly two people,
+  // but we don’t have the other uid wired here yet.
+  // For now we leave peerUid / peerProfile out for ticks.
+  initialMessages={[]}
+/>
+
 
       {/* CallSheet uses the same booking room for WebRTC signaling */}
       <CallSheet

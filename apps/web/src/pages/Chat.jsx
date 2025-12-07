@@ -147,25 +147,30 @@ export default function Chat() {
 
   // 3) Attach socket + join room once we know the room id
   useEffect(() => {
-    if (!room || !myLabel) return;
+  if (!room || !myLabel) return;
 
-    let s;
+  let s;
+  try {
+    s = connectSocket(); // uses shared socket client from api.js
+    setSocket(s);
+    s.emit("room:join", { room, who: myLabel });
+
+    // 🔥 tell backend we've read messages in this room
+    s.emit("chat:read", { room }, (ack) => {
+      console.log("chat:read ack =", ack);
+    });
+  } catch (e) {
+    console.warn("chat connectSocket failed:", e?.message || e);
+  }
+
+  return () => {
     try {
-      s = connectSocket(); // uses shared socket client from api.js
-      setSocket(s);
-      s.emit("room:join", { room, who: myLabel });
-    } catch (e) {
-      console.warn("chat connectSocket failed:", e?.message || e);
-    }
-
-    return () => {
-      try {
-        if (s && room) s.emit("room:leave", { room });
-        s?.disconnect();
-      } catch {}
-      setSocket(null);
-    };
-  }, [room, myLabel]);
+      if (s && room) s.emit("room:leave", { room });
+      s?.disconnect();
+    } catch {}
+    setSocket(null);
+  };
+}, [room, myLabel]);
 
   // ---------- guards ----------
 if (meLoading) {

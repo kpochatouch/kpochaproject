@@ -205,64 +205,63 @@ export default function attachSockets(httpServer) {
        Chat
     --------------------------------------------------- */
     socket.on("chat:message", async (msg = {}, ack) => {
-      await authReady;
-      try {
-        const r = roomName(msg.room) || socket.data.room;
-        if (!r) return ack?.({ ok: false, error: "room_required" });
+  await authReady;
+  try {
+    const r = roomName(msg.room) || socket.data.room;
+    if (!r) return ack?.({ ok: false, error: "room_required" });
 
-        const text = msg.text ?? msg.message ?? msg.body ?? "";
-        const meta = msg.meta || {};
-        const attachmentsRaw = Array.isArray(meta.attachments) ? meta.attachments : [];
+    const text = msg.text ?? msg.message ?? msg.body ?? "";
+    const meta = msg.meta || {};
+    const attachmentsRaw = Array.isArray(meta.attachments) ? meta.attachments : [];
 
-        if (!text && attachmentsRaw.length === 0) {
-          return ack?.({ ok: false, error: "message_empty" });
-        }
+    if (!text && attachmentsRaw.length === 0) {
+      return ack?.({ ok: false, error: "message_empty" });
+    }
 
-        const fromUid = socket.data.uid || msg.fromUid || hinted || socket.id;
+    const fromUid = socket.data.uid || msg.fromUid || hinted || socket.id;
 
-        // determine DM peer
-        let toUid = null;
-        const parts = String(r).split(":");
-        if (parts[0] === "dm" && parts.length === 3) {
-          const [, a, b] = parts;
-          toUid = fromUid === a ? b : fromUid === b ? a : null;
-        }
+    // determine DM peer
+    let toUid = null;
+    const parts = String(r).split(":");
+    if (parts[0] === "dm" && parts.length === 3) {
+      const [, a, b] = parts;
+      toUid = fromUid === a ? b : fromUid === b ? a : null;
+    }
 
-        const attachments = attachmentsRaw.map((a) => ({
-          url: a.url,
-          type: a.type || "file",
-          name: a.name || "",
-          size: a.size || 0,
-        }));
+    const attachments = attachmentsRaw.map((a) => ({
+      url: a.url,
+      type: a.type || "file",
+      name: a.name || "",
+      size: a.size || 0,
+    }));
 
-        const res = await chatService.saveMessage({
-          room: r,
-          fromUid,
-          toUid,
-          body: text,
-          attachments,
-          meta,
-          clientId: msg.clientId || null,
-        });
-
-        // chatService.saveMessage already:
-        //  - builds payload
-        //  - attaches sender
-        //  - emits "chat:message" to the room
-        const payload = res.message;
-
-        return ack?.({
-          ok: true,
-          id: payload?.id,
-          existing: !!res.existing,
-        });
-
-
-      } catch (err) {
-        console.warn("[chat:message] error:", err?.message || err);
-        return ack?.({ ok: false, error: "save_failed" });
-      }
+    const res = await chatService.saveMessage({
+      room: r,
+      fromUid,
+      toUid,
+      body: text,
+      attachments,
+      meta,
+      clientId: msg.clientId || null,
     });
+
+    // chatService.saveMessage already:
+    //  - builds payload
+    //  - attaches sender
+    //  - emits "chat:message" to the room
+    const payload = res.message;
+
+    return ack?.({
+      ok: true,
+      id: payload?.id,
+      existing: !!res.existing,
+    });
+  } catch (err) {
+    console.warn("[chat:message] error:", err?.message || err);
+    return ack?.({ ok: false, error: "save_failed" });
+  }
+});
+
 
         // 🔥 NEW: mark messages in a room as read via socket (no HTTP)
     socket.on("chat:read", async (payload = {}, ack) => {

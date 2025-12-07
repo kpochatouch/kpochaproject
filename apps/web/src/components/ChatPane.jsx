@@ -2,6 +2,10 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
 
+const isMobileDevice =
+  typeof navigator !== "undefined" &&
+  /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
 function generateClientId() {
   return `c_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 }
@@ -464,16 +468,27 @@ export default function ChatPane({
   }
 
   // ---------- keyboard: Enter vs newline ----------
-  function handleKeyDown(e) {
-    if (e.key === "Enter") {
-      if (e.shiftKey || e.ctrlKey) {
-        // new line
-        return;
-      }
-      e.preventDefault();
-      send();
-    }
+// ChatGPT-style:
+// - Mobile: Enter = newline (use button to send)
+// - Desktop: Enter = send, Shift+Enter = newline
+function handleKeyDown(e) {
+  if (e.key !== "Enter") return;
+
+  // 📱 On mobile, let Enter just insert a newline
+  if (isMobileDevice) {
+    return; // do nothing → browser inserts newline
   }
+
+  // 🖥 On desktop: Shift+Enter = newline
+  if (e.shiftKey) {
+    return; // let it create a newline
+  }
+
+  // Plain Enter on desktop = send
+  e.preventDefault();
+  send();
+}
+
 
   // ---------- context menu / long-press ----------
   function openMenu(e, msg) {
