@@ -33,11 +33,11 @@ export default function callRoutes({ requireAuth }) {
         meta
       });
 
-      return res.json({
+            return res.json({
         ok: true,
         id: String(call._id),
         callId: call.callId,
-        room: call.room
+        room: call.room,
         callType: call.callType,
       });
 
