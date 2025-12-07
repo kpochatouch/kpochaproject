@@ -1,6 +1,8 @@
 // apps/web/src/components/ChatPane.jsx
 import { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
+import VoiceInputButton from "./VoiceInputButton.jsx";
+import VoiceMessageButton from "./VoiceMessageButton.jsx";
 
 const isMobileDevice =
   typeof navigator !== "undefined" &&
@@ -90,7 +92,7 @@ export default function ChatPane({
   // menu / actions state
   const [menu, setMenu] = useState(null); // { x, y, msg }
   const longPressTimerRef = useRef(null);
-  const [replyTo, setReplyTo] = useState(null); // message we’re replying to
+  const [replyTo, setReplyTo] = useState(null);
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState([]);
 
@@ -105,7 +107,6 @@ export default function ChatPane({
             Array.isArray(m.seenBy) &&
             peerUid &&
             m.seenBy.includes(peerUid);
-          // from history: at least delivered; upgrade to seen if seenBy has peer
           status = seen ? "seen" : "delivered";
         } else {
           status = "received";
@@ -141,14 +142,10 @@ export default function ChatPane({
 
       let status;
       if (isMe) {
-        // this is MY message coming back from the server
         const seen =
           peerUid && Array.isArray(seenBy) && seenBy.includes(peerUid);
-        // server echo = at least sent; upgrade to seen if peer has read
-        // we treat the echo as "delivered"
         status = seen ? "seen" : "delivered";
       } else {
-        // message from the other person
         status = "received";
       }
 
@@ -174,7 +171,7 @@ export default function ChatPane({
       const n = normalizeIncoming(m);
 
       setMsgs((prev) => {
-        // 1) if server returned clientId and we have optimistic msg => replace it
+        // reconcile optimistic message by clientId
         if (n.clientId) {
           const idx = prev.findIndex(
             (x) => x.clientId && x.clientId === n.clientId
@@ -184,8 +181,6 @@ export default function ChatPane({
             const existing = copy[idx];
 
             let nextStatus = n.status;
-
-            // If it's my own message, never downgrade from a "better" status
             const order = ["pending", "sent", "delivered", "seen"];
             if (existing.isMe) {
               const existingRank = order.indexOf(existing.status || "pending");
@@ -206,7 +201,7 @@ export default function ChatPane({
           }
         }
 
-        // 2) avoid exact id dupes
+        // avoid dupes
         if (
           prev.some(
             (x) => x.id === n.id || (n.clientId && x.clientId === n.clientId)
@@ -306,6 +301,13 @@ export default function ChatPane({
     return json.secure_url || json.url;
   }
 
+  async function uploadAudioBlob(blob) {
+    const file = new File([blob], `voice-${Date.now()}.webm`, {
+      type: blob.type || "audio/webm",
+    });
+    return uploadFileToCloudinary(file);
+  }
+
   async function handleFileChange(e) {
     const file = e.target.files?.[0];
     if (!file || !socket || !room) return;
@@ -354,39 +356,115 @@ export default function ChatPane({
       ]);
 
       socket.emit("chat:message", payload, (ack) => {
-  if (!ack || !ack.ok) {
-    setMsgs((prev) =>
-      prev.map((m) =>
-        m.clientId === clientId ? { ...m, status: "failed" } : m
-      )
-    );
-  } else {
-    // ack from server = SENT (single tick)
-    // but never downgrade from delivered/seen back to sent
-    setMsgs((prev) => {
-      const order = ["pending", "sent", "delivered", "seen"];
-      const sentRank = order.indexOf("sent");
+        if (!ack || !ack.ok) {
+          setMsgs((prev) =>
+            prev.map((m) =>
+              m.clientId === clientId ? { ...m, status: "failed" } : m
+            )
+          );
+        } else {
+          const order = ["pending", "sent", "delivered", "seen"];
+          const sentRank = order.indexOf("sent");
 
-      return prev.map((m) => {
-        if (m.clientId !== clientId || !m.isMe) return m;
+          setMsgs((prev) =>
+            prev.map((m) => {
+              if (m.clientId !== clientId || !m.isMe) return m;
 
-        const currentRank = order.indexOf(m.status || "pending");
-        if (currentRank >= sentRank) {
-          // already sent or better (delivered/seen) → keep it
-          return m;
+              const currentRank = order.indexOf(m.status || "pending");
+              if (currentRank >= sentRank) {
+                return m;
+              }
+              return { ...m, status: "sent" };
+            })
+          );
         }
-        return { ...m, status: "sent" };
       });
-    });
-  }
-});
-
     } catch (err) {
       console.error("upload failed", err);
       alert("Upload failed");
     } finally {
       setUploading(false);
       e.target.value = "";
+    }
+  }
+
+  async function handleVoiceMessage(blob) {
+    if (!blob || !socket || !room) return;
+
+    const now = Date.now();
+    const clientId = generateClientId();
+
+    try {
+      setUploading(true);
+
+      const url = await uploadAudioBlob(blob);
+
+      const attachment = {
+        url,
+        type: "audio",
+        name: `Voice message ${new Date(now).toLocaleString()}`,
+        size: blob.size || 0,
+      };
+
+      const payload = {
+        room,
+        body: "",
+        clientId,
+        ts: now,
+        meta: { attachments: [attachment] },
+        ...(toUid ? { toUid } : {}),
+      };
+
+      setMsgs((prev) => [
+        ...prev,
+        {
+          id: `local:${clientId}`,
+          clientId,
+          room,
+          body: "",
+          fromUid: meUid || null,
+          sender: { displayName: myLabel || "You" },
+          at: now,
+          meta: { attachments: [attachment] },
+          isMe: true,
+          _optimistic: true,
+          status: "pending",
+          seenBy: meUid ? [meUid] : [],
+        },
+      ]);
+
+      socket.emit("chat:message", payload, (ack) => {
+        if (!ack || !ack.ok) {
+          setMsgs((prev) =>
+            prev.map((m) =>
+              m.clientId === clientId ? { ...m, status: "failed" } : m
+            )
+          );
+        } else {
+          const order = ["pending", "sent", "delivered", "seen"];
+          const sentRank = order.indexOf("sent");
+
+          setMsgs((prev) =>
+            prev.map((m) => {
+              if (m.clientId !== clientId || !m.isMe) return m;
+
+              const currentRank = order.indexOf(m.status || "pending");
+              if (currentRank >= sentRank) return m;
+              return { ...m, status: "sent" };
+            })
+          );
+        }
+      });
+    } catch (e) {
+      console.error("voice message upload failed", e);
+      alert("Voice upload failed");
+      setMsgs((prev) =>
+        prev.map((m) =>
+          m.clientId === clientId ? { ...m, status: "failed" } : m
+        )
+      );
+    } finally {
+      setUploading(false);
     }
   }
 
@@ -435,60 +513,60 @@ export default function ChatPane({
     ]);
 
     socket.emit("chat:message", payload, (ack) => {
-  console.log("chat:message ack = ", ack);
-  if (ack && ack.ok === false) {
-    setMsgs((prev) =>
-      prev.map((m) =>
-        m.clientId === clientId ? { ...m, status: "failed" } : m
-      )
-    );
-  } else if (ack && ack.ok) {
-    // ack from server = SENT (single tick)
-    // but don't downgrade from delivered/seen
-    setMsgs((prev) => {
-      const order = ["pending", "sent", "delivered", "seen"];
-      const sentRank = order.indexOf("sent");
+      console.log("chat:message ack = ", ack);
+      if (ack && ack.ok === false) {
+        setMsgs((prev) =>
+          prev.map((m) =>
+            m.clientId === clientId ? { ...m, status: "failed" } : m
+          )
+        );
+      } else if (ack && ack.ok) {
+        const order = ["pending", "sent", "delivered", "seen"];
+        const sentRank = order.indexOf("sent");
 
-      return prev.map((m) => {
-        if (m.clientId !== clientId || !m.isMe) return m;
+        setMsgs((prev) =>
+          prev.map((m) => {
+            if (m.clientId !== clientId || !m.isMe) return m;
 
-        const currentRank = order.indexOf(m.status || "pending");
-        if (currentRank >= sentRank) {
-          // e.g., already delivered or seen
-          return m;
-        }
-        return { ...m, status: "sent" };
-      });
+            const currentRank = order.indexOf(m.status || "pending");
+            if (currentRank >= sentRank) {
+              return m;
+            }
+            return { ...m, status: "sent" };
+          })
+        );
+      }
     });
-  }
-});
 
     setText("");
     setReplyTo(null);
   }
 
   // ---------- keyboard: Enter vs newline ----------
-// ChatGPT-style:
-// - Mobile: Enter = newline (use button to send)
-// - Desktop: Enter = send, Shift+Enter = newline
-function handleKeyDown(e) {
-  if (e.key !== "Enter") return;
+  // Mobile: Enter = newline (use button to send)
+  // Desktop: Enter = send, Shift+Enter = newline
+  function handleKeyDown(e) {
+    if (e.key !== "Enter") return;
 
-  // 📱 On mobile, let Enter just insert a newline
-  if (isMobileDevice) {
-    return; // do nothing → browser inserts newline
+    if (isMobileDevice) {
+      // on phone, let Enter insert newline
+      return;
+    }
+
+    if (e.shiftKey) {
+      // desktop Shift+Enter = newline
+      return;
+    }
+
+    e.preventDefault();
+    send();
   }
 
-  // 🖥 On desktop: Shift+Enter = newline
-  if (e.shiftKey) {
-    return; // let it create a newline
+  function handleVoiceResult(transcript) {
+    if (!transcript) return;
+    setText((prev) => (prev ? `${prev} ${transcript}` : transcript));
+    setTimeout(() => textareaRef.current?.focus(), 0);
   }
-
-  // Plain Enter on desktop = send
-  e.preventDefault();
-  send();
-}
-
 
   // ---------- context menu / long-press ----------
   function openMenu(e, msg) {
@@ -542,7 +620,6 @@ function handleKeyDown(e) {
     setTimeout(() => textareaRef.current?.focus(), 0);
   }
 
-  // ⭐ toggle star via backend
   async function handleToggleStar() {
     if (!menu?.msg?.id) return closeMenu();
     const id = menu.msg.id;
@@ -560,7 +637,6 @@ function handleKeyDown(e) {
     }
   }
 
-  // 📌 toggle pin via backend
   async function handlePin() {
     if (!menu?.msg?.id) return closeMenu();
     const id = menu.msg.id;
@@ -578,7 +654,6 @@ function handleKeyDown(e) {
     }
   }
 
-  // 🗑 delete-for-me via backend (then hide locally)
   async function handleDeleteForMe() {
     if (!menu?.msg?.id) return closeMenu();
     const id = menu.msg.id;
@@ -616,7 +691,6 @@ function handleKeyDown(e) {
     closeMenu();
   }
 
-  // 😊 react via backend
   async function handleReact(emoji) {
     if (!menu?.msg?.id) return closeMenu();
     const id = menu.msg.id;
@@ -656,7 +730,6 @@ function handleKeyDown(e) {
           const isSelected = selectedIds.includes(m.id);
           const reaction = getMyReaction(m, meUid);
 
-          // ---------- decide which name + avatar to show ----------
           let displayName;
           let avatarUrl = "";
 
@@ -689,7 +762,6 @@ function handleKeyDown(e) {
           const prev = i > 0 ? msgs[i - 1] : null;
           const showDateHeader = !prev || !sameDay(prev?.at, m.at);
 
-          // ---------- status → ticks ----------
           let statusNode = null;
           if (isMe) {
             if (m.status === "pending") {
@@ -725,11 +797,7 @@ function handleKeyDown(e) {
                 </div>
               )}
 
-              <div
-                className={`flex ${
-                  isMe ? "justify-end" : "justify-start"
-                }`}
-              >
+              <div className={`flex ${isMe ? "justify-end" : "justify-start"}`}>
                 {!isMe && (
                   <div className="mr-2 mt-1">
                     {avatarUrl ? (
@@ -765,7 +833,6 @@ function handleKeyDown(e) {
                     </div>
                   </div>
 
-                  {/* reply preview */}
                   {m.meta?.replyTo && (
                     <div className="mt-1 mb-1 border-l border-zinc-600 pl-2 text-[10px] text-zinc-400 line-clamp-2">
                       Replying to: {m.meta.replyTo.body}
@@ -784,6 +851,7 @@ function handleKeyDown(e) {
                         if (!att || !att.url) return null;
                         const type = att.type || "";
                         const name = att.name || "Attachment";
+
                         if (type.startsWith("image")) {
                           return (
                             <a
@@ -801,6 +869,7 @@ function handleKeyDown(e) {
                             </a>
                           );
                         }
+
                         if (type.startsWith("video")) {
                           return (
                             <video
@@ -811,6 +880,20 @@ function handleKeyDown(e) {
                             />
                           );
                         }
+
+                        if (type.startsWith("audio")) {
+                          return (
+                            <audio
+                              key={idx}
+                              src={att.url}
+                              controls
+                              className="w-full"
+                            >
+                              Your browser does not support audio playback.
+                            </audio>
+                          );
+                        }
+
                         return (
                           <a
                             key={idx}
@@ -830,7 +913,6 @@ function handleKeyDown(e) {
                     <div className="mt-1 text-xs">{reaction}</div>
                   )}
 
-                  {/* time + ticks */}
                   <div className="mt-1 flex items-center justify-end gap-2 text-[10px] text-zinc-400">
                     {timeLabel && <span>{timeLabel}</span>}
                     {statusNode}
@@ -843,7 +925,6 @@ function handleKeyDown(e) {
         <div ref={endRef} />
       </div>
 
-      {/* message actions menu – like your screenshot */}
       {menu && (
         <div className="fixed inset-0 z-40" onClick={closeMenu}>
           <div
@@ -915,7 +996,6 @@ function handleKeyDown(e) {
         </div>
       )}
 
-      {/* reply banner above input */}
       {replyTo && (
         <div className="mt-2 mx-1 px-3 py-1 rounded-lg bg-zinc-900 border border-zinc-700 text-[11px] text-zinc-300 flex justify-between items-center">
           <div className="truncate">
@@ -953,6 +1033,18 @@ function handleKeyDown(e) {
           onChange={(e) => setText(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Type a message…"
+        />
+
+        {/* 🎙 voice typing (speech → text) */}
+        <VoiceInputButton
+          onResult={handleVoiceResult}
+          disabled={!room || !socket}
+        />
+
+        {/* 🎧 voice message (record + send as audio attachment) */}
+        <VoiceMessageButton
+          onRecorded={handleVoiceMessage}
+          disabled={!room || !socket || uploading}
         />
 
         <button
