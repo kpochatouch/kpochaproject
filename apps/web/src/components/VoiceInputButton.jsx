@@ -1,3 +1,4 @@
+// apps/web/src/components/VoiceInputButton.jsx
 import { useEffect, useRef, useState } from "react";
 
 function createRecognition() {
@@ -8,7 +9,7 @@ function createRecognition() {
 
   const rec = new SR();
   rec.continuous = false;
-  rec.interimResults = false;
+  rec.interimResults = false; // keep simple: final text only
   rec.lang = navigator.language || "en-US";
   return rec;
 }
@@ -23,7 +24,17 @@ function createRecognition() {
 export default function VoiceInputButton({ onResult, disabled = false }) {
   const [supported, setSupported] = useState(false);
   const [listening, setListening] = useState(false);
+  const [seconds, setSeconds] = useState(0);
+
   const recognitionRef = useRef(null);
+  const timerRef = useRef(null);
+
+  function clearTimer() {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+  }
 
   useEffect(() => {
     const rec = createRecognition();
@@ -45,10 +56,14 @@ export default function VoiceInputButton({ onResult, disabled = false }) {
 
     rec.onerror = () => {
       setListening(false);
+      clearTimer();
+      setSeconds(0);
     };
 
     rec.onend = () => {
       setListening(false);
+      clearTimer();
+      setSeconds(0);
     };
 
     return () => {
@@ -60,42 +75,66 @@ export default function VoiceInputButton({ onResult, disabled = false }) {
           recognitionRef.current.stop();
         } catch {}
       }
+      clearTimer();
     };
   }, [onResult]);
 
   function handleClick() {
-    if (!recognitionRef.current || disabled) return;
+    const rec = recognitionRef.current;
+    if (!rec) return;
 
-    // Stop if already recording
+    // 🔴 If already listening → always stop, even if disabled just became true
     if (listening) {
       try {
-        recognitionRef.current.stop();
+        rec.stop();
       } catch {}
+      setListening(false);
+      clearTimer();
+      setSeconds(0);
       return;
     }
 
+    // Not listening yet → respect disabled flag
+    if (disabled) return;
+
     try {
-      recognitionRef.current.start();
+      rec.start();
       setListening(true);
+      setSeconds(0);
+      clearTimer();
+      timerRef.current = setInterval(() => {
+        setSeconds((s) => s + 1);
+      }, 1000);
     } catch (e) {
       console.warn("speech recognition start failed", e);
       setListening(false);
+      clearTimer();
+      setSeconds(0);
     }
   }
 
   if (!supported) return null; // hide if not supported
 
+  const label = listening
+    ? `🎙️ Listening ${seconds.toString().padStart(2, "0")}s`
+    : "🎙️";
+
   return (
     <button
       type="button"
       onClick={handleClick}
-      disabled={disabled}
-      className={`px-2 py-2 rounded-lg border border-zinc-800 text-sm ${
+      // allow stopping while listening even if disabled turned true
+      disabled={!listening && disabled}
+      className={`px-2 py-2 rounded-lg border border-zinc-800 text-xs sm:text-sm ${
         listening ? "bg-red-500 text-white" : "bg-zinc-900 text-zinc-200"
       }`}
-      title={listening ? "Tap to stop listening" : "Tap and speak"}
+      title={
+        listening
+          ? "Listening… tap to stop"
+          : "Tap and speak – converts to text"
+      }
     >
-      {listening ? "🎙️…" : "🎙️"}
+      {label}
     </button>
   );
 }
