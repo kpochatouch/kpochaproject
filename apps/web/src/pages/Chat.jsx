@@ -26,50 +26,17 @@ export default function Chat() {
   const [room, setRoom] = useState(null);
   const [initialMessages, setInitialMessages] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
+
+  // 🔔 call state now also carries role: "caller" | "receiver"
   const [callState, setCallState] = useState({
-  open: false,
-  room: null,
-  callId: null,
-  callType: "audio",
-});
+    open: false,
+    room: null,
+    callId: null,
+    callType: "audio",
+    role: "caller",
+  });
 
   const [peerProfile, setPeerProfile] = useState(null);
-
-    async function handleStartCall(callType = "audio") {
-  if (!peerUid) return;
-  try {
-    const ack = await initiateCall({
-      receiverUid: peerUid,
-      callType,   // "audio" or "video"
-      meta: {},
-    });
-
-    const callRoom = ack.room;
-    const callId = ack.callId || null;
-
-    if (!callRoom) {
-      console.warn("[chat] initiateCall returned no room:", ack);
-      alert("Could not start call.");
-      return;
-    }
-
-    setCallState({
-      open: true,
-      room: callRoom,
-      callId,
-      callType: ack.callType || callType,  // keep in sync with backend
-    });
-  } catch (e) {
-    console.error("start call failed:", e);
-    alert("Could not start call. Please try again.");
-  }
-}
-
-  function handleCallClose() {
-    setCallState((prev) => ({ ...prev, open: false }));
-    // later you can also call updateCallStatus({ callId: prev.callId, status: "ended" })
-  }
-
 
   // who we’re chatting with → /chat?with=<uid>
   const peerUid = query.get("with");
@@ -90,6 +57,47 @@ export default function Chat() {
     myUid ||
     "me";
 
+  // ------------------ CALL HELPERS ------------------ //
+
+  async function handleStartCall(callType = "audio") {
+    if (!peerUid) return;
+    try {
+      const ack = await initiateCall({
+        receiverUid: peerUid,
+        callType, // "audio" or "video"
+        meta: {},
+      });
+
+      const callRoom = ack.room;
+      const callId = ack.callId || null;
+
+      if (!callRoom) {
+        console.warn("[chat] initiateCall returned no room:", ack);
+        alert("Could not start call.");
+        return;
+      }
+
+      // Outgoing call → we are the caller
+      setCallState({
+        open: true,
+        room: callRoom,
+        callId,
+        callType: ack.callType || callType,
+        role: "caller",
+      });
+    } catch (e) {
+      console.error("start call failed:", e);
+      alert("Could not start call. Please try again.");
+    }
+  }
+
+  function handleCallClose() {
+    setCallState((prev) => ({ ...prev, open: false }));
+    // CallSheet itself already sends the correct status (ended/cancelled/declined)
+  }
+
+  // ------------------ PEER PROFILE ------------------ //
+
   // 1) Load peer profile (to show name + avatar)
   useEffect(() => {
     if (!peerUid) return;
@@ -100,7 +108,6 @@ export default function Chat() {
         const data = await getPublicProfileByUid(peerUid);
         if (!alive) return;
 
-        // data shape: { ok: true, profile, posts: ... }
         const p = data?.profile || data;
 
         if (p) {
@@ -122,6 +129,8 @@ export default function Chat() {
     };
   }, [peerUid]);
 
+  // ------------------ CHAT HISTORY ------------------ //
+
   // 2) Load history for this DM (room + messages)
   useEffect(() => {
     if (!peerUid || !currentUser || !myUid) {
@@ -135,7 +144,6 @@ export default function Chat() {
       try {
         setLoadingHistory(true);
 
-        // uses /api/chat/with/:peerUid under the hood
         const data = await getChatWith(peerUid);
 
         if (!alive) return;
@@ -149,7 +157,7 @@ export default function Chat() {
             room: m.room,
             body: m.body || "",
             fromUid,
-            sender: m.sender || null, // server-provided sender object { uid, displayName, photoUrl }
+            sender: m.sender || null,
             clientId: m.clientId || null,
             at: m.createdAt || m.at || Date.now(),
             meta: {
@@ -161,7 +169,6 @@ export default function Chat() {
             toUid: m.toUid || null,
           };
         });
-
 
         setRoom(roomFromApi);
         setInitialMessages(normalized);
@@ -188,57 +195,137 @@ export default function Chat() {
     };
   }, [peerUid, currentUser, myUid, myLabel]);
 
+  // ------------------ SOCKET SETUP ------------------ //
+
   // 3) Attach socket + join room once we know the room id
   useEffect(() => {
-  if (!room || !myLabel) return;
+    if (!room || !myLabel) return;
 
-  let s;
-  try {
-    s = connectSocket(); // uses shared socket client from api.js
-    setSocket(s);
-    s.emit("room:join", { room, who: myLabel });
+    let s;
+    try {
+      s = connectSocket(); // shared socket client
+      setSocket(s);
+      s.emit("room:join", { room, who: myLabel });
 
-    // 🔥 tell backend we've read messages in this room
-    s.emit("chat:read", { room }, (ack) => {
-      console.log("chat:read ack =", ack);
-    });
-  } catch (e) {
-    console.warn("chat connectSocket failed:", e?.message || e);
+      // tell backend we've read messages in this room
+      s.emit("chat:read", { room }, (ack) => {
+        console.log("chat:read ack =", ack);
+      });
+    } catch (e) {
+      console.warn("chat connectSocket failed:", e?.message || e);
+    }
+
+    return () => {
+      try {
+        if (s && room) s.emit("room:leave", { room });
+      } catch {}
+      setSocket(null);
+    };
+  }, [room, myLabel]);
+
+  // 4) Listen for call events so BOTH sides react
+  useEffect(() => {
+    if (!socket || !myUid) return;
+
+    // New call coming in from server
+    function handleCallInitiate(evt) {
+      if (!evt) return;
+      const {
+        callId,
+        room: callRoom,
+        callType = "audio",
+        callerUid,
+        receiverUid,
+      } = evt;
+
+      // We only care if we are the receiver
+      if (!receiverUid || receiverUid !== myUid) return;
+
+      // And only if this chat is with that caller
+      if (peerUid && callerUid && peerUid !== callerUid) return;
+
+      // Incoming call → open sheet as receiver
+      setCallState((prev) => {
+        // if already open for this call, do nothing
+        if (prev.open && prev.callId && callId && prev.callId === callId) {
+          return prev;
+        }
+        return {
+          open: true,
+          room: callRoom,
+          callId: callId || prev.callId,
+          callType,
+          role: "receiver",
+        };
+      });
+    }
+
+    // Status changes (accepted / ended / cancelled / declined / missed)
+    function handleCallStatus(evt) {
+      if (!evt) return;
+      const { callId, room: callRoom, status } = evt;
+
+      setCallState((prev) => {
+        if (!prev.open) return prev;
+
+        // Check if this status belongs to the current call
+        if (
+          (prev.callId && callId && prev.callId !== callId) ||
+          (prev.room && callRoom && prev.room !== callRoom)
+        ) {
+          return prev;
+        }
+
+        // If other side ended / cancelled / declined / missed → close our sheet
+        if (["ended", "cancelled", "declined", "missed"].includes(status)) {
+          return { ...prev, open: false };
+        }
+
+        return prev;
+      });
+    }
+
+    try {
+      socket.on("call:initiate", handleCallInitiate);
+      socket.on("call:status", handleCallStatus);
+    } catch (e) {
+      console.warn("attach call listeners failed:", e?.message || e);
+    }
+
+    return () => {
+      try {
+        socket.off("call:initiate", handleCallInitiate);
+        socket.off("call:status", handleCallStatus);
+      } catch {}
+    };
+  }, [socket, myUid, peerUid]);
+
+  // ------------------ GUARDS ------------------ //
+
+  if (meLoading) {
+    return (
+      <div className="max-w-4xl mx-auto px-4 py-10">
+        <p className="text-sm text-zinc-400">Loading your account…</p>
+      </div>
+    );
   }
 
-  return () => {
-    try {
-      if (s && room) s.emit("room:leave", { room });
-    } catch {}
-    setSocket(null);
-  };
-}, [room, myLabel]);
-
-  // ---------- guards ----------
-if (meLoading) {
-  return (
-    <div className="max-w-4xl mx-auto px-4 py-10">
-      <p className="text-sm text-zinc-400">Loading your account…</p>
-    </div>
-  );
-}
-
-if (!currentUser) {
-  return (
-    <div className="max-w-4xl mx-auto px-4 py-10">
-      <p className="text-sm text-zinc-300">
-        Please log in to use chat.
-      </p>
-      <button
-        type="button"
-        onClick={() => navigate("/login")}
-        className="mt-3 px-4 py-2 rounded-lg bg-gold text-black font-semibold"
-      >
-        Go to login
-      </button>
-    </div>
-  );
-}
+  if (!currentUser) {
+    return (
+      <div className="max-w-4xl mx-auto px-4 py-10">
+        <p className="text-sm text-zinc-300">
+          Please log in to use chat.
+        </p>
+        <button
+          type="button"
+          onClick={() => navigate("/login")}
+          className="mt-3 px-4 py-2 rounded-lg bg-gold text-black font-semibold"
+        >
+          Go to login
+        </button>
+      </div>
+    );
+  }
 
   if (!peerUid) {
     return (
@@ -274,6 +361,8 @@ if (!currentUser) {
     peerProfile?.displayName || peerUid.slice(0, 6) + "…";
   const peerAvatar = peerProfile?.avatarUrl || "";
 
+  // ------------------ RENDER ------------------ //
+
   return (
     <div className="max-w-4xl mx-auto px-4 py-6 space-y-4">
       {/* header like Messenger / TikTok center panel */}
@@ -299,45 +388,43 @@ if (!currentUser) {
         </div>
 
         <div className="flex items-center gap-2">
-  {/* Voice / Audio call */}
-  <button
-    onClick={() => handleStartCall("audio")}
-    className="px-4 py-2 rounded-lg bg-gold text-black font-semibold text-sm"
-    type="button"
-  >
-    Voice Call
-  </button>
+          {/* Voice / Audio call */}
+          <button
+            onClick={() => handleStartCall("audio")}
+            className="px-4 py-2 rounded-lg bg-gold text-black font-semibold text-sm"
+            type="button"
+          >
+            Voice Call
+          </button>
 
-  {/* Video call */}
-  <button
-    onClick={() => handleStartCall("video")}
-    className="px-4 py-2 rounded-lg border border-gold text-gold font-semibold text-sm"
-    type="button"
-  >
-    Video Call
-  </button>
-</div>
-
-
+          {/* Video call */}
+          <button
+            onClick={() => handleStartCall("video")}
+            className="px-4 py-2 rounded-lg border border-gold text-gold font-semibold text-sm"
+            type="button"
+          >
+            Video Call
+          </button>
+        </div>
       </div>
 
       <div className="rounded-lg border border-zinc-800 bg-black/40 p-3 h-[60vh]">
         <ChatPane
           socket={socket}
           room={room}
-          meUid={myUid}              // pass authoritative uid for dedupe/isMe
-          myLabel={myLabel}          // display label for "You"
+          meUid={myUid}
+          myLabel={myLabel}
           toUid={peerUid}
-          peerUid={peerUid}          // NEW: tell ChatPane who the peer is
-          peerProfile={peerProfile}  // NEW: let ChatPane show name + avatar
+          peerUid={peerUid}
+          peerProfile={peerProfile}
           initialMessages={initialMessages}
         />
       </div>
 
-
-            <CallSheet
-        role="caller"
-        room={callState.room}        // signaling room for WebRTC
+      {/* 🔔 Shared CallSheet – role now dynamic */}
+      <CallSheet
+        role={callState.role}
+        room={callState.room}
         callId={callState.callId}
         callType={callState.callType}
         me={myLabel}
@@ -345,9 +432,8 @@ if (!currentUser) {
         peerAvatar={peerAvatar}
         open={callState.open}
         onClose={handleCallClose}
-        chatRoom={room}              // ✅ DM chat room for logging history
+        chatRoom={room}
       />
-
     </div>
   );
 }
