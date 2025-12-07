@@ -343,6 +343,7 @@ export default function attachSockets(httpServer) {
           id: String(call._id),
           callId: call.callId,
           room: call.room,
+          callType: call.callType,
         });
       } catch (err) {
         console.error("[call:initiate] err:", err?.message || err);

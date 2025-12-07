@@ -38,6 +38,7 @@ export default function callRoutes({ requireAuth }) {
         id: String(call._id),
         callId: call.callId,
         room: call.room
+        callType: call.callType,
       });
 
     } catch (err) {

@@ -21,7 +21,7 @@ function formatMoney(kobo = 0) {
 export default function BookingChat() {
   const { bookingId } = useParams();
   const { me } = useMe();
-  const [openCall, setOpenCall] = useState(false);
+  cconst [callType, setCallType] = useState("audio");
 
   const [booking, setBooking] = useState(null);
   const [loadingBooking, setLoadingBooking] = useState(true);
@@ -30,6 +30,12 @@ export default function BookingChat() {
     () => (bookingId ? `booking:${bookingId}` : null),
     [bookingId]
   );
+
+  function handleStartCall(nextType = "audio") {
+  setCallType(nextType);
+  setOpenCall(true);
+}
+
 
   const myLabel =
     me?.displayName || me?.fullName || me?.email || me?.uid || "me";
@@ -130,12 +136,26 @@ export default function BookingChat() {
             Chat and voice call for this booking.
           </p>
         </div>
-        <button
-          onClick={() => setOpenCall(true)}
-          className="px-4 py-2 rounded-lg bg-gold text-black font-semibold"
-        >
-          Start Call
-        </button>
+        <div className="flex items-center gap-2">
+  {/* Voice / audio call */}
+  <button
+    onClick={() => handleStartCall("audio")}
+    className="px-4 py-2 rounded-lg bg-gold text-black font-semibold text-sm"
+    type="button"
+  >
+    Voice Call
+  </button>
+
+  {/* Video call */}
+  <button
+    onClick={() => handleStartCall("video")}
+    className="px-4 py-2 rounded-lg border border-gold text-gold font-semibold text-sm"
+    type="button"
+  >
+    Video Call
+  </button>
+</div>
+
       </div>
 
       {/* Badge: what this chat is about */}
@@ -174,6 +194,7 @@ export default function BookingChat() {
       {/* CallSheet uses the same booking room for WebRTC signaling */}
       <CallSheet
         room={room}
+        callType={callType} 
         me={myLabel}
         open={openCall}
         onClose={() => setOpenCall(false)}

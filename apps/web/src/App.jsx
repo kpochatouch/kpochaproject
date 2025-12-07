@@ -1,5 +1,5 @@
 // apps/web/src/App.jsx
-import React, { Suspense, lazy, useEffect } from "react";
+import React, { Suspense, lazy, useEffect, useState } from "react";
 import {
   Routes,
   Route,
@@ -7,7 +7,8 @@ import {
   useLocation,
   useNavigate,
 } from "react-router-dom";
-import { api } from "./lib/api";
+import { api, registerSocketHandler } from "./lib/api";
+import CallSheet from "./components/CallSheet.jsx";
 
 import Navbar from "./components/Navbar.jsx";
 import Footer from "./components/Footer.jsx";
@@ -157,6 +158,54 @@ export default function App() {
   useChatbase();
   const location = useLocation();
   const navigate = useNavigate();
+
+    const { me } = useMe();
+  const [incomingCall, setIncomingCall] = useState(null);
+
+  const myLabel =
+    me?.displayName ||
+    me?.fullName ||
+    me?.username ||
+    me?.email ||
+    me?.uid ||
+    "You";
+
+  // Global listener for incoming calls
+  useEffect(() => {
+    // when server emits "call:incoming"
+    const offIncoming = registerSocketHandler("call:incoming", (payload) => {
+      if (!payload) return;
+
+      setIncomingCall({
+        open: true,
+        callId: payload.callId,
+        room: payload.room,
+        callType: payload.callType || "audio",
+        fromUid: payload.callerUid,
+        meta: payload.meta || {},
+      });
+    });
+
+    // close modal when call ends / cancelled / declined
+    const offStatus = registerSocketHandler("call:status", (payload) => {
+      if (!payload) return;
+      if (
+        ["ended", "missed", "cancelled", "declined", "failed"].includes(
+          payload.status
+        )
+      ) {
+        setIncomingCall((prev) =>
+          prev && prev.callId === payload.callId ? null : prev
+        );
+      }
+    });
+
+    return () => {
+      offIncoming();
+      offStatus();
+    };
+  }, []);
+
 
   // Listener for AWS liveness events
   useEffect(() => {
@@ -436,7 +485,17 @@ export default function App() {
         </Suspense>
       </main>
 
-      {!hideChrome && <Footer />}
-    </div>
-  );
-}
+            {!hideChrome && <Footer />}
+            <CallSheet
+              role="receiver"
+              room={incomingCall?.room || null}
+              callId={incomingCall?.callId || null}
+              callType={incomingCall?.callType || "audio"}
+              me={myLabel}
+              open={Boolean(incomingCall?.open && incomingCall?.room)}
+              onClose={() => setIncomingCall(null)}
+            />
+          </div>
+        );
+      }
+

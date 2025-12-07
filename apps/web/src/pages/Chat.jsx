@@ -6,6 +6,7 @@ import {
   getChatWith,
   getPublicProfileByUid,
   markThreadRead,
+  initiateCall,
 } from "../lib/api";
 import { useMe } from "../context/MeContext.jsx";
 import ChatPane from "../components/ChatPane.jsx";
@@ -25,8 +26,50 @@ export default function Chat() {
   const [room, setRoom] = useState(null);
   const [initialMessages, setInitialMessages] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
-  const [openCall, setOpenCall] = useState(false);
+  const [callState, setCallState] = useState({
+  open: false,
+  room: null,
+  callId: null,
+  callType: "audio",
+});
+
   const [peerProfile, setPeerProfile] = useState(null);
+
+    async function handleStartCall(callType = "audio") {
+  if (!peerUid) return;
+  try {
+    const ack = await initiateCall({
+      receiverUid: peerUid,
+      callType,   // "audio" or "video"
+      meta: {},
+    });
+
+    const callRoom = ack.room;
+    const callId = ack.callId || null;
+
+    if (!callRoom) {
+      console.warn("[chat] initiateCall returned no room:", ack);
+      alert("Could not start call.");
+      return;
+    }
+
+    setCallState({
+      open: true,
+      room: callRoom,
+      callId,
+      callType: ack.callType || callType,  // keep in sync with backend
+    });
+  } catch (e) {
+    console.error("start call failed:", e);
+    alert("Could not start call. Please try again.");
+  }
+}
+
+  function handleCallClose() {
+    setCallState((prev) => ({ ...prev, open: false }));
+    // later you can also call updateCallStatus({ callId: prev.callId, status: "ended" })
+  }
+
 
   // who we’re chatting with → /chat?with=<uid>
   const peerUid = query.get("with");
@@ -166,7 +209,6 @@ export default function Chat() {
   return () => {
     try {
       if (s && room) s.emit("room:leave", { room });
-      s?.disconnect();
     } catch {}
     setSocket(null);
   };
@@ -256,13 +298,27 @@ if (!currentUser) {
           </div>
         </div>
 
-        <button
-          onClick={() => setOpenCall(true)}
-          className="px-4 py-2 rounded-lg bg-gold text-black font-semibold text-sm"
-          type="button"
-        >
-          Start Call
-        </button>
+        <div className="flex items-center gap-2">
+  {/* Voice / Audio call */}
+  <button
+    onClick={() => handleStartCall("audio")}
+    className="px-4 py-2 rounded-lg bg-gold text-black font-semibold text-sm"
+    type="button"
+  >
+    Voice Call
+  </button>
+
+  {/* Video call */}
+  <button
+    onClick={() => handleStartCall("video")}
+    className="px-4 py-2 rounded-lg border border-gold text-gold font-semibold text-sm"
+    type="button"
+  >
+    Video Call
+  </button>
+</div>
+
+
       </div>
 
       <div className="rounded-lg border border-zinc-800 bg-black/40 p-3 h-[60vh]">
@@ -280,11 +336,14 @@ if (!currentUser) {
 
 
       <CallSheet
-        room={room}
-        me={myLabel}
-        open={openCall}
-        onClose={() => setOpenCall(false)}
-      />
+  role="caller"
+  room={callState.room}
+  callId={callState.callId}
+  callType={callState.callType}
+  me={myLabel}
+  open={callState.open}
+  onClose={handleCallClose}
+/>
     </div>
   );
 }
