@@ -787,6 +787,41 @@ export default function ChatPane({
             }
           }
 
+                  const callInfo = m.meta?.call || null;
+
+        function formatCallDuration(sec) {
+          if (!sec || sec <= 0) return "";
+          const minutes = Math.floor(sec / 60);
+          const seconds = sec % 60;
+          if (minutes <= 0) return `${seconds}s`;
+          return `${minutes}m ${seconds.toString().padStart(2, "0")}s`;
+        }
+
+        function formatCallLabel(call) {
+          if (!call) return "";
+          const kind = call.type === "video" ? "Video call" : "Voice call";
+          const dur = formatCallDuration(call.durationSec);
+
+          if (call.status === "ended" && call.hasConnected) {
+            return dur ? `${kind} • ${dur}` : kind;
+          }
+
+          if (call.status === "cancelled") {
+            return `Cancelled ${kind.toLowerCase()}`;
+          }
+
+          if (call.status === "declined") {
+            return `Missed ${kind.toLowerCase()}`;
+          }
+
+          // fallback
+          return `${kind} • ${call.status || "unknown"}`;
+        }
+
+        const isCallMessage = Boolean(callInfo);
+        const callLabel = isCallMessage ? formatCallLabel(callInfo) : "";
+
+
           return (
             <div key={m.id || i}>
               {showDateHeader && (
@@ -839,10 +874,17 @@ export default function ChatPane({
                     </div>
                   )}
 
-                  {m.body && (
-                    <div className="text-sm whitespace-pre-wrap">
-                      {m.body}
+                                    {isCallMessage ? (
+                    <div className="flex items-center gap-2 text-sm">
+                      <span>{callInfo.type === "video" ? "📹" : "📞"}</span>
+                      <span>{callLabel}</span>
                     </div>
+                  ) : (
+                    m.body && (
+                      <div className="text-sm whitespace-pre-wrap">
+                        {m.body}
+                      </div>
+                    )
                   )}
 
                   {attachments.length > 0 && (

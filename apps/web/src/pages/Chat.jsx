@@ -335,17 +335,19 @@ if (!currentUser) {
       </div>
 
 
-      <CallSheet
-  role="caller"
-  room={callState.room}
-  callId={callState.callId}
-  callType={callState.callType}
-  me={myLabel}
-  peerName={peerName}
-  peerAvatar={peerAvatar}
-  open={callState.open}
-  onClose={handleCallClose}
-/>
+            <CallSheet
+        role="caller"
+        room={callState.room}        // signaling room for WebRTC
+        callId={callState.callId}
+        callType={callState.callType}
+        me={myLabel}
+        peerName={peerName}
+        peerAvatar={peerAvatar}
+        open={callState.open}
+        onClose={handleCallClose}
+        chatRoom={room}              // ✅ DM chat room for logging history
+      />
+
     </div>
   );
 }

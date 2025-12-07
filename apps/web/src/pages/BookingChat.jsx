@@ -21,7 +21,8 @@ function formatMoney(kobo = 0) {
 export default function BookingChat() {
   const { bookingId } = useParams();
   const { me } = useMe();
-  cconst [callType, setCallType] = useState("audio");
+  const [callType, setCallType] = useState("audio");
+  const [openCall, setOpenCall] = useState(false);
 
   const [booking, setBooking] = useState(null);
   const [loadingBooking, setLoadingBooking] = useState(true);
