@@ -23,7 +23,7 @@ export default function CallSheet({
   role = "caller",
   callId = null,
   callType = "audio",
-  peerName = "Kpocha Touch User",
+  peerName = "",
   peerAvatar = "",
   chatRoom = null,
 }) {
@@ -32,6 +32,7 @@ export default function CallSheet({
   const [mode, setMode] = useState(callType || "audio");
   const [starting, setStarting] = useState(false);
   const [hasConnected, setHasConnected] = useState(false);
+  const [hasAccepted, setHasAccepted] = useState(false);
   const [autoStarted, setAutoStarted] = useState(false);
 
   const [micMuted, setMicMuted] = useState(false);
@@ -68,6 +69,28 @@ export default function CallSheet({
     const ss = String(seconds).padStart(2, "0");
     return `${mm}:${ss}`;
   }
+  // 🔔 Send call summary into chat (for call bubble)
+  async function sendCallSummaryMessage(status) {
+    if (!chatRoom) return; // nothing to do if no room passed
+
+    const callMeta = {
+      type: callType || (mode === "video" ? "video" : "audio"),
+      status, // "ended" | "cancelled" | "declined"
+      hasConnected,
+      durationSec: hasConnected ? elapsedSeconds : 0,
+    };
+
+    try {
+      await sendChatMessage({
+        room: chatRoom,
+        text: "",
+        meta: { call: callMeta },
+      });
+    } catch (e) {
+      console.warn("[CallSheet] sendCallSummaryMessage failed:", e?.message || e);
+    }
+  }
+
 
   // keep mode in sync with callType when prop changes
   useEffect(() => {
@@ -96,7 +119,7 @@ export default function CallSheet({
       } catch {}
     }
 
-    return () => {
+        return () => {
       try {
         sc.disconnect();
       } catch {}
@@ -104,7 +127,9 @@ export default function CallSheet({
       stopAllTones();
       setAutoStarted(false);
       setElapsedSeconds(0); // reset duration when modal closes
+      setHasAccepted(false); // 👈 reset accept state
     };
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, room, role]);
 
@@ -157,7 +182,7 @@ export default function CallSheet({
       }
     };
 
-    pcNew.onconnectionstatechange = () => {
+        pcNew.onconnectionstatechange = () => {
       const st = pcNew.connectionState;
       if (st === "connected") {
         // only run once per call
@@ -172,7 +197,7 @@ export default function CallSheet({
         });
       }
       if (["disconnected", "failed", "closed"].includes(st)) {
-        // connection lost – you might want to auto-hangup later
+        setHasConnected(false); // 👈 not connected anymore
       }
     };
 
@@ -241,8 +266,9 @@ export default function CallSheet({
         pc.close();
       }
     } catch {}
-    setPc(null);
+        setPc(null);
     setHasConnected(false);
+    setHasAccepted(false); // 👈 reset accept state
     setElapsedSeconds(0); // reset duration when call ends
 
     try {
@@ -314,13 +340,15 @@ export default function CallSheet({
 
   // ---- receiver actions ----
 
-  async function acceptIncoming() {
+    async function acceptIncoming() {
     if (!sig || !room) return;
     setStarting(true);
     try {
       stopAllTones();
+      setHasAccepted(true);              // 👈 receiver has accepted
       await safeUpdateStatus("accepted");
       await setupPeerConnection(false);
+
     } catch (e) {
       console.error("accept call failed:", e);
       alert(
@@ -337,6 +365,7 @@ export default function CallSheet({
   async function declineIncoming() {
     stopAllTones();
     await safeUpdateStatus("declined");
+    await sendCallSummaryMessage("declined");
     cleanupPeer();
     onClose?.();
   }
@@ -349,6 +378,7 @@ export default function CallSheet({
       hasConnected ? "ended" : role === "caller" ? "cancelled" : "declined";
 
     await safeUpdateStatus(endedStatus);
+    await sendCallSummaryMessage(endedStatus);
     cleanupPeer();
     onClose?.();
   }
@@ -380,13 +410,23 @@ export default function CallSheet({
 
   if (!open || !room) return null;
 
-  const isCaller = role === "caller";
+    const isCaller = role === "caller";
 
   // WhatsApp-like status text
   let statusText = "";
-  if (hasConnected) statusText = "Connected";
-  else if (starting) statusText = "Connecting…";
-  else statusText = isCaller ? "Calling…" : "Incoming call";
+  if (hasConnected) {
+    statusText = "Connected";
+  } else if (starting) {
+    statusText = "Connecting…";
+  } else if (!isCaller && hasAccepted) {
+    // receiver has tapped Accept but WebRTC not fully connected yet
+    statusText = "Connecting…";
+  } else {
+    statusText = isCaller ? "Calling…" : "Incoming call";
+  }
+
+  const displayPeerName =
+    peerName && peerName.trim().length ? peerName : "Unknown user";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80">
@@ -439,12 +479,12 @@ export default function CallSheet({
                 {peerAvatar ? (
                   <img
                     src={peerAvatar}
-                    alt={peerName}
+                    alt={displayPeerName}
                     className="w-full h-full object-cover"
                   />
                 ) : (
                   <span className="text-3xl text-emerald-400">
-                    {peerName.slice(0, 1).toUpperCase()}
+                    {displayPeerName.slice(0, 1).toUpperCase()}
                   </span>
                 )}
               </div>
@@ -459,7 +499,7 @@ export default function CallSheet({
           {/* centre text */}
           <div className="relative z-10 flex flex-col items-center gap-1 mt-4">
             <span className="text-lg md:text-2xl font-semibold text-zinc-50">
-              {peerName}
+             {displayPeerName}
             </span>
 
             {/* show duration once connected, otherwise show status text */}
@@ -476,36 +516,50 @@ export default function CallSheet({
 
         {/* bottom controls */}
         <div className="px-8 pb-8 pt-4 bg-black/70 border-t border-zinc-800 flex flex-col gap-4">
-          {/* accept / decline for receiver, hangup for both */}
-          <div className="flex items-center justify-center gap-4">
-            {!isCaller && !pc ? (
-              <>
-                <button
-                  className="flex items-center justify-center w-12 h-12 rounded-full bg-emerald-500 text-black font-bold shadow-lg disabled:opacity-50"
-                  onClick={acceptIncoming}
-                  disabled={starting}
-                  type="button"
-                >
-                  ✓
-                </button>
-                <button
-                  className="flex items-center justify-center w-12 h-12 rounded-full bg-rose-600 text-white shadow-lg"
-                  onClick={declineIncoming}
-                  type="button"
-                >
-                  ✕
-                </button>
-              </>
-            ) : (
+          {/* accept / decline for receiver, hangup for caller */}
+        <div className="flex items-center justify-center gap-6">
+          {!isCaller && !pc ? (
+            <>
+              {/* Decline on the left (red phone) */}
               <button
-                className="flex items-center justify-center w-12 h-12 rounded-full bg-rose-600 text-white shadow-lg mx-auto"
-                onClick={hangup}
+                className="flex items-center justify-center w-12 h-12 rounded-full bg-rose-600 text-white text-xl shadow-lg"
+                onClick={declineIncoming}
                 type="button"
               >
-                ⛔
+                📞
               </button>
-            )}
-          </div>
+
+              {/* Center handset (slider-style look, no action) */}
+              <button
+                className="flex items-center justify-center w-12 h-12 rounded-full bg-zinc-800 text-zinc-200 text-xl shadow-inner"
+                type="button"
+                disabled
+              >
+                📞
+              </button>
+
+              {/* Accept on the right (green phone) */}
+              <button
+                className="flex items-center justify-center w-12 h-12 rounded-full bg-emerald-500 text-black text-xl shadow-lg disabled:opacity-50"
+                onClick={acceptIncoming}
+                disabled={starting}
+                type="button"
+              >
+                📞
+              </button>
+            </>
+          ) : (
+            // Caller view: single red hangup button in the middle
+            <button
+              className="flex items-center justify-center w-12 h-12 rounded-full bg-rose-600 text-white text-xl shadow-lg mx-auto"
+              onClick={hangup}
+              type="button"
+            >
+              📞
+            </button>
+          )}
+        </div>
+
 
           {/* real mic / camera / chat buttons */}
           <div className="flex items-center justify-center gap-6 text-zinc-400 text-xl">

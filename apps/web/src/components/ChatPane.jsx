@@ -247,11 +247,13 @@ export default function ChatPane({
     }
 
     socket.on("chat:message", onMsg);
+    socket.on("chat:update", onMsg);
     socket.on("chat:seen", onSeen);
 
     return () => {
       try {
         socket.off("chat:message", onMsg);
+        socket.off("chat:update", onMsg);
         socket.off("chat:seen", onSeen);
       } catch {}
     };
@@ -784,37 +786,42 @@ export default function ChatPane({
 
                   const callInfo = m.meta?.call || null;
 
-        function formatCallDuration(sec) {
-          if (!sec || sec <= 0) return "";
-          const minutes = Math.floor(sec / 60);
-          const seconds = sec % 60;
-          if (minutes <= 0) return `${seconds}s`;
-          return `${minutes}m ${seconds.toString().padStart(2, "0")}s`;
-        }
+function formatCallDuration(sec) {
+  if (!sec || sec <= 0) return "";
+  const minutes = Math.floor(sec / 60);
+  const seconds = sec % 60;
+  if (minutes <= 0) return `${seconds}s`;
+  return `${minutes}m ${seconds.toString().padStart(2, "0")}s`;
+}
 
-        function formatCallLabel(call) {
-          if (!call) return "";
-          const kind = call.type === "video" ? "Video call" : "Voice call";
-          const dur = formatCallDuration(call.durationSec);
+function formatCallLabel(call) {
+  if (!call) return "";
+  const status = call.status || "";
+  const dur = formatCallDuration(call.durationSec);
 
-          if (call.status === "ended" && call.hasConnected) {
-            return dur ? `${kind} • ${dur}` : kind;
-          }
+  // 1) Ended connected call → "Call ended • 2m 15s" (both sides)
+  if (status === "ended" && call.hasConnected) {
+    return dur ? `Call ended • ${dur}` : "Call ended";
+  }
 
-          if (call.status === "cancelled") {
-            return `Cancelled ${kind.toLowerCase()}`;
-          }
+  // 2) Cancelled before connect
+  //    - Caller (isMe) → "Cancelled"
+  //    - Receiver (!isMe) → "Missed Call"
+  if (status === "cancelled") {
+    return isMe ? "Cancelled" : "Missed Call";
+  }
 
-          if (call.status === "declined") {
-            return `Missed ${kind.toLowerCase()}`;
-          }
+  // 3) Declined as receiver → "Declined" (both sides)
+  if (status === "declined") {
+    return "Declined";
+  }
 
-          // fallback
-          return `${kind} • ${call.status || "unknown"}`;
-        }
+  // Fallback if some strange status appears
+  return "Call";
+}
 
-        const isCallMessage = Boolean(callInfo);
-        const callLabel = isCallMessage ? formatCallLabel(callInfo) : "";
+const isCallMessage = Boolean(callInfo);
+const callLabel = isCallMessage ? formatCallLabel(callInfo) : "";
 
 
           return (
@@ -1052,19 +1059,20 @@ export default function ChatPane({
       )}
 
       <div className="mt-2 flex gap-2 items-center">
-        <label className="text-xs px-3 py-2 rounded-lg border border-zinc-800 cursor-pointer">
-          {uploading ? "Uploading…" : "Attach file"}
-          <input
-            type="file"
-            className="hidden"
-            onChange={handleFileChange}
-            disabled={uploading}
-          />
-        </label>
+        <label className="flex items-center justify-center w-9 h-9 md:w-10 md:h-10 rounded-full border border-zinc-800 cursor-pointer text-lg">
+    {uploading ? "…" : "+"}
+    <input
+      type="file"
+      className="hidden"
+      onChange={handleFileChange}
+      disabled={uploading}
+    />
+  </label>
 
         <textarea
           ref={textareaRef}
-          className="flex-1 bg-black border border-zinc-800 rounded-lg px-3 py-2 text-sm resize-none leading-snug"
+          className="flex-1 bg-black border border-zinc-800 rounded-lg px-3 py-2.5 text-sm resize-none leading-snug"
+
           rows={1}
           value={text}
           onChange={(e) => setText(e.target.value)}
@@ -1085,14 +1093,13 @@ export default function ChatPane({
         />
 
         <button
-          className="px-4 py-2 rounded-lg bg-gold text-black font-semibold text-sm"
-          onClick={send}
-          type="button"
-          disabled={!text.trim() || !room || uploading}
-        >
-          Send
-        </button>
-
+        className="flex items-center justify-center w-9 h-9 md:w-10 md:h-10 rounded-full bg-gold text-black text-lg font-bold"
+        onClick={send}
+        type="button"
+        disabled={!text.trim() || !room || uploading}
+      >
+        ↑
+      </button>
       </div>
     </div>
   );

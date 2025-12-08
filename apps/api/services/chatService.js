@@ -39,6 +39,26 @@ function userRoom(uid) {
 
 function buildPayloadFromDoc(doc) {
   if (!doc) return null;
+
+  const meta = doc.meta || {};
+  const attachments = doc.attachments || [];
+  const seenBy = Array.isArray(doc.seenBy) ? doc.seenBy : [];
+
+  // ⭐ project star / pin from meta onto top-level fields
+  const starredBy = Array.isArray(meta.starredBy) ? meta.starredBy : [];
+  const pinnedBy = Array.isArray(meta.pinnedBy) ? meta.pinnedBy : [];
+
+  // 😀 build reactions array from meta.myReactions
+  let reactions = [];
+  if (Array.isArray(doc.reactions)) {
+    reactions = doc.reactions;
+  } else if (meta.myReactions && typeof meta.myReactions === "object") {
+    reactions = Object.entries(meta.myReactions).map(([uid, emoji]) => ({
+      uid,
+      emoji,
+    }));
+  }
+
   return {
     id: String(doc._id),
     room: doc.room,
@@ -46,13 +66,19 @@ function buildPayloadFromDoc(doc) {
     fromUid: doc.fromUid,
     toUid: doc.toUid || null,
     body: doc.body,
-    meta: doc.meta || {},
-    attachments: doc.attachments || [],
+    meta,
+    attachments,
     createdAt: doc.createdAt || doc.created_at || new Date(),
-    seenBy: Array.isArray(doc.seenBy) ? doc.seenBy : [],
+    seenBy,
     clientId: doc.clientId || null,
+
+    // 🔑 these are what ChatPane is expecting:
+    starredBy,
+    pinnedBy,
+    reactions,
   };
 }
+
 
 async function attachSender(payload) {
   if (!payload || !payload.fromUid) return payload;
