@@ -485,17 +485,31 @@ export default function App() {
         </Suspense>
       </main>
 
-            {!hideChrome && <Footer />}
-            <CallSheet
-              role="receiver"
-              room={incomingCall?.room || null}
-              callId={incomingCall?.callId || null}
-              callType={incomingCall?.callType || "audio"}
-              me={myLabel}
-              open={Boolean(incomingCall?.open && incomingCall?.room)}
-              onClose={() => setIncomingCall(null)}
-            />
-          </div>
-        );
-      }
+                 {!hideChrome && <Footer />}
+                <CallSheet
+                  role="receiver"
+                  room={incomingCall?.room || null}
+                  callId={incomingCall?.callId || null}
+                  callType={incomingCall?.callType || "audio"}
+                  me={myLabel}
+                  // 🔥 show real caller identity from meta put there by Chat.jsx
+                  peerName={
+                    incomingCall?.meta?.fromName ||
+                    incomingCall?.meta?.callerName ||
+                    ""
+                  }
+                  peerAvatar={
+                    incomingCall?.meta?.fromAvatar ||
+                    incomingCall?.meta?.callerAvatar ||
+                    ""
+                  }
+                  // 🔔 allow call summary bubble for DM chat if chatRoom passed
+                  chatRoom={incomingCall?.meta?.chatRoom || null}
+                  open={Boolean(incomingCall?.open && incomingCall?.room)}
+                  onClose={() => setIncomingCall(null)}
+                />
+              </div>
+            );
+          }
+
 

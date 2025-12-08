@@ -170,6 +170,8 @@ const BASE_RECONNECT_DELAY = 1000;
 /* helper: return auth object for socket.io (object or function allowed)
    socket.io client accepts either auth: { token } or auth: () => ({ token }) */
 function _getAuthPayload() {
+  const payload = {};
+
   // prefer latestToken, fallback to localStorage
   if (!latestToken) {
     try {
@@ -178,8 +180,20 @@ function _getAuthPayload() {
     } catch {}
   }
 
-  if (latestToken) return { token: latestToken };
-  return {};
+  if (latestToken) {
+    payload.token = latestToken;
+  }
+
+  // ALSO hint uid if Firebase knows it
+  try {
+    if (firebaseAuth && firebaseAuth.currentUser) {
+      payload.uid = firebaseAuth.currentUser.uid;
+    }
+  } catch {
+    // ignore
+  }
+
+  return payload;
 }
 
 /* generic dispatcher: forwards payload to registered handlers */
@@ -225,14 +239,23 @@ onTokenChange = (newToken) => {
   latestToken = newToken;
   if (!socket) return;
   try {
+    // refresh auth payload
     socket.auth = _getAuthPayload();
-    if (!socket.connected) {
-      socket.connect();
+
+    // 🔥 force a reconnect so the server verifies token & joins user:<uid>
+    if (socket.connected) {
+      try {
+        socket.disconnect();
+      } catch {
+        /* ignore */
+      }
     }
+    socket.connect();
   } catch (e) {
     console.warn("[socket] auth refresh failed:", e?.message || e);
   }
 };
+
 
 /* connectSocket: idempotent, registers optional callbacks */
 export function connectSocket({ onNotification, onBookingAccepted, onCallEvent } = {}) {

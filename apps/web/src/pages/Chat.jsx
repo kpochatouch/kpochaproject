@@ -59,13 +59,30 @@ export default function Chat() {
 
   // ------------------ CALL HELPERS ------------------ //
 
-  async function handleStartCall(callType = "audio") {
+   async function handleStartCall(callType = "audio") {
     if (!peerUid) return;
+
+    // build meta so receiver sees real caller info
+    const fromAvatar =
+      currentUser?.avatarUrl ||
+      currentUser?.photoUrl ||
+      currentUser?.photoURL ||
+      "";
+
+    const meta = {
+      fromUid: myUid,
+      fromName: myLabel,
+      fromAvatar,
+      peerUid,
+      chatRoom: room || null, // DM chat room id (if already known)
+      source: "dm_chat",
+    };
+
     try {
       const ack = await initiateCall({
         receiverUid: peerUid,
         callType, // "audio" or "video"
-        meta: {},
+        meta,
       });
 
       const callRoom = ack.room;
@@ -90,6 +107,7 @@ export default function Chat() {
       alert("Could not start call. Please try again.");
     }
   }
+
 
   function handleCallClose() {
     setCallState((prev) => ({ ...prev, open: false }));
