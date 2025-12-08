@@ -88,6 +88,10 @@ export default function ChatPane({
 
   const endRef = useRef(null);
   const textareaRef = useRef(null);
+  const [composerFocused, setComposerFocused] = useState(false);
+
+const hideSideButtonsOnMobile = isMobileDevice && composerFocused;
+
 
   // menu / actions state
   const [menu, setMenu] = useState(null); // { x, y, msg }
@@ -716,7 +720,7 @@ export default function ChatPane({
 
   return (
     <div className="flex flex-col h-full relative">
-      <div className="flex-1 overflow-y-auto space-y-2 p-3 border border-zinc-800 rounded-xl">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden space-y-2 p-3 border border-zinc-800 rounded-xl no-scrollbar">
         {msgs.map((m, i) => {
           const isMe = Boolean(m.isMe);
           const attachments = Array.isArray(m.meta?.attachments)
@@ -834,6 +838,8 @@ const callLabel = isCallMessage ? formatCallLabel(callInfo) : "";
                 </div>
               )}
 
+              <style>{inlineNoScrollbar}</style>
+
               <div className={`flex ${isMe ? "justify-end" : "justify-start"}`}>
                 {!isMe && (
                   <div className="mr-2 mt-1">
@@ -876,18 +882,19 @@ const callLabel = isCallMessage ? formatCallLabel(callInfo) : "";
                     </div>
                   )}
 
-                                    {isCallMessage ? (
-                    <div className="flex items-center gap-2 text-sm">
-                      <span>{callInfo.type === "video" ? "📹" : "📞"}</span>
-                      <span>{callLabel}</span>
+                  {isCallMessage ? (
+                  <div className="flex items-center gap-2 text-sm">
+                    <span>{callInfo.type === "video" ? "📹" : "📞"}</span>
+                    <span>{callLabel}</span>
+                  </div>
+                ) : (
+                  m.body && (
+                    <div className="text-sm whitespace-pre-wrap break-words">
+                      {m.body}
                     </div>
-                  ) : (
-                    m.body && (
-                      <div className="text-sm whitespace-pre-wrap">
-                        {m.body}
-                      </div>
-                    )
-                  )}
+                  )
+                )}
+
 
                   {attachments.length > 0 && (
                     <div className="mt-2 space-y-1">
@@ -937,6 +944,17 @@ const callLabel = isCallMessage ? formatCallLabel(callInfo) : "";
                             </audio>
                           );
                         }
+
+                        // inline CSS since global CSS is locked
+                        const inlineNoScrollbar = `
+                          .no-scrollbar {
+                            -ms-overflow-style: none;
+                            scrollbar-width: none;
+                          }
+                          .no-scrollbar::-webkit-scrollbar {
+                            display: none;
+                          }
+                        `;
 
                         return (
                           <a
@@ -1059,44 +1077,59 @@ const callLabel = isCallMessage ? formatCallLabel(callInfo) : "";
       )}
 
       <div className="mt-2 flex gap-2 items-center">
-        <label className="flex items-center justify-center w-9 h-9 md:w-10 md:h-10 rounded-full border border-zinc-800 cursor-pointer text-lg">
-    {uploading ? "…" : "+"}
-    <input
-      type="file"
-      className="hidden"
-      onChange={handleFileChange}
-      disabled={uploading}
-    />
-  </label>
+      {/* Attach button – hidden on mobile when typing */}
+      {!hideSideButtonsOnMobile && (
+        <label
+          className="flex items-center justify-center w-9 h-9 md:w-10 md:h-10 rounded-full border border-zinc-800 cursor-pointer text-lg"
+          title="Attach image, video, or file"
+        >
+          {uploading ? "…" : "+"}
+          <input
+            type="file"
+            className="hidden"
+            onChange={handleFileChange}
+            disabled={uploading}
+          />
+        </label>
+      )}
 
-        <textarea
-          ref={textareaRef}
-          className="flex-1 bg-black border border-zinc-800 rounded-lg px-3 py-2.5 text-sm resize-none leading-snug"
+      <textarea
+        ref={textareaRef}
+        className="flex-1 bg-black border border-zinc-800 rounded-lg px-3 py-2.5 text-sm resize-none leading-snug"
+        rows={1}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={handleKeyDown}
+        onFocus={() => setComposerFocused(true)}
+        onBlur={() => setComposerFocused(false)}
+        placeholder="Type a message…"
+      />
 
-          rows={1}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Type a message…"
-        />
+      {/* Voice typing & voice note – hidden on mobile when typing */}
+      {!hideSideButtonsOnMobile && (
+        <>
+          <div title="Voice typing (convert speech to text)">
+            <VoiceInputButton
+              onResult={handleVoiceResult}
+              disabled={!room || !socket}
+            />
+          </div>
 
-        {/* 🎙 voice typing (speech → text) */}
-        <VoiceInputButton
-          onResult={handleVoiceResult}
-          disabled={!room || !socket}
-        />
+          <div title="Send voice note">
+            <VoiceMessageButton
+              onRecorded={handleVoiceMessage}
+              disabled={!room || !socket || uploading}
+            />
+          </div>
+        </>
+      )}
 
-        {/* 🎧 voice message (record + send as audio attachment) */}
-        <VoiceMessageButton
-          onRecorded={handleVoiceMessage}
-          disabled={!room || !socket || uploading}
-        />
-
-        <button
+      <button
         className="flex items-center justify-center w-9 h-9 md:w-10 md:h-10 rounded-full bg-gold text-black text-lg font-bold"
         onClick={send}
         type="button"
         disabled={!text.trim() || !room || uploading}
+        title="Send message"
       >
         ↑
       </button>

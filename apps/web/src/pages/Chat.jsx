@@ -242,32 +242,34 @@ export default function Chat() {
   }, [room, myLabel]);
 
   // 4) Listen for call events so BOTH sides react
-  useEffect(() => {
+    useEffect(() => {
     if (!socket || !myUid) return;
 
-    // New call coming in from server
-    function handleCallInitiate(evt) {
+    // Incoming call from server via callService.createCall()
+    function handleCallIncoming(evt) {
       if (!evt) return;
+
       const {
         callId,
         room: callRoom,
         callType = "audio",
         callerUid,
-        receiverUid,
+        toUid,      // <- this is what callService sends
+        meta,
       } = evt;
 
-      // We only care if we are the receiver
-      if (!receiverUid || receiverUid !== myUid) return;
+      // Only care if *I* am the target of this incoming call
+      if (!toUid || toUid !== myUid) return;
 
-      // And only if this chat is with that caller
+      // If this chat is bound to a specific peer, ensure caller matches that peer
       if (peerUid && callerUid && peerUid !== callerUid) return;
 
-      // Incoming call → open sheet as receiver
       setCallState((prev) => {
-        // if already open for this call, do nothing
+        // If already open for this call, do nothing
         if (prev.open && prev.callId && callId && prev.callId === callId) {
           return prev;
         }
+
         return {
           open: true,
           room: callRoom,
@@ -294,8 +296,7 @@ export default function Chat() {
           return prev;
         }
 
-        // If other side ended / cancelled / declined / missed → close our sheet
-        if (["ended", "cancelled", "declined", "missed"].includes(status)) {
+        if (["ended", "cancelled", "declined", "missed", "failed"].includes(status)) {
           return { ...prev, open: false };
         }
 
@@ -304,7 +305,8 @@ export default function Chat() {
     }
 
     try {
-      socket.on("call:initiate", handleCallInitiate);
+      // 🔁 listen to what the backend actually emits
+      socket.on("call:incoming", handleCallIncoming);
       socket.on("call:status", handleCallStatus);
     } catch (e) {
       console.warn("attach call listeners failed:", e?.message || e);
@@ -312,11 +314,12 @@ export default function Chat() {
 
     return () => {
       try {
-        socket.off("call:initiate", handleCallInitiate);
+        socket.off("call:incoming", handleCallIncoming);
         socket.off("call:status", handleCallStatus);
       } catch {}
     };
   }, [socket, myUid, peerUid]);
+
 
   // ------------------ GUARDS ------------------ //
 
