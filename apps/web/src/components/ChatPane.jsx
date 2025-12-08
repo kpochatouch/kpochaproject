@@ -1,6 +1,6 @@
 // apps/web/src/components/ChatPane.jsx
 import { useEffect, useRef, useState } from "react";
-import { api } from "../lib/api";
+import { api, sendChatMessage } from "../lib/api";
 import VoiceInputButton from "./VoiceInputButton.jsx";
 import VoiceMessageButton from "./VoiceMessageButton.jsx";
 
@@ -309,202 +309,39 @@ export default function ChatPane({
   }
 
   async function handleFileChange(e) {
-    const file = e.target.files?.[0];
-    if (!file || !socket || !room) return;
+  const file = e.target.files?.[0];
+  // ⛔ stop using socket as a gate
+  if (!file || !room) return;
 
-    try {
-      setUploading(true);
-      const url = await uploadFileToCloudinary(file);
-      const now = Date.now();
-      const attachment = {
-        url,
-        type: file.type.startsWith("image/")
-          ? "image"
-          : file.type.startsWith("video/")
-          ? "video"
-          : "file",
-        name: file.name,
-        size: file.size,
-      };
-
-      const clientId = generateClientId();
-      const payload = {
-        room,
-        body: "",
-        clientId,
-        ts: now,
-        meta: { attachments: [attachment] },
-        ...(toUid ? { toUid } : {}),
-      };
-
-      setMsgs((x) => [
-        ...x,
-        {
-          id: `local:${clientId}`,
-          clientId,
-          room,
-          body: "",
-          fromUid: meUid || null,
-          sender: { displayName: myLabel || "You" },
-          at: now,
-          meta: { attachments: [attachment] },
-          isMe: true,
-          _optimistic: true,
-          status: "pending",
-          seenBy: meUid ? [meUid] : [],
-        },
-      ]);
-
-      socket.emit("chat:message", payload, (ack) => {
-        if (!ack || !ack.ok) {
-          setMsgs((prev) =>
-            prev.map((m) =>
-              m.clientId === clientId ? { ...m, status: "failed" } : m
-            )
-          );
-        } else {
-          const order = ["pending", "sent", "delivered", "seen"];
-          const sentRank = order.indexOf("sent");
-
-          setMsgs((prev) =>
-            prev.map((m) => {
-              if (m.clientId !== clientId || !m.isMe) return m;
-
-              const currentRank = order.indexOf(m.status || "pending");
-              if (currentRank >= sentRank) {
-                return m;
-              }
-              return { ...m, status: "sent" };
-            })
-          );
-        }
-      });
-    } catch (err) {
-      console.error("upload failed", err);
-      alert("Upload failed");
-    } finally {
-      setUploading(false);
-      e.target.value = "";
-    }
-  }
-
-  async function handleVoiceMessage(blob) {
-    if (!blob || !socket || !room) return;
-
+  try {
+    setUploading(true);
+    const url = await uploadFileToCloudinary(file);
     const now = Date.now();
-    const clientId = generateClientId();
-
-    try {
-      setUploading(true);
-
-      const url = await uploadAudioBlob(blob);
-
-      const attachment = {
-        url,
-        type: "audio",
-        name: `Voice message ${new Date(now).toLocaleString()}`,
-        size: blob.size || 0,
-      };
-
-      const payload = {
-        room,
-        body: "",
-        clientId,
-        ts: now,
-        meta: { attachments: [attachment] },
-        ...(toUid ? { toUid } : {}),
-      };
-
-      setMsgs((prev) => [
-        ...prev,
-        {
-          id: `local:${clientId}`,
-          clientId,
-          room,
-          body: "",
-          fromUid: meUid || null,
-          sender: { displayName: myLabel || "You" },
-          at: now,
-          meta: { attachments: [attachment] },
-          isMe: true,
-          _optimistic: true,
-          status: "pending",
-          seenBy: meUid ? [meUid] : [],
-        },
-      ]);
-
-      socket.emit("chat:message", payload, (ack) => {
-        if (!ack || !ack.ok) {
-          setMsgs((prev) =>
-            prev.map((m) =>
-              m.clientId === clientId ? { ...m, status: "failed" } : m
-            )
-          );
-        } else {
-          const order = ["pending", "sent", "delivered", "seen"];
-          const sentRank = order.indexOf("sent");
-
-          setMsgs((prev) =>
-            prev.map((m) => {
-              if (m.clientId !== clientId || !m.isMe) return m;
-
-              const currentRank = order.indexOf(m.status || "pending");
-              if (currentRank >= sentRank) return m;
-              return { ...m, status: "sent" };
-            })
-          );
-        }
-      });
-    } catch (e) {
-      console.error("voice message upload failed", e);
-      alert("Voice upload failed");
-      setMsgs((prev) =>
-        prev.map((m) =>
-          m.clientId === clientId ? { ...m, status: "failed" } : m
-        )
-      );
-    } finally {
-      setUploading(false);
-    }
-  }
-
-  // ---------- text send ----------
-  function send() {
-    const body = String(text || "").trim();
-    if (!body || !socket || !room) return;
-
-    const now = Date.now();
-    const clientId = generateClientId();
-    const payload = {
-      room,
-      body,
-      clientId,
-      ts: now,
-      ...(toUid ? { toUid } : {}),
-      ...(replyTo
-        ? {
-            meta: {
-              replyTo: {
-                id: replyTo.id,
-                fromUid: replyTo.fromUid,
-                body: replyTo.body?.slice(0, 200) || "",
-              },
-            },
-          }
-        : {}),
+    const attachment = {
+      url,
+      type: file.type.startsWith("image/")
+        ? "image"
+        : file.type.startsWith("video/")
+        ? "video"
+        : "file",
+      name: file.name,
+      size: file.size,
     };
 
-    setMsgs((x) => [
-      ...x,
+    const clientId = generateClientId();
+
+    // optimistic bubble
+    setMsgs((prev) => [
+      ...prev,
       {
         id: `local:${clientId}`,
         clientId,
         room,
-        body,
+        body: "",
         fromUid: meUid || null,
         sender: { displayName: myLabel || "You" },
         at: now,
-        meta: payload.meta || {},
+        meta: { attachments: [attachment] },
         isMe: true,
         _optimistic: true,
         status: "pending",
@@ -512,35 +349,193 @@ export default function ChatPane({
       },
     ]);
 
-    socket.emit("chat:message", payload, (ack) => {
-      console.log("chat:message ack = ", ack);
-      if (ack && ack.ok === false) {
-        setMsgs((prev) =>
-          prev.map((m) =>
-            m.clientId === clientId ? { ...m, status: "failed" } : m
-          )
-        );
-      } else if (ack && ack.ok) {
-        const order = ["pending", "sent", "delivered", "seen"];
-        const sentRank = order.indexOf("sent");
+    // ✅ reliable send (socket first, REST fallback)
+    let ok = false;
+    try {
+      const res = await sendChatMessage({
+        room,
+        text: "",
+        meta: { attachments: [attachment] },
+        clientId,
+      });
+      ok = !res || res.ok !== false;
+    } catch (err) {
+      console.error("send attachment failed:", err);
+      ok = false;
+    }
 
-        setMsgs((prev) =>
-          prev.map((m) => {
-            if (m.clientId !== clientId || !m.isMe) return m;
+    const order = ["pending", "sent", "delivered", "seen"];
+    const sentRank = order.indexOf("sent");
 
-            const currentRank = order.indexOf(m.status || "pending");
-            if (currentRank >= sentRank) {
-              return m;
-            }
-            return { ...m, status: "sent" };
-          })
-        );
-      }
-    });
+    setMsgs((prev) =>
+      prev.map((m) => {
+        if (m.clientId !== clientId || !m.isMe) return m;
+        if (!ok) return { ...m, status: "failed" };
 
-    setText("");
-    setReplyTo(null);
+        const currentRank = order.indexOf(m.status || "pending");
+        if (currentRank >= sentRank) return m;
+        return { ...m, status: "sent" };
+      })
+    );
+  } catch (err) {
+    console.error("upload failed", err);
+    alert("Upload failed");
+  } finally {
+    setUploading(false);
+    e.target.value = "";
   }
+}
+
+  async function handleVoiceMessage(blob) {
+  if (!blob || !room) return;
+
+  const now = Date.now();
+  const clientId = generateClientId();
+
+  try {
+    setUploading(true);
+
+    const url = await uploadAudioBlob(blob);
+
+    const attachment = {
+      url,
+      type: "audio",
+      name: `Voice message ${new Date(now).toLocaleString()}`,
+      size: blob.size || 0,
+    };
+
+    // optimistic bubble
+    setMsgs((prev) => [
+      ...prev,
+      {
+        id: `local:${clientId}`,
+        clientId,
+        room,
+        body: "",
+        fromUid: meUid || null,
+        sender: { displayName: myLabel || "You" },
+        at: now,
+        meta: { attachments: [attachment] },
+        isMe: true,
+        _optimistic: true,
+        status: "pending",
+        seenBy: meUid ? [meUid] : [],
+      },
+    ]);
+
+    // ✅ reliable send
+    let ok = false;
+    try {
+      const res = await sendChatMessage({
+        room,
+        text: "",
+        meta: { attachments: [attachment] },
+        clientId,
+      });
+      ok = !res || res.ok !== false;
+    } catch (e) {
+      console.error("voice message send failed", e);
+      ok = false;
+    }
+
+    const order = ["pending", "sent", "delivered", "seen"];
+    const sentRank = order.indexOf("sent");
+
+    setMsgs((prev) =>
+      prev.map((m) => {
+        if (m.clientId !== clientId || !m.isMe) return m;
+        if (!ok) return { ...m, status: "failed" };
+
+        const currentRank = order.indexOf(m.status || "pending");
+        if (currentRank >= sentRank) return m;
+        return { ...m, status: "sent" };
+      })
+    );
+  } catch (e) {
+    console.error("voice message upload failed", e);
+    alert("Voice upload failed");
+    setMsgs((prev) =>
+      prev.map((m) =>
+        m.clientId === clientId ? { ...m, status: "failed" } : m
+      )
+    );
+  } finally {
+    setUploading(false);
+  }
+}
+
+
+  // ---------- text send ----------
+  async function send() {
+  const body = String(text || "").trim();
+  if (!body || !room) return;
+
+  const now = Date.now();
+  const clientId = generateClientId();
+
+  const meta =
+    replyTo && replyTo.id
+      ? {
+          replyTo: {
+            id: replyTo.id,
+            fromUid: replyTo.fromUid,
+            body: replyTo.body?.slice(0, 200) || "",
+          },
+        }
+      : {};
+
+  // optimistic bubble
+  setMsgs((prev) => [
+    ...prev,
+    {
+      id: `local:${clientId}`,
+      clientId,
+      room,
+      body,
+      fromUid: meUid || null,
+      sender: { displayName: myLabel || "You" },
+      at: now,
+      meta,
+      isMe: true,
+      _optimistic: true,
+      status: "pending",
+      seenBy: meUid ? [meUid] : [],
+    },
+  ]);
+
+  let ok = false;
+
+  try {
+    const res = await sendChatMessage({
+      room,
+      text: body,
+      meta,
+      clientId,
+    });
+    console.log("chat:message result =", res);
+    ok = !res || res.ok !== false;
+  } catch (err) {
+    console.error("chat:message send failed:", err);
+    ok = false;
+  }
+
+  const order = ["pending", "sent", "delivered", "seen"];
+  const sentRank = order.indexOf("sent");
+
+  setMsgs((prev) =>
+    prev.map((m) => {
+      if (m.clientId !== clientId || !m.isMe) return m;
+      if (!ok) return { ...m, status: "failed" };
+
+      const currentRank = order.indexOf(m.status || "pending");
+      if (currentRank >= sentRank) return m;
+      return { ...m, status: "sent" };
+    })
+  );
+
+  setText("");
+  setReplyTo(null);
+}
 
   // ---------- keyboard: Enter vs newline ----------
   // Mobile: Enter = newline (use button to send)
@@ -1093,10 +1088,11 @@ export default function ChatPane({
           className="px-4 py-2 rounded-lg bg-gold text-black font-semibold text-sm"
           onClick={send}
           type="button"
-          disabled={!text.trim() || !room || !socket}
+          disabled={!text.trim() || !room || uploading}
         >
           Send
         </button>
+
       </div>
     </div>
   );
