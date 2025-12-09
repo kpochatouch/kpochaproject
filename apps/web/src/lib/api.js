@@ -66,25 +66,27 @@ function ensureAuthListener() {
   try {
     firebaseAuth = getAuth();
     onAuthStateChanged(firebaseAuth, async (user) => {
-      if (user) {
-        try {
-          const t = await user.getIdToken(); // not forced
-          latestToken = t;
-          try {
-            localStorage.setItem("token", t);
-          } catch {}
-          if (typeof onTokenChange === "function") onTokenChange(t);
-        } catch {
-          // ignore
-        }
-      } else {
-        latestToken = null;
-        try {
-          localStorage.removeItem("token");
-        } catch {}
-        if (typeof onTokenChange === "function") onTokenChange(null);
-      }
-    });
+  if (user) {
+    try {
+      // 🔥 force a fresh token when user logs in
+      const t = await user.getIdToken(true);
+      latestToken = t;
+      try {
+        localStorage.setItem("token", t);
+      } catch {}
+      if (typeof onTokenChange === "function") onTokenChange(t);
+    } catch {
+      // ignore
+    }
+  } else {
+    latestToken = null;
+    try {
+      localStorage.removeItem("token");
+    } catch {}
+    if (typeof onTokenChange === "function") onTokenChange(null);
+  }
+});
+
   } catch {
     // firebase not available (SSR/build)
   }
@@ -170,6 +172,8 @@ const BASE_RECONNECT_DELAY = 1000;
 /* helper: return auth object for socket.io (object or function allowed)
    socket.io client accepts either auth: { token } or auth: () => ({ token }) */
 function _getAuthPayload() {
+  const payload = {};
+
   // prefer latestToken, fallback to localStorage
   if (!latestToken) {
     try {
@@ -178,8 +182,20 @@ function _getAuthPayload() {
     } catch {}
   }
 
-  if (latestToken) return { token: latestToken };
-  return {};
+  if (latestToken) {
+    payload.token = latestToken;
+  }
+
+  // ALSO hint uid if Firebase knows it
+  try {
+    if (firebaseAuth && firebaseAuth.currentUser) {
+      payload.uid = firebaseAuth.currentUser.uid;
+    }
+  } catch {
+    // ignore
+  }
+
+  return payload;
 }
 
 /* generic dispatcher: forwards payload to registered handlers */
@@ -225,14 +241,23 @@ onTokenChange = (newToken) => {
   latestToken = newToken;
   if (!socket) return;
   try {
+    // refresh auth payload
     socket.auth = _getAuthPayload();
-    if (!socket.connected) {
-      socket.connect();
+
+    // 🔥 force a reconnect so the server verifies token & joins user:<uid>
+    if (socket.connected) {
+      try {
+        socket.disconnect();
+      } catch {
+        /* ignore */
+      }
     }
+    socket.connect();
   } catch (e) {
     console.warn("[socket] auth refresh failed:", e?.message || e);
   }
 };
+
 
 /* connectSocket: idempotent, registers optional callbacks */
 export function connectSocket({ onNotification, onBookingAccepted, onCallEvent } = {}) {
@@ -254,14 +279,46 @@ export function connectSocket({ onNotification, onBookingAccepted, onCallEvent }
 
   try {
     const opts = {
-      autoConnect: false,
-      transports: ["websocket", "polling"],
-      path: "/socket.io",
-      auth: () => _getAuthPayload(),
-      // allow browser to choose appropriate headers
-    };
+  autoConnect: false,
+  transports: ["websocket", "polling"],
+  path: "/socket.io",
+  // 🔥 ask Firebase for a fresh token on each (re)connect
+  auth: (cb) => {
+    try {
+      const auth = firebaseAuth || getAuth();
+      const user = auth.currentUser;
+      if (!user) {
+        cb(_getAuthPayload()); // probably just uid hint or empty
+        return;
+      }
 
-    socket = ioClient(ROOT, opts);
+      // force refresh, then update our cache + send to server
+      user
+        .getIdToken(true)
+        .then((t) => {
+          latestToken = t;
+          try {
+            localStorage.setItem("token", t);
+          } catch {}
+          cb({
+            ..._getAuthPayload(),
+            token: t,
+            uid: user.uid,
+          });
+        })
+        .catch((err) => {
+          console.warn("[socket] getIdToken(true) failed:", err?.message || err);
+          cb(_getAuthPayload()); // fallback to whatever we have
+        });
+    } catch (e) {
+      console.warn("[socket] auth callback failed:", e?.message || e);
+      cb(_getAuthPayload());
+    }
+  },
+};
+
+socket = ioClient(ROOT, opts);
+
 
     socket.on("connect", () => {
       socketConnected = true;
