@@ -1,7 +1,12 @@
 // apps/web/src/components/CallSheet.jsx
 import { useEffect, useRef, useState } from "react";
 import SignalingClient from "../lib/webrtc/SignalingClient";
-import { updateCallStatus, sendChatMessage } from "../lib/api";
+import {
+  updateCallStatus,
+  sendChatMessage,
+  registerSocketHandler,
+} from "../lib/api";
+
 
 /**
  * Props:
@@ -35,6 +40,7 @@ export default function CallSheet({
   const [hasAccepted, setHasAccepted] = useState(false);
   const [autoStarted, setAutoStarted] = useState(false);
   const [peerAccepted, setPeerAccepted] = useState(false);
+  const [peerStatus, setPeerStatus] = useState(null);
 
   const [micMuted, setMicMuted] = useState(false);
   const [camOff, setCamOff] = useState(mode === "audio");
@@ -225,6 +231,43 @@ export default function CallSheet({
         }
       }
     };
+
+      // 🔔 React to backend call:status events for this call
+  useEffect(() => {
+    if (!open || !callId) return;
+
+    // subscribe via global socket helper
+    const unsubscribe = registerSocketHandler("call:status", (evt) => {
+      if (!evt) return;
+      const { callId: evtId, status } = evt;
+
+      // ignore other calls
+      if (!evtId || evtId !== callId) return;
+
+      setPeerStatus(status || null);
+
+      // ✅ as soon as backend says "accepted", we know peer has picked
+      if (status === "accepted") {
+        stopAllTones();       // stop caller ringtone immediately
+        setPeerAccepted(true); // flip UI from "Calling…" → "Connecting…"
+      }
+
+      // if remote ends / cancels / declines, close our sheet too
+      if (["ended", "cancelled", "declined", "missed", "failed"].includes(status)) {
+        // we already send a summary when *we* hang up,
+        // but if the other side ended first, just clean up + close.
+        cleanupPeer();
+        onClose?.();
+      }
+    });
+
+    return () => {
+      try {
+        unsubscribe && unsubscribe();
+      } catch {}
+    };
+  }, [open, callId, onClose]);
+
 
         pcNew.onconnectionstatechange = () => {
       const st = pcNew.connectionState;
