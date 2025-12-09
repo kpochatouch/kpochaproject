@@ -514,51 +514,53 @@ export default function CallSheet({
           </div>
         </div>
 
-        {/* bottom controls */}
-        <div className="px-8 pb-8 pt-4 bg-black/70 border-t border-zinc-800 flex flex-col gap-4">
-          {/* accept / decline for receiver, hangup for caller */}
-        <div className="flex items-center justify-center gap-6">
-          {!isCaller && !pc ? (
-            <>
-              {/* Decline on the left (red phone) */}
-              <button
-                className="flex items-center justify-center w-12 h-12 rounded-full bg-rose-600 text-white text-xl shadow-lg"
-                onClick={declineIncoming}
-                type="button"
-              >
-                📞
-              </button>
+          {/* bottom controls */}
+            <div className="px-8 pb-8 pt-4 bg-black/70 border-t border-zinc-800 flex flex-col gap-4">
+              {/* accept / decline for receiver (before connected), hangup otherwise */}
+              <div className="flex items-center justify-center gap-6">
+                {/* Receiver, not yet connected → show Accept / Decline */}
+                {!isCaller && !hasConnected ? (
+                  <>
+                    {/* Decline on the left (red phone) */}
+                    <button
+                      className="flex items-center justify-center w-12 h-12 rounded-full bg-rose-600 text-white text-xl shadow-lg"
+                      onClick={declineIncoming}
+                      type="button"
+                    >
+                      📞
+                    </button>
 
-              {/* Center handset (slider-style look, no action) */}
-              <button
-                className="flex items-center justify-center w-12 h-12 rounded-full bg-zinc-800 text-zinc-200 text-xl shadow-inner"
-                type="button"
-                disabled
-              >
-                📞
-              </button>
+                    {/* Center handset (slider-style look, no action) */}
+                    <button
+                      className="flex items-center justify-center w-12 h-12 rounded-full bg-zinc-800 text-zinc-200 text-xl shadow-inner"
+                      type="button"
+                      disabled
+                    >
+                      📞
+                    </button>
 
-              {/* Accept on the right (green phone) */}
-              <button
-                className="flex items-center justify-center w-12 h-12 rounded-full bg-emerald-500 text-black text-xl shadow-lg disabled:opacity-50"
-                onClick={acceptIncoming}
-                disabled={starting}
-                type="button"
-              >
-                📞
-              </button>
-            </>
-          ) : (
-            // Caller view: single red hangup button in the middle
-            <button
-              className="flex items-center justify-center w-12 h-12 rounded-full bg-rose-600 text-white text-xl shadow-lg mx-auto"
-              onClick={hangup}
-              type="button"
-            >
-              📞
-            </button>
-          )}
-        </div>
+                    {/* Accept on the right (green phone) */}
+                    <button
+                      className="flex items-center justify-center w-12 h-12 rounded-full bg-emerald-500 text-black text-xl shadow-lg disabled:opacity-50"
+                      onClick={acceptIncoming}
+                      disabled={starting}
+                      type="button"
+                    >
+                      📞
+                    </button>
+                  </>
+                ) : (
+                  // Caller or already-connected receiver → single red hangup
+                  <button
+                    className="flex items-center justify-center w-12 h-12 rounded-full bg-rose-600 text-white text-xl shadow-lg mx-auto"
+                    onClick={hangup}
+                    type="button"
+                  >
+                    📞
+                  </button>
+                )}
+              </div>
+
 
 
           {/* real mic / camera / chat buttons */}
