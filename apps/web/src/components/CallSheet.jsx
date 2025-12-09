@@ -573,51 +573,40 @@ if (callFailed) {
           {/* bottom controls */}
             <div className="px-8 pb-8 pt-4 bg-black/70 border-t border-zinc-800 flex flex-col gap-4">
               {/* accept / decline for receiver (before connected), hangup otherwise */}
-              <div className="flex items-center justify-center gap-6">
-                {/* Receiver, not yet connected → show Accept / Decline */}
-                {!isCaller && !hasConnected ? (
-                  <>
-                    {/* Decline on the left (red phone) */}
-                    <button
-                      className="flex items-center justify-center w-12 h-12 rounded-full bg-rose-600 text-white text-xl shadow-lg"
-                      onClick={declineIncoming}
-                      type="button"
-                    >
-                      📞
-                    </button>
+    <div className="flex items-center justify-center gap-10">
+  {/* Receiver, before they accept → show Accept / Decline only */}
+  {!isCaller && !hasConnected && !hasAccepted && !callFailed ? (
+    <>
+      {/* Decline (red) */}
+      <button
+        className="flex items-center justify-center w-14 h-14 rounded-full bg-rose-600 text-white text-xl shadow-lg"
+        onClick={declineIncoming}
+        type="button"
+      >
+        📞
+      </button>
 
-                    {/* Center handset (slider-style look, no action) */}
-                    <button
-                      className="flex items-center justify-center w-12 h-12 rounded-full bg-zinc-800 text-zinc-200 text-xl shadow-inner"
-                      type="button"
-                      disabled
-                    >
-                      📞
-                    </button>
-
-                    {/* Accept on the right (green phone) */}
-                    <button
-                      className="flex items-center justify-center w-12 h-12 rounded-full bg-emerald-500 text-black text-xl shadow-lg disabled:opacity-50"
-                      onClick={acceptIncoming}
-                      disabled={starting}
-                      type="button"
-                    >
-                      📞
-                    </button>
-                  </>
-                ) : (
-                  // Caller or already-connected receiver → single red hangup
-                  <button
-                    className="flex items-center justify-center w-12 h-12 rounded-full bg-rose-600 text-white text-xl shadow-lg mx-auto"
-                    onClick={hangup}
-                    type="button"
-                  >
-                    📞
-                  </button>
-                )}
-              </div>
-
-
+      {/* Accept (green) */}
+      <button
+        className="flex items-center justify-center w-14 h-14 rounded-full bg-emerald-500 text-black text-xl shadow-lg disabled:opacity-50"
+        onClick={acceptIncoming}
+        disabled={starting}
+        type="button"
+      >
+        📞
+      </button>
+    </>
+  ) : (
+    // Caller OR receiver after accepting → single red hangup
+    <button
+      className="flex items-center justify-center w-14 h-14 rounded-full bg-rose-600 text-white text-xl shadow-lg mx-auto"
+      onClick={hangup}
+      type="button"
+    >
+      📞
+    </button>
+  )}
+</div>
 
           {/* real mic / camera / chat buttons */}
           <div className="flex items-center justify-center gap-6 text-zinc-400 text-xl">
