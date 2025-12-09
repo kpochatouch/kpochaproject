@@ -216,30 +216,37 @@ export default function Chat() {
   // ------------------ SOCKET SETUP ------------------ //
 
   // 3) Attach socket + join room once we know the room id
-  useEffect(() => {
+    useEffect(() => {
     if (!room || !myLabel) return;
 
-    let s;
-    try {
-      s = connectSocket(); // shared socket client
-      setSocket(s);
-      s.emit("room:join", { room, who: myLabel });
+    const s = connectSocket(); // should return the shared singleton
+    setSocket(s);
 
-      // tell backend we've read messages in this room
+    function joinRoom() {
+      if (!room) return;
+      s.emit("room:join", { room, who: myLabel });
       s.emit("chat:read", { room }, (ack) => {
         console.log("chat:read ack =", ack);
       });
-    } catch (e) {
-      console.warn("chat connectSocket failed:", e?.message || e);
     }
+
+    // join immediately
+    joinRoom();
+
+    // 👇 re-join on every reconnect so we don't lose the room
+    s.on("connect", joinRoom);
 
     return () => {
       try {
-        if (s && room) s.emit("room:leave", { room });
-      } catch {}
+        s.off("connect", joinRoom);
+        if (room) s.emit("room:leave", { room });
+      } catch (e) {
+        console.warn("chat cleanup failed:", e?.message || e);
+      }
       setSocket(null);
     };
   }, [room, myLabel]);
+
 
   // 4) Listen for call events so BOTH sides react
     useEffect(() => {
