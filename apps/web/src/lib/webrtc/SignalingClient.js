@@ -115,42 +115,22 @@ export default class SignalingClient {
    * Dev note: if you want local dev env fallbacks, set VITE_STUN_URLS / VITE_TURN_URLS
    * but do NOT put TURN credentials (VITE_TURN_USERNAME / VITE_TURN_PASSWORD) in production Vercel.
    */
-    static async getIceServers() {
-    // Build root exactly like other API clients: strip trailing slashes and /api
-    let root =
-      (import.meta.env.VITE_API_BASE_URL ||
-        import.meta.env.VITE_API_BASE ||
-        window.location.origin)
-        .toString()
-        .trim();
-
-    root = root.replace(/\/+$/, "");
-    if (/\/api$/i.test(root)) {
-      root = root.replace(/\/api$/i, "");
-    }
-
-    const url = `${root}/api/webrtc/ice`;
-
+  static async getIceServers() {
+    const base = import.meta.env.VITE_API_BASE_URL || window.location.origin;
     try {
-      const res = await fetch(url);
+      const res = await fetch(`${base.replace(/\/+$/, "")}/api/webrtc/ice`);
       if (res.ok) {
         const data = await res.json();
         if (data && Array.isArray(data.iceServers) && data.iceServers.length) {
           return data.iceServers;
         }
       } else {
+        // helpful debug log in dev
         try {
           const text = await res.text();
-          console.warn(
-            "[getIceServers] server returned non-ok:",
-            res.status,
-            text
-          );
+          console.warn("[getIceServers] server returned non-ok:", res.status, text);
         } catch (e) {
-          console.warn(
-            "[getIceServers] server returned non-ok status:",
-            res.status
-          );
+          console.warn("[getIceServers] server returned non-ok status:", res.status);
         }
       }
     } catch (err) {
@@ -168,7 +148,6 @@ export default class SignalingClient {
       },
     ];
   }
-
 
   on(evt, fn) {
     if (!evt || typeof fn !== "function") return;
