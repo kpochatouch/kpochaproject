@@ -248,46 +248,10 @@ export default function Chat() {
   }, [room, myLabel]);
 
 
-  // 4) Listen for call events so BOTH sides react
-    useEffect(() => {
-    if (!socket || !myUid) return;
+   // 4) Listen only for call status (close caller UI when call ends/fails)
+  useEffect(() => {
+    if (!socket) return;
 
-    // Incoming call from server via callService.createCall()
-    function handleCallIncoming(evt) {
-      if (!evt) return;
-
-      const {
-        callId,
-        room: callRoom,
-        callType = "audio",
-        callerUid,
-        toUid,      // <- this is what callService sends
-        meta,
-      } = evt;
-
-      // Only care if *I* am the target of this incoming call
-      if (!toUid || toUid !== myUid) return;
-
-      // If this chat is bound to a specific peer, ensure caller matches that peer
-      if (peerUid && callerUid && peerUid !== callerUid) return;
-
-      setCallState((prev) => {
-        // If already open for this call, do nothing
-        if (prev.open && prev.callId && callId && prev.callId === callId) {
-          return prev;
-        }
-
-        return {
-          open: true,
-          room: callRoom,
-          callId: callId || prev.callId,
-          callType,
-          role: "receiver",
-        };
-      });
-    }
-
-    // Status changes (accepted / ended / cancelled / declined / missed)
     function handleCallStatus(evt) {
       if (!evt) return;
       const { callId, room: callRoom, status } = evt;
@@ -295,7 +259,7 @@ export default function Chat() {
       setCallState((prev) => {
         if (!prev.open) return prev;
 
-        // Check if this status belongs to the current call
+        // Check if this status belongs to the current call we’re showing
         if (
           (prev.callId && callId && prev.callId !== callId) ||
           (prev.room && callRoom && prev.room !== callRoom)
@@ -303,7 +267,11 @@ export default function Chat() {
           return prev;
         }
 
-        if (["ended", "cancelled", "declined", "missed", "failed"].includes(status)) {
+        if (
+          ["ended", "cancelled", "declined", "missed", "failed"].includes(
+            status
+          )
+        ) {
           return { ...prev, open: false };
         }
 
@@ -312,20 +280,18 @@ export default function Chat() {
     }
 
     try {
-      // 🔁 listen to what the backend actually emits
-      socket.on("call:incoming", handleCallIncoming);
       socket.on("call:status", handleCallStatus);
     } catch (e) {
-      console.warn("attach call listeners failed:", e?.message || e);
+      console.warn("attach call status listener failed:", e?.message || e);
     }
 
     return () => {
       try {
-        socket.off("call:incoming", handleCallIncoming);
         socket.off("call:status", handleCallStatus);
       } catch {}
     };
-  }, [socket, myUid, peerUid]);
+  }, [socket]);
+
 
 
   // ------------------ GUARDS ------------------ //

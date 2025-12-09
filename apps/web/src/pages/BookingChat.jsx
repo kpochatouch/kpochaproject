@@ -1,7 +1,7 @@
 // apps/web/src/pages/BookingChat.jsx
 import { useParams } from "react-router-dom";
 import { useEffect, useMemo, useState } from "react";
-import { api, connectSocket } from "../lib/api";
+import { api, connectSocket, initiateCall } from "../lib/api";
 import { useMe } from "../context/MeContext.jsx";
 import ChatPane from "../components/ChatPane";
 import CallSheet from "../components/CallSheet";
@@ -21,27 +21,33 @@ function formatMoney(kobo = 0) {
 export default function BookingChat() {
   const { bookingId } = useParams();
   const { me } = useMe();
-  const [callType, setCallType] = useState("audio");
-  const [openCall, setOpenCall] = useState(false);
+
+  // 🔐 who am I?
+  const myUid =
+    me?.uid || me?.ownerUid || me?._id || me?.id || me?.userId || null;
+
+  const myLabel =
+    me?.displayName || me?.fullName || me?.email || myUid || "me";
+
+  // 🔔 call state for this page (caller only)
+  const [callState, setCallState] = useState({
+    open: false,
+    room: null,
+    callId: null,
+    callType: "audio",
+    role: "caller",
+  });
 
   const [booking, setBooking] = useState(null);
   const [loadingBooking, setLoadingBooking] = useState(true);
 
+  // booking chat room id (for messages)
   const room = useMemo(
     () => (bookingId ? `booking:${bookingId}` : null),
     [bookingId]
   );
 
-  function handleStartCall(nextType = "audio") {
-  setCallType(nextType);
-  setOpenCall(true);
-}
-
-
-  const myLabel =
-    me?.displayName || me?.fullName || me?.email || me?.uid || "me";
-
-  // ---- Load booking meta (for badge) ----
+  // ---- Load booking meta (for badge + figuring out peerUid) ----
   useEffect(() => {
     if (!bookingId) {
       setLoadingBooking(false);
@@ -88,27 +94,60 @@ export default function BookingChat() {
     [booking]
   );
 
-  // ---- Socket connection (shared with chat + call) ----
-  const socket = useMemo(() => {
-  if (!room) return null;
-  try {
-    const s = connectSocket();
-    // join the booking room on connect
-    s.emit("join:booking", { bookingId, who: myLabel });
+  // 🔎 figure out who the *other* person is for this booking
+  const peerUid = useMemo(() => {
+    if (!booking || !myUid) return null;
 
-    // after join, mark the booking chat as read
-    // (chat:read uses socket.data.room if room isn't passed)
-    s.emit("chat:read", {}, (ack) => {
-      console.log("booking chat:read ack =", ack);
-    });
+    const clientUid =
+      booking.clientUid ||
+      booking.client_uid ||
+      booking.client?.uid ||
+      booking.client?.ownerUid ||
+      null;
 
-    return s;
-  } catch {
+    const proUid =
+      booking.proOwnerUid ||
+      booking.proUid ||
+      booking.pro_uid ||
+      booking.pro?.ownerUid ||
+      booking.pro?.uid ||
+      null;
+
+    // If I'm the client → call the pro
+    if (myUid && clientUid && myUid === clientUid) return proUid || null;
+
+    // If I'm the pro → call the client
+    if (myUid && proUid && myUid === proUid) return clientUid || null;
+
+    // Fallback (if we can't tell) – just pick "the other" that isn't me
+    if (clientUid && clientUid !== myUid) return clientUid;
+    if (proUid && proUid !== myUid) return proUid;
+
     return null;
-  }
-}, [room, bookingId, myLabel]);
+  }, [booking, myUid]);
 
+  // ---- Socket connection (shared with chat + call status) ----
+  const socket = useMemo(() => {
+    if (!room) return null;
+    try {
+      const s = connectSocket();
 
+      // join the booking room on connect (for chat)
+      s.emit("join:booking", { bookingId, who: myLabel });
+
+      // after join, mark the booking chat as read
+      // (chat:read uses socket.data.room if room isn't passed)
+      s.emit("chat:read", {}, (ack) => {
+        console.log("booking chat:read ack =", ack);
+      });
+
+      return s;
+    } catch {
+      return null;
+    }
+  }, [room, bookingId, myLabel]);
+
+  // Clean up socket on unmount
   useEffect(() => {
     return () => {
       try {
@@ -120,6 +159,110 @@ export default function BookingChat() {
     };
   }, [socket, room]);
 
+  // Listen only for call status → so caller's sheet closes properly
+  useEffect(() => {
+    if (!socket) return;
+
+    function handleCallStatus(evt) {
+      if (!evt) return;
+      const { callId, room: callRoom, status } = evt;
+
+      setCallState((prev) => {
+        if (!prev.open) return prev;
+
+        // Check if this status belongs to the current call
+        if (
+          (prev.callId && callId && prev.callId !== callId) ||
+          (prev.room && callRoom && prev.room !== callRoom)
+        ) {
+          return prev;
+        }
+
+        if (
+          ["ended", "cancelled", "declined", "missed", "failed"].includes(
+            status
+          )
+        ) {
+          return { ...prev, open: false };
+        }
+
+        return prev;
+      });
+    }
+
+    try {
+      socket.on("call:status", handleCallStatus);
+    } catch (e) {
+      console.warn(
+        "[BookingChat] attach call status listener failed:",
+        e?.message || e
+      );
+    }
+
+    return () => {
+      try {
+        socket.off("call:status", handleCallStatus);
+      } catch {}
+    };
+  }, [socket]);
+
+  // ---- Start a call through backend (like DM) ----
+  async function handleStartCall(nextType = "audio") {
+    if (!booking || !myUid) {
+      alert("Booking not ready yet. Please wait a moment and try again.");
+      return;
+    }
+
+    if (!peerUid) {
+      alert("Could not determine who to call for this booking.");
+      return;
+    }
+
+    // build meta so receiver sees real caller + booking info
+    const fromAvatar =
+      me?.avatarUrl || me?.photoUrl || me?.photoURL || "";
+
+    const meta = {
+      fromUid: myUid,
+      fromName: myLabel,
+      fromAvatar,
+      peerUid,
+      bookingId,
+      chatRoom: room || null, // booking chat room id
+      source: "booking_chat",
+    };
+
+    try {
+      const ack = await initiateCall({
+        receiverUid: peerUid,
+        callType: nextType, // "audio" or "video"
+        meta,
+      });
+
+      const callRoom = ack.room;
+      const callId = ack.callId || null;
+
+      if (!callRoom) {
+        console.warn("[BookingChat] initiateCall returned no room:", ack);
+        alert("Could not start call.");
+        return;
+      }
+
+      // Outgoing call → we are the caller
+      setCallState({
+        open: true,
+        room: callRoom,
+        callId,
+        callType: ack.callType || nextType,
+        role: "caller",
+      });
+    } catch (e) {
+      console.error("[BookingChat] start call failed:", e);
+      alert("Could not start call. Please try again.");
+    }
+  }
+
+  // ---- Guards ----
   if (!room) {
     return (
       <div className="max-w-4xl mx-auto p-4">
@@ -138,25 +281,24 @@ export default function BookingChat() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-  {/* Voice / audio call */}
-  <button
-    onClick={() => handleStartCall("audio")}
-    className="px-4 py-2 rounded-lg bg-gold text-black font-semibold text-sm"
-    type="button"
-  >
-    Voice Call
-  </button>
+          {/* Voice / audio call */}
+          <button
+            onClick={() => handleStartCall("audio")}
+            className="px-4 py-2 rounded-lg bg-gold text-black font-semibold text-sm"
+            type="button"
+          >
+            Voice Call
+          </button>
 
-  {/* Video call */}
-  <button
-    onClick={() => handleStartCall("video")}
-    className="px-4 py-2 rounded-lg border border-gold text-gold font-semibold text-sm"
-    type="button"
-  >
-    Video Call
-  </button>
-</div>
-
+          {/* Video call */}
+          <button
+            onClick={() => handleStartCall("video")}
+            className="px-4 py-2 rounded-lg border border-gold text-gold font-semibold text-sm"
+            type="button"
+          >
+            Video Call
+          </button>
+        </div>
       </div>
 
       {/* Badge: what this chat is about */}
@@ -181,24 +323,35 @@ export default function BookingChat() {
 
       {/* Chat uses the shared socket + booking room */}
       <ChatPane
-  socket={socket}
-  room={room}
-  meUid={me?.uid || me?.ownerUid || me?._id || me?.id || me?.userId || null}
-  myLabel={myLabel}
-  // booking chat is usually between exactly two people,
-  // but we don’t have the other uid wired here yet.
-  // For now we leave peerUid / peerProfile out for ticks.
-  initialMessages={[]}
-/>
-
-
-      {/* CallSheet uses the same booking room for WebRTC signaling */}
-      <CallSheet
+        socket={socket}
         room={room}
-        callType={callType} 
+        meUid={myUid}
+        myLabel={myLabel}
+        // booking chat is usually between exactly two people,
+        // but we don’t have the other profile wired here yet.
+        peerUid={peerUid || null}
+        initialMessages={[]}
+      />
+
+      {/* CallSheet uses the callState (signaling room) + booking chat as chatRoom */}
+      <CallSheet
+        role={callState.role}
+        room={callState.room}
+        callId={callState.callId}
+        callType={callState.callType}
         me={myLabel}
-        open={openCall}
-        onClose={() => setOpenCall(false)}
+        // we don’t know a nice peerName/avatar from booking here yet,
+        // so we leave them empty and let CallSheet fall back.
+        peerName=""
+        peerAvatar=""
+        chatRoom={room}
+        open={callState.open}
+        onClose={() =>
+          setCallState((prev) => ({
+            ...prev,
+            open: false,
+          }))
+        }
       />
     </div>
   );
