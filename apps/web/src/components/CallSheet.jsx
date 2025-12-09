@@ -34,12 +34,17 @@ export default function CallSheet({
   const [hasConnected, setHasConnected] = useState(false);
   const [hasAccepted, setHasAccepted] = useState(false);
   const [autoStarted, setAutoStarted] = useState(false);
+  const [peerAccepted, setPeerAccepted] = useState(false);
 
   const [micMuted, setMicMuted] = useState(false);
   const [camOff, setCamOff] = useState(mode === "audio");
 
   // ⏱ call duration state
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+
+  // ❌ call failed state (when accepted but never connects)
+  const [callFailed, setCallFailed] = useState(false);
+
 
   const localRef = useRef(null);
   const remoteRef = useRef(null);
@@ -119,7 +124,7 @@ export default function CallSheet({
       } catch {}
     }
 
-        return () => {
+         return () => {
       try {
         sc.disconnect();
       } catch {}
@@ -128,6 +133,7 @@ export default function CallSheet({
       setAutoStarted(false);
       setElapsedSeconds(0); // reset duration when modal closes
       setHasAccepted(false); // 👈 reset accept state
+      setCallFailed(false);  // 👈 reset failure flag
     };
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -147,6 +153,44 @@ export default function CallSheet({
 
     return () => clearInterval(id);
   }, [open, hasConnected]);
+
+    // ⏲️ fail-safe: if call is accepted but never connects, fail after ~20s
+  useEffect(() => {
+    if (!open) return;
+
+    const accepted = peerAccepted || hasAccepted;
+
+    // Nobody has accepted yet → no timer
+    if (!accepted) return;
+
+    // Already connected → no need for timeout
+    if (hasConnected) return;
+
+    // Start 20s timeout once we're in "accepted but not connected" state
+    const timeoutId = setTimeout(() => {
+      console.warn(
+        "[CallSheet] Call failed: no WebRTC connection within 20 seconds"
+      );
+
+      // 1) Stop any ringing / tones
+      stopAllTones();
+
+      // 2) Mark as failed so UI shows "Call failed"
+      setCallFailed(true);
+
+      // 3) Let backend know it failed because of timeout (optional)
+      safeUpdateStatus("declined", { reason: "timeout_no_connection" });
+
+      // 4) Auto hang up after a short pause so user can briefly see "Call failed"
+      setTimeout(() => {
+        hangup();
+      }, 1500);
+    }, 20000); // 20,000 ms = 20 seconds
+
+    // Cleanup: if state changes (connects, closes, etc.), cancel timeout
+    return () => clearTimeout(timeoutId);
+  }, [open, peerAccepted, hasAccepted, hasConnected]);
+
 
   async function setupPeerConnection(asCaller) {
     if (!sig || !room) return null;
@@ -216,18 +260,22 @@ export default function CallSheet({
       }
     });
 
-    sig.on("webrtc:answer", async (msg) => {
-      try {
-        if (asCaller) {
-          const remoteSdp = msg?.payload || msg; // unwrap payload
-          await pcNew.setRemoteDescription(
-            new RTCSessionDescription(remoteSdp)
-          );
-        }
-      } catch (e) {
-        console.error("[CallSheet] handle answer failed:", e);
-      }
-    });
+  sig.on("webrtc:answer", async (msg) => {
+  try {
+    if (asCaller) {
+      const remoteSdp = msg?.payload || msg; // unwrap payload
+      await pcNew.setRemoteDescription(
+        new RTCSessionDescription(remoteSdp)
+      );
+
+      // 👇 peer has tapped "Accept" → stop ringing on caller side
+      stopAllTones();
+      setPeerAccepted(true);
+    }
+  } catch (e) {
+    console.error("[CallSheet] handle answer failed:", e);
+  }
+});
 
     sig.on("webrtc:ice", async (msg) => {
       try {
@@ -265,11 +313,13 @@ export default function CallSheet({
         });
         pc.close();
       }
-    } catch {}
-        setPc(null);
+      } catch {}
+    setPc(null);
     setHasConnected(false);
     setHasAccepted(false); // 👈 reset accept state
+    setPeerAccepted(false);
     setElapsedSeconds(0); // reset duration when call ends
+    setCallFailed(false);  // 👈 reset failure flag
 
     try {
       sig?.disconnect();
@@ -410,20 +460,26 @@ export default function CallSheet({
 
   if (!open || !room) return null;
 
-    const isCaller = role === "caller";
+const isCaller = role === "caller";
 
-  // WhatsApp-like status text
-  let statusText = "";
-  if (hasConnected) {
-    statusText = "Connected";
-  } else if (starting) {
-    statusText = "Connecting…";
-  } else if (!isCaller && hasAccepted) {
-    // receiver has tapped Accept but WebRTC not fully connected yet
-    statusText = "Connecting…";
-  } else {
-    statusText = isCaller ? "Calling…" : "Incoming call";
-  }
+// WhatsApp-like status text
+let statusText = "";
+if (callFailed) {
+  statusText = "Call failed";
+} else if (hasConnected) {
+  statusText = "Connected";
+} else if (starting) {
+  statusText = "Connecting…";
+} else if (isCaller && peerAccepted) {
+  // 👈 caller knows peer accepted, but WebRTC not fully connected yet
+  statusText = "Connecting…";
+} else if (!isCaller && hasAccepted) {
+  // receiver has tapped Accept but WebRTC not fully connected yet
+  statusText = "Connecting…";
+} else {
+  statusText = isCaller ? "Calling…" : "Incoming call";
+}
+
 
   const displayPeerName =
     peerName && peerName.trim().length ? peerName : "Unknown user";
