@@ -549,7 +549,7 @@ export default function CallSheet({
     });
   }
 
-    // ---------- render ----------
+      // ---------- render ----------
 
   if (!open || !room) return null;
 
@@ -576,7 +576,7 @@ export default function CallSheet({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80">
-      <div className="relative w-full max-w-xl h-full md:h-[520px] md:rounded-2xl md:overflow-hidden bg-[#111] border border-zinc-800">
+      <div className="relative w-full max-w-xl md:rounded-2xl md:overflow-hidden bg-[#111] border border-zinc-800">
         {/* top bar */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 bg-black/60">
           <div className="flex flex-col">
@@ -596,12 +596,15 @@ export default function CallSheet({
           </button>
         </div>
 
-        {/* body: video or audio */}
-        <div className="relative flex-1 bg-black overflow-hidden">
+        {/* body: fixed height so nothing collapses */}
+        <div
+          className="relative bg-black overflow-hidden"
+          style={{ height: "460px" }} // 👈 explicit height, ignores external flex
+        >
           {/* VIDEO LAYOUT */}
           {mode === "video" && (
             <>
-              {/* primary view (remote by default, local when flipped) */}
+              {/* big view */}
               <video
                 ref={pipFlipped ? localRef : remoteRef}
                 autoPlay
@@ -610,7 +613,7 @@ export default function CallSheet({
               />
               <div className="absolute inset-0 bg-black/35" />
 
-              {/* PiP bottom-right INSIDE the video, tap to swap */}
+              {/* PiP bottom-right INSIDE video */}
               <video
                 ref={pipFlipped ? remoteRef : localRef}
                 autoPlay
@@ -631,7 +634,7 @@ export default function CallSheet({
             </>
           )}
 
-          {/* AUDIO LAYOUT (unchanged style) */}
+          {/* AUDIO LAYOUT */}
           {mode === "audio" && (
             <div className="flex flex-col items-center justify-center h-full">
               <div className="w-32 h-32 rounded-full mb-4 border-4 border-emerald-500/60 shadow-[0_0_40px_rgba(16,185,129,0.4)] flex items-center justify-center overflow-hidden bg-zinc-900">
@@ -654,7 +657,7 @@ export default function CallSheet({
                 <video ref={remoteRef} autoPlay playsInline />
               </div>
 
-              {/* name + timer / status for audio only */}
+              {/* name + timer / status for audio */}
               <div className="mt-4 flex flex-col items-center gap-1">
                 <span className="text-lg md:text-2xl font-semibold text-zinc-50">
                   {displayPeerName}
@@ -669,9 +672,8 @@ export default function CallSheet({
             </div>
           )}
 
-          {/* bottom controls overlay (sits ON the video / audio) */}
+          {/* bottom controls overlay (on top of video / audio) */}
           <div className="absolute inset-x-0 bottom-3 flex flex-col items-center gap-3 z-30">
-            {/* accept / decline for receiver (before connected), hangup otherwise */}
             <div className="flex items-center justify-center gap-10">
               {!isCaller && !hasConnected && !hasAccepted && !callFailed ? (
                 <>
@@ -695,7 +697,6 @@ export default function CallSheet({
                   </button>
                 </>
               ) : (
-                // Caller OR receiver after accepting → single red hangup
                 <button
                   className="flex items-center justify-center w-14 h-14 rounded-full bg-rose-600 text-white text-xl shadow-lg mx-auto"
                   onClick={hangup}
@@ -706,7 +707,6 @@ export default function CallSheet({
               )}
             </div>
 
-            {/* mic / camera / chat buttons */}
             <div className="flex items-center justify-center gap-6 text-zinc-400 text-xl">
               {/* mic */}
               <button
@@ -719,7 +719,7 @@ export default function CallSheet({
                 {micMuted ? "🔇" : "🎙"}
               </button>
 
-              {/* camera (only meaningful for video) */}
+              {/* camera (video only) */}
               {mode === "video" && (
                 <button
                   type="button"
@@ -732,7 +732,7 @@ export default function CallSheet({
                 </button>
               )}
 
-              {/* chat shortcut: back to chat */}
+              {/* chat shortcut */}
               <button
                 type="button"
                 onClick={onClose}
