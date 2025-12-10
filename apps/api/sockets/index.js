@@ -300,21 +300,26 @@ if (!text && attachmentsRaw.length === 0 && !hasCallMeta) {
     });
 
 
-   /* ---------------------------------------------------
-   WebRTC signaling
+  /* ---------------------------------------------------
+   WebRTC signaling (extra debug)
 --------------------------------------------------- */
 ["webrtc:offer", "webrtc:answer", "webrtc:ice"].forEach((evt) => {
-  socket.on(evt, async ({ room, payload } = {}, cb) => {
+  socket.on(evt, async (raw = {}, cb) => {
     await authReady;
 
-    const r = roomName(room) || socket.data.room;
+    // raw is whatever the client sent
+    console.log(`[socket] ${evt} RAW from ${socket.id}:`, raw);
+
+    const r = roomName(raw.room) || socket.data.room;
+    const payload = raw.payload ?? raw;
 
     if (!r || payload == null) {
+      console.warn(`[socket] ${evt} missing room or payload`, { r, hasPayload: !!payload });
       cb?.({ ok: false, error: "room_or_payload_required" });
       return;
     }
 
-    console.log(`[socket] ${evt} from ${socket.id} → room ${r}`, {
+    console.log(`[socket] ${evt} FORWARD to room ${r} from ${socket.id}`, {
       hasPayload: !!payload,
     });
 
@@ -326,6 +331,7 @@ if (!text && attachmentsRaw.length === 0 && !hasCallMeta) {
     cb?.({ ok: true });
   });
 });
+
 
 
     /* ---------------------------------------------------
