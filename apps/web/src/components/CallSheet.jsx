@@ -59,6 +59,9 @@ export default function CallSheet({
   const callerToneRef = useRef(null);
   const incomingToneRef = useRef(null);
 
+  // NEW: stash offer that arrives before receiver taps "Accept"
+  const pendingOfferRef = useRef(null);
+
   function stopAllTones() {
     [callerToneRef, incomingToneRef].forEach((ref) => {
       try {
@@ -110,7 +113,7 @@ export default function CallSheet({
   }, [callType]);
 
   // setup signaling when modal opens
-  useEffect(() => {
+   useEffect(() => {
     if (!open || !room) return;
 
     const sc = new SignalingClient(
@@ -128,22 +131,29 @@ export default function CallSheet({
         incomingToneRef.current = audio;
         audio.play().catch(() => {});
       } catch {}
+
+      // 🔴 NEW: stash incoming offer that may arrive BEFORE user taps Accept
+      sc.on("webrtc:offer", (msg) => {
+        console.log("[CallSheet] stashed incoming offer before accept");
+        pendingOfferRef.current = msg;
+      });
     }
 
-         return () => {
+    return () => {
       try {
         sc.disconnect();
       } catch {}
       setSig(null);
       stopAllTones();
       setAutoStarted(false);
-      setElapsedSeconds(0); // reset duration when modal closes
-      setHasAccepted(false); // 👈 reset accept state
-      setCallFailed(false);  // 👈 reset failure flag
+      setElapsedSeconds(0);
+      setHasAccepted(false);
+      setCallFailed(false);
     };
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, room, role]);
+
 
   // ⏱ duration timer: start counting only when connected
   useEffect(() => {
@@ -295,8 +305,8 @@ export default function CallSheet({
 };
 
 
-    // signaling listeners
-    sig.on("webrtc:offer", async (msg) => {
+       // signaling listeners
+    const handleOffer = async (msg) => {
       try {
         const remoteSdp = msg?.payload || msg; // unwrap payload
         await pcNew.setRemoteDescription(new RTCSessionDescription(remoteSdp));
@@ -308,7 +318,17 @@ export default function CallSheet({
       } catch (e) {
         console.error("[CallSheet] handle offer failed:", e);
       }
-    });
+    };
+
+    sig.on("webrtc:offer", handleOffer);
+
+    // 🔴 NEW: if we already received an offer BEFORE Accept, handle it now
+    if (!asCaller && pendingOfferRef.current) {
+      console.log("[CallSheet] processing stashed offer after accept");
+      handleOffer(pendingOfferRef.current);
+      pendingOfferRef.current = null;
+    }
+
 
   sig.on("webrtc:answer", async (msg) => {
   try {
