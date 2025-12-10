@@ -7,6 +7,7 @@ import {
   getPublicProfileByUid,
   markThreadRead,
   initiateCall,
+  sendChatMessage,
 } from "../lib/api";
 import { useMe } from "../context/MeContext.jsx";
 import ChatPane from "../components/ChatPane.jsx";
@@ -50,7 +51,7 @@ export default function Chat() {
     currentUser?.userId ||
     null;
 
-  const myLabel =
+    const myLabel =
     currentUser?.displayName ||
     currentUser?.fullName ||
     currentUser?.username ||
@@ -60,7 +61,24 @@ export default function Chat() {
 
   // ------------------ CALL HELPERS ------------------ //
 
-   async function handleStartCall(callType = "audio") {
+  // 👇 paste this helper EXACTLY here
+  function buildCallMeta({
+    direction = "outgoing",
+    type = "audio",
+    status = "dialing",
+    callId = null,
+  } = {}) {
+    return {
+      call: {
+        direction,   // "outgoing" | "incoming"
+        type,        // "audio" | "video"
+        status,      // "dialing" | "ringing" | "accepted" | "ended" | "missed" | "cancelled"
+        callId,
+      },
+    };
+  }
+
+  async function handleStartCall(callType = "audio") {
     if (!peerUid) return;
 
     // build meta so receiver sees real caller info
@@ -103,11 +121,31 @@ export default function Chat() {
         callType: ack.callType || callType,
         role: "caller",
       });
+
+      // 🔔 AFTER we successfully start the call, write a call bubble into this DM
+      // so Chat + Inbox have a record of "Voice call (you called)" etc.
+      if (room) {
+        try {
+          await sendChatMessage({
+            room,
+            text: "",
+            meta: buildCallMeta({
+              direction: "outgoing",
+              type: ack.callType || callType,
+              status: "dialing",
+              callId,
+            }),
+          });
+        } catch (err) {
+          console.warn("[chat] could not write call bubble:", err?.message || err);
+        }
+      }
     } catch (e) {
       console.error("start call failed:", e);
       alert("Could not start call. Please try again.");
     }
   }
+
 
 
   function handleCallClose() {

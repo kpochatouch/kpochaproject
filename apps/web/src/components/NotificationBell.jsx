@@ -1,10 +1,11 @@
 // apps/web/src/components/NotificationBell.jsx
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import useNotifications from "../hooks/useNotifications";
 
 export default function NotificationBell() {
   const { items, unread, markAll } = useNotifications();
   const [open, setOpen] = useState(false);
+  const rootRef = useRef(null); // 👈 to detect outside clicks
 
   async function handleToggle() {
     const willOpen = !open;
@@ -20,8 +21,27 @@ export default function NotificationBell() {
     }
   }
 
+  // 👇 close when clicking anywhere outside (uses ClickOutsideLayer)
+  useEffect(() => {
+    function handleGlobalClick(evt) {
+      if (!rootRef.current) return;
+      const originalEvent = evt.detail;
+      const target = originalEvent?.target;
+      if (!target) return;
+
+      // if click is inside the bell or dropdown, ignore
+      if (rootRef.current.contains(target)) return;
+
+      // click outside → close
+      setOpen(false);
+    }
+
+    window.addEventListener("global-click", handleGlobalClick);
+    return () => window.removeEventListener("global-click", handleGlobalClick);
+  }, []);
+
   return (
-    <div className="relative">
+    <div className="relative" ref={rootRef}>
       <button
         onClick={handleToggle}
         type="button"
@@ -46,9 +66,21 @@ export default function NotificationBell() {
               {items.map((n) => {
                 const id = n._id || n.id;
                 const createdAt = n.createdAt ? new Date(n.createdAt) : null;
-                const timeText = createdAt
-                  ? createdAt.toLocaleString()
-                  : "";
+                const timeText = createdAt ? createdAt.toLocaleString() : "";
+
+                // 👇 Always have *something* to show as title
+                const title =
+                  n.title ||
+                  n.type ||
+                  (n.meta && n.meta.label) ||
+                  "Notification";
+
+                // 👇 Try multiple places for the message body
+                let body =
+                  n.body ||
+                  (n.meta &&
+                    (n.meta.preview || n.meta.message || n.meta.text)) ||
+                  n.message;
 
                 return (
                   <div
@@ -57,16 +89,16 @@ export default function NotificationBell() {
                       n.read ? "opacity-80" : "bg-zinc-900/40"
                     }`}
                   >
-                    {n.title && (
-                      <div className="text-[11px] font-semibold mb-0.5">
-                        {n.title}
-                      </div>
-                    )}
-                    {n.body && (
+                    <div className="text-[11px] font-semibold mb-0.5">
+                      {title}
+                    </div>
+
+                    {body && (
                       <div className="text-[11px] text-zinc-300">
-                        {n.body}
+                        {body}
                       </div>
                     )}
+
                     {timeText && (
                       <div className="text-[10px] text-zinc-500 mt-1">
                         {timeText}

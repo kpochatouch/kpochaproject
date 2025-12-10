@@ -44,6 +44,10 @@ export default function CallSheet({
 
   const [micMuted, setMicMuted] = useState(false);
   const [camOff, setCamOff] = useState(mode === "audio");
+  // UI state
+const [fullscreen, setFullscreen] = useState(true); // full by default
+const [pipSwapped, setPipSwapped] = useState(false); // swap local/remote PIP
+
 
   // ⏱ call duration state
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -575,48 +579,73 @@ if (callFailed) {
     peerName && peerName.trim().length ? peerName : "Unknown user";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80">
-      <div className="relative w-full max-w-xl h-full md:h-[520px] md:rounded-2xl md:overflow-hidden bg-[#111] border border-zinc-800">
-        {/* top bar */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 bg-black/60">
-          <div className="flex flex-col">
-            <span className="text-xs text-zinc-400 uppercase tracking-[0.15em]">
-              Kpocha Touch
-            </span>
-            <span className="text-[11px] text-emerald-400">
-              End-to-end encrypted
-            </span>
-          </div>
-          <button
-            className="text-xs px-3 py-1 rounded-full border border-zinc-700 text-zinc-300 hover:bg-zinc-800"
-            onClick={hangup}
-            type="button"
-          >
-            Close
-          </button>
-        </div>
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90">
+    <div
+      className={
+        fullscreen
+          ? "relative w-full h-full bg-black"
+          : "relative w-full max-w-xl h-full md:h-[520px] md:rounded-2xl md:overflow-hidden bg-[#111] border border-zinc-800"
+      }
+    >
 
-        {/* main content */}
-        <div className="relative flex-1 flex flex-col items-center justify-center px-6 py-10 overflow-hidden">
-          {/* video layout */}
-          {mode === "video" && (
-            <>
-              <video
-                ref={remoteRef}
-                autoPlay
-                playsInline
-                className="absolute inset-0 w-full h-full object-cover opacity-80"
-              />
-              <div className="absolute inset-0 bg-black/40" />
-              <video
-                ref={localRef}
-                autoPlay
-                playsInline
-                muted
-                className="absolute bottom-24 right-4 w-28 h-40 rounded-2xl border border-zinc-300 shadow-lg object-cover bg-black"
-              />
-            </>
-          )}
+     {/* top bar */}
+<div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 bg-black/70">
+  <div className="flex flex-col">
+    <span className="text-xs text-zinc-400 uppercase tracking-[0.15em]">
+      Kpocha Touch
+    </span>
+    <span className="text-[11px] text-emerald-400">
+      End-to-end encrypted
+    </span>
+  </div>
+
+  <div className="flex items-center gap-2">
+    <button
+      className="text-[11px] px-2 py-1 rounded-full border border-zinc-700 text-zinc-300 hover:bg-zinc-800 hidden md:inline-flex"
+      type="button"
+      onClick={() => setFullscreen((v) => !v)}
+    >
+      {fullscreen ? "Mini view" : "Full view"}
+    </button>
+
+    <button
+      className="text-xs px-3 py-1 rounded-full border border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+      onClick={hangup}
+      type="button"
+    >
+      Close
+    </button>
+  </div>
+</div>
+
+
+    {/* video layout */}
+{mode === "video" && (
+  <>
+    {/* BIG video – can be remote or local depending on pipSwapped */}
+    <video
+      ref={pipSwapped ? localRef : remoteRef}
+      autoPlay
+      playsInline
+      className="absolute inset-0 w-full h-full object-cover"
+    />
+
+    {/* Soft gradient at bottom for text, not heavy dark overlay */}
+    <div className="pointer-events-none absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-black via-black/40 to-transparent" />
+
+    {/* Small PIP – tap to swap */}
+    <video
+      ref={pipSwapped ? remoteRef : localRef}
+      autoPlay
+      playsInline
+      muted
+      onClick={() => setPipSwapped((v) => !v)}
+      className="absolute top-24 right-4 w-28 h-40 rounded-2xl border border-zinc-300 shadow-lg object-cover bg-black cursor-pointer"
+    />
+  </>
+)}
+      <div className="relative z-10 flex flex-col justify-between h-full">
+      
 
           {/* audio layout */}
           {mode === "audio" && (
@@ -664,10 +693,9 @@ if (callFailed) {
             <div className="px-8 pb-8 pt-4 bg-black/70 border-t border-zinc-800 flex flex-col gap-4">
               {/* accept / decline for receiver (before connected), hangup otherwise */}
     <div className="flex items-center justify-center gap-10">
-  {/* Receiver, before they accept → show Accept / Decline only */}
   {!isCaller && !hasConnected && !hasAccepted && !callFailed ? (
     <>
-      {/* Decline (red) */}
+      {/* Decline (red) – same icon for both */}
       <button
         className="flex items-center justify-center w-14 h-14 rounded-full bg-rose-600 text-white text-xl shadow-lg"
         onClick={declineIncoming}
@@ -676,18 +704,17 @@ if (callFailed) {
         📞
       </button>
 
-      {/* Accept (green) */}
+      {/* Accept (green) – DIFFERENT for audio vs video */}
       <button
         className="flex items-center justify-center w-14 h-14 rounded-full bg-emerald-500 text-black text-xl shadow-lg disabled:opacity-50"
         onClick={acceptIncoming}
         disabled={starting}
         type="button"
       >
-        📞
+        {mode === "video" ? "🎥" : "📞"}
       </button>
     </>
   ) : (
-    // Caller OR receiver after accepting → single red hangup
     <button
       className="flex items-center justify-center w-14 h-14 rounded-full bg-rose-600 text-white text-xl shadow-lg mx-auto"
       onClick={hangup}
@@ -697,6 +724,7 @@ if (callFailed) {
     </button>
   )}
 </div>
+
 
           {/* real mic / camera / chat buttons */}
           <div className="flex items-center justify-center gap-6 text-zinc-400 text-xl">

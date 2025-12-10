@@ -41,6 +41,35 @@ function formatTime(ts) {
   }).format(d);
 }
 
+function summarizeCallForPreview(callMeta = {}, currentUid) {
+  const typeLabel = callMeta.type === "video" ? "Video call" : "Voice call";
+  const status = callMeta.status || "";
+  const direction =
+    callMeta.direction ||
+    (callMeta.fromUid && currentUid && callMeta.fromUid === currentUid
+      ? "outgoing"
+      : "incoming");
+
+  if (status === "missed") {
+    return direction === "outgoing"
+      ? `Missed ${typeLabel} (you called)`
+      : `Missed ${typeLabel}`;
+  }
+
+  if (status === "ended" || status === "accepted") {
+    return direction === "outgoing"
+      ? `${typeLabel} (you called)`
+      : `${typeLabel} (they called you)`;
+  }
+
+  if (status === "dialing" || status === "ringing") {
+    return `${typeLabel} · calling…`;
+  }
+
+  return typeLabel;
+}
+
+
 function normalizeThread(raw = {}, currentUid) {
   const peerUid =
     raw.peerUid ||
@@ -54,14 +83,30 @@ function normalizeThread(raw = {}, currentUid) {
   const room = raw.room || raw.roomId || raw.threadId || null;
 
   const lastMessage = raw.lastMessage || raw.last || {};
-  const lastBody =
-    raw.lastBody ||
-    lastMessage.body ||
-    lastMessage.text ||
-    (lastMessage.attachments && lastMessage.attachments.length ? "[Attachment]" : "");
+  const lastMeta = lastMessage.meta || raw.lastMeta || {};
+
+  let lastBody;
+
+  if (lastMeta && lastMeta.call) {
+    // 🔔 this thread’s last item is a call bubble
+    lastBody = summarizeCallForPreview(lastMeta.call, currentUid);
+  } else {
+    lastBody =
+      raw.lastBody ||
+      lastMessage.body ||
+      lastMessage.text ||
+      (lastMessage.attachments && lastMessage.attachments.length
+        ? "[Attachment]"
+        : "");
+  }
 
   const lastAt =
-    raw.lastAt || lastMessage.at || lastMessage.createdAt || lastMessage.ts || raw.updatedAt || null;
+    raw.lastAt ||
+    lastMessage.at ||
+    lastMessage.createdAt ||
+    lastMessage.ts ||
+    raw.updatedAt ||
+    null;
 
   const unread =
     typeof raw.unread === "number"
@@ -78,7 +123,8 @@ function normalizeThread(raw = {}, currentUid) {
     raw.peerName ||
     "Unknown user";
 
-  const avatarUrl = peerProfile.avatarUrl || peerProfile.photoUrl || raw.avatarUrl || "";
+  const avatarUrl =
+    peerProfile.avatarUrl || peerProfile.photoUrl || raw.avatarUrl || "";
 
   return {
     peerUid,
@@ -90,6 +136,7 @@ function normalizeThread(raw = {}, currentUid) {
     avatarUrl,
   };
 }
+
 
 export default function Inbox() {
   const navigate = useNavigate();
@@ -218,8 +265,18 @@ useEffect(() => {
         const peerUid = fromUid === myUid ? toUid : fromUid;
         if (!peerUid) return;
 
-        const body =
-          msg.body || msg.text || (msg.attachments && msg.attachments.length ? "[Attachment]" : "");
+        const meta = msg.meta || {};
+let body;
+
+if (meta.call) {
+  body = summarizeCallForPreview(meta.call, myUid);
+} else {
+  body =
+    msg.body ||
+    msg.text ||
+    (msg.attachments && msg.attachments.length ? "[Attachment]" : "");
+}
+
         const at = msg.at || msg.ts || msg.createdAt || Date.now();
 
         setThreads((prev) => {

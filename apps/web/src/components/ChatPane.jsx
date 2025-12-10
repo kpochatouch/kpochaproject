@@ -880,18 +880,21 @@ const callLabel = isCallMessage ? formatCallLabel(callInfo) : "";
                     </div>
                   )}
 
-                  {isCallMessage ? (
-                  <div className="flex items-center gap-2 text-sm">
-                    <span>{callInfo.type === "video" ? "📹" : "📞"}</span>
-                    <span>{callLabel}</span>
-                  </div>
-                ) : (
-                  m.body && (
-                    <div className="text-sm whitespace-pre-wrap break-words">
-                      {m.body}
-                    </div>
-                  )
-                )}
+            {isCallMessage ? (
+      <div className="w-full flex justify-center my-2">
+        <div className="px-4 py-1.5 rounded-full bg-zinc-800 text-zinc-200 text-xs flex items-center gap-2 border border-zinc-700">
+          <span>{callInfo.type === "video" ? "📹" : "📞"}</span>
+          <span>{callLabel}</span>
+        </div>
+      </div>
+    ) : (
+      m.body && (
+        <div className="text-sm whitespace-pre-wrap break-words">
+          {m.body}
+        </div>
+      )
+    )}
+
 
 
                   {attachments.length > 0 && (
