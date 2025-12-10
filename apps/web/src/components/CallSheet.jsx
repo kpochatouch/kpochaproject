@@ -602,16 +602,18 @@ export default function CallSheet({
           style={{ height: "460px" }} // 👈 explicit height, ignores external flex
         >
           {/* VIDEO LAYOUT */}
-          {mode === "video" && (
-            <>
-              {/* big view */}
-              <video
-                ref={pipFlipped ? localRef : remoteRef}
-                autoPlay
-                playsInline
-                className="absolute inset-0 w-full h-full object-cover opacity-90"
-              />
-              <div className="absolute inset-0 bg-black/35" />
+    {mode === "video" && (
+  <>
+    {/* big view (also tap to swap) */}
+    <video
+      ref={pipFlipped ? localRef : remoteRef}
+      autoPlay
+      playsInline
+      onClick={() => setPipFlipped((v) => !v)}   // 👈 tap big view to swap
+      className="absolute inset-0 w-full h-full object-cover opacity-90"
+    />
+    <div className="absolute inset-0 bg-black/35" />
+
 
               {/* PiP bottom-right INSIDE video */}
               <video
@@ -624,7 +626,7 @@ export default function CallSheet({
               />
 
               {/* timer / status at bottom centre */}
-              <div className="absolute bottom-24 left-0 right-0 flex justify-center z-20">
+              <div className="absolute bottom-32 left-0 right-0 flex justify-center z-20">
                 <span className="px-3 py-1 rounded-full bg-black/70 text-xs text-zinc-100">
                   {hasConnected
                     ? formatDuration(elapsedSeconds)
@@ -673,7 +675,7 @@ export default function CallSheet({
           )}
 
           {/* bottom controls overlay (on top of video / audio) */}
-          <div className="absolute inset-x-0 bottom-3 flex flex-col items-center gap-3 z-30">
+          <div className="absolute inset-x-0 bottom-4 flex flex-col items-center gap-3 z-30">
             <div className="flex items-center justify-center gap-10">
               {!isCaller && !hasConnected && !hasAccepted && !callFailed ? (
                 <>
