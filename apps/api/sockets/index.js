@@ -99,6 +99,7 @@ export default function attachSockets(httpServer) {
      Connection / Auth
   --------------------------------------------------- */
   io.on("connection", (socket) => {
+    console.log("[sockets] client connected", socket.id);
     const hinted =
       socket.handshake.auth?.uid ||
       socket.handshake.query?.uid ||
@@ -113,6 +114,7 @@ export default function attachSockets(httpServer) {
           socket.handshake.auth?.Authorization ||
           socket.handshake.query?.token ||
           null;
+
 
         let uid = hinted;
 
