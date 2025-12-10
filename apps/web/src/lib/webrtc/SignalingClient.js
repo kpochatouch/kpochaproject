@@ -132,29 +132,34 @@ export default class SignalingClient {
     const url = `${root}/api/webrtc/ice`;
 
     try {
-      const res = await fetch(url);
-      if (res.ok) {
-        const data = await res.json();
-        if (data && Array.isArray(data.iceServers) && data.iceServers.length) {
-          return data.iceServers;
-        }
-      } else {
-        try {
-          const text = await res.text();
-          console.warn(
-            "[getIceServers] server returned non-ok:",
-            res.status,
-            text
-          );
-        } catch (e) {
-          console.warn(
-            "[getIceServers] server returned non-ok status:",
-            res.status
-          );
-        }
+          const res = await fetch(url);
+    if (res.ok) {
+      const data = await res.json();
+
+      // 🔍 ADD THIS BLOCK
+      if (data && Array.isArray(data.iceServers) && data.iceServers.length) {
+        console.log("[getIceServers] using backend ICE:", data.iceServers);
+        return data.iceServers;
       }
-    } catch (err) {
-      console.warn("[getIceServers] backend request failed:", err?.message || err);
+      // 🔍 END ADDED BLOCK
+
+    } else {
+      try {
+        const text = await res.text();
+        console.warn(
+          "[getIceServers] server returned non-ok:",
+          res.status,
+          text
+        );
+      } catch (e) {
+        console.warn(
+          "[getIceServers] server returned non-ok status:",
+          res.status
+        );
+      }
+    }
+    } catch (e) {
+      console.warn("[getIceServers] fetch failed:", e?.message || e);
     }
 
     // Fallback: Google STUN (safe, no credentials)

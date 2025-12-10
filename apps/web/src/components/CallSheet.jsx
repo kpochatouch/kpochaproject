@@ -269,24 +269,31 @@ export default function CallSheet({
       }
     };
 
-        pcNew.onconnectionstatechange = () => {
-      const st = pcNew.connectionState;
-      if (st === "connected") {
-        // only run once per call
-        setHasConnected((prev) => {
-          if (!prev) {
-            stopAllTones();
-            safeUpdateStatus("accepted", {
-              connectedAt: new Date().toISOString(),
-            });
-          }
-          return true;
+    pcNew.onconnectionstatechange = () => {
+  const st = pcNew.connectionState;
+
+  console.log("[CallSheet] connectionState change:", {
+    connectionState: pcNew.connectionState,
+    iceConnectionState: pcNew.iceConnectionState,
+    signalingState: pcNew.signalingState,
+  });
+
+  if (st === "connected") {
+    setHasConnected((prev) => {
+      if (!prev) {
+        stopAllTones();
+        safeUpdateStatus("accepted", {
+          connectedAt: new Date().toISOString(),
         });
       }
-      if (["disconnected", "failed", "closed"].includes(st)) {
-        setHasConnected(false); // 👈 not connected anymore
-      }
-    };
+      return true;
+    });
+  }
+  if (["disconnected", "failed", "closed"].includes(st)) {
+    setHasConnected(false);
+  }
+};
+
 
     // signaling listeners
     sig.on("webrtc:offer", async (msg) => {
