@@ -211,12 +211,16 @@ export default function attachSockets(httpServer) {
     if (!r) return ack?.({ ok: false, error: "room_required" });
 
     const text = msg.text ?? msg.message ?? msg.body ?? "";
-    const meta = msg.meta || {};
-    const attachmentsRaw = Array.isArray(meta.attachments) ? meta.attachments : [];
+const meta = msg.meta || {};
+const attachmentsRaw = Array.isArray(meta.attachments) ? meta.attachments : [];
 
-    if (!text && attachmentsRaw.length === 0) {
-      return ack?.({ ok: false, error: "message_empty" });
-    }
+// allow pure meta.call messages for call bubbles
+const hasCallMeta = !!meta.call;
+
+if (!text && attachmentsRaw.length === 0 && !hasCallMeta) {
+  return ack?.({ ok: false, error: "message_empty" });
+}
+
 
     const fromUid = socket.data.uid || msg.fromUid || hinted || socket.id;
 
@@ -294,25 +298,33 @@ export default function attachSockets(httpServer) {
     });
 
 
-    /* ---------------------------------------------------
-       WebRTC signaling
-    --------------------------------------------------- */
-    ["webrtc:offer", "webrtc:answer", "webrtc:ice"].forEach((evt) => {
-      socket.on(evt, async ({ room, payload } = {}, cb) => {
-        await authReady;
-        const r = roomName(room) || socket.data.room;
-        if (!r || payload == null) {
-          return cb?.({ ok: false, error: "room_or_payload_required" });
-        }
+   /* ---------------------------------------------------
+   WebRTC signaling
+--------------------------------------------------- */
+["webrtc:offer", "webrtc:answer", "webrtc:ice"].forEach((evt) => {
+  socket.on(evt, async ({ room, payload } = {}, cb) => {
+    await authReady;
 
-        socket.to(r).emit(evt, {
-          payload,
-          from: socket.data.uid || hinted || socket.id,
-        });
+    const r = roomName(room) || socket.data.room;
 
-        cb?.({ ok: true });
-      });
+    if (!r || payload == null) {
+      cb?.({ ok: false, error: "room_or_payload_required" });
+      return;
+    }
+
+    console.log(`[socket] ${evt} from ${socket.id} → room ${r}`, {
+      hasPayload: !!payload,
     });
+
+    socket.to(r).emit(evt, {
+      payload,
+      from: socket.data.uid || hinted || socket.id,
+    });
+
+    cb?.({ ok: true });
+  });
+});
+
 
     /* ---------------------------------------------------
        Call: initiate (delegated to callService)

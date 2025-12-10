@@ -276,8 +276,10 @@ export default function CallSheet({
         } catch (e) {
           console.warn("[CallSheet] emit ice failed:", e?.message || e);
         }
-      }
-    };
+  } else {
+    console.log("[CallSheet] ICE gathering complete");
+  }
+};
 
     pcNew.onconnectionstatechange = () => {
   const st = pcNew.connectionState;
@@ -351,6 +353,7 @@ export default function CallSheet({
       try {
         const cand = msg?.payload || msg; // unwrap payload
         if (cand) {
+          console.log("[CallSheet] remote ICE candidate:", cand.type, cand.protocol);
           await pcNew.addIceCandidate(cand);
         }
       } catch (e) {
