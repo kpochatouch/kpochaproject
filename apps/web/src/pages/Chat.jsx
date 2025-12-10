@@ -21,6 +21,7 @@ export default function Chat() {
   const navigate = useNavigate();
   const query = useQuery();
   const { me: currentUser, loading: meLoading } = useMe();
+    const startCallType = query.get("call"); // "audio" | "video" | null
 
   const [socket, setSocket] = useState(null);
   const [room, setRoom] = useState(null);
@@ -292,7 +293,20 @@ export default function Chat() {
     };
   }, [socket]);
 
+    // 🔥 Auto-start call when URL has ?call=audio or ?call=video
+  useEffect(() => {
+    if (!startCallType) return;        // no call param → do nothing
+    if (!peerUid) return;              // no peer to call
+    if (!room) return;                 // DM room not ready yet
+    if (!currentUser || !myUid) return;
 
+    const id = setTimeout(() => {
+      handleStartCall(startCallType);
+    }, 300);
+
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startCallType, peerUid, room, currentUser, myUid]);
 
   // ------------------ GUARDS ------------------ //
 

@@ -1,5 +1,5 @@
 // apps/web/src/pages/BookingChat.jsx
-import { useParams } from "react-router-dom";
+import { useParams, useLocation } from "react-router-dom";
 import { useEffect, useMemo, useState } from "react";
 import { api, connectSocket, initiateCall } from "../lib/api";
 import { useMe } from "../context/MeContext.jsx";
@@ -20,7 +20,16 @@ function formatMoney(kobo = 0) {
 
 export default function BookingChat() {
   const { bookingId } = useParams();
+  const location = useLocation();
+
+  // ?call=audio | ?call=video | null
+  const startCallType = useMemo(
+    () => new URLSearchParams(location.search).get("call"),
+    [location.search]
+  );
+
   const { me } = useMe();
+
 
   // 🔐 who am I?
   const myUid =
@@ -205,6 +214,20 @@ export default function BookingChat() {
       } catch {}
     };
   }, [socket]);
+
+    // 🔥 Auto-start call when URL has ?call=audio or ?call=video
+  useEffect(() => {
+    if (!startCallType) return; // no call param → do nothing
+    if (!peerUid) return;       // no peer to call yet
+    if (!room) return;          // booking chat room not ready yet
+    if (!myUid || !me) return;  // user not ready
+
+    const id = setTimeout(() => {
+      handleStartCall(startCallType);
+    }, 300);
+
+    return () => clearTimeout(id);
+  }, [startCallType, peerUid, room, myUid, me]);
 
   // ---- Start a call through backend (like DM) ----
   async function handleStartCall(nextType = "audio") {

@@ -197,6 +197,43 @@ export default function CallSheet({
     return () => clearTimeout(timeoutId);
   }, [open, peerAccepted, hasAccepted, hasConnected]);
 
+    // 🔔 React to backend call:status events for this call
+  useEffect(() => {
+    if (!open || !callId) return;
+
+    const unsubscribe = registerSocketHandler("call:status", (evt) => {
+      if (!evt) return;
+      const { callId: evtId, status } = evt;
+
+      // ignore other calls
+      if (!evtId || evtId !== callId) return;
+
+      setPeerStatus(status || null);
+
+      // as soon as backend says "accepted", we know peer has picked
+      if (status === "accepted") {
+        stopAllTones();
+        setPeerAccepted(true);
+      }
+
+      // if remote ends / cancels / declines, close our sheet too
+      if (
+        ["ended", "cancelled", "declined", "missed", "failed"].includes(
+          status
+        )
+      ) {
+        cleanupPeer();
+        onClose?.();
+      }
+    });
+
+    return () => {
+      try {
+        unsubscribe && unsubscribe();
+      } catch {}
+    };
+  }, [open, callId, onClose]);
+
 
   async function setupPeerConnection(asCaller) {
     if (!sig || !room) return null;
@@ -231,43 +268,6 @@ export default function CallSheet({
         }
       }
     };
-
-      // 🔔 React to backend call:status events for this call
-  useEffect(() => {
-    if (!open || !callId) return;
-
-    // subscribe via global socket helper
-    const unsubscribe = registerSocketHandler("call:status", (evt) => {
-      if (!evt) return;
-      const { callId: evtId, status } = evt;
-
-      // ignore other calls
-      if (!evtId || evtId !== callId) return;
-
-      setPeerStatus(status || null);
-
-      // ✅ as soon as backend says "accepted", we know peer has picked
-      if (status === "accepted") {
-        stopAllTones();       // stop caller ringtone immediately
-        setPeerAccepted(true); // flip UI from "Calling…" → "Connecting…"
-      }
-
-      // if remote ends / cancels / declines, close our sheet too
-      if (["ended", "cancelled", "declined", "missed", "failed"].includes(status)) {
-        // we already send a summary when *we* hang up,
-        // but if the other side ended first, just clean up + close.
-        cleanupPeer();
-        onClose?.();
-      }
-    });
-
-    return () => {
-      try {
-        unsubscribe && unsubscribe();
-      } catch {}
-    };
-  }, [open, callId, onClose]);
-
 
         pcNew.onconnectionstatechange = () => {
       const st = pcNew.connectionState;
@@ -393,11 +393,19 @@ export default function CallSheet({
     }
   }
 
-  // ---- caller: start as soon as sheet opens ----
+    // ---- caller: start as soon as sheet opens ----
   async function startCaller() {
     if (!sig || !room) return;
     setStarting(true);
     try {
+      console.log("[CallSheet] startCaller()", {
+        open,
+        room,
+        role,
+        callId,
+        callType,
+      });
+
       if (!callerToneRef.current) {
         try {
           const audio = new Audio("/sound/caller-tune.mp3");
@@ -433,10 +441,18 @@ export default function CallSheet({
 
   // ---- receiver actions ----
 
-    async function acceptIncoming() {
+     async function acceptIncoming() {
     if (!sig || !room) return;
     setStarting(true);
     try {
+      console.log("[CallSheet] acceptIncoming()", {
+        open,
+        room,
+        role,
+        callId,
+        callType,
+      });
+
       stopAllTones();
       setHasAccepted(true);              // 👈 receiver has accepted
       await safeUpdateStatus("accepted");
@@ -454,6 +470,7 @@ export default function CallSheet({
       setStarting(false);
     }
   }
+
 
   async function declineIncoming() {
     stopAllTones();
