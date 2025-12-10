@@ -549,30 +549,27 @@ export default function CallSheet({
     });
   }
 
-  // ---------- render ----------
+    // ---------- render ----------
 
   if (!open || !room) return null;
 
-const isCaller = role === "caller";
+  const isCaller = role === "caller";
 
-// WhatsApp-like status text
-let statusText = "";
-if (callFailed) {
-  statusText = "Call failed";
-} else if (hasConnected) {
-  statusText = "Connected";
-} else if (starting) {
-  statusText = "Connecting…";
-} else if (isCaller && peerAccepted) {
-  // 👈 caller knows peer accepted, but WebRTC not fully connected yet
-  statusText = "Connecting…";
-} else if (!isCaller && hasAccepted) {
-  // receiver has tapped Accept but WebRTC not fully connected yet
-  statusText = "Connecting…";
-} else {
-  statusText = isCaller ? "Calling…" : "Incoming call";
-}
-
+  // WhatsApp-like status text
+  let statusText = "";
+  if (callFailed) {
+    statusText = "Call failed";
+  } else if (hasConnected) {
+    statusText = "Connected";
+  } else if (starting) {
+    statusText = "Connecting…";
+  } else if (isCaller && peerAccepted) {
+    statusText = "Connecting…";
+  } else if (!isCaller && hasAccepted) {
+    statusText = "Connecting…";
+  } else {
+    statusText = isCaller ? "Calling…" : "Incoming call";
+  }
 
   const displayPeerName =
     peerName && peerName.trim().length ? peerName : "Unknown user";
@@ -599,36 +596,44 @@ if (callFailed) {
           </button>
         </div>
 
-        {/* main content */}
-        <div className="relative flex-1 flex flex-col items-center justify-center px-6 py-10 overflow-hidden">
-          {/* video layout */}
-      {mode === "video" && (
-  <>
-    {/* Primary big view (remote by default, local when flipped) */}
-    <video
-      ref={pipFlipped ? localRef : remoteRef}
-      autoPlay
-      playsInline
-      className="absolute inset-0 w-full h-full object-cover opacity-90"
-    />
-    <div className="absolute inset-0 bg-black/35" />
+        {/* body: video or audio */}
+        <div className="relative flex-1 bg-black overflow-hidden">
+          {/* VIDEO LAYOUT */}
+          {mode === "video" && (
+            <>
+              {/* primary view (remote by default, local when flipped) */}
+              <video
+                ref={pipFlipped ? localRef : remoteRef}
+                autoPlay
+                playsInline
+                className="absolute inset-0 w-full h-full object-cover opacity-90"
+              />
+              <div className="absolute inset-0 bg-black/35" />
 
-    {/* PIP view (tap to swap) */}
-    <video
-      ref={pipFlipped ? remoteRef : localRef}
-      autoPlay
-      playsInline
-      muted
-      onClick={() => setPipFlipped((v) => !v)}
-      className="absolute bottom-24 right-4 w-28 h-40 md:w-32 md:h-44 rounded-2xl border border-zinc-300 shadow-lg object-cover bg-black cursor-pointer"
-    />
-  </>
-)}
+              {/* PiP bottom-right INSIDE the video, tap to swap */}
+              <video
+                ref={pipFlipped ? remoteRef : localRef}
+                autoPlay
+                playsInline
+                muted
+                onClick={() => setPipFlipped((v) => !v)}
+                className="absolute bottom-24 right-4 w-28 h-40 md:w-32 md:h-44 rounded-2xl border border-zinc-300 shadow-lg object-cover bg-black cursor-pointer"
+              />
 
+              {/* timer / status at bottom centre */}
+              <div className="absolute bottom-24 left-0 right-0 flex justify-center z-20">
+                <span className="px-3 py-1 rounded-full bg-black/70 text-xs text-zinc-100">
+                  {hasConnected
+                    ? formatDuration(elapsedSeconds)
+                    : statusText}
+                </span>
+              </div>
+            </>
+          )}
 
-          {/* audio layout */}
+          {/* AUDIO LAYOUT (unchanged style) */}
           {mode === "audio" && (
-            <div className="flex flex-col items-center">
+            <div className="flex flex-col items-center justify-center h-full">
               <div className="w-32 h-32 rounded-full mb-4 border-4 border-emerald-500/60 shadow-[0_0_40px_rgba(16,185,129,0.4)] flex items-center justify-center overflow-hidden bg-zinc-900">
                 {peerAvatar ? (
                   <img
@@ -642,34 +647,30 @@ if (callFailed) {
                   </span>
                 )}
               </div>
+
               {/* hidden video tags so audio tracks still attach */}
               <div className="w-0 h-0 overflow-hidden">
                 <video ref={localRef} autoPlay playsInline muted />
                 <video ref={remoteRef} autoPlay playsInline />
               </div>
+
+              {/* name + timer / status for audio only */}
+              <div className="mt-4 flex flex-col items-center gap-1">
+                <span className="text-lg md:text-2xl font-semibold text-zinc-50">
+                  {displayPeerName}
+                </span>
+                <span className="text-sm text-zinc-300 mt-1">
+                  {hasConnected ? formatDuration(elapsedSeconds) : statusText}
+                </span>
+                <span className="text-[11px] text-zinc-500 mt-1">
+                  Voice call • {isCaller ? "You are calling" : "Incoming"}
+                </span>
+              </div>
             </div>
           )}
 
-          {/* centre text */}
-          <div className="relative z-10 flex flex-col items-center gap-1 mt-4">
-            <span className="text-lg md:text-2xl font-semibold text-zinc-50">
-             {displayPeerName}
-            </span>
-
-            {/* show duration once connected, otherwise show status text */}
-            <span className="text-sm text-zinc-300 mt-1">
-              {hasConnected ? formatDuration(elapsedSeconds) : statusText}
-            </span>
-
-            <span className="text-[11px] text-zinc-500 mt-1">
-              {mode === "audio" ? "Voice call" : "Video call"} •{" "}
-              {isCaller ? "You are calling" : "Incoming"}
-            </span>
-          </div>
-        </div>
-
-                    {/* bottom controls – overlay at bottom of card */}
-          <div className="absolute bottom-6 left-0 right-0 flex flex-col items-center gap-4 px-8">
+          {/* bottom controls overlay (sits ON the video / audio) */}
+          <div className="absolute inset-x-0 bottom-3 flex flex-col items-center gap-3 z-30">
             {/* accept / decline for receiver (before connected), hangup otherwise */}
             <div className="flex items-center justify-center gap-10">
               {!isCaller && !hasConnected && !hasAccepted && !callFailed ? (
@@ -742,7 +743,9 @@ if (callFailed) {
               </button>
             </div>
           </div>
+        </div>
       </div>
     </div>
   );
 }
+
