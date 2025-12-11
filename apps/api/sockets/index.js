@@ -95,6 +95,41 @@ export default function attachSockets(httpServer) {
     console.warn("[sockets] setGetIO failed:", e?.message || e);
   }
 
+    // ✅ NEW: presence-aware notification rule:
+  // if the recipient is already in the chat room, skip creating a DB notification.
+  try {
+    if (chatService?.setShouldNotifyFn) {
+      chatService.setShouldNotifyFn(({ room, fromUid, toUid }) => {
+        // no room or no recipient → can't reason, default: notify
+        if (!room || !toUid) return true;
+
+        const r = String(room);
+        const adapter = ioRef?.sockets?.adapter;
+        if (!adapter) return true;
+
+        const sids = adapter.rooms.get(r);
+        if (!sids || !sids.size) return true;
+
+        for (const sid of sids) {
+          const s = ioRef.sockets.sockets.get(sid);
+          if (!s) continue;
+          const uid = s.data?.uid;
+          // 👇 if the recipient has any socket currently joined to this room,
+          // they are "present" in that chat → do NOT create notification
+          if (uid && String(uid) === String(toUid)) {
+            return false; // skip notification
+          }
+        }
+
+        // recipient not in this room → we SHOULD notify
+        return true;
+      });
+    }
+  } catch (e) {
+    console.warn("[sockets] setShouldNotifyFn failed:", e?.message || e);
+  }
+
+
   /* ---------------------------------------------------
      Connection / Auth
   --------------------------------------------------- */

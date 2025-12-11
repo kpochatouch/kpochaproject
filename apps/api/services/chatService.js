@@ -33,6 +33,15 @@ function getIO() {
   }
 }
 
+/* ✅ NEW: presence-aware notification hook
+   sockets/index.js will register a function here.
+   It should return true = create notification, false = skip. */
+let _shouldNotifyFn = null;
+export function setShouldNotifyFn(fn) {
+  _shouldNotifyFn = typeof fn === "function" ? fn : null;
+}
+
+
 function userRoom(uid) {
   return `user:${String(uid)}`;
 }
@@ -253,6 +262,15 @@ export async function saveMessage({
     console.warn("[chatService] emit chat:message failed:", e?.message || e);
   }
 
+    const trimmedBody = String(body || "").trim();
+  const bodyPreview =
+    trimmedBody.length > 0
+      ? trimmedBody.slice(0, 140)
+      : payload?.attachments && payload.attachments.length
+      ? "[Attachment]"
+      : "";
+
+
   // 4) if DM -> notify recipient (via Notification + dm:incoming)
   try {
     // DM rooms expected to be "dm:<uidA>:<uidB>"
@@ -266,26 +284,51 @@ export async function saveMessage({
         const realRecipient = toUid || recipient || null;
 
         if (realRecipient && realRecipient !== fromUid) {
-          // create a notification record for the recipient
+          // 🔍 decide if we should create a notification at all
+          let shouldNotify = true;
           try {
-            await createNotification({
-              toUid: realRecipient,
-              fromUid,
-              type: "chat_message",
-              data: {
+            if (typeof _shouldNotifyFn === "function") {
+              shouldNotify = _shouldNotifyFn({
                 room,
                 fromUid,
-                bodyPreview: (body || "").slice(0, 140),
-              },
-            });
+                toUid: realRecipient,
+              });
+            }
           } catch (e) {
             console.warn(
-              "[chatService] createNotification(chat_message) failed:",
+              "[chatService] _shouldNotifyFn failed (dm):",
               e?.message || e
             );
           }
 
-          // also emit a DM-specific incoming event
+          if (shouldNotify) {
+            try {
+              await createNotification({
+                toUid: realRecipient,
+                fromUid,
+                type: "chat_message",
+                title: "New message",
+                body:
+                  trimmedBody ||
+                  (payload?.attachments && payload.attachments.length
+                    ? "[Attachment]"
+                    : "[New message]"),
+                data: {
+                  room,
+                  fromUid,
+                  peerUid: fromUid, // 👈 so frontend knows who to open chat with
+                  bodyPreview,
+                },
+              });
+            } catch (e) {
+              console.warn(
+                "[chatService] createNotification(chat_message) failed:",
+                e?.message || e
+              );
+            }
+          }
+
+          // also emit a DM-specific incoming event (even if we skipped notification)
           try {
             const io = getIO();
             io?.to(userRoom(realRecipient)).emit("dm:incoming", {
@@ -300,20 +343,50 @@ export async function saveMessage({
         }
       }
     } else if (toUid) {
-      // not a dm room, but toUid provided (one-to-one); still notify
+      // not a dm room, but toUid provided (one-to-one)
+      let shouldNotify = true;
       try {
-        await createNotification({
-          toUid,
-          fromUid,
-          type: "chat_message",
-          data: { room, fromUid, bodyPreview: (body || "").slice(0, 140) },
-        });
+        if (typeof _shouldNotifyFn === "function") {
+          shouldNotify = _shouldNotifyFn({
+            room,
+            fromUid,
+            toUid,
+          });
+        }
       } catch (e) {
         console.warn(
-          "[chatService] createNotification(chat_message) failed:",
+          "[chatService] _shouldNotifyFn failed (toUid):",
           e?.message || e
         );
       }
+
+      if (shouldNotify) {
+        try {
+          await createNotification({
+            toUid,
+            fromUid,
+            type: "chat_message",
+            title: "New message",
+            body:
+              trimmedBody ||
+              (payload?.attachments && payload.attachments.length
+                ? "[Attachment]"
+                : "[New message]"),
+            data: {
+              room,
+              fromUid,
+              peerUid: fromUid,
+              bodyPreview,
+            },
+          });
+        } catch (e) {
+          console.warn(
+            "[chatService] createNotification(chat_message) failed:",
+            e?.message || e
+          );
+        }
+      }
+
       try {
         const io = getIO();
         io?.to(userRoom(toUid)).emit("dm:incoming", {
@@ -323,7 +396,10 @@ export async function saveMessage({
           at: payload.createdAt,
         });
       } catch (e) {
-        console.warn("[chatService] emit dm:incoming (toUid flow) failed:", e?.message || e);
+        console.warn(
+          "[chatService] emit dm:incoming (toUid flow) failed:",
+          e?.message || e
+        );
       }
     }
   } catch (e) {
@@ -332,6 +408,7 @@ export async function saveMessage({
 
   return { ok: true, existing: false, message: payload };
 }
+
 
 /**
  * getMessages(room, { limit = 50, before = null })

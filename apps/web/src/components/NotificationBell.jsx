@@ -1,11 +1,9 @@
 // apps/web/src/components/NotificationBell.jsx
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import useNotifications from "../hooks/useNotifications";
 import { markThreadRead, markRoomRead } from "../lib/api";
 
-export default function NotificationBell() {
-  const { items, unread, markAll, markRead } = useNotifications();
+export default function NotificationBell({ items, unread, markAll, markRead }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef(null);
   const navigate = useNavigate();

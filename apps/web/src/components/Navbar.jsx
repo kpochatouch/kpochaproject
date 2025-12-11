@@ -16,7 +16,7 @@ export default function Navbar() {
 
   // new: get unread from the shared notifications hook (lightweight)
   // This keeps the small chat/inbox unread bubble in sync with the bell
-  const { unread = 0 } = useNotifications();
+  const { items, unread = 0, markAll, markRead } = useNotifications();
 
   // watch firebase auth → keep token in localStorage
   useEffect(() => {
@@ -162,7 +162,14 @@ export default function Navbar() {
           )}
 
           {/* notification bell + signout */}
-          {token && <NotificationBell />}
+          {token && (
+            <NotificationBell
+              items={items}
+              unread={unread}
+              markAll={markAll}
+              markRead={markRead}
+            />
+          )}
 
           {token ? (
             <button
@@ -220,12 +227,18 @@ export default function Navbar() {
       {open && (
         <div className="md:hidden border-t border-zinc-800 bg-black/95 backdrop-blur">
           <div className="max-w-6xl mx-auto px-4 py-3 flex flex-col gap-2">
-            {token && (
+                       {token && (
               <div className="flex items-center justify-between mb-2">
                 <span className="text-sm text-zinc-400">Notifications</span>
-                <NotificationBell />
+                <NotificationBell
+                  items={items}
+                  unread={unread}
+                  markAll={markAll}
+                  markRead={markRead}
+                />
               </div>
             )}
+
 
             <NavLink
               to="/browse"
