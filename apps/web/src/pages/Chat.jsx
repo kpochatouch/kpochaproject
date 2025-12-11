@@ -12,6 +12,7 @@ import {
 import { useMe } from "../context/MeContext.jsx";
 import ChatPane from "../components/ChatPane.jsx";
 import CallSheet from "../components/CallSheet.jsx";
+import RouteLoader from "../components/RouteLoader.jsx";
 
 function useQuery() {
   const { search } = useLocation();
@@ -348,13 +349,10 @@ export default function Chat() {
 
   // ------------------ GUARDS ------------------ //
 
-  if (meLoading) {
-    return (
-      <div className="max-w-4xl mx-auto px-4 py-10">
-        <p className="text-sm text-zinc-400">Loading your account…</p>
-      </div>
-    );
+    if (meLoading) {
+    return <RouteLoader full />;
   }
+
 
   if (!currentUser) {
     return (
@@ -385,13 +383,10 @@ export default function Chat() {
     );
   }
 
-  if (loadingHistory && !room) {
-    return (
-      <div className="max-w-4xl mx-auto px-4 py-10">
-        <p className="text-sm text-zinc-400">Loading conversation…</p>
-      </div>
-    );
-  }
+    if (loadingHistory && !room) {
+  return <RouteLoader full />;
+}
+
 
   if (!room) {
     return (

@@ -2,15 +2,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  connectSocket,
   registerSocketHandler,
   getChatInbox,
   markThreadRead,
   markRoomRead,
-  getPublicProfileByUid,        // NEW
+  getPublicProfileByUid,
 } from "../lib/api";
 import { useMe } from "../context/MeContext.jsx";
 import InboxList from "../components/Inbox.jsx"; // or the correct relative path
+import RouteLoader from "../components/RouteLoader.jsx";
 
 
 /* Configuration */
@@ -140,7 +140,7 @@ function normalizeThread(raw = {}, currentUid) {
 
 export default function Inbox() {
   const navigate = useNavigate();
-  const { me: currentUser } = useMe();
+  const { me: currentUser, loading: meLoading } = useMe();
 
   const [threads, setThreads] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -246,89 +246,91 @@ useEffect(() => {
 }, [myUid]);
 
 
-  // Socket: ensure connect and register handler
-  useEffect(() => {
-    if (!myUid) return;
+  // Socket: register handler for new chat messages
+useEffect(() => {
+  if (!myUid) return;
 
-    // connect (idempotent) and register handler
-    connectSocket();
+  // The socket connection itself is now handled in App.jsx.
+  // Here we ONLY listen for "chat:message" events and update the inbox.
+  const unregister = registerSocketHandler("chat:message", (msg) => {
+    try {
+      const fromUid = msg.fromUid || msg.from;
+      const toUid = msg.toUid || msg.to;
+      const room = msg.room || msg.roomId || null;
 
-    const unregister = registerSocketHandler("chat:message", (msg) => {
-      try {
-        const fromUid = msg.fromUid || msg.from;
-        const toUid = msg.toUid || msg.to;
-        const room = msg.room || msg.roomId || null;
+      if (!fromUid && !toUid) return;
+      if (fromUid !== myUid && toUid !== myUid) return;
 
-        if (!fromUid && !toUid) return;
-        if (fromUid !== myUid && toUid !== myUid) return;
+      const peerUid = fromUid === myUid ? toUid : fromUid;
+      if (!peerUid) return;
 
-        const peerUid = fromUid === myUid ? toUid : fromUid;
-        if (!peerUid) return;
+      const meta = msg.meta || {};
+      let body;
 
-        const meta = msg.meta || {};
-let body;
-
-if (meta.call) {
-  body = summarizeCallForPreview(meta.call, myUid);
-} else {
-  body =
-    msg.body ||
-    msg.text ||
-    (msg.attachments && msg.attachments.length ? "[Attachment]" : "");
-}
-
-        const at = msg.at || msg.ts || msg.createdAt || Date.now();
-
-        setThreads((prev) => {
-          const existingIndex = prev.findIndex((t) => t.peerUid === peerUid);
-          let updatedThread;
-
-          if (existingIndex >= 0) {
-            const current = prev[existingIndex];
-            const newUnread = fromUid === myUid ? current.unread : (current.unread || 0) + 1;
-
-            updatedThread = {
-              ...current,
-              lastBody: body,
-              lastAt: at,
-              unread: newUnread,
-              room: current.room || room || current.room,
-            };
-
-            const cloned = [...prev];
-            cloned.splice(existingIndex, 1);
-            // newest first, cap array length
-            return [updatedThread, ...cloned].slice(0, MAX_THREADS);
-          }
-
-          // new thread
-            updatedThread = {
-              peerUid,
-              room: room || null,
-              unread: fromUid === myUid ? 0 : 1,
-              lastBody: body,
-              lastAt: at,
-              // we do NOT know their profile name yet → show clear "Unknown user"
-              displayName: "Unknown user",
-              avatarUrl: "",
-            };
-
-
-          return [updatedThread, ...prev].slice(0, MAX_THREADS);
-        });
-      } catch (e) {
-        console.warn("[Inbox] socket chat:message handler failed:", e?.message || e);
+      if (meta.call) {
+        body = summarizeCallForPreview(meta.call, myUid);
+      } else {
+        body =
+          msg.body ||
+          msg.text ||
+          (msg.attachments && msg.attachments.length ? "[Attachment]" : "");
       }
-    });
 
-        return () => {
-      try {
-        if (typeof unregister === "function") unregister();
-      } catch {}
-      // do NOT call setState during cleanup
-    };
+      const at = msg.at || msg.ts || msg.createdAt || Date.now();
 
-  }, [myUid]);
+      setThreads((prev) => {
+        const existingIndex = prev.findIndex((t) => t.peerUid === peerUid);
+        let updatedThread;
+
+        if (existingIndex >= 0) {
+          const current = prev[existingIndex];
+          const newUnread =
+            fromUid === myUid ? current.unread : (current.unread || 0) + 1;
+
+          updatedThread = {
+            ...current,
+            lastBody: body,
+            lastAt: at,
+            unread: newUnread,
+            room: current.room || room || current.room,
+          };
+
+          const cloned = [...prev];
+          cloned.splice(existingIndex, 1);
+          // newest first, cap array length
+          return [updatedThread, ...cloned].slice(0, MAX_THREADS);
+        }
+
+        // new thread
+        updatedThread = {
+          peerUid,
+          room: room || null,
+          unread: fromUid === myUid ? 0 : 1,
+          lastBody: body,
+          lastAt: at,
+          // we do NOT know their profile name yet → show clear "Unknown user"
+          displayName: "Unknown user",
+          avatarUrl: "",
+        };
+
+        return [updatedThread, ...prev].slice(0, MAX_THREADS);
+      });
+    } catch (e) {
+      console.warn(
+        "[Inbox] socket chat:message handler failed:",
+        e?.message || e
+      );
+    }
+  });
+
+  return () => {
+    try {
+      if (typeof unregister === "function") unregister();
+    } catch {}
+    // do NOT call setState during cleanup
+  };
+}, [myUid]);
+
 
   const filteredThreads = useMemo(() => {
     const term = (debouncedSearch || "").trim().toLowerCase();
@@ -414,20 +416,14 @@ if (meta.call) {
 
   }
 
-  if (!currentUser) {
-    return (
-      <div className="max-w-4xl mx-auto px-4 py-10">
-        <p className="text-sm text-zinc-300">Please log in to view your messages.</p>
-        <button
-          type="button"
-          onClick={() => navigate("/login")}
-          className="mt-3 px-4 py-2 rounded-lg bg-gold text-black font-semibold"
-        >
-          Go to login
-        </button>
-      </div>
-    );
+    if (meLoading) {
+    return <RouteLoader full />;
   }
+
+  if (loading) {
+  return <RouteLoader full />;
+}
+
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-6 space-y-4">
@@ -466,22 +462,7 @@ if (meta.call) {
         </div>
       )}
 
-      {loading && (
-        <div className="space-y-2">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="animate-pulse flex items-center justify-between border border-zinc-900 rounded-lg px-3 py-3 bg-black/40">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-zinc-800" />
-                <div className="space-y-2">
-                  <div className="h-3 w-24 bg-zinc-800 rounded" />
-                  <div className="h-3 w-40 bg-zinc-900 rounded" />
-                </div>
-              </div>
-              <div className="h-3 w-10 bg-zinc-900 rounded" />
-            </div>
-          ))}
-        </div>
-      )}
+      
 
       {!loading && filteredThreads.length === 0 && !errorMsg && (
         <div className="border border-zinc-800 rounded-xl bg-black/40 px-4 py-10 text-center text-sm text-zinc-400">
