@@ -7,7 +7,7 @@ import {
   useLocation,
   useNavigate,
 } from "react-router-dom";
-import { api, registerSocketHandler } from "./lib/api";
+import { api, connectSocket, registerSocketHandler } from "./lib/api";
 import CallSheet from "./components/CallSheet.jsx";
 
 import Navbar from "./components/Navbar.jsx";
@@ -156,11 +156,18 @@ function FindProSmart() {
 /* ---------- App ---------- */
 export default function App() {
   useChatbase();
-  const location = useLocation();
+    const location = useLocation();
   const navigate = useNavigate();
 
-    const { me } = useMe();
+  const { me } = useMe();
   const [incomingCall, setIncomingCall] = useState(null);
+
+  // As soon as we know who "me" is, connect the socket with the right auth
+  useEffect(() => {
+    if (!me) return;        // if not logged in yet, do nothing
+    connectSocket();        // this will reuse or reconnect the socket with token
+  }, [me]);
+
 
   const myLabel =
     me?.displayName ||
