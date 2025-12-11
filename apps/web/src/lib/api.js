@@ -460,7 +460,7 @@ export async function sendChatMessage({ room, text = "", meta = {}, clientId = n
 
   const hasText = !!(text && text.trim());
   const hasAttachments = Array.isArray(meta?.attachments) && meta.attachments.length > 0;
-  const hasCallMeta = !!(meta && meta.call);  // 👈 NEW
+  const hasCallMeta = !!(meta && meta.call); // allow pure call messages
 
   if (!hasText && !hasAttachments && !hasCallMeta) {
     throw new Error("message_empty");
@@ -470,8 +470,6 @@ export async function sendChatMessage({ room, text = "", meta = {}, clientId = n
   if (!clientId) clientId = `c_${uuidv4()}`;
 
   const payload = { room, text, meta, clientId };
-}
-
 
   // 1️⃣ Try to make sure socket is ready
   try {
@@ -497,6 +495,7 @@ export async function sendChatMessage({ room, text = "", meta = {}, clientId = n
     const data = await _sendChatMessageRest(payload);
     return { ...data, clientId };
   }
+}
 
 
 async function _sendChatMessageRest({ room, text, meta = {}, clientId = null }) {
