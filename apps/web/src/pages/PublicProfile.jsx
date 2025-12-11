@@ -4,7 +4,6 @@ import { useParams, useNavigate } from "react-router-dom";
 import { api, connectSocket, registerSocketHandler } from "../lib/api";
 import FeedCard from "../components/FeedCard.jsx";
 import LiveActivity from "../components/LiveActivity.jsx";
-import NotificationsMenu from "../components/NotificationsMenu.jsx";
 import SideMenu from "../components/SideMenu.jsx";
 import FeedComposer from "../components/FeedComposer.jsx";
 import { useMe } from "../context/MeContext.jsx";
@@ -778,15 +777,11 @@ export default function PublicProfile() {
     profile.metrics?.jobsCompleted ??
     0;
 
-
   return (
-    <div className="min-h-screen bg-[#0b0c10] text-white">
-      {/* Cover */}
-      <div className="relative bg-gradient-to-r from-zinc-900 via-zinc-800 to-zinc-900 h-44 z-10">
-        <div className="absolute right-4 top-3 z-20">
-          <NotificationsMenu />
-        </div>
-      </div>
+    <div className="pt-40 pb-10 min-h-screen bg-zinc-900">
+      {/* Cover photo */}
+      <div className="relative bg-gradient-to-r from-zinc-900 via-zinc-800 to-zinc-900 h-44 z-10" />
+
 
       <div className="max-w-6xl mx-auto px-4 -mt-16 relative z-30">
         <div className="flex flex-col sm:flex-row sm:items-end gap-4 sm:gap-6">
