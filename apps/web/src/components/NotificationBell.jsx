@@ -2,6 +2,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import useNotifications from "../hooks/useNotifications";
+import { markThreadRead, markRoomRead } from "../lib/api";
 
 export default function NotificationBell() {
   const { items, unread, markAll, markRead } = useNotifications();
@@ -15,30 +16,42 @@ export default function NotificationBell() {
   }
 
   // clicking a single notification → mark THAT one as read + deep link
-  async function handleNotificationClick(n) {
-    const id = n._id || n.id;
-    const type = n.type;
-    const data = n.data || {};
+async function handleNotificationClick(n) {
+  const id = n._id || n.id;
+  const type = n.type;
+  const data = n.data || {};
 
-    if (id) {
-      try {
-        await markRead(id);
-      } catch (e) {
-        console.warn("[NotificationBell] markRead failed:", e?.message || e);
-      }
-    }
-
-    setOpen(false);
-
-    // Deep link rules (adjust as your data model grows)
-    if (type === "chat_message" && data.peerUid) {
-      navigate(`/chat?with=${encodeURIComponent(data.peerUid)}`);
-    } else if (type === "booking_update" && data.bookingId) {
-      navigate(`/bookings/${encodeURIComponent(data.bookingId)}`);
-    } else if ((type === "call_missed" || type === "call") && data.peerUid) {
-      navigate(`/chat?with=${encodeURIComponent(data.peerUid)}&call=audio`);
+  if (id) {
+    try {
+      await markRead(id);
+    } catch (e) {
+      console.warn("[NotificationBell] markRead failed:", e?.message || e);
     }
   }
+
+  // NEW: proactively mark the related chat thread as read
+  try {
+    if (data.peerUid) {
+      await markThreadRead(data.peerUid);
+    } else if (data.room) {
+      await markRoomRead(data.room);
+    }
+  } catch (e) {
+    console.warn("[NotificationBell] markThreadRead/markRoomRead failed:", e?.message || e);
+  }
+
+  setOpen(false);
+
+  // Deep link rules
+  if (type === "chat_message" && data.peerUid) {
+    navigate(`/chat?with=${encodeURIComponent(data.peerUid)}`);
+  } else if (type === "booking_update" && data.bookingId) {
+    navigate(`/bookings/${encodeURIComponent(data.bookingId)}`);
+  } else if ((type === "call_missed" || type === "call") && data.peerUid) {
+    navigate(`/chat?with=${encodeURIComponent(data.peerUid)}&call=audio`);
+  }
+}
+
 
   // click outside → close dropdown
   useEffect(() => {
