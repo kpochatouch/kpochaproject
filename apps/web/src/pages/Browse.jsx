@@ -17,7 +17,6 @@ import ErrorBoundary from "../components/ErrorBoundary";
 import SideMenu from "../components/SideMenu.jsx";
 import FeedComposer from "../components/FeedComposer.jsx";
 import { connectSocket, registerSocketHandler } from "../lib/api";
-import NotificationsBell from "../components/NotificationBell.jsx";
 
 /* ---------------- Main Browse page ---------------- */
 export default function Browse() {
@@ -475,37 +474,34 @@ export default function Browse() {
             <h1 className="text-2xl font-semibold">Discover</h1>
           </div>
 
-          <div className="flex items-center gap-3">
-            {/* 🔔 Notifications bell is always visible; badge shows only when there are unread items */}
-            <NotificationsBell />
-
-            {/* tab pills */}
-            <div className="inline-flex rounded-xl border border-zinc-800 overflow-hidden">
-              <button
-                className={`px-4 py-2 text-sm border-r border-zinc-800 ${
-                  isFeedTab
-                    ? "bg-gold text-black font-semibold"
-                    : "hover:bg-zinc-900"
-                }`}
-                onClick={() => setTabAndUrl("feed")}
-                type="button"
-              >
-                Feed
-              </button>
-              <button
-                className={`px-4 py-2 text-sm ${
-                  isProsTab
-                    ? "bg-gold text-black font-semibold"
-                    : "hover:bg-zinc-900"
-                }`}
-                onClick={() => setTabAndUrl("pros")}
-                type="button"
-              >
-                Pros
-              </button>
-            </div>
-          </div>
-        </div>
+   <div className="flex items-center gap-3">
+  {/* tab pills only – bell removed */}
+  <div className="inline-flex rounded-xl border border-zinc-800 overflow-hidden">
+    <button
+      className={`px-4 py-2 text-sm border-r border-zinc-800 ${
+        isFeedTab
+          ? "bg-gold text-black font-semibold"
+          : "hover:bg-zinc-900"
+      }`}
+      onClick={() => setTabAndUrl("feed")}
+      type="button"
+    >
+      Feed
+    </button>
+    <button
+      className={`px-4 py-2 text-sm ${
+        isProsTab
+          ? "bg-gold text-black font-semibold"
+          : "hover:bg-zinc-900"
+      }`}
+      onClick={() => setTabAndUrl("pros")}
+      type="button"
+    >
+      Pros
+    </button>
+  </div>
+  </div>
+   </div>
 
         {/* filters — only show on Pros tab */}
         {isProsTab && (
