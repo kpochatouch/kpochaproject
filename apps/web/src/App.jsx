@@ -162,6 +162,56 @@ export default function App() {
   const { me } = useMe();
   const [incomingCall, setIncomingCall] = useState(null);
 
+    // 🔔 tab title flash for incoming calls
+  function flashTitle(text = "📞 Incoming call…") {
+    const original = document.title;
+    let on = false;
+
+    const id = setInterval(() => {
+      document.title = on ? text : original;
+      on = !on;
+    }, 900);
+
+    return () => {
+      clearInterval(id);
+      document.title = original;
+    };
+  }
+
+  // 🔔 system notification (click to focus tab)
+  async function showIncomingNotification({ title, body, icon, onClick }) {
+    if (!("Notification" in window)) return null;
+
+    if (Notification.permission === "default") {
+      try {
+        await Notification.requestPermission();
+      } catch {}
+    }
+
+    if (Notification.permission !== "granted") return null;
+
+    try {
+      const n = new Notification(title, {
+        body,
+        icon,
+        tag: "kpocha-incoming-call",
+        renotify: true,
+        requireInteraction: true,
+      });
+
+      n.onclick = () => {
+        try { window.focus(); } catch {}
+        onClick?.();
+        try { n.close(); } catch {}
+      };
+
+      return n;
+    } catch {
+      return null;
+    }
+  }
+
+
   // As soon as we know who "me" is, connect the socket with the right auth
   useEffect(() => {
     if (!me) return;        // if not logged in yet, do nothing
@@ -177,41 +227,80 @@ export default function App() {
     me?.uid ||
     "You";
 
-  // Global listener for incoming calls
-  useEffect(() => {
-    // when server emits "call:incoming"
-    const offIncoming = registerSocketHandler("call:incoming", (payload) => {
-      if (!payload) return;
 
-      setIncomingCall({
-        open: true,
-        callId: payload.callId,
-        room: payload.room,
-        callType: payload.callType || "audio",
-        fromUid: payload.callerUid,
-        meta: payload.meta || {},
+ // Socket listeners for incoming calls
+useEffect(() => {
+  const offIncoming = registerSocketHandler("call:incoming", (payload) => {
+    if (!payload) return;
+
+    // If backend ever sends a status-only payload on this event, handle it safely
+    if (
+      payload.status &&
+      ["ended", "missed", "cancelled", "declined", "failed"].includes(payload.status)
+    ) {
+      setIncomingCall((prev) =>
+        prev && prev.callId === payload.callId ? null : prev
+      );
+      return;
+    }
+
+    const meta = payload.meta || {};
+    const callerName = meta.fromName || meta.callerName || "Someone";
+    const callType = payload.callType || "audio";
+
+    setIncomingCall({
+      open: true,
+      callId: payload.callId,
+      room: payload.room,
+      callType,
+      fromUid: payload.callerUid,
+      meta,
+    });
+
+    // ✅ Android-only vibration (helps attention)
+    if (navigator.vibrate) {
+      navigator.vibrate([200, 100, 200, 100, 200]);
+    }
+
+    // If tab is hidden, flash title + show system notification
+    if (document.hidden) {
+      const stopFlash = flashTitle(`📞 ${callerName} calling…`);
+
+      showIncomingNotification({
+        title: "Kpocha Touch — Incoming call",
+        body: `${callerName} is calling (${callType}). Tap to answer.`,
+        icon: meta.fromAvatar || meta.callerAvatar || "/icons/icon-192.png",
+        onClick: () => {},
       });
-    });
 
-    // close modal when call ends / cancelled / declined
-    const offStatus = registerSocketHandler("call:status", (payload) => {
-      if (!payload) return;
-      if (
-        ["ended", "missed", "cancelled", "declined", "failed"].includes(
-          payload.status
-        )
-      ) {
-        setIncomingCall((prev) =>
-          prev && prev.callId === payload.callId ? null : prev
-        );
-      }
-    });
+      const onVis = () => {
+        if (!document.hidden) {
+          stopFlash();
+          document.removeEventListener("visibilitychange", onVis);
+        }
+      };
+      document.addEventListener("visibilitychange", onVis);
+    }
+  });
 
-    return () => {
-      offIncoming();
-      offStatus();
-    };
-  }, []);
+  const offStatus = registerSocketHandler("call:status", (payload) => {
+    if (!payload) return;
+
+    if (
+      ["ended", "missed", "cancelled", "declined", "failed"].includes(payload.status)
+    ) {
+      setIncomingCall((prev) =>
+        prev && prev.callId === payload.callId ? null : prev
+      );
+    }
+  });
+
+  return () => {
+    try { offIncoming && offIncoming(); } catch {}
+    try { offStatus && offStatus(); } catch {}
+  };
+}, []);
+
 
 
   // Listener for AWS liveness events
@@ -493,30 +582,22 @@ export default function App() {
       </main>
 
                  {!hideChrome && <Footer />}
-                <CallSheet
-                  role="receiver"
-                  room={incomingCall?.room || null}
-                  callId={incomingCall?.callId || null}
-                  callType={incomingCall?.callType || "audio"}
-                  me={myLabel}
-                  // 🔥 show real caller identity from meta put there by Chat.jsx
-                  peerName={
-                    incomingCall?.meta?.fromName ||
-                    incomingCall?.meta?.callerName ||
-                    ""
-                  }
-                  peerAvatar={
-                    incomingCall?.meta?.fromAvatar ||
-                    incomingCall?.meta?.callerAvatar ||
-                    ""
-                  }
-                  // 🔔 allow call summary bubble for DM chat if chatRoom passed
-                  chatRoom={incomingCall?.meta?.chatRoom || null}
-                  open={Boolean(incomingCall?.open && incomingCall?.room)}
-                  onClose={() => setIncomingCall(null)}
-                />
-              </div>
-            );
-          }
+       {Boolean(incomingCall?.open && incomingCall?.room) && (
+        <CallSheet
+          role="receiver"
+          room={incomingCall.room}
+          callId={incomingCall.callId || null}
+          callType={incomingCall.callType || "audio"}
+          me={myLabel}
+          peerName={incomingCall?.meta?.fromName || incomingCall?.meta?.callerName || ""}
+          peerAvatar={incomingCall?.meta?.fromAvatar || incomingCall?.meta?.callerAvatar || ""}
+          chatRoom={incomingCall?.meta?.chatRoom || null}
+          open
+          onClose={() => setIncomingCall(null)}
+        />
+      )}
+    </div>
+  );
+}
 
 

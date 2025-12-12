@@ -58,6 +58,36 @@ export default function CallSheet({
   const localRef = useRef(null);
   const remoteRef = useRef(null);
 
+  // 🔆 Keep screen awake during calls (mobile)
+const wakeLockRef = useRef(null);
+
+async function requestWakeLock() {
+  try {
+    if (!("wakeLock" in navigator)) return false;
+
+    wakeLockRef.current = await navigator.wakeLock.request("screen");
+
+    // 👇 NEW: detect if the system releases it
+    wakeLockRef.current.addEventListener("release", () => {
+      console.log("[WakeLock] released by system");
+    });
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+
+async function releaseWakeLock() {
+  try {
+    if (!wakeLockRef.current) return;
+    await wakeLockRef.current?.release();
+  } catch {}
+  wakeLockRef.current = null;
+}
+
+
   // ring tones
   const callerToneRef = useRef(null);
   const incomingToneRef = useRef(null);
@@ -159,6 +189,7 @@ export default function CallSheet({
       setElapsedSeconds(0);
       setHasAccepted(false);
       setCallFailed(false);
+      releaseWakeLock();
     };
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -494,9 +525,10 @@ export default function CallSheet({
       });
 
       stopAllTones();
-      setHasAccepted(true);              // 👈 receiver has accepted
+      setHasAccepted(true);
       await safeUpdateStatus("accepted");
       await setupPeerConnection(false);
+
 
     } catch (e) {
       console.error("accept call failed:", e);
@@ -523,15 +555,19 @@ export default function CallSheet({
   // ---- hangup (both roles) ----
 
   async function hangup() {
-    stopAllTones();
-    const endedStatus =
-      hasConnected ? "ended" : role === "caller" ? "cancelled" : "declined";
+  stopAllTones();
 
-    await safeUpdateStatus(endedStatus);
-    await sendCallSummaryMessage(endedStatus);
-    cleanupPeer();
-    onClose?.();
-  }
+  const endedStatus =
+    hasConnected ? "ended" : role === "caller" ? "cancelled" : "declined";
+
+  await safeUpdateStatus(endedStatus);
+  await sendCallSummaryMessage(endedStatus);
+
+  await releaseWakeLock();   // ✅ allow sleep again
+  cleanupPeer();
+  onClose?.();
+}
+
 
   // ---- mic / camera toggles ----
 
@@ -555,6 +591,35 @@ export default function CallSheet({
       setCamOff(!t.enabled);
     });
   }
+
+  // When the call is open, keep the screen awake.
+// When the call closes, allow screen to sleep again.
+useEffect(() => {
+  if (!open) {
+    releaseWakeLock();
+    return;
+  }
+
+  // 🔴 Only keep screen awake for VIDEO calls
+  if (mode === "video") {
+    requestWakeLock();
+  }
+
+  const onVis = () => {
+    if (!document.hidden && mode === "video") {
+      requestWakeLock();
+    }
+  };
+
+  document.addEventListener("visibilitychange", onVis);
+
+  return () => {
+    document.removeEventListener("visibilitychange", onVis);
+    releaseWakeLock();
+  };
+}, [open, mode]);
+
+
 
       // ---------- render ----------
 
