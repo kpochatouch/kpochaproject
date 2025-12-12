@@ -37,42 +37,44 @@ export default function useNotifications() {
 
   // Realtime notifications via sockets.
   // Accept both 'notification:new' and 'notification:received' server events.
-  useEffect(() => {
-    connectSocket();
+  // apps/web/src/hooks/useNotifications.js
+useEffect(() => {
+  connectSocket();
 
-    const handler = (payload) => {
-      if (!payload) return;
+  const handler = (payload) => {
+    if (!payload) return;
 
-      // Normalize id field
-      const id = payload.id || payload._id || (payload.data && payload.data.id) || null;
-      const normalized = { id, ...payload };
+    const id =
+      payload.id ||
+      payload._id ||
+      (payload.data && payload.data.id) ||
+      null;
+    const normalized = { id, ...payload };
 
-      setItems((prev) => {
-        // avoid duplicates: check id
-        if (id && prev.some((p) => String(p.id || p._id) === String(id))) {
-          // replace existing item if server sent updated payload
-          return prev.map((p) =>
-            String(p.id || p._id) === String(id) ? { ...p, ...normalized } : p
-          );
-        }
-        return [normalized, ...prev].slice(0, 200);
-      });
-
-      // update unread counter only if backend indicates it's unread
-      const alreadyRead = !!payload.read || !!payload.seen;
-      if (!alreadyRead) {
-        setUnread((u) => u + 1);
+    setItems((prev) => {
+      if (id && prev.some((p) => String(p.id || p._id) === String(id))) {
+        return prev.map((p) =>
+          String(p.id || p._id) === String(id) ? { ...p, ...normalized } : p
+        );
       }
-    };
+      return [normalized, ...prev].slice(0, 200);
+    });
 
-    const off1 = registerSocketHandler("notification:received", handler);
-    const off2 = registerSocketHandler("notification:new", handler);
+    const alreadyRead = !!payload.read || !!payload.seen;
+    if (!alreadyRead) {
+      setUnread((u) => u + 1);
+    }
+  };
 
-    return () => {
-      try { off1 && off1(); } catch {}
-      try { off2 && off2(); } catch {}
-    };
-  }, []);
+  const off = registerSocketHandler("notification:received", handler);
+
+  return () => {
+    try {
+      off && off();
+    } catch {}
+  };
+}, []);
+
 
   async function markRead(id) {
     if (!id) return;

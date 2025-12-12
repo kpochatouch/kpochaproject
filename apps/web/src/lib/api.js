@@ -365,8 +365,6 @@ socket = ioClient(ROOT, opts);
 
     // bridge notification events -> unified "notification:received"
     socket.on("notification:new", (payload) => _dispatch("notification:received", payload));
-    socket.on("notification:received", (payload) => _dispatch("notification:received", payload));
-
     socket.connect();
   } catch (e) {
     console.warn("[socket] connect failed:", e?.message || e);
