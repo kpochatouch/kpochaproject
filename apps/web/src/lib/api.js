@@ -309,14 +309,35 @@ export function connectSocket({ onNotification, onBookingAccepted, onCallEvent }
     socketListeners.get("call:status").add(onCallEvent);
   }
 
-  // ✅ If socket already exists, reuse it (don’t create another one)
+// ✅ If socket already exists, reuse it BUT ensure events are wired
 if (socket) {
   try {
+    // keep socketConnected in sync
+    socketConnected = !!socket.connected;
+
+    // wire already-registered events
+    for (const ev of socketListeners.keys()) _ensureWire(ev);
+
+    // always wire core realtime events (including WebRTC)
+    _ensureWire("notification:new");
+    _ensureWire("notification:received");
+    _ensureWire("chat:message");
+    _ensureWire("presence:join");
+    _ensureWire("presence:leave");
+    _ensureWire("call:initiate");
+    _ensureWire("call:accepted");
+    _ensureWire("call:ended");
+    _ensureWire("call:missed");
+    _ensureWire("booking:accepted");
+    _ensureWire("webrtc:offer");
+    _ensureWire("webrtc:answer");
+    _ensureWire("webrtc:ice");
+
     if (!socket.connected) socket.connect();
   } catch {}
+
   return socket;
 }
-
 
   try {
     const opts = {
