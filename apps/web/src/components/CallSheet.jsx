@@ -95,6 +95,9 @@ async function releaseWakeLock() {
   // NEW: stash offer that arrives before receiver taps "Accept"
   const pendingOfferRef = useRef(null);
 
+  // keep a reference to the "stash offer" handler so we can remove it later
+const stashOfferHandlerRef = useRef(null);
+
   function stopAllTones() {
     [callerToneRef, incomingToneRef].forEach((ref) => {
       try {
@@ -172,11 +175,13 @@ async function releaseWakeLock() {
         audio.play().catch(() => {});
       } catch {}
 
-      // 🔴 NEW: stash incoming offer that may arrive BEFORE user taps Accept
-      sc.on("webrtc:offer", (msg) => {
-        console.log("[CallSheet] stashed incoming offer before accept");
-        pendingOfferRef.current = msg;
-      });
+      // 🔴 stash incoming offer that may arrive BEFORE user taps Accept
+const stash = (msg) => {
+  console.log("[CallSheet] stashed incoming offer before accept");
+  pendingOfferRef.current = msg;
+};
+stashOfferHandlerRef.current = stash;
+sc.on("webrtc:offer", stash);
     }
 
     return () => {
@@ -189,6 +194,7 @@ async function releaseWakeLock() {
       setElapsedSeconds(0);
       setHasAccepted(false);
       setCallFailed(false);
+      stashOfferHandlerRef.current = null;
       releaseWakeLock();
     };
 
@@ -236,7 +242,8 @@ async function releaseWakeLock() {
       setCallFailed(true);
 
       // 3) Let backend know it failed because of timeout (optional)
-      safeUpdateStatus("declined", { reason: "timeout_no_connection" });
+      safeUpdateStatus("failed", { reason: "timeout_no_connection" });
+
 
       // 4) Auto hang up after a short pause so user can briefly see "Call failed"
       setTimeout(() => {
@@ -247,6 +254,31 @@ async function releaseWakeLock() {
     // Cleanup: if state changes (connects, closes, etc.), cancel timeout
     return () => clearTimeout(timeoutId);
   }, [open, peerAccepted, hasAccepted, hasConnected]);
+
+  // ⏳ caller ring timeout: if nobody accepts within 30s, mark missed
+useEffect(() => {
+  if (!open) return;
+  if (role !== "caller") return;
+
+  // stop timer if connected or accepted
+  if (hasConnected || peerAccepted) return;
+
+  const id = setTimeout(async () => {
+    try {
+      stopAllTones();
+      setCallFailed(true);
+
+      await safeUpdateStatus("missed", { reason: "ring_timeout" });
+      await sendCallSummaryMessage("missed");
+
+      cleanupPeer();
+      onClose?.();
+    } catch {}
+  }, 30000);
+
+  return () => clearTimeout(id);
+}, [open, role, hasConnected, peerAccepted]);
+
 
     // 🔔 React to backend call:status events for this call
   useEffect(() => {
@@ -382,6 +414,14 @@ async function flushIce() {
   }
 };
 
+// ✅ receiver: remove the stasher once we are ready to handle offers for real
+if (!asCaller && stashOfferHandlerRef.current) {
+  try {
+    sig.off("webrtc:offer", stashOfferHandlerRef.current);
+  } catch {}
+  stashOfferHandlerRef.current = null;
+}
+
 
        // signaling listeners
     const handleOffer = async (msg) => {
@@ -501,39 +541,42 @@ async function flushIce() {
   }
 
     // ---- caller: start as soon as sheet opens ----
-  async function startCaller() {
-    if (!sig || !room) return;
-    setStarting(true);
-    try {
-      console.log("[CallSheet] startCaller()", {
-        open,
-        room,
-        role,
-        callId,
-        callType,
-      });
+async function startCaller() {
+  if (!sig || !room) return;
 
-      if (!callerToneRef.current) {
-        try {
-          const audio = new Audio("/sound/caller-tune.mp3");
-          audio.loop = true;
-          callerToneRef.current = audio;
-          audio.play().catch(() => {});
-        } catch {}
-      }
+  setStarting(true);
+  try {
+    const ok = await sig.ready(8000);
+    if (!ok) throw new Error("signaling_not_ready");
 
-      await setupPeerConnection(true);
-      await safeUpdateStatus("ringing");
-    } catch (e) {
-      console.error("call start error:", e);
-      alert(
-        "Could not start call. Please check microphone/camera permissions."
-      );
-      stopAllTones();
-    } finally {
-      setStarting(false);
+    console.log("[CallSheet] startCaller()", {
+      open,
+      room,
+      role,
+      callId,
+      callType,
+    });
+
+    if (!callerToneRef.current) {
+      try {
+        const audio = new Audio("/sound/caller-tune.mp3");
+        audio.loop = true;
+        callerToneRef.current = audio;
+        audio.play().catch(() => {});
+      } catch {}
     }
+
+    await setupPeerConnection(true);
+    await safeUpdateStatus("ringing");
+  } catch (e) {
+    console.error("call start error:", e);
+    alert("Could not start call. Please check microphone/camera permissions.");
+    stopAllTones();
+  } finally {
+    setStarting(false);
   }
+}
+
 
   // auto-start caller once signaling client is ready
   useEffect(() => {
@@ -548,36 +591,37 @@ async function flushIce() {
 
   // ---- receiver actions ----
 
-     async function acceptIncoming() {
-    if (!sig || !room) return;
-    setStarting(true);
-    try {
-      console.log("[CallSheet] acceptIncoming()", {
-        open,
-        room,
-        role,
-        callId,
-        callType,
-      });
+async function acceptIncoming() {
+  if (!sig || !room) return;
 
-      stopAllTones();
-      setHasAccepted(true);
-      await safeUpdateStatus("accepted");
-      await setupPeerConnection(false);
+  setStarting(true);
+  try {
+    const ok = await sig.ready(8000);
+    if (!ok) throw new Error("signaling_not_ready");
 
+    console.log("[CallSheet] acceptIncoming()", {
+      open,
+      room,
+      role,
+      callId,
+      callType,
+    });
 
-    } catch (e) {
-      console.error("accept call failed:", e);
-      alert(
-        "Could not accept call. Please check microphone/camera permissions."
-      );
-      await safeUpdateStatus("declined", { reason: "media_error" });
-      cleanupPeer();
-      onClose?.();
-    } finally {
-      setStarting(false);
-    }
+    stopAllTones();
+    setHasAccepted(true);
+    await safeUpdateStatus("accepted");
+    await setupPeerConnection(false);
+  } catch (e) {
+    console.error("accept call failed:", e);
+    alert("Could not accept call. Please check microphone/camera permissions.");
+    await safeUpdateStatus("declined", { reason: "media_error" });
+    cleanupPeer();
+    onClose?.();
+  } finally {
+    setStarting(false);
   }
+}
+
 
 
   async function declineIncoming() {
