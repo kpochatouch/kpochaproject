@@ -41,7 +41,8 @@ export default function useNotifications() {
 useEffect(() => {
   connectSocket();
 
-  const handler = (payload) => {
+  const handler = async (payload) => {
+
     if (!payload) return;
 
     const id =
@@ -60,10 +61,17 @@ useEffect(() => {
       return [normalized, ...prev].slice(0, 200);
     });
 
-    const alreadyRead = !!payload.read || !!payload.seen;
-    if (!alreadyRead) {
-      setUnread((u) => u + 1);
-    }
+  // 🔁 Always re-sync unread count from server (source of truth)
+try {
+  const counts = await getNotificationsCounts();
+  if (mounted.current) setUnread(Number(counts?.unread || 0));
+} catch (e) {
+  console.warn(
+    "[useNotifications] refresh unread after socket failed:",
+    e?.message || e
+  );
+}
+
   };
 
   const off = registerSocketHandler("notification:received", handler);
@@ -85,7 +93,19 @@ useEffect(() => {
           String(it.id || it._id) === String(id) ? { ...it, read: true, seen: true } : it
         )
       );
-      setUnread((u) => Math.max(0, u - 1));
+
+      // 🔁 refresh unread from backend
+try {
+  const counts = await getNotificationsCounts();
+  if (mounted.current) setUnread(Number(counts?.unread || 0));
+} catch (e) {
+  console.warn(
+    "[useNotifications] refresh unread after markRead failed:",
+    e?.message || e
+  );
+}
+
+      
     } catch (e) {
       console.warn("[useNotifications] markRead failed:", e?.message || e);
     }
@@ -95,7 +115,19 @@ useEffect(() => {
     try {
       await apiMarkAllNotificationsRead();
       setItems((s) => s.map((it) => ({ ...it, read: true, seen: true })));
-      setUnread(0);
+
+      // 🔁 refresh unread from backend
+try {
+  const counts = await getNotificationsCounts();
+  if (mounted.current) setUnread(Number(counts?.unread || 0));
+} catch (e) {
+  console.warn(
+    "[useNotifications] refresh unread after markAll failed:",
+    e?.message || e
+  );
+}
+
+      
     } catch (e) {
       console.warn("[useNotifications] markAll failed:", e?.message || e);
     }
