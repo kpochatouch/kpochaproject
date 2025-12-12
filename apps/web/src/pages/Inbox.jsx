@@ -7,6 +7,7 @@ import {
   markThreadRead,
   markRoomRead,
   getPublicProfileByUid,
+  markNotificationGroupRead,
 } from "../lib/api";
 import { useMe } from "../context/MeContext.jsx";
 import InboxList from "../components/Inbox.jsx"; // or the correct relative path
@@ -153,6 +154,8 @@ export default function Inbox() {
 
 
   const myUid = currentUser?.uid || currentUser?.ownerUid || currentUser?._id || null;
+  const [profileCache, setProfileCache] = useState({});
+
 
   // debounce the search input into state (triggers re-render)
   useEffect(() => {
@@ -252,7 +255,7 @@ useEffect(() => {
 
   // The socket connection itself is now handled in App.jsx.
   // Here we ONLY listen for "chat:message" events and update the inbox.
-  const unregister = registerSocketHandler("chat:message", (msg) => {
+    const unregister = registerSocketHandler("chat:message", (msg) => {
     try {
       const fromUid = msg.fromUid || msg.from;
       const toUid = msg.toUid || msg.to;
@@ -297,18 +300,15 @@ useEffect(() => {
 
           const cloned = [...prev];
           cloned.splice(existingIndex, 1);
-          // newest first, cap array length
           return [updatedThread, ...cloned].slice(0, MAX_THREADS);
         }
 
-        // new thread
         updatedThread = {
           peerUid,
           room: room || null,
           unread: fromUid === myUid ? 0 : 1,
           lastBody: body,
           lastAt: at,
-          // we do NOT know their profile name yet → show clear "Unknown user"
           displayName: "Unknown user",
           avatarUrl: "",
         };
@@ -323,13 +323,69 @@ useEffect(() => {
     }
   });
 
+  // ✅ NEW: listen to dm:incoming (emitted to user:<uid>), so Inbox updates even if you didn't join the room
+  const unregisterDm = registerSocketHandler("dm:incoming", (msg) => {
+    try {
+      const fromUid = msg?.fromUid || msg?.from;
+      const room = msg?.room || null;
+
+      if (!fromUid) return;
+      if (fromUid === myUid) return; // dm:incoming is for me, but guard anyway
+
+      const peerUid = fromUid;
+      const body =
+        msg?.body ||
+        msg?.text ||
+        (msg?.attachments && msg.attachments.length ? "[Attachment]" : "");
+
+      const at = msg?.at || msg?.createdAt || Date.now();
+
+      setThreads((prev) => {
+        const existingIndex = prev.findIndex((t) => t.peerUid === peerUid);
+        let updatedThread;
+
+        if (existingIndex >= 0) {
+          const current = prev[existingIndex];
+          updatedThread = {
+            ...current,
+            lastBody: body || current.lastBody,
+            lastAt: at,
+            unread: (current.unread || 0) + 1,
+            room: current.room || room || current.room,
+          };
+
+          const cloned = [...prev];
+          cloned.splice(existingIndex, 1);
+          return [updatedThread, ...cloned].slice(0, MAX_THREADS);
+        }
+
+        updatedThread = {
+          peerUid,
+          room: room || null,
+          unread: 1,
+          lastBody: body || "",
+          lastAt: at,
+          displayName: "Unknown user",
+          avatarUrl: "",
+        };
+
+        return [updatedThread, ...prev].slice(0, MAX_THREADS);
+      });
+    } catch (e) {
+      console.warn("[Inbox] dm:incoming handler failed:", e?.message || e);
+    }
+  });
+
   return () => {
     try {
       if (typeof unregister === "function") unregister();
     } catch {}
-    // do NOT call setState during cleanup
+    try {
+      if (typeof unregisterDm === "function") unregisterDm();
+    } catch {}
   };
 }, [myUid]);
+
 
 
   const filteredThreads = useMemo(() => {
@@ -341,87 +397,101 @@ useEffect(() => {
     });
   }, [threads, debouncedSearch]);
 
-    // Hydrate threads that still show "Unknown user" using public profiles
-  useEffect(() => {
-    let cancelled = false;
+  // Hydrate threads that still show "Unknown user" using public profiles
+const missingUidsKey = useMemo(() => {
+  const missing = threads
+    .filter((t) => t.peerUid && (!t.displayName || t.displayName === "Unknown user"))
+    .map((t) => t.peerUid);
 
-    async function hydrateMissingProfiles() {
-      // find threads that have a peerUid but no proper displayName yet
-      const missing = threads.filter(
-        (t) =>
-          t.peerUid &&
-          (!t.displayName || t.displayName === "Unknown user")
-      );
+  return [...new Set(missing)].sort().join("|");
+}, [threads]);
 
-      if (!missing.length) return;
+useEffect(() => {
+  if (!missingUidsKey) return;
 
-      const uniqueUids = [...new Set(missing.map((t) => t.peerUid))];
-      const updates = {};
+  let cancelled = false;
 
-      for (const uid of uniqueUids) {
-        try {
-          const data = await getPublicProfileByUid(uid);
-          const p = data?.profile || data;
-          if (!p) continue;
+  async function hydrate() {
+    const uids = missingUidsKey.split("|").filter(Boolean);
+    const updates = {};
 
-          updates[uid] = {
-            displayName:
-              p.displayName ||
-              p.fullName ||
-              p.username ||
-              "Unknown user",
-            avatarUrl: p.avatarUrl || p.photoUrl || "",
-          };
-        } catch (e) {
-          // ignore failures for individual users
-          console.warn("[Inbox] hydrate profile failed for", uid, e?.message || e);
-        }
-      }
-
-      if (cancelled) return;
-      if (!Object.keys(updates).length) return;
-
-      setThreads((prev) =>
-        prev.map((t) =>
-          updates[t.peerUid] ? { ...t, ...updates[t.peerUid] } : t
-        )
-      );
+  for (const uid of uids) {
+  try {
+    // ✅ 1) use cache first (no fetch)
+    if (profileCache[uid]) {
+      updates[uid] = profileCache[uid];
+      continue;
     }
 
-    hydrateMissingProfiles();
+    // ✅ 2) fetch only if not cached
+    const data = await getPublicProfileByUid(uid);
+    const p = data?.profile || data;
+    if (!p) continue;
 
-    return () => {
-      cancelled = true;
+    const cached = {
+      displayName: p.displayName || p.fullName || p.username || "Unknown user",
+      avatarUrl: p.avatarUrl || p.photoUrl || "",
     };
-  }, [threads]);
 
-
-   async function openThread(t) {
-    if (!t || !t.peerUid) return;
-
-    // 1) Navigate to DM chat
-    navigate(`/chat?with=${encodeURIComponent(t.peerUid)}`);
-
-    // 2) Optimistic local update: clear unread for this peer
-    setThreads((prev) =>
-      prev.map((x) =>
-        x.peerUid === t.peerUid ? { ...x, unread: 0 } : x
-      )
-    );
-
-    // 3) Tell backend to zero the unread counter
-    try {
-      if (t.room) {
-        // Prefer room if we have it (booking or DM)
-        await markRoomRead(t.room);
-      } else {
-        // Fallback: DM pair-based read
-        await markThreadRead(t.peerUid);
-      }
-    } catch (e) {
-      console.warn("[Inbox] markThreadRead/markRoomRead failed:", e?.message || e);
-    }
+    // ✅ 3) apply + save cache
+    updates[uid] = cached;
+    setProfileCache((prev) => ({ ...prev, [uid]: cached }));
+  } catch (e) {
+    console.warn("[Inbox] hydrate profile failed for", uid, e?.message || e);
   }
+}
+
+
+    if (cancelled) return;
+    if (!Object.keys(updates).length) return;
+
+    setThreads((prev) =>
+      prev.map((t) => (updates[t.peerUid] ? { ...t, ...updates[t.peerUid] } : t))
+    );
+  }
+
+  hydrate();
+
+  return () => {
+    cancelled = true;
+  };
+}, [missingUidsKey, profileCache, getPublicProfileByUid]);
+
+async function openThread(t) {
+  if (!t || !t.peerUid) return;
+
+  // optimistic local update
+  setThreads((prev) =>
+    prev.map((x) => (x.peerUid === t.peerUid ? { ...x, unread: 0 } : x))
+  );
+
+  // IMPORTANT: we need a room key even for DM.
+  // If backend already provides t.room, we use it.
+  // If not, we fall back to the DM room format: dm:<smallUid>:<bigUid>
+  const roomKey =
+    t.room ||
+    (myUid && t.peerUid
+      ? myUid < t.peerUid
+        ? `dm:${myUid}:${t.peerUid}`
+        : `dm:${t.peerUid}:${myUid}`
+      : null);
+
+  try {
+    if (roomKey) {
+      await markRoomRead(roomKey);
+      await markNotificationGroupRead(`chat:${roomKey}`);
+    } else {
+      // last fallback
+      await markThreadRead(t.peerUid);
+    }
+  } catch (e) {
+    console.warn("[Inbox] mark read failed:", e?.message || e);
+  }
+
+  // navigate AFTER awaits
+  navigate(`/chat?with=${encodeURIComponent(t.peerUid)}`);
+}
+
 
 
     if (meLoading) {

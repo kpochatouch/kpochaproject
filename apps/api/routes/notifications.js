@@ -107,4 +107,34 @@ router.put("/notifications/read-all", requireAuth, async (req, res) => {
   }
 });
 
+/**
+ * PUT /api/notifications/read-group
+ * mark all notifications for this user with the same groupKey as seen
+ */
+router.put("/notifications/read-group", requireAuth, async (req, res) => {
+  try {
+    const uid = req.user.uid;
+    const { groupKey } = req.body || {};
+    if (!groupKey) return res.status(400).json({ ok: false, error: "groupKey required" });
+
+    const result = await Notification.updateMany(
+      { ownerUid: uid, groupKey, seen: { $ne: true }, deleted: { $ne: true } },
+      { $set: { seen: true, readAt: new Date() } }
+    );
+
+    // reset redis counter safely (recompute)
+    try {
+      if (redisClient) {
+        const cnt = await unreadCount(uid);
+        await redisClient.set(`notifications:unread:${uid}`, String(Number(cnt || 0)));
+      }
+    } catch {}
+
+    return res.json({ ok: true, updated: result?.modifiedCount ?? 0 });
+  } catch (e) {
+    console.error("[notifications:readGroup]", e?.message || e);
+    return res.status(500).json({ ok: false, error: "read_group_failed" });
+  }
+});
+
 export default router;

@@ -686,6 +686,13 @@ export async function markAllNotificationsRead() {
   return data;
 }
 
+export async function markNotificationGroupRead(groupKey) {
+  if (!groupKey) throw new Error("groupKey required");
+  const { data } = await api.put("/api/notifications/read-group", { groupKey });
+  return data;
+}
+
+
 /* Basic / profile / bundle helpers */
 export async function getMe() {
   const { data } = await api.get("/api/me");
@@ -831,6 +838,7 @@ export default {
   getNotificationsCounts,
   markNotificationRead,
   markAllNotificationsRead,
+  markNotificationGroupRead,
 
   // calls / webrtc
   initiateCall,

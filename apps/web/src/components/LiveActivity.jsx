@@ -58,6 +58,8 @@ export default function LiveActivity({ ownerUid }) {
           })
         : null;
 
+
+
     return () => {
       mounted = false;
       if (unregister) unregister();

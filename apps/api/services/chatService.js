@@ -313,6 +313,7 @@ export async function saveMessage({
                   (payload?.attachments && payload.attachments.length
                     ? "[Attachment]"
                     : "[New message]"),
+                    groupKey: `chat:${room}`,
                 data: {
                   room,
                   fromUid,
@@ -372,6 +373,7 @@ export async function saveMessage({
               (payload?.attachments && payload.attachments.length
                 ? "[Attachment]"
                 : "[New message]"),
+                groupKey: `chat:${room}`,
             data: {
               room,
               fromUid,
