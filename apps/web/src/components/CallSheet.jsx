@@ -296,6 +296,41 @@ async function releaseWakeLock() {
     const pcNew = new RTCPeerConnection({ iceServers });
     setPc(pcNew);
 
+    // ================= ICE SAFETY QUEUE (CRITICAL FOR MOBILE / iOS) =================
+const pendingIce = [];
+let remoteDescReady = false;
+
+async function addIceSafely(raw) {
+  if (!raw) return;
+
+  // normalize candidate
+  const ice =
+    raw instanceof RTCIceCandidate ? raw : new RTCIceCandidate(raw);
+
+  // queue ICE until remoteDescription exists
+  if (!remoteDescReady || !pcNew.remoteDescription) {
+    pendingIce.push(ice);
+    return;
+  }
+
+  await pcNew.addIceCandidate(ice);
+}
+
+async function flushIce() {
+  remoteDescReady = true;
+
+  while (pendingIce.length) {
+    const c = pendingIce.shift();
+    try {
+      await pcNew.addIceCandidate(c);
+    } catch (e) {
+      console.warn("[CallSheet] flushIce failed:", e?.message || e);
+    }
+  }
+}
+// ======================================================================
+
+
     // local media
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: true,
@@ -353,6 +388,7 @@ async function releaseWakeLock() {
       try {
         const remoteSdp = msg?.payload || msg; // unwrap payload
         await pcNew.setRemoteDescription(new RTCSessionDescription(remoteSdp));
+        await flushIce();
         if (!asCaller) {
           const answer = await pcNew.createAnswer();
           await pcNew.setLocalDescription(answer);
@@ -381,6 +417,8 @@ async function releaseWakeLock() {
         new RTCSessionDescription(remoteSdp)
       );
 
+      await flushIce();
+
       // 👇 peer has tapped "Accept" → stop ringing on caller side
       stopAllTones();
       setPeerAccepted(true);
@@ -391,16 +429,14 @@ async function releaseWakeLock() {
 });
 
     sig.on("webrtc:ice", async (msg) => {
-      try {
-        const cand = msg?.payload || msg; // unwrap payload
-        if (cand) {
-          console.log("[CallSheet] remote ICE candidate:", cand.type, cand.protocol);
-          await pcNew.addIceCandidate(cand);
-        }
-      } catch (e) {
-        console.warn("[CallSheet] addIceCandidate failed:", e?.message || e);
-      }
-    });
+  try {
+    const cand = msg?.payload || msg;
+    await addIceSafely(cand);
+  } catch (e) {
+    console.warn("[CallSheet] addIceCandidate failed:", e?.message || e);
+  }
+});
+
 
     // caller creates offer immediately
     if (asCaller) {
