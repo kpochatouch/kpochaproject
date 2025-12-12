@@ -131,6 +131,40 @@ api.interceptors.request.use(async (config) => {
   return config;
 });
 
+api.interceptors.response.use(
+  (res) => res,
+  async (err) => {
+    const status = err?.response?.status;
+
+    // ✅ If token expired / unauthorized, try refresh ONCE then retry request
+    if (status === 401 && !err.config.__retried) {
+      err.config.__retried = true;
+
+      try {
+        const auth = firebaseAuth || getAuth();
+        const user = auth.currentUser;
+
+        if (user) {
+          const fresh = await user.getIdToken(true);
+          latestToken = fresh;
+
+          try { localStorage.setItem("token", fresh); } catch {}
+
+          err.config.headers = err.config.headers || {};
+          err.config.headers.Authorization = `Bearer ${fresh}`;
+
+          return api.request(err.config);
+        }
+      } catch {
+        // if refresh fails, fall through
+      }
+    }
+
+    return Promise.reject(err);
+  }
+);
+
+
 /* manual override used by Login.jsx after sign-in */
 export function setAuthToken(token) {
   if (!token) {
@@ -275,7 +309,14 @@ export function connectSocket({ onNotification, onBookingAccepted, onCallEvent }
     socketListeners.get("call:status").add(onCallEvent);
   }
 
-  if (socket && socketConnected) return socket;
+  // ✅ If socket already exists, reuse it (don’t create another one)
+if (socket) {
+  try {
+    if (!socket.connected) socket.connect();
+  } catch {}
+  return socket;
+}
+
 
   try {
     const opts = {
