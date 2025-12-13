@@ -347,6 +347,15 @@ const pcNew = new RTCPeerConnection({
 pcRef.current = pcNew;
 setPc(pcNew);
 
+// ✅ EXTRA DEBUG (laptop issues)
+pcNew.oniceconnectionstatechange = () => {
+  console.log("[CallSheet] iceConnectionState:", pcNew.iceConnectionState);
+};
+pcNew.onsignalingstatechange = () => {
+  console.log("[CallSheet] signalingState:", pcNew.signalingState);
+};
+
+
 
     // ================= ICE SAFETY QUEUE (CRITICAL FOR MOBILE / iOS) =================
 const pendingIce = [];
@@ -393,8 +402,26 @@ async function flushIce() {
 
     // remote media
     pcNew.ontrack = (ev) => {
-      if (remoteRef.current) remoteRef.current.srcObject = ev.streams[0];
-    };
+  const stream = ev.streams?.[0];
+  console.log("[CallSheet] ontrack fired", {
+    tracks: stream?.getTracks()?.map((t) => `${t.kind}:${t.readyState}`),
+  });
+
+  if (remoteRef.current && stream) {
+    remoteRef.current.srcObject = stream;
+
+    // ✅ force playback on laptops (autoplay policy)
+    const el = remoteRef.current;
+    el.playsInline = true;
+
+    Promise.resolve()
+      .then(() => el.play?.())
+      .catch((e) =>
+        console.warn("[CallSheet] remote play blocked:", e?.message || e)
+      );
+  }
+};
+
 
     // ICE
     pcNew.onicecandidate = (ev) => {
