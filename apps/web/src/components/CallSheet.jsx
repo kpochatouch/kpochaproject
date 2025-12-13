@@ -337,7 +337,11 @@ if (pcRef.current) {
   pcRef.current = null;
 }
 
-const pcNew = new RTCPeerConnection({ iceServers });
+const pcNew = new RTCPeerConnection({
+  iceServers,
+  iceTransportPolicy: "relay", // TURN-only test
+});
+
 pcRef.current = pcNew;
 setPc(pcNew);
 
@@ -423,11 +427,15 @@ async function flushIce() {
       return true;
     });
   }
-  if (st === "failed" || st === "disconnected") {
+  if (st === "failed") {
   cleanupPeer();
   onClose?.();
   return;
 }
+
+// ❗ DO NOT close immediately on "disconnected"
+// Mobile + laptops often recover from this state
+
 
 if (st === "closed") {
   setHasConnected(false);
@@ -627,7 +635,7 @@ async function acceptIncoming() {
 
   setStarting(true);
   if (mode === "video") requestWakeLock();
-  
+
   try {
     const ok = await sig.ready(8000);
     if (!ok) throw new Error("signaling_not_ready");
