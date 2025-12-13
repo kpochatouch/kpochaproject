@@ -57,6 +57,7 @@ export default function CallSheet({
 
   const localRef = useRef(null);
   const remoteRef = useRef(null);
+  const pcRef = useRef(null);
 
   // 🔆 Keep screen awake during calls (mobile)
 const wakeLockRef = useRef(null);
@@ -325,8 +326,21 @@ useEffect(() => {
 
     const iceServers = await SignalingClient.getIceServers();
 
-    const pcNew = new RTCPeerConnection({ iceServers });
-    setPc(pcNew);
+// ✅ MUST happen BEFORE creating a new RTCPeerConnection
+if (pcRef.current) {
+  try {
+    pcRef.current.onicecandidate = null;
+    pcRef.current.ontrack = null;
+    pcRef.current.onconnectionstatechange = null;
+    pcRef.current.close();
+  } catch {}
+  pcRef.current = null;
+}
+
+const pcNew = new RTCPeerConnection({ iceServers });
+pcRef.current = pcNew;
+setPc(pcNew);
+
 
     // ================= ICE SAFETY QUEUE (CRITICAL FOR MOBILE / iOS) =================
 const pendingIce = [];
@@ -409,9 +423,15 @@ async function flushIce() {
       return true;
     });
   }
-  if (["disconnected", "failed", "closed"].includes(st)) {
-    setHasConnected(false);
-  }
+  if (st === "failed" || st === "disconnected") {
+  cleanupPeer();
+  onClose?.();
+  return;
+}
+
+if (st === "closed") {
+  setHasConnected(false);
+}
 };
 
 // ✅ receiver: remove the stasher once we are ready to handle offers for real
@@ -495,15 +515,24 @@ if (!asCaller && stashOfferHandlerRef.current) {
     stopAllTones();
 
     try {
-      if (pc) {
-        pc.getSenders()?.forEach((s) => {
-          try {
-            s.track?.stop();
-          } catch {}
-        });
-        pc.close();
-      }
+     const livePc = pcRef.current || pc;
+
+if (livePc) {
+  livePc.onicecandidate = null;
+  livePc.ontrack = null;
+  livePc.onconnectionstatechange = null;
+
+  livePc.getSenders()?.forEach((s) => {
+    try { s.track?.stop(); } catch {}
+  });
+
+  try { livePc.close(); } catch {}
+}
+
+pcRef.current = null;
+
       } catch {}
+      pcRef.current = null;
     setPc(null);
     setHasConnected(false);
     setHasAccepted(false); // 👈 reset accept state
@@ -545,6 +574,8 @@ async function startCaller() {
   if (!sig || !room) return;
 
   setStarting(true);
+  if (mode === "video") requestWakeLock();
+
   try {
     const ok = await sig.ready(8000);
     if (!ok) throw new Error("signaling_not_ready");
@@ -595,6 +626,8 @@ async function acceptIncoming() {
   if (!sig || !room) return;
 
   setStarting(true);
+  if (mode === "video") requestWakeLock();
+  
   try {
     const ok = await sig.ready(8000);
     if (!ok) throw new Error("signaling_not_ready");
