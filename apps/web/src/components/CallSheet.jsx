@@ -57,37 +57,6 @@ export default function CallSheet({
 
   const localRef = useRef(null);
   const remoteRef = useRef(null);
-  const pcRef = useRef(null);
-
-  // 🔆 Keep screen awake during calls (mobile)
-const wakeLockRef = useRef(null);
-
-async function requestWakeLock() {
-  try {
-    if (!("wakeLock" in navigator)) return false;
-
-    wakeLockRef.current = await navigator.wakeLock.request("screen");
-
-    // 👇 NEW: detect if the system releases it
-    wakeLockRef.current.addEventListener("release", () => {
-      console.log("[WakeLock] released by system");
-    });
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-
-async function releaseWakeLock() {
-  try {
-    if (!wakeLockRef.current) return;
-    await wakeLockRef.current?.release();
-  } catch {}
-  wakeLockRef.current = null;
-}
-
 
   // ring tones
   const callerToneRef = useRef(null);
@@ -95,9 +64,6 @@ async function releaseWakeLock() {
 
   // NEW: stash offer that arrives before receiver taps "Accept"
   const pendingOfferRef = useRef(null);
-
-  // keep a reference to the "stash offer" handler so we can remove it later
-const stashOfferHandlerRef = useRef(null);
 
   function stopAllTones() {
     [callerToneRef, incomingToneRef].forEach((ref) => {
@@ -176,13 +142,11 @@ const stashOfferHandlerRef = useRef(null);
         audio.play().catch(() => {});
       } catch {}
 
-      // 🔴 stash incoming offer that may arrive BEFORE user taps Accept
-const stash = (msg) => {
-  console.log("[CallSheet] stashed incoming offer before accept");
-  pendingOfferRef.current = msg;
-};
-stashOfferHandlerRef.current = stash;
-sc.on("webrtc:offer", stash);
+      // 🔴 NEW: stash incoming offer that may arrive BEFORE user taps Accept
+      sc.on("webrtc:offer", (msg) => {
+        console.log("[CallSheet] stashed incoming offer before accept");
+        pendingOfferRef.current = msg;
+      });
     }
 
     return () => {
@@ -195,8 +159,6 @@ sc.on("webrtc:offer", stash);
       setElapsedSeconds(0);
       setHasAccepted(false);
       setCallFailed(false);
-      stashOfferHandlerRef.current = null;
-      releaseWakeLock();
     };
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -243,8 +205,7 @@ sc.on("webrtc:offer", stash);
       setCallFailed(true);
 
       // 3) Let backend know it failed because of timeout (optional)
-      safeUpdateStatus("failed", { reason: "timeout_no_connection" });
-
+      safeUpdateStatus("declined", { reason: "timeout_no_connection" });
 
       // 4) Auto hang up after a short pause so user can briefly see "Call failed"
       setTimeout(() => {
@@ -255,31 +216,6 @@ sc.on("webrtc:offer", stash);
     // Cleanup: if state changes (connects, closes, etc.), cancel timeout
     return () => clearTimeout(timeoutId);
   }, [open, peerAccepted, hasAccepted, hasConnected]);
-
-  // ⏳ caller ring timeout: if nobody accepts within 30s, mark missed
-useEffect(() => {
-  if (!open) return;
-  if (role !== "caller") return;
-
-  // stop timer if connected or accepted
-  if (hasConnected || peerAccepted) return;
-
-  const id = setTimeout(async () => {
-    try {
-      stopAllTones();
-      setCallFailed(true);
-
-      await safeUpdateStatus("missed", { reason: "ring_timeout" });
-      await sendCallSummaryMessage("missed");
-
-      cleanupPeer();
-      onClose?.();
-    } catch {}
-  }, 30000);
-
-  return () => clearTimeout(id);
-}, [open, role, hasConnected, peerAccepted]);
-
 
     // 🔔 React to backend call:status events for this call
   useEffect(() => {
@@ -324,64 +260,10 @@ useEffect(() => {
 
     const wantVideo = mode === "video" && !camOff;
 
-    const iceCfg = await SignalingClient.getIceServers();
-    const iceServers = Array.isArray(iceCfg) ? iceCfg : (iceCfg?.iceServers || []);
+    const iceServers = await SignalingClient.getIceServers();
 
-
-// ✅ MUST happen BEFORE creating a new RTCPeerConnection
-if (pcRef.current) {
-  try {
-    pcRef.current.onicecandidate = null;
-    pcRef.current.ontrack = null;
-    pcRef.current.onconnectionstatechange = null;
-    pcRef.current.close();
-  } catch {}
-  pcRef.current = null;
-}
-
-const pcNew = new RTCPeerConnection({
-  iceServers,
-  iceTransportPolicy: "relay", // TURN-only test
-});
-
-pcRef.current = pcNew;
-setPc(pcNew);
-
-
-    // ================= ICE SAFETY QUEUE (CRITICAL FOR MOBILE / iOS) =================
-const pendingIce = [];
-let remoteDescReady = false;
-
-async function addIceSafely(raw) {
-  if (!raw) return;
-
-  // normalize candidate
-  const ice =
-    raw instanceof RTCIceCandidate ? raw : new RTCIceCandidate(raw);
-
-  // queue ICE until remoteDescription exists
-  if (!remoteDescReady || !pcNew.remoteDescription) {
-    pendingIce.push(ice);
-    return;
-  }
-
-  await pcNew.addIceCandidate(ice);
-}
-
-async function flushIce() {
-  remoteDescReady = true;
-
-  while (pendingIce.length) {
-    const c = pendingIce.shift();
-    try {
-      await pcNew.addIceCandidate(c);
-    } catch (e) {
-      console.warn("[CallSheet] flushIce failed:", e?.message || e);
-    }
-  }
-}
-// ======================================================================
-
+    const pcNew = new RTCPeerConnection({ iceServers });
+    setPc(pcNew);
 
     // local media
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -429,28 +311,10 @@ async function flushIce() {
       return true;
     });
   }
-  if (st === "failed") {
-  cleanupPeer();
-  onClose?.();
-  return;
-}
-
-// ❗ DO NOT close immediately on "disconnected"
-// Mobile + laptops often recover from this state
-
-
-if (st === "closed") {
-  setHasConnected(false);
-}
+  if (["disconnected", "failed", "closed"].includes(st)) {
+    setHasConnected(false);
+  }
 };
-
-// ✅ receiver: remove the stasher once we are ready to handle offers for real
-if (!asCaller && stashOfferHandlerRef.current) {
-  try {
-    sig.off("webrtc:offer", stashOfferHandlerRef.current);
-  } catch {}
-  stashOfferHandlerRef.current = null;
-}
 
 
        // signaling listeners
@@ -458,7 +322,6 @@ if (!asCaller && stashOfferHandlerRef.current) {
       try {
         const remoteSdp = msg?.payload || msg; // unwrap payload
         await pcNew.setRemoteDescription(new RTCSessionDescription(remoteSdp));
-        await flushIce();
         if (!asCaller) {
           const answer = await pcNew.createAnswer();
           await pcNew.setLocalDescription(answer);
@@ -487,8 +350,6 @@ if (!asCaller && stashOfferHandlerRef.current) {
         new RTCSessionDescription(remoteSdp)
       );
 
-      await flushIce();
-
       // 👇 peer has tapped "Accept" → stop ringing on caller side
       stopAllTones();
       setPeerAccepted(true);
@@ -499,14 +360,16 @@ if (!asCaller && stashOfferHandlerRef.current) {
 });
 
     sig.on("webrtc:ice", async (msg) => {
-  try {
-    const cand = msg?.payload || msg;
-    await addIceSafely(cand);
-  } catch (e) {
-    console.warn("[CallSheet] addIceCandidate failed:", e?.message || e);
-  }
-});
-
+      try {
+        const cand = msg?.payload || msg; // unwrap payload
+        if (cand) {
+          console.log("[CallSheet] remote ICE candidate:", cand.type, cand.protocol);
+          await pcNew.addIceCandidate(cand);
+        }
+      } catch (e) {
+        console.warn("[CallSheet] addIceCandidate failed:", e?.message || e);
+      }
+    });
 
     // caller creates offer immediately
     if (asCaller) {
@@ -525,24 +388,15 @@ if (!asCaller && stashOfferHandlerRef.current) {
     stopAllTones();
 
     try {
-     const livePc = pcRef.current || pc;
-
-if (livePc) {
-  livePc.onicecandidate = null;
-  livePc.ontrack = null;
-  livePc.onconnectionstatechange = null;
-
-  livePc.getSenders()?.forEach((s) => {
-    try { s.track?.stop(); } catch {}
-  });
-
-  try { livePc.close(); } catch {}
-}
-
-pcRef.current = null;
-
+      if (pc) {
+        pc.getSenders()?.forEach((s) => {
+          try {
+            s.track?.stop();
+          } catch {}
+        });
+        pc.close();
+      }
       } catch {}
-      pcRef.current = null;
     setPc(null);
     setHasConnected(false);
     setHasAccepted(false); // 👈 reset accept state
@@ -580,44 +434,39 @@ pcRef.current = null;
   }
 
     // ---- caller: start as soon as sheet opens ----
-async function startCaller() {
-  if (!sig || !room) return;
+  async function startCaller() {
+    if (!sig || !room) return;
+    setStarting(true);
+    try {
+      console.log("[CallSheet] startCaller()", {
+        open,
+        room,
+        role,
+        callId,
+        callType,
+      });
 
-  setStarting(true);
-  if (mode === "video") requestWakeLock();
+      if (!callerToneRef.current) {
+        try {
+          const audio = new Audio("/sound/caller-tune.mp3");
+          audio.loop = true;
+          callerToneRef.current = audio;
+          audio.play().catch(() => {});
+        } catch {}
+      }
 
-  try {
-    const ok = await sig.ready(8000);
-    if (!ok) throw new Error("signaling_not_ready");
-
-    console.log("[CallSheet] startCaller()", {
-      open,
-      room,
-      role,
-      callId,
-      callType,
-    });
-
-    if (!callerToneRef.current) {
-      try {
-        const audio = new Audio("/sound/caller-tune.mp3");
-        audio.loop = true;
-        callerToneRef.current = audio;
-        audio.play().catch(() => {});
-      } catch {}
+      await setupPeerConnection(true);
+      await safeUpdateStatus("ringing");
+    } catch (e) {
+      console.error("call start error:", e);
+      alert(
+        "Could not start call. Please check microphone/camera permissions."
+      );
+      stopAllTones();
+    } finally {
+      setStarting(false);
     }
-
-    await setupPeerConnection(true);
-    await safeUpdateStatus("ringing");
-  } catch (e) {
-    console.error("call start error:", e);
-    alert("Could not start call. Please check microphone/camera permissions.");
-    stopAllTones();
-  } finally {
-    setStarting(false);
   }
-}
-
 
   // auto-start caller once signaling client is ready
   useEffect(() => {
@@ -632,39 +481,35 @@ async function startCaller() {
 
   // ---- receiver actions ----
 
-async function acceptIncoming() {
-  if (!sig || !room) return;
+     async function acceptIncoming() {
+    if (!sig || !room) return;
+    setStarting(true);
+    try {
+      console.log("[CallSheet] acceptIncoming()", {
+        open,
+        room,
+        role,
+        callId,
+        callType,
+      });
 
-  setStarting(true);
-  if (mode === "video") requestWakeLock();
+      stopAllTones();
+      setHasAccepted(true);              // 👈 receiver has accepted
+      await safeUpdateStatus("accepted");
+      await setupPeerConnection(false);
 
-  try {
-    const ok = await sig.ready(8000);
-    if (!ok) throw new Error("signaling_not_ready");
-
-    console.log("[CallSheet] acceptIncoming()", {
-      open,
-      room,
-      role,
-      callId,
-      callType,
-    });
-
-    stopAllTones();
-    setHasAccepted(true);
-    await safeUpdateStatus("accepted");
-    await setupPeerConnection(false);
-  } catch (e) {
-    console.error("accept call failed:", e);
-    alert("Could not accept call. Please check microphone/camera permissions.");
-    await safeUpdateStatus("declined", { reason: "media_error" });
-    cleanupPeer();
-    onClose?.();
-  } finally {
-    setStarting(false);
+    } catch (e) {
+      console.error("accept call failed:", e);
+      alert(
+        "Could not accept call. Please check microphone/camera permissions."
+      );
+      await safeUpdateStatus("declined", { reason: "media_error" });
+      cleanupPeer();
+      onClose?.();
+    } finally {
+      setStarting(false);
+    }
   }
-}
-
 
 
   async function declineIncoming() {
@@ -678,19 +523,15 @@ async function acceptIncoming() {
   // ---- hangup (both roles) ----
 
   async function hangup() {
-  stopAllTones();
+    stopAllTones();
+    const endedStatus =
+      hasConnected ? "ended" : role === "caller" ? "cancelled" : "declined";
 
-  const endedStatus =
-    hasConnected ? "ended" : role === "caller" ? "cancelled" : "declined";
-
-  await safeUpdateStatus(endedStatus);
-  await sendCallSummaryMessage(endedStatus);
-
-  await releaseWakeLock();   // ✅ allow sleep again
-  cleanupPeer();
-  onClose?.();
-}
-
+    await safeUpdateStatus(endedStatus);
+    await sendCallSummaryMessage(endedStatus);
+    cleanupPeer();
+    onClose?.();
+  }
 
   // ---- mic / camera toggles ----
 
@@ -714,35 +555,6 @@ async function acceptIncoming() {
       setCamOff(!t.enabled);
     });
   }
-
-  // When the call is open, keep the screen awake.
-// When the call closes, allow screen to sleep again.
-useEffect(() => {
-  if (!open) {
-    releaseWakeLock();
-    return;
-  }
-
-  // 🔴 Only keep screen awake for VIDEO calls
-  if (mode === "video") {
-    requestWakeLock();
-  }
-
-  const onVis = () => {
-    if (!document.hidden && mode === "video") {
-      requestWakeLock();
-    }
-  };
-
-  document.addEventListener("visibilitychange", onVis);
-
-  return () => {
-    document.removeEventListener("visibilitychange", onVis);
-    releaseWakeLock();
-  };
-}, [open, mode]);
-
-
 
       // ---------- render ----------
 
