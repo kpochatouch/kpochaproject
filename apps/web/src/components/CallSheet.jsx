@@ -324,7 +324,9 @@ useEffect(() => {
 
     const wantVideo = mode === "video" && !camOff;
 
-    const iceServers = await SignalingClient.getIceServers();
+    const iceCfg = await SignalingClient.getIceServers();
+    const iceServers = Array.isArray(iceCfg) ? iceCfg : (iceCfg?.iceServers || []);
+
 
 // ✅ MUST happen BEFORE creating a new RTCPeerConnection
 if (pcRef.current) {
