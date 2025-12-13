@@ -69,6 +69,7 @@ function ensureAuthListener() {
   if (user) {
     try {
       // 🔥 force a fresh token when user logs in
+      
       const t = await user.getIdToken(true);
       latestToken = t;
       try {
