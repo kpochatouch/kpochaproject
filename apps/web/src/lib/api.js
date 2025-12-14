@@ -60,6 +60,59 @@ let firebaseAuth = null;
 let authListenerStarted = false;
 let latestToken = null;
 
+let tokenReadyPromise = null;
+
+async function waitForTokenReady(timeoutMs = 8000) {
+  if (latestToken) return latestToken;
+  if (tokenReadyPromise) return tokenReadyPromise;
+
+  tokenReadyPromise = new Promise((resolve) => {
+    let done = false;
+    let unsub = null;
+
+    const finish = (t) => {
+      if (done) return;
+      done = true;
+      try { unsub && unsub(); } catch {}
+      resolve(t || null);
+    };
+
+    const tmr = setTimeout(() => finish(null), timeoutMs);
+
+    try {
+      const auth = firebaseAuth || getAuth();
+      unsub = onAuthStateChanged(auth, async (user) => {
+        try {
+          if (!user) {
+            clearTimeout(tmr);
+            finish(null);
+            return;
+          }
+
+          const t = await user.getIdToken(true);
+          latestToken = t;
+
+          try { localStorage.setItem("token", t); } catch {}
+
+          clearTimeout(tmr);
+          finish(t);
+        } catch {
+          clearTimeout(tmr);
+          finish(null);
+        }
+      });
+    } catch {
+      clearTimeout(tmr);
+      finish(null);
+    }
+  }).finally(() => {
+    tokenReadyPromise = null;
+  });
+
+  return tokenReadyPromise;
+}
+
+
 // optional hook for token changes
 export let onTokenChange = null;
 
@@ -100,7 +153,45 @@ ensureAuthListener();
 api.interceptors.request.use(async (config) => {
   ensureAuthListener();
 
-  // 1) Try to get fresh token from Firebase (if available)
+  config.headers = config.headers || {};
+  const rawUrl = String(config.url || "");
+
+// Normalize to a pathname we can safely match
+let path = rawUrl;
+try {
+  if (/^https?:\/\//i.test(rawUrl)) {
+    path = new URL(rawUrl).pathname;
+  } else {
+    path = rawUrl.startsWith("/") ? rawUrl : `/${rawUrl}`;
+  }
+} catch {
+  path = rawUrl.startsWith("/") ? rawUrl : `/${rawUrl}`;
+}
+
+const needsAuth =
+  path.startsWith("/api/") &&
+  !path.startsWith("/api/health") &&
+  !path.startsWith("/api/settings") &&
+  !path.startsWith("/api/posts/public") &&
+  !path.startsWith("/api/barbers") &&
+  !path.startsWith("/api/geo");
+
+  // ✅ add this here
+    if (needsAuth && latestToken) {
+      config.headers.Authorization = `Bearer ${latestToken}`;
+    }
+
+  // If this endpoint needs auth, wait briefly for Firebase to produce a token
+  if (needsAuth && !latestToken) {
+    const t = await waitForTokenReady(8000);
+    if (t) {
+      config.headers.Authorization = `Bearer ${t}`;
+      return config;
+    }
+  }
+
+
+  // Normal path: Firebase token if available
   if (firebaseAuth) {
     const user = firebaseAuth.currentUser;
     if (user) {
@@ -111,19 +202,17 @@ api.interceptors.request.use(async (config) => {
           config.headers.Authorization = `Bearer ${fresh}`;
           return config;
         }
-      } catch {
-        // ignore and fall back
-      }
+      } catch {}
     }
   }
 
-  // 2) Use latestToken if present
+  // Use cached token
   if (latestToken) {
     config.headers.Authorization = `Bearer ${latestToken}`;
     return config;
   }
 
-  // 3) Fallback to localStorage-saved token (used by some login flows)
+  // Fallback to localStorage token
   try {
     const t = localStorage.getItem("token");
     if (t) {
@@ -135,13 +224,14 @@ api.interceptors.request.use(async (config) => {
   return config;
 });
 
+
 api.interceptors.response.use(
   (res) => res,
   async (err) => {
     const status = err?.response?.status;
 
     // ✅ If token expired / unauthorized, try refresh ONCE then retry request
-    if (status === 401 && !err.config.__retried) {
+    if (status === 401 && err?.config && !err.config.__retried) {
       err.config.__retried = true;
 
       try {
@@ -313,14 +403,35 @@ export function connectSocket({ onNotification, onBookingAccepted, onCallEvent }
     socketListeners.get("call:status").add(onCallEvent);
   }
 
-// ✅ If socket already exists, reuse it
+// ✅ If socket already exists, reuse it BUT ensure events are wired
 if (socket) {
   try {
     socketConnected = !!socket.connected;
+
+    // wire already-registered events
+    for (const ev of socketListeners.keys()) _ensureWire(ev);
+
+    // always wire core realtime events (including WebRTC)
+    _ensureWire("notification:new");
+    _ensureWire("notification:received");
+    _ensureWire("chat:message");
+    _ensureWire("presence:join");
+    _ensureWire("presence:leave");
+    _ensureWire("call:initiate");
+    _ensureWire("call:accepted");
+    _ensureWire("call:ended");
+    _ensureWire("call:missed");
+    _ensureWire("booking:accepted");
+    _ensureWire("webrtc:offer");
+    _ensureWire("webrtc:answer");
+    _ensureWire("webrtc:ice");
+
     if (!socket.connected) socket.connect();
   } catch {}
+
   return socket;
 }
+
 
 
   try {
