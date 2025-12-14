@@ -174,7 +174,9 @@ const needsAuth =
   !path.startsWith("/api/settings") &&
   !path.startsWith("/api/posts/public") &&
   !path.startsWith("/api/barbers") &&
-  !path.startsWith("/api/geo");
+  !path.startsWith("/api/geo") &&
+  !path.startsWith("/api/webrtc"); // ✅ WebRTC ICE must NOT require auth
+
 
   // ✅ add this here
     if (needsAuth && latestToken) {

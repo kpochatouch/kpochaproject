@@ -48,7 +48,7 @@ router.get("/webrtc/ice", (req, res) => {
         ],
       });
     }
-
+    res.set("Cache-Control", "no-store");
     return res.json({ iceServers });
   } catch (err) {
     console.error(err);
