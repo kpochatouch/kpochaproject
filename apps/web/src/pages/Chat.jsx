@@ -6,7 +6,6 @@ import {
   getChatWith,
   getPublicProfileByUid,
   markThreadRead,
-  markRoomRead,
   initiateCall,
   sendChatMessage,
 } from "../lib/api";
@@ -67,6 +66,8 @@ export default function Chat() {
   useEffect(() => {
     myLabelRef.current = myLabel;
   }, [myLabel]);
+
+  const joinedRoomRef = useRef(null);
 
 
   // ------------------ CALL HELPERS ------------------ //
@@ -250,13 +251,7 @@ export default function Chat() {
           console.warn("[chat] markThreadRead failed:", err?.message || err);
         }
 
-        if (roomFromApi) {
-          try {
-            await markRoomRead(roomFromApi);
-          } catch (err) {
-            console.warn("[chat] markRoomRead failed:", err?.message || err);
-          }
-        }
+  
       } catch (e) {
         console.warn("load chat history failed:", e?.message || e);
         setRoom(null);
@@ -282,12 +277,18 @@ export default function Chat() {
     setSocket(s);
 
     function joinRoom() {
-      if (!room) return;
-      s.emit("room:join", { room, who: myLabelRef.current });
-      s.emit("chat:read", { room }, (ack) => {
-        console.log("chat:read ack =", ack);
-      });
-    }
+  if (!room) return;
+
+  s.emit("room:join", { room, who: myLabelRef.current }, (ack) => {
+    const realRoom = ack?.room || room;
+    if (ack?.ok) joinedRoomRef.current = realRoom;
+
+    s.emit("chat:read", { room: realRoom }, (ack2) => {
+      console.log("chat:read ack =", ack2);
+    });
+  });
+}
+
 
     // join immediately
     joinRoom();
@@ -298,7 +299,10 @@ export default function Chat() {
     return () => {
   try {
     s.off("connect", joinRoom);
-    if (room) s.emit("room:leave", { room: String(room) });
+
+    const r = joinedRoomRef.current;
+    if (r) s.emit("room:leave", { room: String(r) });
+    joinedRoomRef.current = null;
   } catch (e) {
     console.warn("chat cleanup failed:", e?.message || e);
   }

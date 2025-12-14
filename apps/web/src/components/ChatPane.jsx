@@ -157,6 +157,11 @@ const hideSideButtonsOnMobile = isMobileDevice && composerFocused;
     setMsgs(normalized);
   }, [room, initialMessages, peerUid]);
 
+  useEffect(() => {
+  if (!socket || !room) return;
+  socket.emit("chat:read", { room });
+}, [socket, room]);
+
   // ---------- socket listeners ----------
   useEffect(() => {
     if (!socket) return;
@@ -206,52 +211,49 @@ const hideSideButtonsOnMobile = isMobileDevice && composerFocused;
       };
     }
 
-    function onMsg(m) {
-      const n = normalizeIncoming(m);
+   function onMsg(m) {
+  const n = normalizeIncoming(m);
 
-      setMsgs((prev) => {
-        // reconcile optimistic message by clientId
-        if (n.clientId) {
-          const idx = prev.findIndex(
-            (x) => x.clientId && x.clientId === n.clientId
-          );
-          if (idx !== -1) {
-            const copy = [...prev];
-            const existing = copy[idx];
+  // ✅ emit outside setState (side-effect safe)
+  if (!n.isMe && n.room === room) {
+    socket.emit("chat:read", { room });
+  }
 
-            let nextStatus = n.status;
-            const order = ["pending", "sent", "delivered", "seen"];
-            if (existing.isMe) {
-              const existingRank = order.indexOf(existing.status || "pending");
-              const incomingRank = order.indexOf(n.status || "pending");
+  setMsgs((prev) => {
+    // reconcile optimistic message by clientId
+    if (n.clientId) {
+      const idx = prev.findIndex(
+        (x) => x.clientId && x.clientId === n.clientId
+      );
+      if (idx !== -1) {
+        const copy = [...prev];
+        const existing = copy[idx];
 
-              if (existingRank > incomingRank) {
-                nextStatus = existing.status;
-              }
-            }
-
-            copy[idx] = {
-              ...existing,
-              ...n,
-              _confirmed: true,
-              status: nextStatus,
-            };
-            return copy;
-          }
+        let nextStatus = n.status;
+        const order = ["pending", "sent", "delivered", "seen"];
+        if (existing.isMe) {
+          const existingRank = order.indexOf(existing.status || "pending");
+          const incomingRank = order.indexOf(n.status || "pending");
+          if (existingRank > incomingRank) nextStatus = existing.status;
         }
 
-        // avoid dupes
-        if (
-          prev.some(
-            (x) => x.id === n.id || (n.clientId && x.clientId === n.clientId)
-          )
-        ) {
-          return prev;
-        }
-
-        return [...prev, n];
-      });
+        copy[idx] = { ...existing, ...n, _confirmed: true, status: nextStatus };
+        return copy;
+      }
     }
+
+    if (
+      prev.some(
+        (x) => x.id === n.id || (n.clientId && x.clientId === n.clientId)
+      )
+    ) {
+      return prev;
+    }
+
+    return [...prev, n];
+  });
+}
+
 
     // live "seen" listener
     function onSeen(evt) {
