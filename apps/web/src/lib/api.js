@@ -7,6 +7,9 @@ import { getAuth, onAuthStateChanged } from "firebase/auth";
 import { io as ioClient } from "socket.io-client";
 import { v4 as uuidv4 } from "uuid";
 
+const publicProfileCache = new Map();
+const inflightPublicProfile = new Map();
+
 /* ------------------------
    Helper: canonical DM room
    ------------------------ */
@@ -69,7 +72,7 @@ function ensureAuthListener() {
   if (user) {
     try {
       // 🔥 force a fresh token when user logs in
-      
+
       const t = await user.getIdToken(true);
       latestToken = t;
       try {
@@ -310,35 +313,15 @@ export function connectSocket({ onNotification, onBookingAccepted, onCallEvent }
     socketListeners.get("call:status").add(onCallEvent);
   }
 
-// ✅ If socket already exists, reuse it BUT ensure events are wired
+// ✅ If socket already exists, reuse it
 if (socket) {
   try {
-    // keep socketConnected in sync
     socketConnected = !!socket.connected;
-
-    // wire already-registered events
-    for (const ev of socketListeners.keys()) _ensureWire(ev);
-
-    // always wire core realtime events (including WebRTC)
-    _ensureWire("notification:new");
-    _ensureWire("notification:received");
-    _ensureWire("chat:message");
-    _ensureWire("presence:join");
-    _ensureWire("presence:leave");
-    _ensureWire("call:initiate");
-    _ensureWire("call:accepted");
-    _ensureWire("call:ended");
-    _ensureWire("call:missed");
-    _ensureWire("booking:accepted");
-    _ensureWire("webrtc:offer");
-    _ensureWire("webrtc:answer");
-    _ensureWire("webrtc:ice");
-
     if (!socket.connected) socket.connect();
   } catch {}
-
   return socket;
 }
+
 
   try {
     const opts = {
@@ -386,8 +369,6 @@ socket = ioClient(ROOT, opts);
     socket.on("connect", () => {
       socketConnected = true;
       reconnectAttempts = 0;
-
-       wiredEvents.clear();
 
       // wire already-registered events
       for (const ev of socketListeners.keys()) {
@@ -854,7 +835,35 @@ export async function getClientProfileAdmin(clientUid) { const { data } = await 
 export async function updateProProfile(payload) { const { data } = await api.put("/api/profile/pro/me", payload); return data; }
 export async function getPublicProProfile(proId) { const { data } = await api.get(`/api/profile/pro/${proId}`); return data; }
 export async function getPublicProfile(username) { if (!username) throw new Error("username required"); const { data } = await api.get(`/api/profile/public/${encodeURIComponent(username)}`); return data; }
-export async function getPublicProfileByUid(uid) { if (!uid) throw new Error("uid required"); const { data } = await api.get(`/api/profile/public-by-uid/${encodeURIComponent(uid)}`); return data; }
+export async function getPublicProfileByUid(uid) {
+  if (!uid) throw new Error("uid required");
+  const key = String(uid);
+
+  // 1) Fast path: cached
+  if (publicProfileCache.has(key)) {
+    return publicProfileCache.get(key);
+  }
+
+  // 2) Deduplicate: if a request is already running for this uid, reuse it
+  if (inflightPublicProfile.has(key)) {
+    return inflightPublicProfile.get(key);
+  }
+
+  // 3) Make the request and store it as inflight
+  const p = api
+    .get(`/api/profile/public-by-uid/${encodeURIComponent(key)}`)
+    .then(({ data }) => {
+      publicProfileCache.set(key, data);
+      return data;
+    })
+    .finally(() => {
+      inflightPublicProfile.delete(key);
+    });
+
+  inflightPublicProfile.set(key, p);
+  return p;
+}
+
 export async function getProProfileAdmin(proId) { const { data } = await api.get(`/api/profile/pro/${proId}/admin`); return data; }
 export async function ensureClientProfile() { const { data } = await api.post("/api/profile/ensure"); return data; }
 

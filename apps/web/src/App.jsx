@@ -16,6 +16,7 @@ import ClickOutsideLayer from "./components/ClickOutsideLayer.jsx";
 import RequireAuth from "./components/RequireAuth.jsx";
 import RouteLoader from "./components/RouteLoader.jsx";
 import { useMe } from "./context/MeContext.jsx";
+import ChatbaseWidget from "./components/ChatbaseWidget.jsx";
 
 // ---------- pages (lazy) ----------
 const Home = lazy(() => import("./pages/Home.jsx"));
@@ -49,39 +50,6 @@ const PostDetail = lazy(() => import("./pages/PostDetail.jsx"));
 const PublicProfile = lazy(() => import("./pages/PublicProfile.jsx"));
 const ForYou = lazy(() => import("./pages/ForYou.jsx"));
 const Inbox = lazy(() => import("./pages/Inbox.jsx"));
-
-/* ---------- Chatbase hook ---------- */
-function useChatbase() {
-  useEffect(() => {
-    const CHATBOT_ID = import.meta.env.VITE_CHATBASE_ID;
-    if (!CHATBOT_ID) return;
-
-    (async () => {
-      const cfg = { chatbotId: CHATBOT_ID };
-
-      try {
-        const r = await api.get("/api/chatbase/userhash");
-        if (r?.data?.userId && r?.data?.userHash) {
-          cfg.userId = r.data.userId;
-          cfg.userHash = r.data.userHash;
-        }
-      } catch {
-        /* ignore */
-      }
-
-      window.chatbaseConfig = cfg;
-
-      if (!document.getElementById(CHATBOT_ID)) {
-        const s = document.createElement("script");
-        s.src = "https://www.chatbase.co/embed.min.js";
-        s.id = CHATBOT_ID;
-        s.defer = true;
-        s.dataset.domain = "www.chatbase.co";
-        document.body.appendChild(s);
-      }
-    })();
-  }, []);
-}
 
 /* ---------- role guards ---------- */
 function RequireRole({ role, children }) {
@@ -155,7 +123,6 @@ function FindProSmart() {
 
 /* ---------- App ---------- */
 export default function App() {
-  useChatbase();
     const location = useLocation();
   const navigate = useNavigate();
 
@@ -213,10 +180,11 @@ export default function App() {
 
 
   // As soon as we know who "me" is, connect the socket with the right auth
-  useEffect(() => {
-    if (!me) return;        // if not logged in yet, do nothing
-    connectSocket();        // this will reuse or reconnect the socket with token
-  }, [me]);
+ useEffect(() => {
+  const uid = me?.uid;
+  if (!uid) return;
+  connectSocket();
+}, [me?.uid]);
 
 
   const myLabel =
@@ -341,6 +309,7 @@ useEffect(() => {
 
   return (
     <div className="min-h-screen flex flex-col bg-black text-white">
+      <ChatbaseWidget />
       {/* global click → custom event used by menus/overlays */}
       <ClickOutsideLayer />
 

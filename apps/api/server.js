@@ -489,7 +489,7 @@ async function restartSchedulers() {
 
 /* ------------------- Express App ------------------- */
 const app = express();
-
+app.get("/", (_req, res) => res.status(200).send("OK"));
 app.set("redis", redis);
 
 /* ------------------- CORS (hardened, with Vercel previews) ------------------- */

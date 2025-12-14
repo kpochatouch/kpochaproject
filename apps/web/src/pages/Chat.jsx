@@ -1,5 +1,5 @@
 // apps/web/src/pages/Chat.jsx
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   connectSocket,
@@ -60,6 +60,14 @@ export default function Chat() {
     currentUser?.email ||
     myUid ||
     "me";
+
+      // keep latest label without re-running socket effect
+  const myLabelRef = useRef(myLabel);
+
+  useEffect(() => {
+    myLabelRef.current = myLabel;
+  }, [myLabel]);
+
 
   // ------------------ CALL HELPERS ------------------ //
 
@@ -261,20 +269,21 @@ export default function Chat() {
     return () => {
       alive = false;
     };
-  }, [peerUid, currentUser, myUid, myLabel]);
+ }, [peerUid, currentUser, myUid]);
+
 
   // ------------------ SOCKET SETUP ------------------ //
 
   // 3) Attach socket + join room once we know the room id
     useEffect(() => {
-    if (!room || !myLabel) return;
+     if (!room || !myUid) return;
 
     const s = connectSocket(); // should return the shared singleton
     setSocket(s);
 
     function joinRoom() {
       if (!room) return;
-      s.emit("room:join", { room, who: myLabel });
+      s.emit("room:join", { room, who: myLabelRef.current });
       s.emit("chat:read", { room }, (ack) => {
         console.log("chat:read ack =", ack);
       });
@@ -287,15 +296,16 @@ export default function Chat() {
     s.on("connect", joinRoom);
 
     return () => {
-      try {
-        s.off("connect", joinRoom);
-        if (room) s.emit("room:leave", { room });
-      } catch (e) {
-        console.warn("chat cleanup failed:", e?.message || e);
-      }
-      setSocket(null);
-    };
-  }, [room, myLabel]);
+  try {
+    s.off("connect", joinRoom);
+    if (room) s.emit("room:leave", { room: String(room) });
+  } catch (e) {
+    console.warn("chat cleanup failed:", e?.message || e);
+  }
+  setSocket(null);
+};
+
+  }, [room, myUid]);
 
 
    // 4) Listen only for call status (close caller UI when call ends/fails)
