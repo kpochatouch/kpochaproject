@@ -96,6 +96,10 @@ async function releaseWakeLock() {
   // NEW: stash offer that arrives before receiver taps "Accept"
   const pendingOfferRef = useRef(null);
 
+  const offerHandlerRef = useRef(null);
+const answerHandlerRef = useRef(null);
+const iceHandlerRef = useRef(null);
+
   // keep a reference to the "stash offer" handler so we can remove it later
 const stashOfferHandlerRef = useRef(null);
 
@@ -196,6 +200,10 @@ sc.on("webrtc:offer", stash);
       setHasAccepted(false);
       setCallFailed(false);
       stashOfferHandlerRef.current = null;
+      offerHandlerRef.current = null;
+      answerHandlerRef.current = null;
+      iceHandlerRef.current = null;
+      pendingOfferRef.current = null;
       releaseWakeLock();
     };
 
@@ -341,7 +349,7 @@ if (pcRef.current) {
 
 const pcNew = new RTCPeerConnection({
   iceServers,
-  iceTransportPolicy: "relay", // TURN-only test
+  iceTransportPolicy: "all",
 });
 
 pcRef.current = pcNew;
@@ -479,60 +487,79 @@ if (!asCaller && stashOfferHandlerRef.current) {
   stashOfferHandlerRef.current = null;
 }
 
+    // ✅ remove old signaling listeners (prevents closed-pc errors)
+try {
+  if (offerHandlerRef.current) sig.off("webrtc:offer", offerHandlerRef.current);
+  if (answerHandlerRef.current) sig.off("webrtc:answer", answerHandlerRef.current);
+  if (iceHandlerRef.current) sig.off("webrtc:ice", iceHandlerRef.current);
+} catch {}
+offerHandlerRef.current = null;
+answerHandlerRef.current = null;
+iceHandlerRef.current = null;
+pendingOfferRef.current = null;
+
 
        // signaling listeners
-    const handleOffer = async (msg) => {
-      try {
-        const remoteSdp = msg?.payload || msg; // unwrap payload
-        await pcNew.setRemoteDescription(new RTCSessionDescription(remoteSdp));
-        await flushIce();
-        if (!asCaller) {
-          const answer = await pcNew.createAnswer();
-          await pcNew.setLocalDescription(answer);
-          sig.emit("webrtc:answer", answer);
-        }
-      } catch (e) {
-        console.error("[CallSheet] handle offer failed:", e);
-      }
-    };
-
-    sig.on("webrtc:offer", handleOffer);
-
-    // 🔴 NEW: if we already received an offer BEFORE Accept, handle it now
-    if (!asCaller && pendingOfferRef.current) {
-      console.log("[CallSheet] processing stashed offer after accept");
-      handleOffer(pendingOfferRef.current);
-      pendingOfferRef.current = null;
-    }
-
-
-  sig.on("webrtc:answer", async (msg) => {
+  const handleOffer = async (msg) => {
   try {
+    // ✅ ignore if pc is already closed / replaced
+    if (!pcRef.current || pcRef.current !== pcNew) return;
+    if (pcNew.signalingState === "closed") return;
+
+    const remoteSdp = msg?.payload || msg;
+    await pcNew.setRemoteDescription(new RTCSessionDescription(remoteSdp));
+    await flushIce();
+
+    if (!asCaller) {
+      const answer = await pcNew.createAnswer();
+      await pcNew.setLocalDescription(answer);
+      sig.emit("webrtc:answer", answer);
+    }
+  } catch (e) {
+    console.error("[CallSheet] handle offer failed:", e);
+  }
+};
+
+offerHandlerRef.current = handleOffer;
+sig.on("webrtc:offer", handleOffer);
+
+
+const handleAnswer = async (msg) => {
+  try {
+    if (!pcRef.current || pcRef.current !== pcNew) return;
+    if (pcNew.signalingState === "closed") return;
+
     if (asCaller) {
-      const remoteSdp = msg?.payload || msg; // unwrap payload
-      await pcNew.setRemoteDescription(
-        new RTCSessionDescription(remoteSdp)
-      );
-
+      const remoteSdp = msg?.payload || msg;
+      await pcNew.setRemoteDescription(new RTCSessionDescription(remoteSdp));
       await flushIce();
-
-      // 👇 peer has tapped "Accept" → stop ringing on caller side
       stopAllTones();
       setPeerAccepted(true);
     }
   } catch (e) {
     console.error("[CallSheet] handle answer failed:", e);
   }
-});
+};
 
-    sig.on("webrtc:ice", async (msg) => {
+answerHandlerRef.current = handleAnswer;
+sig.on("webrtc:answer", handleAnswer);
+
+
+const handleIce = async (msg) => {
   try {
+    if (!pcRef.current || pcRef.current !== pcNew) return;
+    if (pcNew.signalingState === "closed") return;
+
     const cand = msg?.payload || msg;
     await addIceSafely(cand);
   } catch (e) {
     console.warn("[CallSheet] addIceCandidate failed:", e?.message || e);
   }
-});
+};
+
+iceHandlerRef.current = handleIce;
+sig.on("webrtc:ice", handleIce);
+
 
 
     // caller creates offer immediately
