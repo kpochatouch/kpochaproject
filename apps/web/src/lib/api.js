@@ -156,75 +156,71 @@ api.interceptors.request.use(async (config) => {
   config.headers = config.headers || {};
   const rawUrl = String(config.url || "");
 
-// Normalize to a pathname we can safely match
-let path = rawUrl;
-try {
-  if (/^https?:\/\//i.test(rawUrl)) {
-    path = new URL(rawUrl).pathname;
-  } else {
+  // Normalize to a pathname we can safely match
+  let path = rawUrl;
+  try {
+    if (/^https?:\/\//i.test(rawUrl)) {
+      path = new URL(rawUrl).pathname;
+    } else {
+      path = rawUrl.startsWith("/") ? rawUrl : `/${rawUrl}`;
+    }
+  } catch {
     path = rawUrl.startsWith("/") ? rawUrl : `/${rawUrl}`;
   }
-} catch {
-  path = rawUrl.startsWith("/") ? rawUrl : `/${rawUrl}`;
-}
 
-const needsAuth =
-  path.startsWith("/api/") &&
-  !path.startsWith("/api/health") &&
-  !path.startsWith("/api/settings") &&
-  !path.startsWith("/api/posts/public") &&
-  !path.startsWith("/api/barbers") &&
-  !path.startsWith("/api/geo") &&
-  !path.startsWith("/api/webrtc"); // ✅ WebRTC ICE must NOT require auth
+  const needsAuth =
+    path.startsWith("/api/") &&
+    !path.startsWith("/api/health") &&
+    !path.startsWith("/api/settings") &&
+    !path.startsWith("/api/posts/public") &&
+    !path.startsWith("/api/barbers") &&
+    !path.startsWith("/api/geo") &&
+    !path.startsWith("/api/webrtc"); // ✅ public
 
-
-  // ✅ add this here
-    if (needsAuth && latestToken) {
-      config.headers.Authorization = `Bearer ${latestToken}`;
-    }
-
-  // If this endpoint needs auth, wait briefly for Firebase to produce a token
-  if (needsAuth && !latestToken) {
-    const t = await waitForTokenReady(8000);
-    if (t) {
-      config.headers.Authorization = `Bearer ${t}`;
-      return config;
-    }
+  // ✅ IMPORTANT: public endpoints must not get Authorization header
+  if (!needsAuth) {
+    // optionally clean any accidental auth header
+    try { delete config.headers.Authorization; } catch {}
+    return config;
   }
 
+  // --- everything below is ONLY for needsAuth=true ---
 
-  // Normal path: Firebase token if available
-  if (firebaseAuth) {
-    const user = firebaseAuth.currentUser;
-    if (user) {
-      try {
-        const fresh = await user.getIdToken();
-        if (fresh) {
-          latestToken = fresh;
-          config.headers.Authorization = `Bearer ${fresh}`;
-          return config;
-        }
-      } catch {}
-    }
-  }
-
-  // Use cached token
   if (latestToken) {
     config.headers.Authorization = `Bearer ${latestToken}`;
     return config;
   }
 
-  // Fallback to localStorage token
+  const t = await waitForTokenReady(8000);
+  if (t) {
+    config.headers.Authorization = `Bearer ${t}`;
+    return config;
+  }
+
+  // if Firebase available, try currentUser token
+  if (firebaseAuth?.currentUser) {
+    try {
+      const fresh = await firebaseAuth.currentUser.getIdToken();
+      if (fresh) {
+        latestToken = fresh;
+        config.headers.Authorization = `Bearer ${fresh}`;
+        return config;
+      }
+    } catch {}
+  }
+
+  // fallback localStorage
   try {
-    const t = localStorage.getItem("token");
-    if (t) {
-      latestToken = t;
-      config.headers.Authorization = `Bearer ${t}`;
+    const ls = localStorage.getItem("token");
+    if (ls) {
+      latestToken = ls;
+      config.headers.Authorization = `Bearer ${ls}`;
     }
   } catch {}
 
   return config;
 });
+
 
 
 api.interceptors.response.use(
