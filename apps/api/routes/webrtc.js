@@ -12,6 +12,13 @@ function parseList(envVar) {
 
 router.get("/webrtc/ice", (req, res) => {
   try {
+    // ✅ stop caching TURN credentials (prevents 304 Not Modified)
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+    res.setHeader("Surrogate-Control", "no-store");
+
+
     const stun = parseList(process.env.ICE_STUN_URLS || "");
     const turnUrls = parseList(process.env.ICE_TURN_URLS || "");
     const turnUsername = process.env.ICE_TURN_USERNAME || "";

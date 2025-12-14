@@ -149,7 +149,11 @@ export default class SignalingClient {
 
   static async getIceServers() {
     try {
-      const res = await api.get("/api/webrtc/ice");
+      const res = await api.get("/api/webrtc/ice", {
+      params: { t: Date.now() },              // ✅ cache-bust to avoid 304/stale creds
+      headers: { "Cache-Control": "no-cache" } // ✅ extra nudge
+    });
+
       const ice = res?.data?.iceServers || res?.data || [];
       console.log("[getIceServers] using backend ICE:", ice);
       return ice;
