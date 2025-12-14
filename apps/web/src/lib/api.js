@@ -60,56 +60,6 @@ let firebaseAuth = null;
 let authListenerStarted = false;
 let latestToken = null;
 
-let tokenReadyPromise = null;
-
-async function waitForTokenReady(timeoutMs = 8000) {
-  if (latestToken) return latestToken;
-
-  if (tokenReadyPromise) return tokenReadyPromise;
-
-  tokenReadyPromise = new Promise((resolve) => {
-    let done = false;
-    let unsub = null;
-    const finish = (t) => {
-      if (done) return;
-      done = true;
-      try { unsub && unsub(); } catch {}
-      resolve(t || null);
-    };
-
-    const tmr = setTimeout(() => finish(null), timeoutMs);
-
-    try {
-      const auth = firebaseAuth || getAuth();
-      unsub = onAuthStateChanged(auth, async (user) => {
-        try {
-          if (!user) {
-            clearTimeout(tmr);
-            finish(null);
-            return;
-          }
-          const t = await user.getIdToken(true);
-          latestToken = t;
-          try { localStorage.setItem("token", t); } catch {}
-          clearTimeout(tmr);
-          finish(t);
-        } catch {
-          clearTimeout(tmr);
-          finish(null);
-        }
-      });
-    } catch {
-      clearTimeout(tmr);
-      finish(null);
-    }
-  }).finally(() => {
-    tokenReadyPromise = null;
-  });
-
-  return tokenReadyPromise;
-}
-
-
 // optional hook for token changes
 export let onTokenChange = null;
 
@@ -149,24 +99,6 @@ ensureAuthListener();
 
 api.interceptors.request.use(async (config) => {
   ensureAuthListener();
-  config.headers = config.headers || {};
-  const url = String(config.url || "");
-const needsAuth =
-  url.startsWith("/api/") &&
-  !url.startsWith("/api/health") &&
-  !url.startsWith("/api/settings") &&
-  !url.startsWith("/api/posts/public") &&
-  !url.startsWith("/api/barbers") &&
-  !url.startsWith("/api/geo");
-
-if (needsAuth) {
-  const t = await waitForTokenReady(8000);
-  if (t) {
-    config.headers.Authorization = `Bearer ${t}`;
-    return config;
-  }
-}
-
 
   // 1) Try to get fresh token from Firebase (if available)
   if (firebaseAuth) {
@@ -207,11 +139,10 @@ api.interceptors.response.use(
   (res) => res,
   async (err) => {
     const status = err?.response?.status;
-    const cfg = err?.config; // ✅ guard: axios errors can lack config
 
     // ✅ If token expired / unauthorized, try refresh ONCE then retry request
-    if (status === 401 && cfg && !cfg.__retried) {
-      cfg.__retried = true;
+    if (status === 401 && !err.config.__retried) {
+      err.config.__retried = true;
 
       try {
         const auth = firebaseAuth || getAuth();
@@ -223,10 +154,10 @@ api.interceptors.response.use(
 
           try { localStorage.setItem("token", fresh); } catch {}
 
-          cfg.headers = cfg.headers || {};
-          cfg.headers.Authorization = `Bearer ${fresh}`;
+          err.config.headers = err.config.headers || {};
+          err.config.headers.Authorization = `Bearer ${fresh}`;
 
-          return api.request(cfg);
+          return api.request(err.config);
         }
       } catch {
         // if refresh fails, fall through
@@ -236,7 +167,6 @@ api.interceptors.response.use(
     return Promise.reject(err);
   }
 );
-
 
 
 /* manual override used by Login.jsx after sign-in */
