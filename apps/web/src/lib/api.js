@@ -222,7 +222,6 @@ api.interceptors.request.use(async (config) => {
 });
 
 
-
 api.interceptors.response.use(
   (res) => res,
   async (err) => {
@@ -324,6 +323,18 @@ function _getAuthPayload() {
   return payload;
 }
 
+async function refreshTokenForSocket() {
+  try {
+    const auth = firebaseAuth || getAuth();
+    const user = auth.currentUser;
+    if (!user) return;
+    const t = await user.getIdToken(true);
+    latestToken = t;
+    try { localStorage.setItem("token", t); } catch {}
+  } catch {}
+}
+
+
 /* generic dispatcher: forwards payload to registered handlers */
 function _dispatch(event, payload) {
   const set = socketListeners.get(event);
@@ -410,8 +421,6 @@ if (socket) {
     for (const ev of socketListeners.keys()) _ensureWire(ev);
 
     // always wire core realtime events (including WebRTC)
-    _ensureWire("notification:new");
-    _ensureWire("notification:received");
     _ensureWire("chat:message");
     _ensureWire("presence:join");
     _ensureWire("presence:leave");
@@ -424,7 +433,13 @@ if (socket) {
     _ensureWire("webrtc:answer");
     _ensureWire("webrtc:ice");
 
-    if (!socket.connected) socket.connect();
+    if (!socket.connected) {
+  refreshTokenForSocket().finally(() => {
+    socket.auth = _getAuthPayload();
+    socket.connect();
+  });
+}
+
   } catch {}
 
   return socket;
@@ -432,47 +447,15 @@ if (socket) {
 
 
 
-  try {
-    const opts = {
-  autoConnect: false,
-  transports: ["websocket", "polling"],
-  path: "/socket.io",
-  // 🔥 ask Firebase for a fresh token on each (re)connect
-  auth: (cb) => {
-    try {
-      const auth = firebaseAuth || getAuth();
-      const user = auth.currentUser;
-      if (!user) {
-        cb(_getAuthPayload()); // probably just uid hint or empty
-        return;
-      }
+try {
+  const opts = {
+    autoConnect: false,
+    transports: ["websocket", "polling"],
+    path: "/socket.io",
+    auth: () => _getAuthPayload(), // ✅ correct socket.io auth shape
+  };
 
-      // force refresh, then update our cache + send to server
-      user
-        .getIdToken(true)
-        .then((t) => {
-          latestToken = t;
-          try {
-            localStorage.setItem("token", t);
-          } catch {}
-          cb({
-            ..._getAuthPayload(),
-            token: t,
-            uid: user.uid,
-          });
-        })
-        .catch((err) => {
-          console.warn("[socket] getIdToken(true) failed:", err?.message || err);
-          cb(_getAuthPayload()); // fallback to whatever we have
-        });
-    } catch (e) {
-      console.warn("[socket] auth callback failed:", e?.message || e);
-      cb(_getAuthPayload());
-    }
-  },
-};
-
-socket = ioClient(ROOT, opts);
+  socket = ioClient(ROOT, opts);
 
 
     socket.on("connect", () => {
@@ -484,8 +467,6 @@ socket = ioClient(ROOT, opts);
         _ensureWire(ev);
       }
       // common server events we want always
-      _ensureWire("notification:new");
-      _ensureWire("notification:received");
       _ensureWire("chat:message");
       _ensureWire("presence:join");
       _ensureWire("presence:leave");
@@ -518,7 +499,12 @@ socket = ioClient(ROOT, opts);
 
     // bridge notification events -> unified "notification:received"
     socket.on("notification:new", (payload) => _dispatch("notification:received", payload));
-    socket.connect();
+
+      refreshTokenForSocket().finally(() => {
+        socket.auth = _getAuthPayload();
+        socket.connect();
+      });
+
   } catch (e) {
     console.warn("[socket] connect failed:", e?.message || e);
     _reconnectWithBackoff();
