@@ -5,6 +5,8 @@ import { registerSocketHandler } from "../lib/api";
 /**
  * SAFE useSocket
  *
+ * 
+ * 
  * - ONLY manages handlers for this component.
  * - Does NOT call connectSocket()
  * - Does NOT call disconnectSocket()
