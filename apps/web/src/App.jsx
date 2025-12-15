@@ -9,6 +9,7 @@ import {
 } from "react-router-dom";
 import { api, connectSocket, registerSocketHandler } from "./lib/api";
 import CallSheet from "./components/CallSheet.jsx";
+import InstallPWAButton from "./components/InstallPWAButton.jsx";
 
 import Navbar from "./components/Navbar.jsx";
 import Footer from "./components/Footer.jsx";
@@ -515,6 +516,7 @@ export default function App() {
                   open={Boolean(incomingCall?.open && incomingCall?.room)}
                   onClose={() => setIncomingCall(null)}
                 />
+                <InstallPWAButton />
               </div>
             );
           }
