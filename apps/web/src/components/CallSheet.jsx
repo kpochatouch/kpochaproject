@@ -504,7 +504,6 @@ export default function CallSheet({
     }
   }
 
-
   async function declineIncoming() {
     stopAllTones();
     await safeUpdateStatus("declined");
@@ -750,4 +749,3 @@ export default function CallSheet({
     </div>
   );
 }
-
