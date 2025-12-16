@@ -1,34 +1,34 @@
+// apps/web/src/components/InstallPWAButton.jsx
 import { useEffect, useMemo, useState } from "react";
 
 const KEY_LAST_NAG = "kpocha:pwaLastNagAt";
-const NAG_EVERY_MS = 12 * 60 * 60 * 1000; // 12 hours
+const NAG_EVERY_MS = 12 * 60 * 60 * 1000;
 
 export default function InstallPWAButton() {
   const [deferredPrompt, setDeferredPrompt] = useState(null);
-  const [show, setShow] = useState(false);
+  const [open, setOpen] = useState(false);
 
   const isStandalone = useMemo(() => {
-    // Android/Chrome
     const standaloneMatchMedia =
-      window.matchMedia && window.matchMedia("(display-mode: standalone)").matches;
-
-    // iOS Safari
+      window.matchMedia?.("(display-mode: standalone)")?.matches;
     const iosStandalone = window.navigator.standalone === true;
+    return !!(standaloneMatchMedia || iosStandalone);
+  }, []);
 
-    return standaloneMatchMedia || iosStandalone;
+  const isIOS = useMemo(() => {
+    return /iphone|ipad|ipod/i.test(navigator.userAgent);
   }, []);
 
   useEffect(() => {
-    if (isStandalone) return; // already installed/running as app
+    if (isStandalone) return;
 
     const onBip = (e) => {
       e.preventDefault();
       setDeferredPrompt(e);
-      // we still control when to show the banner
     };
 
     const onInstalled = () => {
-      setShow(false);
+      setOpen(false);
       setDeferredPrompt(null);
       try {
         localStorage.removeItem(KEY_LAST_NAG);
@@ -38,16 +38,16 @@ export default function InstallPWAButton() {
     window.addEventListener("beforeinstallprompt", onBip);
     window.addEventListener("appinstalled", onInstalled);
 
-    // show banner on first load, then every 12 hours
+    // decide whether to open modal (every 12 hours)
     try {
       const last = Number(localStorage.getItem(KEY_LAST_NAG) || "0");
       const now = Date.now();
       if (!last || now - last >= NAG_EVERY_MS) {
-        setShow(true);
+        setOpen(true);
         localStorage.setItem(KEY_LAST_NAG, String(now));
       }
     } catch {
-      setShow(true); // if storage blocked, still show
+      setOpen(true);
     }
 
     return () => {
@@ -57,84 +57,100 @@ export default function InstallPWAButton() {
   }, [isStandalone]);
 
   if (isStandalone) return null;
-  if (!show) return null;
-
-  const canPrompt = !!deferredPrompt; // Chrome/Edge
-  const isIOS =
-    /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
+  if (!open) return null;
 
   async function handleInstall() {
-    if (!deferredPrompt) return;
-    deferredPrompt.prompt();
-    await deferredPrompt.userChoice;
-    setDeferredPrompt(null);
-    setShow(false);
-  }
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      await deferredPrompt.userChoice;
+      setDeferredPrompt(null);
+      setOpen(false);
+      return;
+    }
 
-  function dismiss() {
-    setShow(false);
+    // No prompt available: show instructions only
+    // (button will just close)
+    setOpen(false);
   }
 
   return (
     <div
       style={{
         position: "fixed",
-        left: 12,
-        right: 12,
-        bottom: 14,
-        zIndex: 9999,
-        borderRadius: 14,
-        padding: 14,
-        background: "rgba(17,24,39,0.95)",
-        border: "1px solid rgba(255,255,255,0.14)",
-        color: "white",
+        inset: 0,
+        zIndex: 99999,
+        background: "rgba(0,0,0,0.6)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 16,
       }}
     >
-      <div style={{ fontWeight: 700, marginBottom: 6 }}>
-        Install Kpocha Touch for easy access
-      </div>
-
-      {isIOS && !canPrompt ? (
-        <div style={{ opacity: 0.9, fontSize: 13, lineHeight: 1.35 }}>
-          On iPhone: tap <b>Share</b> → <b>Add to Home Screen</b>.
+      <div
+        style={{
+          width: "100%",
+          maxWidth: 420,
+          borderRadius: 16,
+          background: "rgba(17,24,39,0.98)",
+          border: "1px solid rgba(255,255,255,0.14)",
+          color: "white",
+          padding: 16,
+        }}
+      >
+        <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 6 }}>
+          Install Kpocha Touch
         </div>
-      ) : (
-        <div style={{ opacity: 0.9, fontSize: 13, lineHeight: 1.35 }}>
-          Get the app on your phone. Faster opening and a cleaner full-screen experience.
+
+        <div style={{ opacity: 0.9, fontSize: 14, lineHeight: 1.45 }}>
+          Install Kpocha Touch for easy access, faster opening, and a clean full-screen experience.
         </div>
-      )}
 
-      <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
-        <button
-          onClick={dismiss}
-          style={{
-            flex: 1,
-            padding: "10px 12px",
-            borderRadius: 10,
-            background: "transparent",
-            border: "1px solid rgba(255,255,255,0.18)",
-            color: "white",
-          }}
-        >
-          Not now
-        </button>
+        <div style={{ marginTop: 10, opacity: 0.9, fontSize: 13, lineHeight: 1.45 }}>
+          {isIOS ? (
+            <>
+              On iPhone: tap <b>Share</b> → <b>Add to Home Screen</b>.
+            </>
+          ) : deferredPrompt ? (
+            <>
+              Tap <b>Install</b> to add the app to your phone.
+            </>
+          ) : (
+            <>
+              If you don’t see an install prompt: open Chrome menu (⋮) → <b>Install app</b>.
+            </>
+          )}
+        </div>
 
-        <button
-          onClick={handleInstall}
-          disabled={!canPrompt}
-          style={{
-            flex: 1,
-            padding: "10px 12px",
-            borderRadius: 10,
-            background: canPrompt ? "white" : "rgba(255,255,255,0.25)",
-            border: "1px solid rgba(255,255,255,0.18)",
-            color: canPrompt ? "black" : "rgba(255,255,255,0.8)",
-            cursor: canPrompt ? "pointer" : "not-allowed",
-          }}
-          title={!canPrompt ? "Install is not available yet. Refresh the page once." : ""}
-        >
-          Install App
-        </button>
+        <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+          <button
+            onClick={() => setOpen(false)}
+            style={{
+              flex: 1,
+              padding: "10px 12px",
+              borderRadius: 10,
+              background: "transparent",
+              border: "1px solid rgba(255,255,255,0.18)",
+              color: "white",
+            }}
+          >
+            Not now
+          </button>
+
+          <button
+            onClick={handleInstall}
+            style={{
+              flex: 1,
+              padding: "10px 12px",
+              borderRadius: 10,
+              background: "white",
+              border: "1px solid rgba(255,255,255,0.18)",
+              color: "black",
+              fontWeight: 700,
+            }}
+          >
+            Install
+          </button>
+        </div>
       </div>
     </div>
   );
