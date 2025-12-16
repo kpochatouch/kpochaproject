@@ -130,6 +130,7 @@ export default function Home() {
             <span className="text-gold">Nigeria</span>. Book home or office
             services in minutes.
           </p>
+          
 
           {/* CTAs */}
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
