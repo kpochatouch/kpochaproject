@@ -13,6 +13,7 @@ import { registerSocketHandler } from "../lib/api";
  *
  * Socket connection lifecycle stays fully owned by api.js.
  */
+
 export default function useSocket(initialHandlers = {}) {
   const unregistersRef = useRef(new Set());
 
