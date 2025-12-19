@@ -33,6 +33,7 @@ if (!ROOT) {
 ROOT = ROOT.replace(/\/+$/, "");
 if (/\/api$/i.test(ROOT)) ROOT = ROOT.replace(/\/api$/i, "");
 
+
 /* =========================
    AXIOS client
    - baseURL points at root (we call /api/... everywhere)
@@ -95,6 +96,16 @@ ensureAuthListener();
 
 api.interceptors.request.use(async (config) => {
   ensureAuthListener();
+
+    // 🔧 FIX: always prefix /api for backend routes
+  if (
+    typeof config.url === "string" &&
+    config.url.startsWith("/") &&
+    !config.url.startsWith("/api/")
+  ) {
+    config.url = `/api${config.url}`;
+  }
+
 
   // 1) Try to get fresh token from Firebase (if available)
   if (firebaseAuth) {
