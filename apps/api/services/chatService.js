@@ -484,9 +484,16 @@ export async function markThreadRead(peerUid, uid) {
 
     // also update Thread unreadCounts (best-effort)
     try {
-      await Thread.markRead(roomA, uid).catch(() =>
-        Thread.markRead(roomB, uid).catch(() => null)
-      );
+      // Find the actual thread document regardless of room order
+const thread = await Thread.findOne({
+  type: "dm",
+  participants: { $all: [uid, peerUid] },
+});
+
+if (thread) {
+  await Thread.markRead(thread.room, uid);
+}
+
     } catch (err) {
       // non-fatal
       console.warn("[chatService] Thread.markRead failed:", err?.message || err);
