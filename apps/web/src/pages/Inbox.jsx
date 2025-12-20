@@ -7,6 +7,7 @@ import {
   markThreadRead,
   markRoomRead,
   getPublicProfileByUid,
+  getNotificationsCounts,
 } from "../lib/api";
 import { useMe } from "../context/MeContext.jsx";
 import InboxList from "../components/Inbox.jsx"; // or the correct relative path
@@ -413,6 +414,12 @@ useEffect(() => {
     } catch (e) {
       console.warn("[Inbox] markThreadRead/markRoomRead failed:", e?.message || e);
     }
+
+    try {
+  await getNotificationsCounts();
+} catch (e) {
+  console.warn("[Inbox] refresh notification count failed");
+}
 
   }
 
