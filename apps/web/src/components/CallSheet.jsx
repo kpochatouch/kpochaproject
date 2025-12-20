@@ -62,8 +62,19 @@ export default function CallSheet({
   const callerToneRef = useRef(null);
   const incomingToneRef = useRef(null);
 
-  // NEW: stash offer that arrives before receiver taps "Accept"
-  const pendingOfferRef = useRef(null);
+    const pendingOfferRef = useRef(null);
+
+  // NEW: stash ICE candidates that arrive before remoteDescription is set
+  const pendingIceRef = useRef([]);
+
+  // NEW: keep live pc reference (React state can lag)
+  const pcRef = useRef(null);
+
+  // NEW: track ICE state + manage one fail-safe timer + ignore stale pc events
+  const [iceState, setIceState] = useState(null);
+  const failSafeRef = useRef(null);
+  const pcGenRef = useRef(0);
+
 
   function stopAllTones() {
     [callerToneRef, incomingToneRef].forEach((ref) => {
@@ -90,28 +101,29 @@ export default function CallSheet({
   async function sendCallSummaryMessage(status) {
     if (!chatRoom) return; // nothing to do if no room passed
 
-    // so Inbox + ChatPane can know if it's "you called" or "they called"
-    const direction = role === "caller" ? "outgoing" : "incoming";
-
     const callMeta = {
-      direction, // "outgoing" | "incoming"
       type: callType || (mode === "video" ? "video" : "audio"),
       status, // "ended" | "cancelled" | "declined"
       hasConnected,
       durationSec: hasConnected ? elapsedSeconds : 0,
     };
 
-    try {
+        try {
+      const pretty =
+        status === "ended" ? "📞 Call ended" :
+        status === "cancelled" ? "📞 Call cancelled" :
+        status === "declined" ? "📞 Call declined" :
+        status === "missed" ? "📞 Missed call" :
+        status === "failed" ? "📞 Call failed" :
+        "📞 Call";
+
       await sendChatMessage({
         room: chatRoom,
-        text: "",
+        text: pretty,                 // ✅ not empty anymore
         meta: { call: callMeta },
       });
     } catch (e) {
-      console.warn(
-        "[CallSheet] sendCallSummaryMessage failed:",
-        e?.message || e
-      );
+      console.warn("[CallSheet] sendCallSummaryMessage failed:", e?.message || e);
     }
   }
 
@@ -180,42 +192,48 @@ export default function CallSheet({
     return () => clearInterval(id);
   }, [open, hasConnected]);
 
-    // ⏲️ fail-safe: if call is accepted but never connects, fail after ~20s
+    // ⏲️ fail-safe: only fail if accepted but ICE is NOT making progress
   useEffect(() => {
     if (!open) return;
 
     const accepted = peerAccepted || hasAccepted;
 
-    // Nobody has accepted yet → no timer
-    if (!accepted) return;
+    // clear any existing timer whenever effect re-runs
+    if (failSafeRef.current) {
+      clearTimeout(failSafeRef.current);
+      failSafeRef.current = null;
+    }
 
-    // Already connected → no need for timeout
-    if (hasConnected) return;
+    if (!accepted) return;       // nobody accepted yet
+    if (hasConnected) return;    // already connected
 
-    // Start 20s timeout once we're in "accepted but not connected" state
-    const timeoutId = setTimeout(() => {
-      console.warn(
-        "[CallSheet] Call failed: no WebRTC connection within 20 seconds"
-      );
+    // If ICE is checking, that's progress — don't start the timeout
+    if (iceState === "checking") return;
 
-      // 1) Stop any ringing / tones
+    failSafeRef.current = setTimeout(() => {
+      console.warn("[CallSheet] Call failed: no WebRTC connection within 45 seconds");
+
       stopAllTones();
-
-      // 2) Mark as failed so UI shows "Call failed"
       setCallFailed(true);
 
-      // 3) Let backend know it failed because of timeout (optional)
-      safeUpdateStatus("declined", { reason: "timeout_no_connection" });
+      safeUpdateStatus("failed", {
+        reason: "timeout_no_connection",
+        iceState,
+      });
 
-      // 4) Auto hang up after a short pause so user can briefly see "Call failed"
       setTimeout(() => {
         hangup();
       }, 1500);
-    }, 20000); // 20,000 ms = 20 seconds
+    }, 45000);
 
-    // Cleanup: if state changes (connects, closes, etc.), cancel timeout
-    return () => clearTimeout(timeoutId);
-  }, [open, peerAccepted, hasAccepted, hasConnected]);
+    return () => {
+      if (failSafeRef.current) {
+        clearTimeout(failSafeRef.current);
+        failSafeRef.current = null;
+      }
+    };
+  }, [open, peerAccepted, hasAccepted, hasConnected, iceState]);
+
 
     // 🔔 React to backend call:status events for this call
   useEffect(() => {
@@ -262,8 +280,18 @@ export default function CallSheet({
 
     const iceServers = await SignalingClient.getIceServers();
 
-    const pcNew = new RTCPeerConnection({ iceServers });
-    setPc(pcNew);
+        const pcNew = new RTCPeerConnection({
+          iceServers,
+          iceTransportPolicy: "relay",
+        });
+
+
+        pcGenRef.current += 1;
+        const myGen = pcGenRef.current;
+
+        pcRef.current = pcNew;
+        setPc(pcNew);
+
 
     // local media
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -278,18 +306,20 @@ export default function CallSheet({
       if (remoteRef.current) remoteRef.current.srcObject = ev.streams[0];
     };
 
-    // ICE
-    pcNew.onicecandidate = (ev) => {
-      if (ev.candidate) {
-        try {
-          sig.emit("webrtc:ice", ev.candidate);
-        } catch (e) {
-          console.warn("[CallSheet] emit ice failed:", e?.message || e);
-        }
-  } else {
+ // ICE
+pcNew.onicecandidate = (ev) => {
+  if (!ev.candidate) {
     console.log("[CallSheet] ICE gathering complete");
+    return;
+  }
+
+  try {
+    sig.emit("webrtc:ice", ev.candidate);
+  } catch (e) {
+    console.warn("[CallSheet] emit ice failed:", e?.message || e);
   }
 };
+
 
     pcNew.onconnectionstatechange = () => {
   const st = pcNew.connectionState;
@@ -316,12 +346,39 @@ export default function CallSheet({
   }
 };
 
+pcNew.oniceconnectionstatechange = () => {
+  const st = pcNew.iceConnectionState;
+
+  setIceState(st);
+
+  console.log("[CallSheet] iceConnectionState:", st);
+
+  // ICE progress: "checking" is progress too
+  if (st === "connected" || st === "completed") {
+    setHasConnected((prev) => {
+      if (!prev) {
+        stopAllTones();
+        safeUpdateStatus("accepted", { connectedAt: new Date().toISOString() });
+      }
+      return true;
+    });
+  }
+};
+
 
        // signaling listeners
     const handleOffer = async (msg) => {
       try {
         const remoteSdp = msg?.payload || msg; // unwrap payload
         await pcNew.setRemoteDescription(new RTCSessionDescription(remoteSdp));
+        
+        // flush any ICE that arrived early
+      for (const c of pendingIceRef.current.splice(0)) {
+        try {
+          await pcNew.addIceCandidate(new RTCIceCandidate(c));
+        } catch {}
+      }
+
         if (!asCaller) {
           const answer = await pcNew.createAnswer();
           await pcNew.setLocalDescription(answer);
@@ -350,6 +407,14 @@ export default function CallSheet({
         new RTCSessionDescription(remoteSdp)
       );
 
+      // flush any ICE that arrived early
+      for (const c of pendingIceRef.current.splice(0)) {
+        try {
+          await pcNew.addIceCandidate(new RTCIceCandidate(c));
+        } catch {}
+      }
+
+
       // 👇 peer has tapped "Accept" → stop ringing on caller side
       stopAllTones();
       setPeerAccepted(true);
@@ -359,24 +424,45 @@ export default function CallSheet({
   }
 });
 
-    sig.on("webrtc:ice", async (msg) => {
+       sig.on("webrtc:ice", async (msg) => {
       try {
-        const cand = msg?.payload || msg; // unwrap payload
-        if (cand) {
-          console.log("[CallSheet] remote ICE candidate:", cand.type, cand.protocol);
-          await pcNew.addIceCandidate(cand);
+        // Ignore ICE for older peer connections
+        if (pcGenRef.current !== myGen) return;
+
+        // If pc already closed, ignore (this is your warning)
+        if (pcNew.signalingState === "closed") return;
+
+        const cand = msg?.payload ?? msg;
+
+        if (!cand || !cand.candidate) return;
+
+        console.log("[CallSheet] remote ICE candidate:", {
+          hasCandidate: !!cand.candidate,
+          sdpMid: cand.sdpMid,
+          sdpMLineIndex: cand.sdpMLineIndex,
+        });
+
+        if (!pcNew.remoteDescription) {
+          pendingIceRef.current.push(cand);
+          return;
         }
+
+        await pcNew.addIceCandidate(new RTCIceCandidate(cand));
       } catch (e) {
         console.warn("[CallSheet] addIceCandidate failed:", e?.message || e);
       }
     });
 
+
+
     // caller creates offer immediately
     if (asCaller) {
-      const offer = await pcNew.createOffer({
-        offerToReceiveAudio: true,
-        offerToReceiveVideo: wantVideo,
-      });
+  const offer = await pcNew.createOffer({
+  offerToReceiveAudio: true,
+  offerToReceiveVideo: wantVideo,
+  iceRestart: true,
+});
+
       await pcNew.setLocalDescription(offer);
       sig.emit("webrtc:offer", offer);
     }
@@ -387,16 +473,29 @@ export default function CallSheet({
   function cleanupPeer() {
     stopAllTones();
 
-    try {
-      if (pc) {
-        pc.getSenders()?.forEach((s) => {
+        try {
+      if (failSafeRef.current) {
+        clearTimeout(failSafeRef.current);
+        failSafeRef.current = null;
+      }
+    } catch {}
+
+
+      try {
+      const live = pcRef.current || pc;   // ✅ use ref first
+      if (live) {
+        live.getSenders?.()?.forEach((s) => {
           try {
             s.track?.stop();
           } catch {}
         });
-        pc.close();
+        try {
+          live.close();
+        } catch {}
       }
-      } catch {}
+      pcRef.current = null;              // ✅ clear ref
+    } catch {}
+
     setPc(null);
     setHasConnected(false);
     setHasAccepted(false); // 👈 reset accept state
@@ -510,7 +609,6 @@ export default function CallSheet({
       setStarting(false);
     }
   }
-
 
   async function declineIncoming() {
     stopAllTones();
@@ -757,4 +855,3 @@ export default function CallSheet({
     </div>
   );
 }
-
