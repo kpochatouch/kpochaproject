@@ -219,36 +219,47 @@ const hideSideButtonsOnMobile = isMobileDevice && composerFocused;
     }
 
     // live "seen" listener
-    function onSeen(evt) {
-      if (!evt || !evt.room || !evt.seenBy) return;
-      if (evt.room !== room) return;
+  function onSeen(evt) {
+  console.log("[ChatPane] chat:seen RECEIVED ←", evt);
 
-      const viewerUid = evt.seenBy;
+  if (!evt || !evt.room || !evt.seenBy) {
+    console.warn("[ChatPane] chat:seen ignored (missing fields)");
+    return;
+  }
 
-      setMsgs((prev) => {
-        if (!peerUid || viewerUid !== peerUid) return prev;
+  if (evt.room !== room) {
+    console.warn("[ChatPane] chat:seen ignored (room mismatch)", {
+      expected: room,
+      got: evt.room,
+    });
+    return;
+  }
 
-        const order = ["pending", "sent", "delivered", "seen"];
-        const seenRank = order.indexOf("seen");
+  const viewerUid = evt.seenBy;
 
-        return prev.map((m) => {
-          if (!m.isMe) return m;
+  setMsgs((prev) => {
+    if (!peerUid || viewerUid !== peerUid) return prev;
 
-          const currentRank = order.indexOf(m.status || "pending");
-          if (currentRank >= seenRank) return m;
+    const order = ["pending", "sent", "delivered", "seen"];
+    const seenRank = order.indexOf("seen");
 
-          const nextSeenBy = Array.isArray(m.seenBy)
-            ? Array.from(new Set([...m.seenBy, viewerUid]))
-            : [viewerUid];
+    return prev.map((m) => {
+      if (!m.isMe) return m;
 
-          return {
-            ...m,
-            status: "seen",
-            seenBy: nextSeenBy,
-          };
-        });
-      });
-    }
+      const currentRank = order.indexOf(m.status || "pending");
+      if (currentRank >= seenRank) return m;
+
+      return {
+        ...m,
+        status: "seen",
+        seenBy: Array.isArray(m.seenBy)
+          ? Array.from(new Set([...m.seenBy, viewerUid]))
+          : [viewerUid],
+      };
+    });
+  });
+}
+
 
     socket.on("chat:message", onMsg);
     socket.on("chat:update", onMsg);

@@ -262,13 +262,18 @@ export default function Chat() {
     const s = connectSocket(); // should return the shared singleton
     setSocket(s);
 
-    function joinRoom() {
-      if (!room) return;
-      s.emit("room:join", { room, who: myLabel });
-      s.emit("chat:read", { room }, (ack) => {
-        console.log("chat:read ack =", ack);
-      });
-    }
+  function joinRoom() {
+  if (!room) return;
+
+  console.log("[Chat.jsx] room:join →", room);
+  s.emit("room:join", { room, who: myLabel });
+
+  console.log("[Chat.jsx] chat:read EMIT →", { room });
+  s.emit("chat:read", { room }, (ack) => {
+    console.log("[Chat.jsx] chat:read ACK ←", ack);
+  });
+}
+
 
     // join immediately
     joinRoom();
