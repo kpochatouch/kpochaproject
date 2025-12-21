@@ -136,39 +136,82 @@ export default function Inbox() {
   const handleLoadMore = () => { if (hasMore && !loadingMore) loadInbox({ cursor, limit: 40, append: true }); };
 
   // Socket listener
-  useEffect(() => {
-    if (!myUid) return;
-    const unregister = registerSocketHandler("chat:message", (msg) => {
-      try {
-        const fromUid = msg.fromUid || msg.from;
-        const toUid = msg.toUid || msg.to;
-        const room = msg.room || msg.roomId || null;
-        if (!fromUid && !toUid) return;
-        if (fromUid !== myUid && toUid !== myUid) return;
+    useEffect(() => {
+      if (!myUid) return;
 
-        const peerUid = fromUid === myUid ? toUid : fromUid;
-        if (!peerUid) return;
+      // New message listener
+      const unregister = registerSocketHandler("chat:message", (msg) => {
+        try {
+          const fromUid = msg.fromUid || msg.from;
+          const toUid = msg.toUid || msg.to;
+          const room = msg.room || msg.roomId || null;
+          if (!fromUid && !toUid) return;
+          if (fromUid !== myUid && toUid !== myUid) return;
 
-        const meta = msg.meta || {};
-        const body = meta.call ? summarizeCallForPreview(meta.call, myUid) : msg.body || msg.text || (msg.attachments?.length ? "[Attachment]" : "");
-        const at = msg.at || msg.ts || msg.createdAt || Date.now();
+          const peerUid = fromUid === myUid ? toUid : fromUid;
+          if (!peerUid) return;
 
-        setThreads((prev) => {
-          const existingIndex = prev.findIndex((t) => t.peerUid === peerUid);
-          if (existingIndex >= 0) {
-            const current = prev[existingIndex];
-            const newUnread = fromUid === myUid ? current.unread : (current.unread || 0) + 1;
-            const updated = { ...current, lastBody: body, lastAt: at, unread: newUnread, room: current.room || room || current.room };
-            const cloned = [...prev];
-            cloned.splice(existingIndex, 1);
-            return [updated, ...cloned].slice(0, MAX_THREADS);
-          }
-          return [{ peerUid, room: room || null, unread: fromUid === myUid ? 0 : 1, lastBody: body, lastAt: at, displayName: "Unknown user", avatarUrl: "" }, ...prev].slice(0, MAX_THREADS);
-        });
-      } catch (e) { console.warn("[Inbox] socket chat:message failed:", e?.message || e); }
-    });
-    return () => { try { unregister?.(); } catch {} };
-  }, [myUid]);
+          const meta = msg.meta || {};
+          const body = meta.call
+            ? summarizeCallForPreview(meta.call, myUid)
+            : msg.body || msg.text || (msg.attachments?.length ? "[Attachment]" : "");
+          const at = msg.at || msg.ts || msg.createdAt || Date.now();
+
+          const isUnread = !(msg.seenBy || []).includes(myUid); // server tells if it's seen
+
+          setThreads((prev) => {
+            const existingIndex = prev.findIndex((t) => t.peerUid === peerUid);
+
+            if (existingIndex >= 0) {
+              const current = prev[existingIndex];
+              const updated = {
+                ...current,
+                lastBody: body,
+                lastAt: at,
+                unread: isUnread ? 1 : 0,   // 1 if unread, else 0
+                room: current.room || room || null,
+              };
+              const copy = [...prev];
+              copy[existingIndex] = updated;
+              return copy;
+            } else {
+              return [
+                {
+                  peerUid,
+                  lastBody: body,
+                  lastAt: at,
+                  unread: isUnread ? 1 : 0,
+                  room: room || null,
+                  displayName: "Unknown user",
+                  avatarUrl: "",
+                },
+                ...prev,
+              ].slice(0, MAX_THREADS);
+            }
+          });
+        } catch (e) {
+          console.warn("[Inbox] socket chat:message failed:", e?.message || e);
+        }
+      });
+
+      // Listener for messages marked as seen
+      const unregisterSeen = registerSocketHandler("chat:seen", (payload) => {
+        if (!payload?.room) return;
+        setThreads((prev) =>
+          prev.map((t) =>
+            t.room === payload.room ? { ...t, unread: 0 } : t
+          )
+        );
+      });
+
+      // Cleanup listeners when component is closed
+      return () => {
+        try {
+          unregister?.();
+          unregisterSeen?.();
+        } catch {}
+      };
+    }, [myUid]);
 
   // Hydrate missing profiles
   useEffect(() => {
