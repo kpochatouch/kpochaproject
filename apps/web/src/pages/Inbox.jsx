@@ -63,7 +63,11 @@ function normalizeThread(raw = {}, currentUid) {
     (lastMessage.attachments && lastMessage.attachments.length ? "[Attachment]" : "");
 
   const lastAt = raw.lastAt || lastMessage.at || lastMessage.createdAt || lastMessage.ts || raw.updatedAt || null;
-  const unread = (raw.unreadCounts && myUid && typeof raw.unreadCounts[myUid] === 'number') ? raw.unreadCounts[myUid] : 0;
+  const unread =
+  (raw.unreadCounts && currentUid && typeof raw.unreadCounts[currentUid] === "number")
+    ? raw.unreadCounts[currentUid]
+    : 0;
+
 
   const peerProfile = raw.peerProfile || raw.user || {};
   const displayName = peerProfile.displayName || peerProfile.fullName || peerProfile.username || raw.peerName || "Unknown user";
@@ -168,7 +172,8 @@ export default function Inbox() {
                 ...current,
                 lastBody: body,
                 lastAt: at,
-                unread: isUnread ? 1 : 0,   // 1 if unread, else 0
+                unread: isUnread ? (current.unread || 0) + 1 : current.unread,
+
                 room: current.room || room || null,
               };
               const copy = [...prev];
@@ -181,6 +186,7 @@ export default function Inbox() {
                   lastBody: body,
                   lastAt: at,
                   unread: isUnread ? 1 : 0,
+
                   room: room || null,
                   displayName: "Unknown user",
                   avatarUrl: "",
