@@ -63,11 +63,10 @@ function normalizeThread(raw = {}, currentUid) {
     (lastMessage.attachments && lastMessage.attachments.length ? "[Attachment]" : "");
 
   const lastAt = raw.lastAt || lastMessage.at || lastMessage.createdAt || lastMessage.ts || raw.updatedAt || null;
-  const unread =
-  (raw.unreadCounts && currentUid && typeof raw.unreadCounts[currentUid] === "number")
-    ? raw.unreadCounts[currentUid]
+ const unread =
+  typeof raw.unreadCount === "number"
+    ? raw.unreadCount
     : 0;
-
 
   const peerProfile = raw.peerProfile || raw.user || {};
   const displayName = peerProfile.displayName || peerProfile.fullName || peerProfile.username || raw.peerName || "Unknown user";
