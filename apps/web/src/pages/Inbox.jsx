@@ -246,7 +246,8 @@ export default function Inbox() {
     if (!t?.peerUid) return;
     navigate(`/chat?with=${encodeURIComponent(t.peerUid)}`);
     setThreads((prev) => prev.map((x) => (x.peerUid === t.peerUid ? { ...x, unread: 0 } : x)));
-    try { if (t.peerUid) await markThreadRead(t.peerUid); else if (t.room) await markRoomRead(t.room); } catch {}
+    try { if (t.peerUid) await markThreadRead(t.room);
+ else if (t.room) await markRoomRead(t.room); } catch {}
   }
 
   // Filtered threads for search

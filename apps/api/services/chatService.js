@@ -466,11 +466,9 @@ export async function getInbox(uid) {
  * markThreadRead(peerUid, uid)
  * - marks DM thread between uid & peerUid as seen by uid
  */
-export async function markThreadRead(peerUid, uid) {
-  if (!peerUid) throw new Error("peerUid required");
+export async function markThreadRead(room, uid) {
+  if (!room) throw new Error("room required");
   if (!uid) throw new Error("uid required");
-
-  const room = Thread.createDMRoom(uid, peerUid);
 
   try {
     const res = await ChatMessage.updateMany(
@@ -481,10 +479,8 @@ export async function markThreadRead(peerUid, uid) {
       { $addToSet: { seenBy: uid } }
     );
 
-    // update Thread unread counts
     await Thread.markRead(room, uid).catch(() => null);
 
-    // 🔥 emit seen for THIS canonical room only
     const io = getIO();
     io?.to(room).emit("chat:seen", { room, seenBy: uid });
 
