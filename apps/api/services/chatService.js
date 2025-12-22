@@ -4,7 +4,6 @@ import Thread from "../models/Thread.js";
 import { createNotification } from "./notificationService.js";
 import { ClientProfile } from "../models/Profile.js";
 import { Pro } from "../models.js";
-import { buildDmRoom } from "../routes/chat.js"; // add this import at top
 
 /**
  * chatService
@@ -471,7 +470,7 @@ export async function markThreadRead(peerUid, uid) {
   if (!peerUid) throw new Error("peerUid required");
   if (!uid) throw new Error("uid required");
 
-  const room = buildDmRoom(uid, peerUid);
+  const room = Thread.createDMRoom(uid, peerUid);
 
   try {
     const res = await ChatMessage.updateMany(
