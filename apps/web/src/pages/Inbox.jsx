@@ -200,14 +200,21 @@ export default function Inbox() {
       });
 
       // Listener for messages marked as seen
-      const unregisterSeen = registerSocketHandler("chat:seen", (payload) => {
-        if (!payload?.room) return;
-        setThreads((prev) =>
-          prev.map((t) =>
-            t.room === payload.room ? { ...t, unread: 0 } : t
-          )
-        );
-      });
+    registerSocketHandler("chat:seen", (payload) => {
+  const { seenBy, room } = payload || {};
+  if (!seenBy || !room) return;
+
+  setThreads((prev) =>
+    prev.map((t) => {
+      // Clear unread if this seen event involves the peer of this thread
+      if (t.peerUid && room.includes(t.peerUid)) {
+        return { ...t, unread: 0 };
+      }
+      return t;
+    })
+  );
+});
+
 
       // Cleanup listeners when component is closed
       return () => {
