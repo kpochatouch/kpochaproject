@@ -282,36 +282,37 @@ useEffect(() => {
         const existingIndex = prev.findIndex((t) => t.peerUid === peerUid);
         let updatedThread;
 
-        if (existingIndex >= 0) {
-          const current = prev[existingIndex];
-          const newUnread =
-            fromUid === myUid ? current.unread : (current.unread || 0) + 1;
+    if (existingIndex >= 0) {
+  const current = prev[existingIndex];
 
-          updatedThread = {
-            ...current,
-            lastBody: body,
-            lastAt: at,
-            unread: newUnread,
-            room: current.room || room || current.room,
-          };
+  // ⚠️ DO NOT increment unread here
+  // Backend (Thread) is the source of truth
+  updatedThread = {
+    ...current,
+    lastBody: body,
+    lastAt: at,
+    room: current.room || room || current.room,
+  };
 
-          const cloned = [...prev];
-          cloned.splice(existingIndex, 1);
-          // newest first, cap array length
-          return [updatedThread, ...cloned].slice(0, MAX_THREADS);
-        }
+  const cloned = [...prev];
+  cloned.splice(existingIndex, 1);
+  return [updatedThread, ...cloned].slice(0, MAX_THREADS);
+}
 
         // new thread
         updatedThread = {
-          peerUid,
-          room: room || null,
-          unread: fromUid === myUid ? 0 : 1,
-          lastBody: body,
-          lastAt: at,
-          // we do NOT know their profile name yet → show clear "Unknown user"
-          displayName: "Unknown user",
-          avatarUrl: "",
-        };
+        peerUid,
+        room: room || null,
+
+        // ⚠️ unread must start at 0 until backend confirms otherwise
+        unread: 0,
+
+        lastBody: body,
+        lastAt: at,
+        displayName: "Unknown user",
+        avatarUrl: "",
+      };
+
 
         return [updatedThread, ...prev].slice(0, MAX_THREADS);
       });
