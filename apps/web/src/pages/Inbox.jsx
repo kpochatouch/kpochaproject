@@ -108,12 +108,9 @@ function normalizeThread(raw = {}, currentUid) {
     raw.updatedAt ||
     null;
 
-  const unread =
-    typeof raw.unread === "number"
-      ? raw.unread
-      : typeof raw.unreadCount === "number"
-      ? raw.unreadCount
-      : 0;
+  // V1: Inbox unread is frontend-derived (chat-driven)
+const unread = 0;
+
 
   const peerProfile = raw.peerProfile || raw.user || {};
   const displayName =
@@ -246,18 +243,17 @@ useEffect(() => {
 }, [myUid]);
 
 
-  // Socket: register handler for new chat messages
+ // Socket: register handler for new chat messages
 useEffect(() => {
   if (!myUid) return;
 
-  // The socket connection itself is now handled in App.jsx.
-  // Here we ONLY listen for "chat:message" events and update the inbox.
   const unregister = registerSocketHandler("chat:message", (msg) => {
     try {
       const fromUid = msg.fromUid || msg.from;
       const toUid = msg.toUid || msg.to;
       const room = msg.room || msg.roomId || null;
 
+      // Ignore messages not involving me
       if (!fromUid && !toUid) return;
       if (fromUid !== myUid && toUid !== myUid) return;
 
@@ -273,48 +269,56 @@ useEffect(() => {
         body =
           msg.body ||
           msg.text ||
-          (msg.attachments && msg.attachments.length ? "[Attachment]" : "");
+          (msg.attachments && msg.attachments.length
+            ? "[Attachment]"
+            : "");
       }
 
       const at = msg.at || msg.ts || msg.createdAt || Date.now();
 
       setThreads((prev) => {
-        const existingIndex = prev.findIndex((t) => t.peerUid === peerUid);
-        let updatedThread;
+        const existingIndex = prev.findIndex(
+          (t) => t.peerUid === peerUid
+        );
 
-    if (existingIndex >= 0) {
-  const current = prev[existingIndex];
+        // EXISTING THREAD
+        if (existingIndex >= 0) {
+          const current = prev[existingIndex];
 
-  // ⚠️ DO NOT increment unread here
-  // Backend (Thread) is the source of truth
-  updatedThread = {
-    ...current,
-    lastBody: body,
-    lastAt: at,
-    room: current.room || room || current.room,
-  };
+          const updatedThread = {
+            ...current,
+            lastBody: body,
+            lastAt: at,
+            room: current.room || room || current.room,
 
-  const cloned = [...prev];
-  cloned.splice(existingIndex, 1);
-  return [updatedThread, ...cloned].slice(0, MAX_THREADS);
-}
+            // 🔔 UNREAD BADGE SOURCE (V1)
+            unread:
+              document.visibilityState === "visible"
+                ? current.unread
+                : current.unread + 1,
+          };
 
-        // new thread
-        updatedThread = {
-        peerUid,
-        room: room || null,
+          const cloned = [...prev];
+          cloned.splice(existingIndex, 1);
+          return [updatedThread, ...cloned].slice(
+            0,
+            MAX_THREADS
+          );
+        }
 
-        // ⚠️ unread must start at 0 until backend confirms otherwise
-        unread: 0,
-
-        lastBody: body,
-        lastAt: at,
-        displayName: "Unknown user",
-        avatarUrl: "",
-      };
-
-
-        return [updatedThread, ...prev].slice(0, MAX_THREADS);
+        // BRAND NEW THREAD
+        return [
+          {
+            peerUid,
+            room: room || null,
+            unread: 0,
+            lastBody: body,
+            lastAt: at,
+            displayName: "Unknown user",
+            avatarUrl: "",
+          },
+          ...prev,
+        ].slice(0, MAX_THREADS);
       });
     } catch (e) {
       console.warn(
@@ -328,9 +332,10 @@ useEffect(() => {
     try {
       if (typeof unregister === "function") unregister();
     } catch {}
-    // do NOT call setState during cleanup
   };
 }, [myUid]);
+
+
 
   // Socket: register handler for seen/read events (handles rooms and DMs)
 useEffect(() => {
