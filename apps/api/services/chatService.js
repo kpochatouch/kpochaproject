@@ -4,6 +4,7 @@ import Thread from "../models/Thread.js";
 import { createNotification } from "./notificationService.js";
 import { ClientProfile } from "../models/Profile.js";
 import { Pro } from "../models.js";
+import { buildDmRoom } from "../routes/chat.js"; // add this import at top
 
 /**
  * chatService
@@ -470,55 +471,31 @@ export async function markThreadRead(peerUid, uid) {
   if (!peerUid) throw new Error("peerUid required");
   if (!uid) throw new Error("uid required");
 
-  const roomA = `dm:${uid}:${peerUid}`;
-  const roomB = `dm:${peerUid}:${uid}`;
+  const room = buildDmRoom(uid, peerUid);
+
   try {
     const res = await ChatMessage.updateMany(
       {
-        room: { $in: [roomA, roomB] },
-        toUid: uid,
+        room,
         seenBy: { $ne: uid },
       },
       { $addToSet: { seenBy: uid } }
     );
 
-    // also update Thread unreadCounts (best-effort)
-    try {
-      // Find the actual thread document regardless of room order
-const thread = await Thread.findOne({
-  type: "dm",
-  participants: { $all: [uid, peerUid] },
-});
+    // update Thread unread counts
+    await Thread.markRead(room, uid).catch(() => null);
 
-if (thread) {
-  await Thread.markRead(thread.room, uid);
-}
+    // 🔥 emit seen for THIS canonical room only
+    const io = getIO();
+    io?.to(room).emit("chat:seen", { room, seenBy: uid });
 
-    } catch (err) {
-      // non-fatal
-      console.warn("[chatService] Thread.markRead failed:", err?.message || err);
-    }
-
-    // 🔥 LIVE "SEEN" UPDATE: emit to both possible dm rooms
-    try {
-      const io = getIO();
-      if (io) {
-        io.to(roomA).emit("chat:seen", { room: roomA, seenBy: uid });
-        io.to(roomB).emit("chat:seen", { room: roomB, seenBy: uid });
-      }
-    } catch (err) {
-      console.warn(
-        "[chatService] emit chat:seen (thread) failed:",
-        err?.message || err
-      );
-    }
-
-    return { ok: true, updated: res?.modifiedCount ?? res?.nModified ?? 0 };
+    return { ok: true, updated: res?.modifiedCount ?? 0 };
   } catch (e) {
     console.warn("[chatService] markThreadRead failed:", e?.message || e);
     return { ok: false, error: e?.message || e };
   }
 }
+
 
 /**
  * markRoomRead(room, uid)
@@ -529,10 +506,11 @@ export async function markRoomRead(room, uid) {
   if (!uid) throw new Error("uid required");
 
   try {
-    const res = await ChatMessage.updateMany(
-      { room, toUid: uid, seenBy: { $ne: uid } },
-      { $addToSet: { seenBy: uid } }
-    );
+  const res = await ChatMessage.updateMany(
+  { room, seenBy: { $ne: uid } },
+  { $addToSet: { seenBy: uid } }
+);
+
 
     // also update Thread unreadCounts (best-effort)
     try {
