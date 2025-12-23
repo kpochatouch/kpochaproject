@@ -172,41 +172,62 @@ export default function App() {
     me?.uid ||
     "You";
 
-  // Global listener for incoming calls
-  useEffect(() => {
-    // when server emits "call:incoming"
-    const offIncoming = registerSocketHandler("call:incoming", (payload) => {
-      if (!payload) return;
+  // Global listener for incoming calls (SAFE + RACE-CONDITION PROOF)
+useEffect(() => {
+  // Primary: backend-driven incoming call
+  const offIncoming = registerSocketHandler("call:incoming", (payload) => {
+    if (!payload?.room || !payload?.callId) return;
 
-      setIncomingCall({
+    setIncomingCall({
+      open: true,
+      callId: payload.callId,
+      room: payload.room,
+      callType: payload.callType || "audio",
+      fromUid: payload.callerUid || null,
+      meta: payload.meta || {},
+    });
+  });
+
+  // 🔥 Fallback: signaling offer arrived before backend event
+  const offOfferFallback = registerSocketHandler("webrtc:offer", (payload) => {
+    if (!payload?.room || !payload?.callId) return;
+
+    setIncomingCall((prev) => {
+      // already showing this call → do nothing
+      if (prev?.room === payload.room) return prev;
+
+      return {
         open: true,
         callId: payload.callId,
         room: payload.room,
         callType: payload.callType || "audio",
-        fromUid: payload.callerUid,
+        fromUid: payload.fromUid || null,
         meta: payload.meta || {},
-      });
+      };
     });
+  });
 
-    // close modal when call ends / cancelled / declined
-    const offStatus = registerSocketHandler("call:status", (payload) => {
-      if (!payload) return;
-      if (
-        ["ended", "missed", "cancelled", "declined", "failed"].includes(
-          payload.status
-        )
-      ) {
-        setIncomingCall((prev) =>
-          prev && prev.callId === payload.callId ? null : prev
-        );
-      }
-    });
+  // Close modal when call ends / cancelled / declined
+  const offStatus = registerSocketHandler("call:status", (payload) => {
+    if (!payload?.callId) return;
 
-    return () => {
-      offIncoming();
-      offStatus();
-    };
-  }, []);
+    if (
+      ["ended", "missed", "cancelled", "declined", "failed"].includes(
+        payload.status
+      )
+    ) {
+      setIncomingCall((prev) =>
+        prev && prev.callId === payload.callId ? null : prev
+      );
+    }
+  });
+
+  return () => {
+    offIncoming();
+    offOfferFallback();
+    offStatus();
+  };
+}, []);
 
 
   // Listener for AWS liveness events

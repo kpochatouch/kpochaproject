@@ -143,17 +143,19 @@ export default function CallSheet({
       });
     }
 
-    return () => {
-      try {
-        sc.disconnect();
-      } catch {}
-      setSig(null);
-      stopAllTones();
-      setAutoStarted(false);
-      setElapsedSeconds(0);
-      setHasAccepted(false);
-      setCallFailed(false);
-    };
+   return () => {
+  // ❌ DO NOT disconnect signaling here if call is alive
+  if (!callAliveRef.current) {
+    try {
+      sc.disconnect();
+    } catch {}
+    setSig(null);
+  }
+
+  stopAllTones();
+  setAutoStarted(false);
+};
+
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, room, role]);
