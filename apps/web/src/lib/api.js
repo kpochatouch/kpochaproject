@@ -241,23 +241,20 @@ function _reconnectWithBackoff() {
 onTokenChange = (newToken) => {
   latestToken = newToken;
   if (!socket) return;
+
   try {
-    // refresh auth payload
     socket.auth = _getAuthPayload();
 
-    // 🔥 force a reconnect so the server verifies token & joins user:<uid>
-    if (socket.connected) {
-      try {
-        socket.disconnect();
-      } catch {
-        /* ignore */
-      }
+    // Do NOT kill a live socket
+    if (!socket.connected && !socketConnecting) {
+      socketConnecting = true;
+      socket.connect();
     }
-    socket.connect();
   } catch (e) {
     console.warn("[socket] auth refresh failed:", e?.message || e);
   }
 };
+
 
 
 /* connectSocket: idempotent, registers optional callbacks */
