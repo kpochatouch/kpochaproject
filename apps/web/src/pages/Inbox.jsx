@@ -287,14 +287,16 @@ useEffect(() => {
     if (existingIndex >= 0) {
   const current = prev[existingIndex];
 
-  // ⚠️ DO NOT increment unread here
-  // Backend (Thread) is the source of truth
-  updatedThread = {
-    ...current,
-    lastBody: body,
-    lastAt: at,
-    room: current.room || room || current.room,
-  };
+  const isFromPeer = fromUid !== myUid;
+
+updatedThread = {
+  ...current,
+  lastBody: body,
+  lastAt: at,
+  room: current.room || room || current.room,
+  unread: isFromPeer ? (current.unread || 0) + 1 : current.unread || 0,
+};
+
 
   const cloned = [...prev];
   cloned.splice(existingIndex, 1);

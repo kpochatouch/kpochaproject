@@ -75,7 +75,7 @@ export default class SignalingClient {
   // get ICE servers from backend
   static async getIceServers() {
     try {
-      const res = await api.get("/webrtc/ice");
+      const res = await api.get("/api/webrtc/ice");
       const ice = res?.data?.iceServers || res?.data || [];
       console.log("[getIceServers] using backend ICE:", ice);
       return ice;
