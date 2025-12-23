@@ -64,6 +64,7 @@ export default function CallSheet({
 
   // NEW: stash offer that arrives before receiver taps "Accept"
   const pendingOfferRef = useRef(null);
+  const callAliveRef = useRef(false);
 
   function stopAllTones() {
     [callerToneRef, incomingToneRef].forEach((ref) => {
@@ -201,9 +202,6 @@ export default function CallSheet({
       safeUpdateStatus("declined", { reason: "timeout_no_connection" });
 
       // 4) Auto hang up after a short pause so user can briefly see "Call failed"
-      setTimeout(() => {
-        hangup();
-      }, 1500);
     }, 20000); // 20,000 ms = 20 seconds
 
     // Cleanup: if state changes (connects, closes, etc.), cancel timeout
@@ -256,7 +254,9 @@ export default function CallSheet({
     const iceServers = await SignalingClient.getIceServers();
 
     const pcNew = new RTCPeerConnection({ iceServers });
-    setPc(pcNew);
+      callAliveRef.current = true;
+      setPc(pcNew);
+
 
     // local media
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -312,9 +312,12 @@ export default function CallSheet({
 
        // signaling listeners
     const handleOffer = async (msg) => {
-      try {
-        const remoteSdp = msg?.payload || msg; // unwrap payload
-        await pcNew.setRemoteDescription(new RTCSessionDescription(remoteSdp));
+  try {
+    if (!callAliveRef.current || pcNew.signalingState === "closed") return;
+
+    const remoteSdp = msg?.payload || msg;
+    await pcNew.setRemoteDescription(new RTCSessionDescription(remoteSdp));
+
         if (!asCaller) {
           const answer = await pcNew.createAnswer();
           await pcNew.setLocalDescription(answer);
@@ -337,6 +340,7 @@ export default function CallSheet({
 
   sig.on("webrtc:answer", async (msg) => {
   try {
+    if (!callAliveRef.current || pcNew.signalingState === "closed") return;
     if (asCaller) {
       const remoteSdp = msg?.payload || msg; // unwrap payload
       await pcNew.setRemoteDescription(
@@ -353,12 +357,15 @@ export default function CallSheet({
 });
 
     sig.on("webrtc:ice", async (msg) => {
-      try {
-        const cand = msg?.payload || msg; // unwrap payload
-        if (cand) {
-          console.log("[CallSheet] remote ICE candidate:", cand.type, cand.protocol);
-          await pcNew.addIceCandidate(cand);
-        }
+  try {
+    if (!callAliveRef.current || pcNew.signalingState === "closed") return;
+
+    const cand = msg?.payload || msg;
+    if (cand) {
+      console.log("[CallSheet] remote ICE candidate:", cand.type, cand.protocol);
+      await pcNew.addIceCandidate(cand);
+    }
+
       } catch (e) {
         console.warn("[CallSheet] addIceCandidate failed:", e?.message || e);
       }
@@ -377,19 +384,22 @@ export default function CallSheet({
     return pcNew;
   }
 
-  function cleanupPeer() {
-    stopAllTones();
+ function cleanupPeer() {
+  stopAllTones();
 
-    try {
-      if (pc) {
-        pc.getSenders()?.forEach((s) => {
-          try {
-            s.track?.stop();
-          } catch {}
-        });
-        pc.close();
-      }
-      } catch {}
+  callAliveRef.current = false; // 🔒 block late signaling
+
+  try {
+    if (pc && pc.signalingState !== "closed") {
+      pc.getSenders()?.forEach((s) => {
+        try {
+          s.track?.stop();
+        } catch {}
+      });
+      pc.close();
+    }
+  } catch {}
+
     setPc(null);
     setHasConnected(false);
     setHasAccepted(false); // 👈 reset accept state
