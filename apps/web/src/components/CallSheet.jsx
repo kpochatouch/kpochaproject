@@ -50,6 +50,8 @@ export default function CallSheet({
 
   // ❌ call failed state (when accepted but never connects)
   const [callFailed, setCallFailed] = useState(false);
+  // 🐢 slow connection state (after initial timeout)
+const [slowConnecting, setSlowConnecting] = useState(false);
 
   const [pipFlipped, setPipFlipped] = useState(false);
   const [isMini, setIsMini] = useState(false);
@@ -190,21 +192,22 @@ export default function CallSheet({
 
     // Start 20s timeout once we're in "accepted but not connected" state
     const timeoutId = setTimeout(() => {
-      console.warn(
-        "[CallSheet] Call failed: no WebRTC connection within 20 seconds"
-      );
+  // ⏳ after 20s → still connecting
+  setSlowConnecting(true);
 
-      // 1) Stop any ringing / tones
-      stopAllTones();
+  const finalTimeout = setTimeout(() => {
+    console.warn(
+      "[CallSheet] Call failed: no WebRTC connection after extended wait"
+    );
 
-      // 2) Mark as failed so UI shows "Call failed"
-      setCallFailed(true);
+    stopAllTones();
+    setCallFailed(true);
+    safeUpdateStatus("declined", { reason: "timeout_no_connection" });
+  }, 25000); // extra 25s → total ≈45s
 
-      // 3) Let backend know it failed because of timeout (optional)
-      safeUpdateStatus("declined", { reason: "timeout_no_connection" });
+  return () => clearTimeout(finalTimeout);
+}, 20000); // first 20s
 
-      // 4) Auto hang up after a short pause so user can briefly see "Call failed"
-    }, 20000); // 20,000 ms = 20 seconds
 
     // Cleanup: if state changes (connects, closes, etc.), cancel timeout
     return () => clearTimeout(timeoutId);
@@ -408,6 +411,8 @@ export default function CallSheet({
     setPeerAccepted(false);
     setElapsedSeconds(0); // reset duration when call ends
     setCallFailed(false);  // 👈 reset failure flag
+    setSlowConnecting(false); // reset slow-connecting flag
+
 
     try {
       sig?.disconnect();
@@ -572,9 +577,9 @@ export default function CallSheet({
     statusText = "Call failed";
   } else if (hasConnected) {
     statusText = "Connected";
-  } else if (starting) {
-    statusText = "Connecting…";
-  } else if (isCaller && peerAccepted) {
+  } else if (starting || slowConnecting) {
+  statusText = slowConnecting ? "Still connecting…" : "Connecting…";
+} else if (isCaller && peerAccepted) {
     statusText = "Connecting…";
   } else if (!isCaller && hasAccepted) {
     statusText = "Connecting…";
