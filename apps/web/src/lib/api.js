@@ -323,7 +323,7 @@ socket = ioClient(ROOT, opts);
     socket.on("connect", () => {
       socketConnected = true;
       reconnectAttempts = 0;
-
+    console.log("[socket] connected", socket.id);
        wiredEvents.clear();
 
       // wire already-registered events
@@ -348,6 +348,7 @@ socket = ioClient(ROOT, opts);
 
     socket.on("disconnect", (reason) => {
       socketConnected = false;
+      console.log("[socket] disconnected:", reason);
       // do not clear listeners — keep registry for next connect
       if (reason === "io server disconnect") {
         // server forced disconnect – try to reconnect manually
