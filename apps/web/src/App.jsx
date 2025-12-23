@@ -7,7 +7,7 @@ import {
   useLocation,
   useNavigate,
 } from "react-router-dom";
-import { api, connectSocket, registerSocketHandler } from "./lib/api";
+import { api, registerSocketHandler } from "./lib/api";
 import CallSheet from "./components/CallSheet.jsx";
 import InstallPWAButton from "./components/InstallPWAButton.jsx";
 
@@ -162,12 +162,6 @@ export default function App() {
 
   const { me } = useMe();
   const [incomingCall, setIncomingCall] = useState(null);
-
-  // As soon as we know who "me" is, connect the socket with the right auth
-  useEffect(() => {
-    if (!me) return;        // if not logged in yet, do nothing
-    connectSocket();        // this will reuse or reconnect the socket with token
-  }, [me]);
 
 
   const myLabel =
