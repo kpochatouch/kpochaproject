@@ -163,6 +163,7 @@ export function setAuthToken(token) {
 
 let socket = null;
 let socketConnected = false;
+let socketConnecting = false;
 let wiredEvents = new Set();
 let socketListeners = new Map(); // event -> Set(fn)
 let reconnectAttempts = 0;
@@ -275,7 +276,10 @@ export function connectSocket({ onNotification, onBookingAccepted, onCallEvent }
     socketListeners.get("call:status").add(onCallEvent);
   }
 
-  if (socket && socketConnected) return socket;
+  if (socket && (socketConnected || socketConnecting)) {
+  return socket;
+}
+
 
   try {
     const opts = {
@@ -317,12 +321,14 @@ export function connectSocket({ onNotification, onBookingAccepted, onCallEvent }
   },
 };
 
+socketConnecting = true;
 socket = ioClient(ROOT, opts);
 
 
     socket.on("connect", () => {
       socketConnected = true;
       reconnectAttempts = 0;
+      socketConnecting = false;
     console.log("[socket] connected", socket.id);
        wiredEvents.clear();
 
@@ -348,6 +354,7 @@ socket = ioClient(ROOT, opts);
 
     socket.on("disconnect", (reason) => {
       socketConnected = false;
+      socketConnecting = false;
       console.log("[socket] disconnected:", reason);
       // do not clear listeners — keep registry for next connect
       if (reason === "io server disconnect") {
