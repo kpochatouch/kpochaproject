@@ -90,11 +90,7 @@ export default function CallSheet({
   async function sendCallSummaryMessage(status) {
     if (!chatRoom) return; // nothing to do if no room passed
 
-    // so Inbox + ChatPane can know if it's "you called" or "they called"
-    const direction = role === "caller" ? "outgoing" : "incoming";
-
     const callMeta = {
-      direction, // "outgoing" | "incoming"
       type: callType || (mode === "video" ? "video" : "audio"),
       status, // "ended" | "cancelled" | "declined"
       hasConnected,
@@ -108,10 +104,7 @@ export default function CallSheet({
         meta: { call: callMeta },
       });
     } catch (e) {
-      console.warn(
-        "[CallSheet] sendCallSummaryMessage failed:",
-        e?.message || e
-      );
+      console.warn("[CallSheet] sendCallSummaryMessage failed:", e?.message || e);
     }
   }
 
@@ -511,7 +504,6 @@ export default function CallSheet({
     }
   }
 
-
   async function declineIncoming() {
     stopAllTones();
     await safeUpdateStatus("declined");
@@ -757,4 +749,3 @@ export default function CallSheet({
     </div>
   );
 }
-
