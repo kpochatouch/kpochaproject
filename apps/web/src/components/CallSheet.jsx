@@ -50,8 +50,6 @@ export default function CallSheet({
 
   // ❌ call failed state (when accepted but never connects)
   const [callFailed, setCallFailed] = useState(false);
-  // 🐢 slow connection state (after initial timeout)
-const [slowConnecting, setSlowConnecting] = useState(false);
 
   const [pipFlipped, setPipFlipped] = useState(false);
   const [isMini, setIsMini] = useState(false);
@@ -66,7 +64,6 @@ const [slowConnecting, setSlowConnecting] = useState(false);
 
   // NEW: stash offer that arrives before receiver taps "Accept"
   const pendingOfferRef = useRef(null);
-  const callAliveRef = useRef(false);
 
   function stopAllTones() {
     [callerToneRef, incomingToneRef].forEach((ref) => {
@@ -93,7 +90,11 @@ const [slowConnecting, setSlowConnecting] = useState(false);
   async function sendCallSummaryMessage(status) {
     if (!chatRoom) return; // nothing to do if no room passed
 
+    // so Inbox + ChatPane can know if it's "you called" or "they called"
+    const direction = role === "caller" ? "outgoing" : "incoming";
+
     const callMeta = {
+      direction, // "outgoing" | "incoming"
       type: callType || (mode === "video" ? "video" : "audio"),
       status, // "ended" | "cancelled" | "declined"
       hasConnected,
@@ -107,7 +108,10 @@ const [slowConnecting, setSlowConnecting] = useState(false);
         meta: { call: callMeta },
       });
     } catch (e) {
-      console.warn("[CallSheet] sendCallSummaryMessage failed:", e?.message || e);
+      console.warn(
+        "[CallSheet] sendCallSummaryMessage failed:",
+        e?.message || e
+      );
     }
   }
 
@@ -145,19 +149,17 @@ const [slowConnecting, setSlowConnecting] = useState(false);
       });
     }
 
-   return () => {
-  // ❌ DO NOT disconnect signaling here if call is alive
-  if (!callAliveRef.current) {
-    try {
-      sc.disconnect();
-    } catch {}
-    setSig(null);
-  }
-
-  stopAllTones();
-  setAutoStarted(false);
-};
-
+    return () => {
+      try {
+        sc.disconnect();
+      } catch {}
+      setSig(null);
+      stopAllTones();
+      setAutoStarted(false);
+      setElapsedSeconds(0);
+      setHasAccepted(false);
+      setCallFailed(false);
+    };
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, room, role]);
@@ -192,22 +194,24 @@ const [slowConnecting, setSlowConnecting] = useState(false);
 
     // Start 20s timeout once we're in "accepted but not connected" state
     const timeoutId = setTimeout(() => {
-  // ⏳ after 20s → still connecting
-  setSlowConnecting(true);
+      console.warn(
+        "[CallSheet] Call failed: no WebRTC connection within 20 seconds"
+      );
 
-  const finalTimeout = setTimeout(() => {
-    console.warn(
-      "[CallSheet] Call failed: no WebRTC connection after extended wait"
-    );
+      // 1) Stop any ringing / tones
+      stopAllTones();
 
-    stopAllTones();
-    setCallFailed(true);
-    safeUpdateStatus("failed", { reason: "timeout_no_connection" });
-  }, 25000); // extra 25s → total ≈45s
+      // 2) Mark as failed so UI shows "Call failed"
+      setCallFailed(true);
 
-  return () => clearTimeout(finalTimeout);
-}, 20000); // first 20s
+      // 3) Let backend know it failed because of timeout (optional)
+      safeUpdateStatus("declined", { reason: "timeout_no_connection" });
 
+      // 4) Auto hang up after a short pause so user can briefly see "Call failed"
+      setTimeout(() => {
+        hangup();
+      }, 1500);
+    }, 20000); // 20,000 ms = 20 seconds
 
     // Cleanup: if state changes (connects, closes, etc.), cancel timeout
     return () => clearTimeout(timeoutId);
@@ -258,14 +262,8 @@ const [slowConnecting, setSlowConnecting] = useState(false);
 
     const iceServers = await SignalingClient.getIceServers();
 
-    const pcNew = new RTCPeerConnection({
-      iceServers,
-      iceTransportPolicy: "relay",
-    });
-
-      callAliveRef.current = true;
-      setPc(pcNew);
-
+    const pcNew = new RTCPeerConnection({ iceServers });
+    setPc(pcNew);
 
     // local media
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -321,12 +319,9 @@ const [slowConnecting, setSlowConnecting] = useState(false);
 
        // signaling listeners
     const handleOffer = async (msg) => {
-  try {
-    if (!callAliveRef.current || pcNew.signalingState === "closed") return;
-
-    const remoteSdp = msg?.payload || msg;
-    await pcNew.setRemoteDescription(new RTCSessionDescription(remoteSdp));
-
+      try {
+        const remoteSdp = msg?.payload || msg; // unwrap payload
+        await pcNew.setRemoteDescription(new RTCSessionDescription(remoteSdp));
         if (!asCaller) {
           const answer = await pcNew.createAnswer();
           await pcNew.setLocalDescription(answer);
@@ -349,7 +344,6 @@ const [slowConnecting, setSlowConnecting] = useState(false);
 
   sig.on("webrtc:answer", async (msg) => {
   try {
-    if (!callAliveRef.current || pcNew.signalingState === "closed") return;
     if (asCaller) {
       const remoteSdp = msg?.payload || msg; // unwrap payload
       await pcNew.setRemoteDescription(
@@ -366,15 +360,12 @@ const [slowConnecting, setSlowConnecting] = useState(false);
 });
 
     sig.on("webrtc:ice", async (msg) => {
-  try {
-    if (!callAliveRef.current || pcNew.signalingState === "closed") return;
-
-    const cand = msg?.payload || msg;
-    if (cand) {
-      console.log("[CallSheet] remote ICE candidate:", cand.type, cand.protocol);
-      await pcNew.addIceCandidate(cand);
-    }
-
+      try {
+        const cand = msg?.payload || msg; // unwrap payload
+        if (cand) {
+          console.log("[CallSheet] remote ICE candidate:", cand.type, cand.protocol);
+          await pcNew.addIceCandidate(cand);
+        }
       } catch (e) {
         console.warn("[CallSheet] addIceCandidate failed:", e?.message || e);
       }
@@ -393,30 +384,25 @@ const [slowConnecting, setSlowConnecting] = useState(false);
     return pcNew;
   }
 
- function cleanupPeer() {
-  stopAllTones();
+  function cleanupPeer() {
+    stopAllTones();
 
-  callAliveRef.current = false; // 🔒 block late signaling
-
-  try {
-    if (pc && pc.signalingState !== "closed") {
-      pc.getSenders()?.forEach((s) => {
-        try {
-          s.track?.stop();
-        } catch {}
-      });
-      pc.close();
-    }
-  } catch {}
-
+    try {
+      if (pc) {
+        pc.getSenders()?.forEach((s) => {
+          try {
+            s.track?.stop();
+          } catch {}
+        });
+        pc.close();
+      }
+      } catch {}
     setPc(null);
     setHasConnected(false);
     setHasAccepted(false); // 👈 reset accept state
     setPeerAccepted(false);
     setElapsedSeconds(0); // reset duration when call ends
     setCallFailed(false);  // 👈 reset failure flag
-    setSlowConnecting(false); // reset slow-connecting flag
-
 
     try {
       sig?.disconnect();
@@ -525,6 +511,7 @@ const [slowConnecting, setSlowConnecting] = useState(false);
     }
   }
 
+
   async function declineIncoming() {
     stopAllTones();
     await safeUpdateStatus("declined");
@@ -581,9 +568,9 @@ const [slowConnecting, setSlowConnecting] = useState(false);
     statusText = "Call failed";
   } else if (hasConnected) {
     statusText = "Connected";
-  } else if (starting || slowConnecting) {
-  statusText = slowConnecting ? "Still connecting…" : "Connecting…";
-} else if (isCaller && peerAccepted) {
+  } else if (starting) {
+    statusText = "Connecting…";
+  } else if (isCaller && peerAccepted) {
     statusText = "Connecting…";
   } else if (!isCaller && hasAccepted) {
     statusText = "Connecting…";
@@ -770,3 +757,4 @@ const [slowConnecting, setSlowConnecting] = useState(false);
     </div>
   );
 }
+
