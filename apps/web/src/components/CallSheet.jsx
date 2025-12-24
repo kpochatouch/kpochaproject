@@ -202,7 +202,7 @@ const [slowConnecting, setSlowConnecting] = useState(false);
 
     stopAllTones();
     setCallFailed(true);
-    safeUpdateStatus("declined", { reason: "timeout_no_connection" });
+    safeUpdateStatus("failed", { reason: "timeout_no_connection" });
   }, 25000); // extra 25s → total ≈45s
 
   return () => clearTimeout(finalTimeout);
@@ -258,7 +258,11 @@ const [slowConnecting, setSlowConnecting] = useState(false);
 
     const iceServers = await SignalingClient.getIceServers();
 
-    const pcNew = new RTCPeerConnection({ iceServers });
+    const pcNew = new RTCPeerConnection({
+      iceServers,
+      iceTransportPolicy: "relay",
+    });
+
       callAliveRef.current = true;
       setPc(pcNew);
 
