@@ -365,16 +365,22 @@ export async function getMessages(room, { limit = 50, before = null } = {}) {
 export async function getInbox(uid) {
   if (!uid) throw new Error("uid required");
 
-  // Try to use Thread collection first (fast)
+  // Try to use Thread collection first (fast list of threads)
   try {
-    const threads = await Thread.find({ participants: uid, archived: { $ne: true } })
+    const threads = await Thread.find({
+      participants: uid,
+      archived: { $ne: true },
+    })
       .sort({ lastMessageAt: -1 })
       .limit(200)
       .lean();
 
     if (Array.isArray(threads) && threads.length) {
-      const out = threads.map((t) => {
+      const out = [];
+
+      for (const t of threads) {
         let peerUid = null;
+
         if (t.type === "dm" || String(t.room).startsWith("dm:")) {
           const parts = String(t.room).split(":");
           if (parts.length >= 3) {
@@ -383,29 +389,48 @@ export async function getInbox(uid) {
             peerUid = a === uid ? b : b === uid ? a : null;
           }
         } else if (t.type === "booking") {
-          // for booking threads, peerUid is ambiguous; leave null or set booking id
+          // booking threads – peer ambiguous, leave null (FE can treat specially)
           peerUid = null;
         } else {
           // group/system etc.
           peerUid = null;
         }
 
-        const unreadCount = (t.unreadCounts && Number(t.unreadCounts[uid] || 0)) || 0;
+        // 🟡 IMPORTANT: recompute unread from ChatMessage, don't trust t.unreadCounts
+        let unreadCount = 0;
+        try {
+          unreadCount = await ChatMessage.countDocuments({
+            room: t.room,
+            toUid: uid,
+            seenBy: { $ne: uid },
+          });
+        } catch (e) {
+          console.warn(
+            "[chatService] getInbox unread recompute failed:",
+            e?.message || e
+          );
+          // fallback to whatever is in Thread, if available
+          unreadCount =
+            (t.unreadCounts && Number(t.unreadCounts[uid] || 0)) || 0;
+        }
 
-        return {
+        out.push({
           room: t.room,
           peerUid,
           lastBody: t.lastMessagePreview || "",
           lastFromUid: t.lastMessageFrom || "",
           lastAt: t.lastMessageAt || t.updatedAt || t.createdAt,
           unreadCount: Number(unreadCount || 0),
-        };
-      });
+        });
+      }
 
       return out;
     }
   } catch (e) {
-    console.warn("[chatService] getInbox(thread) failed, falling back:", e?.message || e);
+    console.warn(
+      "[chatService] getInbox(thread) failed, falling back:",
+      e?.message || e
+    );
     // fallback to message-scan below
   }
 
@@ -436,7 +461,8 @@ export async function getInbox(uid) {
           peerUid = a === uid ? b : b === uid ? a : null;
         }
       } else {
-        peerUid = lastDoc.fromUid === uid ? lastDoc.toUid || null : lastDoc.fromUid;
+        peerUid =
+          lastDoc.fromUid === uid ? lastDoc.toUid || null : lastDoc.fromUid;
       }
 
       const unreadCount = await ChatMessage.countDocuments({
@@ -454,43 +480,72 @@ export async function getInbox(uid) {
         unreadCount: Number(unreadCount || 0),
       });
     } catch (e) {
-      console.warn("[chatService] getInbox: item failed for room", r, e?.message || e);
+      console.warn(
+        "[chatService] getInbox: item failed for room",
+        r,
+        e?.message || e
+      );
     }
   }
 
-  out.sort((a, b) => new Date(b.lastAt).getTime() - new Date(a.lastAt).getTime());
+  out.sort(
+    (a, b) =>
+      new Date(b.lastAt).getTime() - new Date(a.lastAt).getTime()
+  );
   return out;
 }
+
 
 /**
  * markThreadRead(peerUid, uid)
  * - marks DM thread between uid & peerUid as seen by uid
  */
-export async function markThreadRead(room, uid) {
-  if (!room) throw new Error("room required");
+export async function markThreadRead(peerUid, uid) {
+  if (!peerUid) throw new Error("peerUid required");
   if (!uid) throw new Error("uid required");
 
+  const roomA = `dm:${uid}:${peerUid}`;
+  const roomB = `dm:${peerUid}:${uid}`;
   try {
     const res = await ChatMessage.updateMany(
       {
-        room,
+        room: { $in: [roomA, roomB] },
+        toUid: uid,
         seenBy: { $ne: uid },
       },
       { $addToSet: { seenBy: uid } }
     );
 
-    await Thread.markRead(room, uid).catch(() => null);
+    // also update Thread unreadCounts (best-effort)
+    try {
+      await Thread.markRead(roomA, uid).catch(() =>
+        Thread.markRead(roomB, uid).catch(() => null)
+      );
+    } catch (err) {
+      // non-fatal
+      console.warn("[chatService] Thread.markRead failed:", err?.message || err);
+    }
 
-    const io = getIO();
-    io?.to(room).emit("chat:seen", { room, seenBy: uid });
+    // 🔥 LIVE "SEEN" UPDATE: emit to both possible dm rooms
+    try {
+      const io = getIO();
+      if (io) {
+        io.to(roomA).emit("chat:seen", { room: roomA, seenBy: uid });
+        io.to(roomB).emit("chat:seen", { room: roomB, seenBy: uid });
+      }
+    } catch (err) {
+      console.warn(
+        "[chatService] emit chat:seen (thread) failed:",
+        err?.message || err
+      );
+    }
 
-    return { ok: true, updated: res?.modifiedCount ?? 0 };
+    return { ok: true, updated: res?.modifiedCount ?? res?.nModified ?? 0 };
   } catch (e) {
     console.warn("[chatService] markThreadRead failed:", e?.message || e);
     return { ok: false, error: e?.message || e };
   }
 }
-
 
 /**
  * markRoomRead(room, uid)
@@ -501,11 +556,10 @@ export async function markRoomRead(room, uid) {
   if (!uid) throw new Error("uid required");
 
   try {
-  const res = await ChatMessage.updateMany(
-  { room, seenBy: { $ne: uid } },
-  { $addToSet: { seenBy: uid } }
-);
-
+    const res = await ChatMessage.updateMany(
+      { room, toUid: uid, seenBy: { $ne: uid } },
+      { $addToSet: { seenBy: uid } }
+    );
 
     // also update Thread unreadCounts (best-effort)
     try {
