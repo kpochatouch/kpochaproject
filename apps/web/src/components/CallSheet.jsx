@@ -361,6 +361,7 @@ export default function CallSheet({
 
     sig.on("webrtc:ice", async (msg) => {
       try {
+        console.log("[ICE RAW]", JSON.stringify(msg));
         const cand = msg?.payload || msg; // unwrap payload
         if (cand) {
           console.log("[CallSheet] remote ICE candidate:", cand.type, cand.protocol);
