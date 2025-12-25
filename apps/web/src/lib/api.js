@@ -457,12 +457,7 @@ async function ensureSocketReady(timeoutMs = 8000) {
    ----------------------- */
 export async function sendChatMessage({ room, text = "", meta = {}, clientId = null }) {
   if (!room) throw new Error("room required");
-
-  const hasText = !!(text && text.trim());
-  const hasAttachments = Array.isArray(meta?.attachments) && meta.attachments.length > 0;
-  const hasCallMeta = !!(meta && meta.call); // allow pure call messages
-
-  if (!hasText && !hasAttachments && !hasCallMeta) {
+  if ((!text || !text.trim()) && (!meta?.attachments || meta.attachments.length === 0)) {
     throw new Error("message_empty");
   }
 
