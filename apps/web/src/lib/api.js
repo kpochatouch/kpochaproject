@@ -69,6 +69,7 @@ function ensureAuthListener() {
   if (user) {
     try {
       // 🔥 force a fresh token when user logs in
+      
       const t = await user.getIdToken(true);
       latestToken = t;
       try {
@@ -131,6 +132,40 @@ api.interceptors.request.use(async (config) => {
   return config;
 });
 
+api.interceptors.response.use(
+  (res) => res,
+  async (err) => {
+    const status = err?.response?.status;
+
+    // ✅ If token expired / unauthorized, try refresh ONCE then retry request
+    if (status === 401 && !err.config.__retried) {
+      err.config.__retried = true;
+
+      try {
+        const auth = firebaseAuth || getAuth();
+        const user = auth.currentUser;
+
+        if (user) {
+          const fresh = await user.getIdToken(true);
+          latestToken = fresh;
+
+          try { localStorage.setItem("token", fresh); } catch {}
+
+          err.config.headers = err.config.headers || {};
+          err.config.headers.Authorization = `Bearer ${fresh}`;
+
+          return api.request(err.config);
+        }
+      } catch {
+        // if refresh fails, fall through
+      }
+    }
+
+    return Promise.reject(err);
+  }
+);
+
+
 /* manual override used by Login.jsx after sign-in */
 export function setAuthToken(token) {
   if (!token) {
@@ -163,7 +198,6 @@ export function setAuthToken(token) {
 
 let socket = null;
 let socketConnected = false;
-let socketConnecting = false;
 let wiredEvents = new Set();
 let socketListeners = new Map(); // event -> Set(fn)
 let reconnectAttempts = 0;
@@ -241,20 +275,23 @@ function _reconnectWithBackoff() {
 onTokenChange = (newToken) => {
   latestToken = newToken;
   if (!socket) return;
-
   try {
+    // refresh auth payload
     socket.auth = _getAuthPayload();
 
-    // Do NOT kill a live socket
-    if (!socket.connected && !socketConnecting) {
-      socketConnecting = true;
-      socket.connect();
+    // 🔥 force a reconnect so the server verifies token & joins user:<uid>
+    if (socket.connected) {
+      try {
+        socket.disconnect();
+      } catch {
+        /* ignore */
+      }
     }
+    socket.connect();
   } catch (e) {
     console.warn("[socket] auth refresh failed:", e?.message || e);
   }
 };
-
 
 
 /* connectSocket: idempotent, registers optional callbacks */
@@ -273,10 +310,35 @@ export function connectSocket({ onNotification, onBookingAccepted, onCallEvent }
     socketListeners.get("call:status").add(onCallEvent);
   }
 
-  if (socket && (socketConnected || socketConnecting)) {
+// ✅ If socket already exists, reuse it BUT ensure events are wired
+if (socket) {
+  try {
+    // keep socketConnected in sync
+    socketConnected = !!socket.connected;
+
+    // wire already-registered events
+    for (const ev of socketListeners.keys()) _ensureWire(ev);
+
+    // always wire core realtime events (including WebRTC)
+    _ensureWire("notification:new");
+    _ensureWire("notification:received");
+    _ensureWire("chat:message");
+    _ensureWire("presence:join");
+    _ensureWire("presence:leave");
+    _ensureWire("call:initiate");
+    _ensureWire("call:accepted");
+    _ensureWire("call:ended");
+    _ensureWire("call:missed");
+    _ensureWire("booking:accepted");
+    _ensureWire("webrtc:offer");
+    _ensureWire("webrtc:answer");
+    _ensureWire("webrtc:ice");
+
+    if (!socket.connected) socket.connect();
+  } catch {}
+
   return socket;
 }
-
 
   try {
     const opts = {
@@ -318,15 +380,13 @@ export function connectSocket({ onNotification, onBookingAccepted, onCallEvent }
   },
 };
 
-socketConnecting = true;
 socket = ioClient(ROOT, opts);
 
 
     socket.on("connect", () => {
       socketConnected = true;
       reconnectAttempts = 0;
-      socketConnecting = false;
-    console.log("[socket] connected", socket.id);
+
        wiredEvents.clear();
 
       // wire already-registered events
@@ -351,8 +411,6 @@ socket = ioClient(ROOT, opts);
 
     socket.on("disconnect", (reason) => {
       socketConnected = false;
-      socketConnecting = false;
-      console.log("[socket] disconnected:", reason);
       // do not clear listeners — keep registry for next connect
       if (reason === "io server disconnect") {
         // server forced disconnect – try to reconnect manually
@@ -370,8 +428,6 @@ socket = ioClient(ROOT, opts);
 
     // bridge notification events -> unified "notification:received"
     socket.on("notification:new", (payload) => _dispatch("notification:received", payload));
-    socket.on("notification:received", (payload) => _dispatch("notification:received", payload));
-
     socket.connect();
   } catch (e) {
     console.warn("[socket] connect failed:", e?.message || e);
@@ -462,7 +518,12 @@ async function ensureSocketReady(timeoutMs = 8000) {
    ----------------------- */
 export async function sendChatMessage({ room, text = "", meta = {}, clientId = null }) {
   if (!room) throw new Error("room required");
-  if ((!text || !text.trim()) && (!meta?.attachments || meta.attachments.length === 0)) {
+
+  const hasText = !!(text && text.trim());
+  const hasAttachments = Array.isArray(meta?.attachments) && meta.attachments.length > 0;
+  const hasCallMeta = !!(meta && meta.call); // allow pure call messages
+
+  if (!hasText && !hasAttachments && !hasCallMeta) {
     throw new Error("message_empty");
   }
 
@@ -688,6 +749,13 @@ export async function markAllNotificationsRead() {
   return data;
 }
 
+export async function markNotificationGroupRead(groupKey) {
+  if (!groupKey) throw new Error("groupKey required");
+  const { data } = await api.put("/api/notifications/read-group", { groupKey });
+  return data;
+}
+
+
 /* Basic / profile / bundle helpers */
 export async function getMe() {
   const { data } = await api.get("/api/me");
@@ -833,6 +901,7 @@ export default {
   getNotificationsCounts,
   markNotificationRead,
   markAllNotificationsRead,
+  markNotificationGroupRead,
 
   // calls / webrtc
   initiateCall,
