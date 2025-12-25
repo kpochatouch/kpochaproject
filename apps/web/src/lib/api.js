@@ -203,6 +203,7 @@ let socketListeners = new Map(); // event -> Set(fn)
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 12;
 const BASE_RECONNECT_DELAY = 1000;
+let __socketCounter = 0;
 
 /* helper: return auth object for socket.io (object or function allowed)
    socket.io client accepts either auth: { token } or auth: () => ({ token }) */
@@ -312,6 +313,7 @@ export function connectSocket({ onNotification, onBookingAccepted, onCallEvent }
 
 // ✅ If socket already exists, reuse it BUT ensure events are wired
 if (socket) {
+  console.log("[api] reuse socket", socket.id);
   try {
     // keep socketConnected in sync
     socketConnected = !!socket.connected;
@@ -380,10 +382,13 @@ if (socket) {
   },
 };
 
+__socketCounter += 1;
+console.log("[api] NEW socket instance", __socketCounter);
 socket = ioClient(ROOT, opts);
 
 
     socket.on("connect", () => {
+      console.log("[api] socket connected", socket.id);
       socketConnected = true;
       reconnectAttempts = 0;
 
@@ -410,6 +415,7 @@ socket = ioClient(ROOT, opts);
     });
 
     socket.on("disconnect", (reason) => {
+      console.log("[api] socket disconnected", socket.id, reason);
       socketConnected = false;
       // do not clear listeners — keep registry for next connect
       if (reason === "io server disconnect") {
