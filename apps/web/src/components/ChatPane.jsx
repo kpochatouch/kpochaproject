@@ -72,6 +72,41 @@ function getMyReaction(m, meUid) {
   return r ? r.emoji : null;
 }
 
+function summarizeCallBubble(callMeta, isMe) {
+  const typeLabel = callMeta.type === "video" ? "Video call" : "Voice call";
+  const status = callMeta.status || "";
+  const direction = callMeta.direction || (isMe ? "outgoing" : "incoming");
+
+  if (status === "missed") {
+    return direction === "outgoing"
+      ? `Missed ${typeLabel} (you called)`
+      : `Missed ${typeLabel}`;
+  }
+
+  if (status === "ended" || status === "accepted") {
+    return direction === "outgoing"
+      ? `${typeLabel} (you called)`
+      : `${typeLabel} (they called you)`;
+  }
+
+  if (status === "cancelled") {
+    return direction === "outgoing"
+      ? `Cancelled ${typeLabel}`
+      : `Missed ${typeLabel}`;
+  }
+
+  if (status === "declined") {
+    return `Declined ${typeLabel}`;
+  }
+
+  if (status === "dialing" || status === "ringing") {
+    return `${typeLabel} · calling…`;
+  }
+
+  return typeLabel;
+}
+
+
 export default function ChatPane({
   socket,
   room,
@@ -788,44 +823,31 @@ const hideSideButtonsOnMobile = isMobileDevice && composerFocused;
             }
           }
 
-                  const callInfo = m.meta?.call || null;
+              const callMeta = m.meta?.call || null;
 
-function formatCallDuration(sec) {
-  if (!sec || sec <= 0) return "";
-  const minutes = Math.floor(sec / 60);
-  const seconds = sec % 60;
-  if (minutes <= 0) return `${seconds}s`;
-  return `${minutes}m ${seconds.toString().padStart(2, "0")}s`;
-}
+          // If this message is a call event → show a centered system bubble
+          if (callMeta) {
+            const label = summarizeCallBubble(callMeta, isMe);
 
-function formatCallLabel(call) {
-  if (!call) return "";
-  const status = call.status || "";
-  const dur = formatCallDuration(call.durationSec);
+            return (
+              <div key={m.id || i}>
+                {showDateHeader && (
+                  <div className="w-full flex justify-center my-2">
+                    <span className="text-[10px] text-zinc-400 px-3 py-0.5 rounded-full bg-zinc-900/60">
+                      {dateLabel}
+                    </span>
+                  </div>
+                )}
 
-  // 1) Ended connected call → "Call ended • 2m 15s" (both sides)
-  if (status === "ended" && call.hasConnected) {
-    return dur ? `Call ended • ${dur}` : "Call ended";
-  }
+                <div className="w-full flex justify-center my-2">
+                  <div className="text-[11px] px-3 py-1 rounded-full bg-zinc-900/70 text-zinc-200 border border-zinc-700">
+                    {label}
+                  </div>
+                </div>
+              </div>
+            );
+          }
 
-  // 2) Cancelled before connect
-  //    - Caller (isMe) → "Cancelled"
-  //    - Receiver (!isMe) → "Missed Call"
-  if (status === "cancelled") {
-    return isMe ? "Cancelled" : "Missed Call";
-  }
-
-  // 3) Declined as receiver → "Declined" (both sides)
-  if (status === "declined") {
-    return "Declined";
-  }
-
-  // Fallback if some strange status appears
-  return "Call";
-}
-
-const isCallMessage = Boolean(callInfo);
-const callLabel = isCallMessage ? formatCallLabel(callInfo) : "";
 
 
           return (
@@ -879,22 +901,11 @@ const callLabel = isCallMessage ? formatCallLabel(callInfo) : "";
                       Replying to: {m.meta.replyTo.body}
                     </div>
                   )}
-
-            {isCallMessage ? (
-      <div className="w-full flex justify-center my-2">
-        <div className="px-4 py-1.5 rounded-full bg-zinc-800 text-zinc-200 text-xs flex items-center gap-2 border border-zinc-700">
-          <span>{callInfo.type === "video" ? "📹" : "📞"}</span>
-          <span>{callLabel}</span>
-        </div>
-      </div>
-    ) : (
-      m.body && (
-        <div className="text-sm whitespace-pre-wrap break-words">
-          {m.body}
-        </div>
-      )
-    )}
-
+                  {m.body && (
+                    <div className="text-sm whitespace-pre-wrap break-words">
+                      {m.body}
+                    </div>
+                  )}
 
 
                   {attachments.length > 0 && (
