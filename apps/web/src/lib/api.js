@@ -69,6 +69,7 @@ function ensureAuthListener() {
   if (user) {
     try {
       // 🔥 force a fresh token when user logs in
+      
       const t = await user.getIdToken(true);
       latestToken = t;
       try {
@@ -130,6 +131,40 @@ api.interceptors.request.use(async (config) => {
 
   return config;
 });
+
+api.interceptors.response.use(
+  (res) => res,
+  async (err) => {
+    const status = err?.response?.status;
+
+    // ✅ If token expired / unauthorized, try refresh ONCE then retry request
+    if (status === 401 && !err.config.__retried) {
+      err.config.__retried = true;
+
+      try {
+        const auth = firebaseAuth || getAuth();
+        const user = auth.currentUser;
+
+        if (user) {
+          const fresh = await user.getIdToken(true);
+          latestToken = fresh;
+
+          try { localStorage.setItem("token", fresh); } catch {}
+
+          err.config.headers = err.config.headers || {};
+          err.config.headers.Authorization = `Bearer ${fresh}`;
+
+          return api.request(err.config);
+        }
+      } catch {
+        // if refresh fails, fall through
+      }
+    }
+
+    return Promise.reject(err);
+  }
+);
+
 
 /* manual override used by Login.jsx after sign-in */
 export function setAuthToken(token) {
@@ -275,7 +310,35 @@ export function connectSocket({ onNotification, onBookingAccepted, onCallEvent }
     socketListeners.get("call:status").add(onCallEvent);
   }
 
-  if (socket && socketConnected) return socket;
+// ✅ If socket already exists, reuse it BUT ensure events are wired
+if (socket) {
+  try {
+    // keep socketConnected in sync
+    socketConnected = !!socket.connected;
+
+    // wire already-registered events
+    for (const ev of socketListeners.keys()) _ensureWire(ev);
+
+    // always wire core realtime events (including WebRTC)
+    _ensureWire("notification:new");
+    _ensureWire("notification:received");
+    _ensureWire("chat:message");
+    _ensureWire("presence:join");
+    _ensureWire("presence:leave");
+    _ensureWire("call:initiate");
+    _ensureWire("call:accepted");
+    _ensureWire("call:ended");
+    _ensureWire("call:missed");
+    _ensureWire("booking:accepted");
+    _ensureWire("webrtc:offer");
+    _ensureWire("webrtc:answer");
+    _ensureWire("webrtc:ice");
+
+    if (!socket.connected) socket.connect();
+  } catch {}
+
+  return socket;
+}
 
   try {
     const opts = {
@@ -365,8 +428,6 @@ socket = ioClient(ROOT, opts);
 
     // bridge notification events -> unified "notification:received"
     socket.on("notification:new", (payload) => _dispatch("notification:received", payload));
-    socket.on("notification:received", (payload) => _dispatch("notification:received", payload));
-
     socket.connect();
   } catch (e) {
     console.warn("[socket] connect failed:", e?.message || e);
@@ -688,6 +749,13 @@ export async function markAllNotificationsRead() {
   return data;
 }
 
+export async function markNotificationGroupRead(groupKey) {
+  if (!groupKey) throw new Error("groupKey required");
+  const { data } = await api.put("/api/notifications/read-group", { groupKey });
+  return data;
+}
+
+
 /* Basic / profile / bundle helpers */
 export async function getMe() {
   const { data } = await api.get("/api/me");
@@ -833,6 +901,7 @@ export default {
   getNotificationsCounts,
   markNotificationRead,
   markAllNotificationsRead,
+  markNotificationGroupRead,
 
   // calls / webrtc
   initiateCall,
