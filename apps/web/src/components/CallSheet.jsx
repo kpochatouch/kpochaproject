@@ -253,7 +253,23 @@ export default function CallSheet({
 
     const wantVideo = mode === "video" && !camOff;
 
-    const iceServers = await SignalingClient.getIceServers();
+    const rawIce = await SignalingClient.getIceServers();
+
+const iceServers = rawIce.map((s) => {
+  // keep STUN
+  if (!s.username) return s;
+
+  // FORCE TURN TCP + TLS only (mobile-safe)
+  return {
+    ...s,
+    urls: s.urls.filter(
+      (u) =>
+        u.includes("transport=tcp") ||
+        u.startsWith("turns:")
+    ),
+  };
+});
+
 
     const pcNew = new RTCPeerConnection({
   iceServers,
