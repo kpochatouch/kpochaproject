@@ -3,9 +3,17 @@
 // Production-ready helpers for chat, call (audio/video), signaling, notifications, bookings, etc.
 
 import axios from "axios";
-import { getAuth, onAuthStateChanged } from "firebase/auth";
 import { io as ioClient } from "socket.io-client";
 import { v4 as uuidv4 } from "uuid";
+
+// =========================
+// AUTH TOKEN (NO FIREBASE)
+// =========================
+let latestToken = null;
+
+// socket will listen to token changes
+export let onTokenChange = null;
+
 
 /* ------------------------
    Helper: canonical DM room
@@ -47,122 +55,25 @@ export const api = axios.create({
   withCredentials: true,
 });
 
-/* =========================================
-   AUTH HANDLING (Firebase)
-   - listens to auth state changes
-   - attempts to fetch fresh ID token before each request
-   - supports manual setAuthToken() (used by Login.jsx)
-   ========================================= */
-let firebaseAuth = null;
-let authListenerStarted = false;
-let latestToken = null;
-
-// optional hook for token changes
-export let onTokenChange = null;
-
-function ensureAuthListener() {
-  if (authListenerStarted) return;
-  authListenerStarted = true;
-  try {
-    firebaseAuth = getAuth();
-    onAuthStateChanged(firebaseAuth, async (user) => {
-  if (user) {
+api.interceptors.request.use((config) => {
+  if (!latestToken) {
     try {
-      // 🔥 force a fresh token when user logs in
-      
-      const t = await user.getIdToken(true);
-      latestToken = t;
-      try {
-        localStorage.setItem("token", t);
-      } catch {}
-      if (typeof onTokenChange === "function") onTokenChange(t);
-    } catch {
-      // ignore
-    }
-  } else {
-    latestToken = null;
-    try {
-      localStorage.removeItem("token");
+      const t = localStorage.getItem("token");
+      if (t) latestToken = t;
     } catch {}
-    if (typeof onTokenChange === "function") onTokenChange(null);
-  }
-});
-
-  } catch {
-    // firebase not available (SSR/build)
-  }
-}
-ensureAuthListener();
-
-api.interceptors.request.use(async (config) => {
-  ensureAuthListener();
-
-  // 1) Try to get fresh token from Firebase (if available)
-  if (firebaseAuth) {
-    const user = firebaseAuth.currentUser;
-    if (user) {
-      try {
-        const fresh = await user.getIdToken();
-        if (fresh) {
-          latestToken = fresh;
-          config.headers.Authorization = `Bearer ${fresh}`;
-          return config;
-        }
-      } catch {
-        // ignore and fall back
-      }
-    }
   }
 
-  // 2) Use latestToken if present
   if (latestToken) {
     config.headers.Authorization = `Bearer ${latestToken}`;
-    return config;
   }
-
-  // 3) Fallback to localStorage-saved token (used by some login flows)
-  try {
-    const t = localStorage.getItem("token");
-    if (t) {
-      latestToken = t;
-      config.headers.Authorization = `Bearer ${t}`;
-    }
-  } catch {}
 
   return config;
 });
 
+
 api.interceptors.response.use(
   (res) => res,
-  async (err) => {
-    const status = err?.response?.status;
-
-    // ✅ If token expired / unauthorized, try refresh ONCE then retry request
-    if (status === 401 && !err.config.__retried) {
-      err.config.__retried = true;
-
-      try {
-        const auth = firebaseAuth || getAuth();
-        const user = auth.currentUser;
-
-        if (user) {
-          const fresh = await user.getIdToken(true);
-          latestToken = fresh;
-
-          try { localStorage.setItem("token", fresh); } catch {}
-
-          err.config.headers = err.config.headers || {};
-          err.config.headers.Authorization = `Bearer ${fresh}`;
-
-          return api.request(err.config);
-        }
-      } catch {
-        // if refresh fails, fall through
-      }
-    }
-
-    return Promise.reject(err);
-  }
+  (err) => Promise.reject(err)
 );
 
 
@@ -219,15 +130,6 @@ function _getAuthPayload() {
 
   if (latestToken) {
     payload.token = latestToken;
-  }
-
-  // ALSO hint uid if Firebase knows it
-  try {
-    if (firebaseAuth && firebaseAuth.currentUser) {
-      payload.uid = firebaseAuth.currentUser.uid;
-    }
-  } catch {
-    // ignore
   }
 
   return payload;
@@ -345,39 +247,7 @@ if (socket) {
   autoConnect: false,
   transports: ["websocket", "polling"],
   path: "/socket.io",
-  // 🔥 ask Firebase for a fresh token on each (re)connect
-  auth: (cb) => {
-    try {
-      const auth = firebaseAuth || getAuth();
-      const user = auth.currentUser;
-      if (!user) {
-        cb(_getAuthPayload()); // probably just uid hint or empty
-        return;
-      }
-
-      // force refresh, then update our cache + send to server
-      user
-        .getIdToken(true)
-        .then((t) => {
-          latestToken = t;
-          try {
-            localStorage.setItem("token", t);
-          } catch {}
-          cb({
-            ..._getAuthPayload(),
-            token: t,
-            uid: user.uid,
-          });
-        })
-        .catch((err) => {
-          console.warn("[socket] getIdToken(true) failed:", err?.message || err);
-          cb(_getAuthPayload()); // fallback to whatever we have
-        });
-    } catch (e) {
-      console.warn("[socket] auth callback failed:", e?.message || e);
-      cb(_getAuthPayload());
-    }
-  },
+  auth: () => _getAuthPayload(),
 };
 
 socket = ioClient(ROOT, opts);
@@ -880,7 +750,6 @@ export default {
   api,
 
   // auth
-  ensureAuthListener,
   setAuthToken,
 
   // socket
