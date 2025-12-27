@@ -7,8 +7,6 @@ import "./styles/global.css";
 import { AuthProvider } from "./context/AuthContext.jsx";
 import { MeProvider } from "./context/MeContext.jsx"; // ✅ add this
 
-// 🔐 Firebase token sync
-import { getAuth, onIdTokenChanged } from "firebase/auth";
 
 // 🟡 AWS (added earlier)
 import { Amplify } from "aws-amplify";
@@ -30,24 +28,6 @@ if (typeof window !== "undefined") {
     window.__KPOCHA_AWS_CONFIGURED__ = true;
   }
 }
-
-// ✅ Keep Firebase ID token in sync with localStorage
-function installAuthTokenSync() {
-  const auth = getAuth();
-  onIdTokenChanged(auth, async (user) => {
-    try {
-      if (user) {
-        const t = await user.getIdToken(/* forceRefresh */ true);
-        localStorage.setItem("token", t);
-      } else {
-        localStorage.removeItem("token");
-      }
-    } catch {
-      localStorage.removeItem("token");
-    }
-  });
-}
-installAuthTokenSync();
 
 // ✅ Correct Provider order: AuthProvider → MeProvider → App
 createRoot(document.getElementById("root")).render(
