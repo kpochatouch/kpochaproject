@@ -255,7 +255,12 @@ export default function CallSheet({
 
     const iceServers = await SignalingClient.getIceServers();
 
-    const pcNew = new RTCPeerConnection({ iceServers });
+    const pcNew = new RTCPeerConnection({
+  iceServers,
+  iceTransportPolicy: "relay",   // 🔥 FORCE TURN (mobile-safe)
+  bundlePolicy: "max-bundle",    // 🧠 required by mobile Chrome
+});
+
     setPc(pcNew);
 
     // local media
