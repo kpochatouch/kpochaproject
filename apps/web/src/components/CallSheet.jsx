@@ -106,53 +106,55 @@ export default function CallSheet({
   }
 
 
-  // keep mode in sync with callType when prop changes
-  useEffect(() => {
-    setMode(callType || "audio");
-    setCamOff(callType === "audio");
-  }, [callType]);
+// keep mode in sync with callType when prop changes
+useEffect(() => {
+  setMode(callType || "audio");
+  setCamOff(callType === "audio");
+}, [callType]);
 
-  // setup signaling when modal opens
-   useEffect(() => {
-    if (!open || !room) return;
+// setup signaling when modal opens
+useEffect(() => {
+  if (!open || !room) return;
 
-  // ✅ CREATE ONE PeerConnection for the entire CallSheet lifecycle
+  const sc = new SignalingClient(
+    room,
+    role === "caller" ? "caller" : "receiver"
+  );
+  sc.connect();
+  setSig(sc);
 
-  if (!pc) {
-    setupPeerConnection(role === "caller");
+  if (role !== "caller") {
+    // incoming side: start ringtone immediately
+    try {
+      const audio = new Audio("/sound/incoming.mp3");
+      audio.loop = true;
+      incomingToneRef.current = audio;
+      audio.play().catch(() => {});
+    } catch {}
   }
 
-    const sc = new SignalingClient(
-      room,
-      role === "caller" ? "caller" : "receiver"
-    );
-    sc.connect();
-    setSig(sc);
+  return () => {
+    try {
+      sc.disconnect();
+    } catch {}
+    setSig(null);
+    stopAllTones();
+    setAutoStarted(false);
+    setElapsedSeconds(0);
+    setHasAccepted(false);
+    setCallFailed(false);
+  };
+}, [open, room, role]);
 
-    if (role !== "caller") {
-      // incoming side: start ringtone immediately
-      try {
-        const audio = new Audio("/sound/incoming.mp3");
-        audio.loop = true;
-        incomingToneRef.current = audio;
-        audio.play().catch(() => {});
-      } catch {}
+// ✅ create PeerConnection ONLY when signaling client is ready
+useEffect(() => {
+  if (!open) return;
+  if (!sig) return;
+  if (pc) return;
 
-    }
-    return () => {
-      try {
-        sc.disconnect();
-      } catch {}
-      setSig(null);
-      stopAllTones();
-      setAutoStarted(false);
-      setElapsedSeconds(0);
-      setHasAccepted(false);
-      setCallFailed(false);
-    };
+  setupPeerConnection(role === "caller");
+}, [open, sig, pc, role]);
 
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, room, role]);
 
 
   // ⏱ duration timer: start counting only when connected
