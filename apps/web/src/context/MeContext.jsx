@@ -6,12 +6,23 @@ import React, {
   useMemo,
   useState,
 } from "react";
-import { onIdTokenChanged } from "firebase/auth";
-import { auth } from "../lib/firebase";
-import { api, setAuthToken } from "../lib/api";
+import { api } from "../lib/api";
 
 const MeContext = createContext(null);
 
+/**
+ * MeProvider
+ *
+ * Responsibilities (ONLY):
+ * - Fetch /api/me using already-authenticated axios
+ * - Expose me, loading, error
+ * - Derive role flags (isPro, isAdmin)
+ *
+ * Non-responsibilities:
+ * - Firebase auth
+ * - Token handling
+ * - localStorage
+ */
 export function MeProvider({ children }) {
   const [version, setVersion] = useState(0);
   const [state, setState] = useState({
@@ -20,50 +31,38 @@ export function MeProvider({ children }) {
     error: null,
   });
 
-  // watch firebase token
-  useEffect(() => {
-    const unsub = onIdTokenChanged(auth, async (user) => {
-      try {
-        const token = user ? await user.getIdToken() : null;
-        setAuthToken(token);
-      } finally {
-        setVersion((v) => v + 1);
-      }
-    });
-    return () => unsub();
-  }, []);
-
-  // initial write (on refresh)
-  useEffect(() => {
-    (async () => {
-      try {
-        const u = auth.currentUser;
-        const token = u ? await u.getIdToken() : null;
-        setAuthToken(token);
-      } catch {
-        setAuthToken(null);
-      }
-    })();
-  }, []);
-
-  // actually fetch /api/me
+  // Fetch /api/me whenever version changes
   useEffect(() => {
     let alive = true;
+
     (async () => {
       setState((s) => ({ ...s, loading: true, error: null }));
+
       try {
         const { data } = await api.get("/api/me");
         if (!alive) return;
-        // expose globally if you really want
+
+        // Optional global exposure (kept from your original logic)
         if (typeof window !== "undefined") {
           window.__ME__ = data || null;
         }
-        setState({ loading: false, me: data || null, error: null });
+
+        setState({
+          loading: false,
+          me: data || null,
+          error: null,
+        });
       } catch (e) {
         if (!alive) return;
-        setState({ loading: false, me: null, error: e });
+
+        setState({
+          loading: false,
+          me: null,
+          error: e,
+        });
       }
     })();
+
     return () => {
       alive = false;
     };
@@ -72,10 +71,12 @@ export function MeProvider({ children }) {
   const value = useMemo(() => {
     const isPro = !!state?.me?.isPro;
     const isAdmin = !!state?.me?.isAdmin;
+
     return {
       ...state,
       isPro,
       isAdmin,
+      // Allow consumers to manually refetch /api/me
       refresh: () => setVersion((v) => v + 1),
     };
   }, [state]);
@@ -85,6 +86,7 @@ export function MeProvider({ children }) {
 
 export function useMe() {
   const ctx = useContext(MeContext);
+
   return (
     ctx || {
       loading: true,
