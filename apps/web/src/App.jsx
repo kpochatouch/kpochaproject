@@ -7,8 +7,9 @@ import {
   useLocation,
   useNavigate,
 } from "react-router-dom";
-import { api, connectSocket, registerSocketHandler } from "./lib/api";
+import { api, registerSocketHandler } from "./lib/api";
 import CallSheet from "./components/CallSheet.jsx";
+import InstallPWAButton from "./components/InstallPWAButton.jsx";
 
 import Navbar from "./components/Navbar.jsx";
 import Footer from "./components/Footer.jsx";
@@ -161,12 +162,6 @@ export default function App() {
 
   const { me } = useMe();
   const [incomingCall, setIncomingCall] = useState(null);
-
-  // As soon as we know who "me" is, connect the socket with the right auth
-  useEffect(() => {
-    if (!me) return;        // if not logged in yet, do nothing
-    connectSocket();        // this will reuse or reconnect the socket with token
-  }, [me]);
 
 
   const myLabel =
@@ -515,6 +510,7 @@ export default function App() {
                   open={Boolean(incomingCall?.open && incomingCall?.room)}
                   onClose={() => setIncomingCall(null)}
                 />
+                <InstallPWAButton />
               </div>
             );
           }
