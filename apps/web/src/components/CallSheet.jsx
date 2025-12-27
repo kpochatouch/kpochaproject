@@ -62,9 +62,6 @@ export default function CallSheet({
   const callerToneRef = useRef(null);
   const incomingToneRef = useRef(null);
 
-  // NEW: stash offer that arrives before receiver taps "Accept"
-  const pendingOfferRef = useRef(null);
-
   function stopAllTones() {
     [callerToneRef, incomingToneRef].forEach((ref) => {
       try {
@@ -119,6 +116,12 @@ export default function CallSheet({
    useEffect(() => {
     if (!open || !room) return;
 
+  // ✅ CREATE ONE PeerConnection for the entire CallSheet lifecycle
+
+  if (!pc) {
+    setupPeerConnection(role === "caller");
+  }
+
     const sc = new SignalingClient(
       room,
       role === "caller" ? "caller" : "receiver"
@@ -135,13 +138,7 @@ export default function CallSheet({
         audio.play().catch(() => {});
       } catch {}
 
-      // 🔴 NEW: stash incoming offer that may arrive BEFORE user taps Accept
-      sc.on("webrtc:offer", (msg) => {
-        console.log("[CallSheet] stashed incoming offer before accept");
-        pendingOfferRef.current = msg;
-      });
     }
-
     return () => {
       try {
         sc.disconnect();
@@ -327,13 +324,6 @@ export default function CallSheet({
 
     sig.on("webrtc:offer", handleOffer);
 
-    // 🔴 NEW: if we already received an offer BEFORE Accept, handle it now
-    if (!asCaller && pendingOfferRef.current) {
-      console.log("[CallSheet] processing stashed offer after accept");
-      handleOffer(pendingOfferRef.current);
-      pendingOfferRef.current = null;
-    }
-
 
   sig.on("webrtc:answer", async (msg) => {
   try {
@@ -489,7 +479,6 @@ export default function CallSheet({
       stopAllTones();
       setHasAccepted(true);              // 👈 receiver has accepted
       await safeUpdateStatus("accepted");
-      await setupPeerConnection(false);
 
     } catch (e) {
       console.error("accept call failed:", e);
