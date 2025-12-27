@@ -396,25 +396,33 @@ useEffect(() => {
   }, [threads]);
 
 
-  async function openThread(t) {
+   async function openThread(t) {
     if (!t || !t.peerUid) return;
-    // navigate to chat page (your app uses query param; keep that for now)
+
+    // 1) Navigate to DM chat
     navigate(`/chat?with=${encodeURIComponent(t.peerUid)}`);
 
-    // optimistic local update
-    setThreads((prev) => prev.map((x) => (x.peerUid === t.peerUid ? { ...x, unread: 0 } : x)));
+    // 2) Optimistic local update: clear unread for this peer
+    setThreads((prev) =>
+      prev.map((x) =>
+        x.peerUid === t.peerUid ? { ...x, unread: 0 } : x
+      )
+    );
 
-        try {
-      if (t.peerUid) {
-        await markThreadRead(t.peerUid);
-      } else if (t.room) {
+    // 3) Tell backend to zero the unread counter
+    try {
+      if (t.room) {
+        // Prefer room if we have it (booking or DM)
         await markRoomRead(t.room);
+      } else {
+        // Fallback: DM pair-based read
+        await markThreadRead(t.peerUid);
       }
     } catch (e) {
       console.warn("[Inbox] markThreadRead/markRoomRead failed:", e?.message || e);
     }
-
   }
+
 
     if (meLoading) {
     return <RouteLoader full />;
