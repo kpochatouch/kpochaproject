@@ -5,7 +5,6 @@ import {
   updateCallStatus,
   sendChatMessage,
   registerSocketHandler,
-  connectSocket,
 } from "../lib/api";
 
 
@@ -120,17 +119,12 @@ export default function CallSheet({
    useEffect(() => {
     if (!open || !room) return;
 
-    const socket = connectSocket();
-
-const sc = new SignalingClient({
-  room,
-  role: role === "caller" ? "caller" : "receiver",
-  socket,
-});
-
-sc.connect();
-setSig(sc);
-
+    const sc = new SignalingClient(
+      room,
+      role === "caller" ? "caller" : "receiver"
+    );
+    sc.connect();
+    setSig(sc);
 
     if (role !== "caller") {
       // incoming side: start ringtone immediately
@@ -259,30 +253,9 @@ setSig(sc);
 
     const wantVideo = mode === "video" && !camOff;
 
-    const rawIce = await SignalingClient.getIceServers();
+    const iceServers = await SignalingClient.getIceServers();
 
-const iceServers = rawIce.map((s) => {
-  // keep STUN
-  if (!s.username) return s;
-
-  // FORCE TURN TCP + TLS only (mobile-safe)
-  return {
-    ...s,
-    urls: s.urls.filter(
-      (u) =>
-        u.includes("transport=tcp") ||
-        u.startsWith("turns:")
-    ),
-  };
-});
-
-
-    const pcNew = new RTCPeerConnection({
-  iceServers,
-  iceTransportPolicy: "relay",   // 🔥 FORCE TURN (mobile-safe)
-  bundlePolicy: "max-bundle",    // 🧠 required by mobile Chrome
-});
-
+    const pcNew = new RTCPeerConnection({ iceServers });
     setPc(pcNew);
 
     // local media
