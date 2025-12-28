@@ -1,4 +1,4 @@
-// apps/web/src/pages/Chat.jsx
+// apps/web/src/pages/Chat.jsx 
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
@@ -6,6 +6,7 @@ import {
   getChatWith,
   getPublicProfileByUid,
   markThreadRead,
+  markRoomRead,
   initiateCall,
   sendChatMessage,
 } from "../lib/api";
@@ -189,7 +190,7 @@ export default function Chat() {
 
   // ------------------ CHAT HISTORY ------------------ //
 
-  // 2) Load history for this DM (room + messages)
+   // 2) Load history for this DM (room + messages)
   useEffect(() => {
     if (!peerUid || !currentUser || !myUid) {
       setLoadingHistory(false);
@@ -203,7 +204,6 @@ export default function Chat() {
         setLoadingHistory(true);
 
         const data = await getChatWith(peerUid);
-
         if (!alive) return;
 
         const roomFromApi = data?.room || null;
@@ -231,12 +231,22 @@ export default function Chat() {
         setRoom(roomFromApi);
         setInitialMessages(normalized);
 
-        // mark this DM thread as read (for inbox counters)
-        if (peerUid) {
-          try {
+        // 💚 Mark this DM as read:
+        // 1) DM pair (Thread.markRead via markThreadRead)
+        // 2) Specific room (Thread.markRead via markRoomRead)
+        try {
+          if (peerUid) {
             await markThreadRead(peerUid);
+          }
+        } catch (err) {
+          console.warn("[chat] markThreadRead failed:", err?.message || err);
+        }
+
+        if (roomFromApi) {
+          try {
+            await markRoomRead(roomFromApi);
           } catch (err) {
-            console.warn("[chat] markThreadRead failed:", err?.message || err);
+            console.warn("[chat] markRoomRead failed:", err?.message || err);
           }
         }
       } catch (e) {
