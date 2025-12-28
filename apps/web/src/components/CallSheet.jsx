@@ -5,7 +5,6 @@ import {
   updateCallStatus,
   sendChatMessage,
   registerSocketHandler,
-  connectSocket,
 } from "../lib/api";
 
 
@@ -34,7 +33,7 @@ export default function CallSheet({
   chatRoom = null,
 }) {
   const [sig, setSig] = useState(null);
-  const pcRef = useRef(null);
+  const [pc, setPc] = useState(null);
   const [mode, setMode] = useState(callType || "audio");
   const [starting, setStarting] = useState(false);
   const [hasConnected, setHasConnected] = useState(false);
@@ -120,17 +119,12 @@ export default function CallSheet({
    useEffect(() => {
     if (!open || !room) return;
 
-    const socket = connectSocket();
-
-    const sc = new SignalingClient({
+    const sc = new SignalingClient(
       room,
-      role: role === "caller" ? "caller" : "receiver",
-      socket,
-    });
-
+      role === "caller" ? "caller" : "receiver"
+    );
     sc.connect();
     setSig(sc);
-
 
     if (role !== "caller") {
       // incoming side: start ringtone immediately
@@ -242,7 +236,7 @@ export default function CallSheet({
         )
       ) {
         cleanupPeer();
-       onClose?.();
+        onClose?.();
       }
     });
 
@@ -253,7 +247,8 @@ export default function CallSheet({
     };
   }, [open, callId, onClose]);
 
-async function setupPeerConnection(asCaller) {
+
+  async function setupPeerConnection(asCaller) {
     if (!sig || !room) return null;
 
     const wantVideo = mode === "video" && !camOff;
@@ -261,7 +256,7 @@ async function setupPeerConnection(asCaller) {
     const iceServers = await SignalingClient.getIceServers();
 
     const pcNew = new RTCPeerConnection({ iceServers });
-    pcRef.current = pcNew;
+    setPc(pcNew);
 
     // local media
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -276,162 +271,151 @@ async function setupPeerConnection(asCaller) {
       if (remoteRef.current) remoteRef.current.srcObject = ev.streams[0];
     };
 
-  // ICE
-  pcNew.onicecandidate = (ev) => {
-    if (ev.candidate) {
-      try {
-        sig.emit("webrtc:ice", ev.candidate);
-      } catch (e) {
-        console.warn("[CallSheet] emit ice failed:", e?.message || e);
-      }
-    } else {
-      console.log("[CallSheet] ICE gathering complete");
-    }
-  };
-
-  pcNew.onconnectionstatechange = () => {
-    const st = pcNew.connectionState;
-
-    console.log("[CallSheet] connectionState change:", {
-      connectionState: pcNew.connectionState,
-      iceConnectionState: pcNew.iceConnectionState,
-      signalingState: pcNew.signalingState,
-    });
-
-    if (st === "connected") {
-      setHasConnected((prev) => {
-        if (!prev) {
-          stopAllTones();
-          safeUpdateStatus("accepted", {
-            connectedAt: new Date().toISOString(),
-          });
+    // ICE
+    pcNew.onicecandidate = (ev) => {
+      if (ev.candidate) {
+        try {
+          sig.emit("webrtc:ice", ev.candidate);
+        } catch (e) {
+          console.warn("[CallSheet] emit ice failed:", e?.message || e);
         }
-        return true;
-      });
-    }
-    if (["disconnected", "failed", "closed"].includes(st)) {
-      setHasConnected(false);
-    }
-  };
+  } else {
+    console.log("[CallSheet] ICE gathering complete");
+  }
+};
 
-  // signaling listeners
-  const handleOffer = async (msg) => {
-    try {
-      const remoteSdp = msg?.payload || msg;
-      await pcNew.setRemoteDescription(new RTCSessionDescription(remoteSdp));
+    pcNew.onconnectionstatechange = () => {
+  const st = pcNew.connectionState;
 
-      if (!asCaller) {
-        const answer = await pcNew.createAnswer();
-        await pcNew.setLocalDescription(answer);
-        sig.emit("webrtc:answer", answer);
-      }
-    } catch (e) {
-      console.error("[CallSheet] handle offer failed:", e);
-    }
-  };
+  console.log("[CallSheet] connectionState change:", {
+    connectionState: pcNew.connectionState,
+    iceConnectionState: pcNew.iceConnectionState,
+    signalingState: pcNew.signalingState,
+  });
 
-  const handleAnswer = async (msg) => {
-    try {
-      if (asCaller) {
-        const remoteSdp = msg?.payload || msg;
-        await pcNew.setRemoteDescription(
-          new RTCSessionDescription(remoteSdp)
-        );
+  if (st === "connected") {
+    setHasConnected((prev) => {
+      if (!prev) {
         stopAllTones();
-        setPeerAccepted(true);
+        safeUpdateStatus("accepted", {
+          connectedAt: new Date().toISOString(),
+        });
       }
-    } catch (e) {
-      console.error("[CallSheet] handle answer failed:", e);
-    }
-  };
-
-  const handleIce = async (msg) => {
-    try {
-      const cand = msg?.payload || msg;
-      if (cand) await pcNew.addIceCandidate(cand);
-    } catch (e) {
-      console.warn("[CallSheet] addIceCandidate failed:", e);
-    }
-  };
-
-  sig.on("webrtc:offer", handleOffer);
-  sig.on("webrtc:answer", handleAnswer);
-  sig.on("webrtc:ice", handleIce);
-
-  // 🔴 CLEAN THEM UP WHEN CALL ENDS
-  pcNew._cleanupSignalHandlers = () => {
-    try {
-      sig.off("webrtc:offer", handleOffer);
-      sig.off("webrtc:answer", handleAnswer);
-      sig.off("webrtc:ice", handleIce);
-    } catch {}
-  };
-
-  // caller creates offer immediately
-  if (asCaller) {
-    const offer = await pcNew.createOffer({
-      offerToReceiveAudio: true,
-      offerToReceiveVideo: wantVideo,
+      return true;
     });
-    await pcNew.setLocalDescription(offer);
-    sig.emit("webrtc:offer", offer);
+  }
+  if (["disconnected", "failed", "closed"].includes(st)) {
+    setHasConnected(false);
+  }
+};
+
+
+       // signaling listeners
+    const handleOffer = async (msg) => {
+      try {
+        const remoteSdp = msg?.payload || msg; // unwrap payload
+        await pcNew.setRemoteDescription(new RTCSessionDescription(remoteSdp));
+        if (!asCaller) {
+          const answer = await pcNew.createAnswer();
+          await pcNew.setLocalDescription(answer);
+          sig.emit("webrtc:answer", answer);
+        }
+      } catch (e) {
+        console.error("[CallSheet] handle offer failed:", e);
+      }
+    };
+
+    sig.on("webrtc:offer", handleOffer);
+
+    // 🔴 NEW: if we already received an offer BEFORE Accept, handle it now
+    if (!asCaller && pendingOfferRef.current) {
+      console.log("[CallSheet] processing stashed offer after accept");
+      handleOffer(pendingOfferRef.current);
+      pendingOfferRef.current = null;
+    }
+
+
+  sig.on("webrtc:answer", async (msg) => {
+  try {
+    if (asCaller) {
+      const remoteSdp = msg?.payload || msg; // unwrap payload
+      await pcNew.setRemoteDescription(
+        new RTCSessionDescription(remoteSdp)
+      );
+
+      // 👇 peer has tapped "Accept" → stop ringing on caller side
+      stopAllTones();
+      setPeerAccepted(true);
+    }
+  } catch (e) {
+    console.error("[CallSheet] handle answer failed:", e);
+  }
+});
+
+    sig.on("webrtc:ice", async (msg) => {
+      try {
+        const cand = msg?.payload || msg; // unwrap payload
+        if (cand) {
+          console.log("[CallSheet] remote ICE candidate:", cand.type, cand.protocol);
+          await pcNew.addIceCandidate(cand);
+        }
+      } catch (e) {
+        console.warn("[CallSheet] addIceCandidate failed:", e?.message || e);
+      }
+    });
+
+    // caller creates offer immediately
+    if (asCaller) {
+      const offer = await pcNew.createOffer({
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: wantVideo,
+      });
+      await pcNew.setLocalDescription(offer);
+      sig.emit("webrtc:offer", offer);
+    }
+
+    return pcNew;
   }
 
-  return pcNew;
-}
+  function cleanupPeer() {
+    stopAllTones();
 
- function cleanupPeer() {
-  stopAllTones();
+    try {
+      if (pc) {
+        pc.getSenders()?.forEach((s) => {
+          try {
+            s.track?.stop();
+          } catch {}
+        });
+        pc.close();
+      }
+      } catch {}
+    setPc(null);
+    setHasConnected(false);
+    setHasAccepted(false); // 👈 reset accept state
+    setPeerAccepted(false);
+    setElapsedSeconds(0); // reset duration when call ends
+    setCallFailed(false);  // 👈 reset failure flag
 
-  // remove signaling listeners
-  try {
-    pcRef.current?._cleanupSignalHandlers?.();
-  } catch {}
+    try {
+      sig?.disconnect();
+    } catch {}
+    setSig(null);
 
-  // fully destroy PeerConnection
-  try {
-    if (pcRef.current) {
-      pcRef.current.onicecandidate = null;
-      pcRef.current.ontrack = null;
-      pcRef.current.onconnectionstatechange = null;
-
-      pcRef.current.getSenders()?.forEach((s) => {
-        try { s.track?.stop(); } catch {}
-      });
-
-      pcRef.current.close();
-      pcRef.current = null;
-    }
-  } catch {}
-
-  // stop media elements
-  try {
+    // stop local & remote streams
     if (localRef.current?.srcObject) {
-      localRef.current.srcObject.getTracks().forEach((t) => t.stop());
+      try {
+        localRef.current.srcObject.getTracks().forEach((t) => t.stop());
+      } catch {}
       localRef.current.srcObject = null;
     }
     if (remoteRef.current?.srcObject) {
-      remoteRef.current.srcObject.getTracks().forEach((t) => t.stop());
+      try {
+        remoteRef.current.srcObject.getTracks().forEach((t) => t.stop());
+      } catch {}
       remoteRef.current.srcObject = null;
     }
-  } catch {}
-
-  // stop socket reconnecting
-  try {
-    if (sig?.socket?.io?.opts) {
-      sig.socket.io.opts.reconnection = false;
-    }
-    sig?.disconnect();
-  } catch {}
-
-  // reset state
-  setSig(null);
-  setHasConnected(false);
-  setHasAccepted(false);
-  setPeerAccepted(false);
-  setElapsedSeconds(0);
-  setCallFailed(false);
-}
+  }
 
   async function safeUpdateStatus(status, meta = {}) {
     if (!callId || !status) return;
@@ -766,4 +750,3 @@ async function setupPeerConnection(asCaller) {
     </div>
   );
 }
-
