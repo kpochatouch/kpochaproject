@@ -1,38 +1,37 @@
 // apps/web/src/lib/webrtc/SignalingClient.js
 // Tiny helper around Socket.IO just for WebRTC signaling
 
-import { api } from "../api";
+import { connectSocket, api } from "../api";
 
 export default class SignalingClient {
-  constructor({ room, role = "caller", socket }) {
+  constructor(room, role = "caller") {
     this.room = room;
     this.role = role;
-    this.socket = socket; // 👈 injected, not created
+    this.socket = null;
     this.joined = false;
   }
 
   // connect and join the call room
-connect() {
-  if (!this.socket) {
-    throw new Error("SignalingClient requires a socket");
+  connect() {
+    if (this.socket) return this.socket;
+
+    this.socket = connectSocket();
+    console.log("[SignalingClient] connect", {
+      room: this.room,
+      role: this.role,
+    });
+
+    this.socket.emit(
+      "room:join",
+      { room: this.room, who: `call:${this.role}` },
+      (ack) => {
+        console.log("[SignalingClient] room:join ack", ack);
+        this.joined = !!ack?.ok;
+      }
+    );
+
+    return this.socket;
   }
-
-  console.log("[SignalingClient] connect", {
-    room: this.room,
-    role: this.role,
-  });
-
-  this.socket.emit(
-    "room:join",
-    { room: this.room, who: `call:${this.role}` },
-    (ack) => {
-      console.log("[SignalingClient] room:join ack", ack);
-      this.joined = !!ack?.ok;
-    }
-  );
-
-  return this.socket;
-}
 
   // listen for signaling events
   on(evt, handler) {
@@ -64,18 +63,19 @@ connect() {
   }
 
   // leave the room
- disconnect() {
-  if (!this.socket) return;
-  console.log("[SignalingClient] disconnect", { room: this.room });
+  disconnect() {
+    if (!this.socket) return;
+    console.log("[SignalingClient] disconnect", { room: this.room });
 
-  this.socket.emit("room:leave", { room: this.room });
-  this.joined = false;
+    this.socket.emit("room:leave", { room: this.room });
+    this.socket = null;
+    this.joined = false;
   }
 
   // get ICE servers from backend
   static async getIceServers() {
     try {
-      const res = await api.get("/api/webrtc/ice");
+      const res = await api.get("/webrtc/ice");
       const ice = res?.data?.iceServers || res?.data || [];
       console.log("[getIceServers] using backend ICE:", ice);
       return ice;
