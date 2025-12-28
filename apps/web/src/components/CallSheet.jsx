@@ -5,6 +5,7 @@ import {
   updateCallStatus,
   sendChatMessage,
   registerSocketHandler,
+  connectSocket,
 } from "../lib/api";
 
 
@@ -119,12 +120,17 @@ export default function CallSheet({
    useEffect(() => {
     if (!open || !room) return;
 
-    const sc = new SignalingClient(
-      room,
-      role === "caller" ? "caller" : "receiver"
-    );
-    sc.connect();
-    setSig(sc);
+    const socket = connectSocket();
+
+const sc = new SignalingClient({
+  room,
+  role: role === "caller" ? "caller" : "receiver",
+  socket,
+});
+
+sc.connect();
+setSig(sc);
+
 
     if (role !== "caller") {
       // incoming side: start ringtone immediately

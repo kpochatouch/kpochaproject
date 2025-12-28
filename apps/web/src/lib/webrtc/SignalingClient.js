@@ -1,37 +1,38 @@
 // apps/web/src/lib/webrtc/SignalingClient.js
 // Tiny helper around Socket.IO just for WebRTC signaling
 
-import { connectSocket, api } from "../api";
+import { api } from "../api";
 
 export default class SignalingClient {
-  constructor(room, role = "caller") {
+  constructor({ room, role = "caller", socket }) {
     this.room = room;
     this.role = role;
-    this.socket = null;
+    this.socket = socket; // 👈 injected, not created
     this.joined = false;
   }
 
   // connect and join the call room
-  connect() {
-    if (this.socket) return this.socket;
-
-    this.socket = connectSocket();
-    console.log("[SignalingClient] connect", {
-      room: this.room,
-      role: this.role,
-    });
-
-    this.socket.emit(
-      "room:join",
-      { room: this.room, who: `call:${this.role}` },
-      (ack) => {
-        console.log("[SignalingClient] room:join ack", ack);
-        this.joined = !!ack?.ok;
-      }
-    );
-
-    return this.socket;
+connect() {
+  if (!this.socket) {
+    throw new Error("SignalingClient requires a socket");
   }
+
+  console.log("[SignalingClient] connect", {
+    room: this.room,
+    role: this.role,
+  });
+
+  this.socket.emit(
+    "room:join",
+    { room: this.room, who: `call:${this.role}` },
+    (ack) => {
+      console.log("[SignalingClient] room:join ack", ack);
+      this.joined = !!ack?.ok;
+    }
+  );
+
+  return this.socket;
+}
 
   // listen for signaling events
   on(evt, handler) {
@@ -63,13 +64,12 @@ export default class SignalingClient {
   }
 
   // leave the room
-  disconnect() {
-    if (!this.socket) return;
-    console.log("[SignalingClient] disconnect", { room: this.room });
+ disconnect() {
+  if (!this.socket) return;
+  console.log("[SignalingClient] disconnect", { room: this.room });
 
-    this.socket.emit("room:leave", { room: this.room });
-    this.socket = null;
-    this.joined = false;
+  this.socket.emit("room:leave", { room: this.room });
+  this.joined = false;
   }
 
   // get ICE servers from backend
