@@ -456,10 +456,13 @@ async function ensureSocketReady(timeoutMs = 8000) {
    - returns { ok, id, existing } or throws
    ----------------------- */
 export async function sendChatMessage({ room, text = "", meta = {}, clientId = null }) {
-  if (!room) throw new Error("room required");
-  if ((!text || !text.trim()) && (!meta?.attachments || meta.attachments.length === 0)) {
-    throw new Error("message_empty");
-  }
+const hasText = !!(text && text.trim());
+const hasAttachments = Array.isArray(meta?.attachments) && meta.attachments.length > 0;
+const hasCallMeta = !!meta?.call;
+
+if (!hasText && !hasAttachments && !hasCallMeta) {
+  throw new Error("message_empty");
+}
 
   // ensure clientId exists (server dedupe expects this)
   if (!clientId) clientId = `c_${uuidv4()}`;
