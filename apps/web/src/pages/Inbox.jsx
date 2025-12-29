@@ -1,7 +1,6 @@
 // apps/web/src/pages/Inbox.jsx
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import useNotifications from "../hooks/useNotifications";
 import {
   registerSocketHandler,
   getChatInbox,
@@ -142,7 +141,6 @@ function normalizeThread(raw = {}, currentUid) {
 export default function Inbox() {
   const navigate = useNavigate();
   const { me: currentUser, loading: meLoading } = useMe();
-const { refreshCounts } = useNotifications();
 
   const [threads, setThreads] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -284,39 +282,36 @@ useEffect(() => {
         const existingIndex = prev.findIndex((t) => t.peerUid === peerUid);
         let updatedThread;
 
-    if (existingIndex >= 0) {
-  const current = prev[existingIndex];
+        if (existingIndex >= 0) {
+          const current = prev[existingIndex];
+          const newUnread =
+            fromUid === myUid ? current.unread : (current.unread || 0) + 1;
 
-  const isFromPeer = fromUid !== myUid;
+          updatedThread = {
+            ...current,
+            lastBody: body,
+            lastAt: at,
+            unread: newUnread,
+            room: current.room || room || current.room,
+          };
 
-updatedThread = {
-  ...current,
-  lastBody: body,
-  lastAt: at,
-  room: current.room || room || current.room,
-  unread: isFromPeer ? (current.unread || 0) + 1 : current.unread || 0,
-};
-
-
-  const cloned = [...prev];
-  cloned.splice(existingIndex, 1);
-  return [updatedThread, ...cloned].slice(0, MAX_THREADS);
-}
+          const cloned = [...prev];
+          cloned.splice(existingIndex, 1);
+          // newest first, cap array length
+          return [updatedThread, ...cloned].slice(0, MAX_THREADS);
+        }
 
         // new thread
         updatedThread = {
-        peerUid,
-        room: room || null,
-
-        // ⚠️ unread must start at 0 until backend confirms otherwise
-        unread: 0,
-
-        lastBody: body,
-        lastAt: at,
-        displayName: "Unknown user",
-        avatarUrl: "",
-      };
-
+          peerUid,
+          room: room || null,
+          unread: fromUid === myUid ? 0 : 1,
+          lastBody: body,
+          lastAt: at,
+          // we do NOT know their profile name yet → show clear "Unknown user"
+          displayName: "Unknown user",
+          avatarUrl: "",
+        };
 
         return [updatedThread, ...prev].slice(0, MAX_THREADS);
       });
@@ -335,40 +330,6 @@ updatedThread = {
     // do NOT call setState during cleanup
   };
 }, [myUid]);
-
-  // Socket: register handler for seen/read events (handles rooms and DMs)
-useEffect(() => {
-  if (!myUid) return;
-
-  const unregister = registerSocketHandler("chat:seen", (msg) => {
-    try {
-      const room = msg.room || msg.roomId || null;
-      const seenBy = msg.seenBy || msg.userId || null;
-      const dmUid = msg.dmUid || msg.peerUid || null; // optional: backend might send DM userId
-
-      if (!seenBy || seenBy !== myUid) return;
-
-      setThreads((prev) =>
-        prev.map((t) => {
-          // 1) Matching room → clear unread
-          if (room && t.room === room) return { ...t, unread: 0 };
-          // 2) Matching DM (no room) → clear unread
-          if (!room && dmUid && t.peerUid === dmUid) return { ...t, unread: 0 };
-          return t;
-        })
-      );
-    } catch (e) {
-      console.warn("[Inbox] socket chat:seen handler failed:", e?.message || e);
-    }
-  });
-
-  return () => {
-    try {
-      if (typeof unregister === "function") unregister();
-    } catch {}
-  };
-}, [myUid]);
-
 
 
   const filteredThreads = useMemo(() => {
@@ -457,9 +418,6 @@ useEffect(() => {
         // Fallback: DM pair-based read
         await markThreadRead(t.peerUid);
       }
-
-      refreshCounts();
-
     } catch (e) {
       console.warn("[Inbox] markThreadRead/markRoomRead failed:", e?.message || e);
     }
