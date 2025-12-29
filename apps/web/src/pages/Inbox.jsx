@@ -331,6 +331,65 @@ useEffect(() => {
   };
 }, [myUid]);
 
+// Socket: listen for dm:incoming (fires even when Inbox was not mounted)
+useEffect(() => {
+  if (!myUid) return;
+
+  const unregister = registerSocketHandler("dm:incoming", (payload) => {
+    try {
+      const { room, fromUid, body, at } = payload || {};
+
+      if (!fromUid || fromUid === myUid) return;
+
+      const peerUid = fromUid;
+      const ts = at || Date.now();
+
+      setThreads((prev) => {
+        const idx = prev.findIndex((t) => t.peerUid === peerUid);
+
+        // Existing thread → bump unread
+        if (idx >= 0) {
+          const current = prev[idx];
+
+          const updated = {
+            ...current,
+            lastBody: body || current.lastBody || "",
+            lastAt: ts,
+            unread: (current.unread || 0) + 1,
+            room: current.room || room || null,
+          };
+
+          const clone = [...prev];
+          clone.splice(idx, 1);
+          return [updated, ...clone].slice(0, MAX_THREADS);
+        }
+
+        // New thread → create entry
+        return [
+          {
+            peerUid,
+            room: room || null,
+            unread: 1,
+            lastBody: body || "",
+            lastAt: ts,
+            displayName: "Unknown user",
+            avatarUrl: "",
+          },
+          ...prev,
+        ].slice(0, MAX_THREADS);
+      });
+    } catch (e) {
+      console.warn("[Inbox] dm:incoming handler failed:", e?.message || e);
+    }
+  });
+
+  return () => {
+    try {
+      unregister?.();
+    } catch {}
+  };
+}, [myUid]);
+
 
   const filteredThreads = useMemo(() => {
     const term = (debouncedSearch || "").trim().toLowerCase();
