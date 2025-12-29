@@ -163,6 +163,7 @@ export function setAuthToken(token) {
 
 let socket = null;
 let socketConnected = false;
+let socketBootstrapStarted = false; // 🔐 hard singleton guard
 let wiredEvents = new Set();
 let socketListeners = new Map(); // event -> Set(fn)
 let reconnectAttempts = 0;
@@ -236,27 +237,16 @@ function _reconnectWithBackoff() {
   }, delay);
 }
 
-/* reconnect on token change: update auth payload and reconnect */
 onTokenChange = (newToken) => {
   latestToken = newToken;
   if (!socket) return;
-  try {
-    // refresh auth payload
-    socket.auth = _getAuthPayload();
 
-    // 🔥 force a reconnect so the server verifies token & joins user:<uid>
-    if (socket.connected) {
-      try {
-        socket.disconnect();
-      } catch {
-        /* ignore */
-      }
-    }
-    socket.connect();
-  } catch (e) {
-    console.warn("[socket] auth refresh failed:", e?.message || e);
-  }
+  // update auth only — let socket.io manage reconnect internally
+  try {
+    socket.auth = _getAuthPayload();
+  } catch {}
 };
+
 
 
 /* connectSocket: idempotent, registers optional callbacks */
@@ -275,7 +265,12 @@ export function connectSocket({ onNotification, onBookingAccepted, onCallEvent }
     socketListeners.get("call:status").add(onCallEvent);
   }
 
-  if (socket && socketConnected) return socket;
+  // 🔐 HARD GUARD: socket bootstrap must run once per tab lifetime
+if (socketBootstrapStarted) {
+  return socket;
+}
+socketBootstrapStarted = true;
+
 
   try {
     const opts = {
