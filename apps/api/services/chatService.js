@@ -373,7 +373,7 @@ export async function getInbox(uid) {
       .lean();
 
     if (Array.isArray(threads) && threads.length) {
-      const out = threads.map((t) => {
+      const out = await Promise.all(threads.map(async (t) => {
         let peerUid = null;
         if (t.type === "dm" || String(t.room).startsWith("dm:")) {
           const parts = String(t.room).split(":");
@@ -390,7 +390,31 @@ export async function getInbox(uid) {
           peerUid = null;
         }
 
-        const unreadCount = (t.unreadCounts && Number(t.unreadCounts[uid] || 0)) || 0;
+        let unreadCount = 0;
+try {
+  unreadCount = await ChatMessage.countDocuments({
+    room: t.room,
+    toUid: uid,
+    seenBy: { $ne: uid },
+  });
+} catch (e) {
+  console.warn(
+    "[chatService] getInbox unread recompute failed:",
+    e?.message || e
+  );
+  let unreadCount = 0;
+try {
+  unreadCount = await ChatMessage.countDocuments({
+    room: t.room,
+    toUid: uid,
+    seenBy: { $ne: uid },
+  });
+} catch {
+  unreadCount =
+    (t.unreadCounts && Number(t.unreadCounts[uid] || 0)) || 0;
+}
+}
+
 
         return {
           room: t.room,
@@ -400,7 +424,7 @@ export async function getInbox(uid) {
           lastAt: t.lastMessageAt || t.updatedAt || t.createdAt,
           unreadCount: Number(unreadCount || 0),
         };
-      });
+      }));
 
       return out;
     }
