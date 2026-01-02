@@ -11,16 +11,17 @@ export default class SignalingClient {
     this.joined = false;
   }
 
-  // connect and join the call room
-  connect() {
-    if (this.socket) return this.socket;
+// connect and join the call room (FIXED: wait for socket connection)
+connect() {
+  if (this.socket) return this.socket;
 
-    this.socket = connectSocket();
-    console.log("[SignalingClient] connect", {
-      room: this.room,
-      role: this.role,
-    });
+  this.socket = connectSocket();
+  console.log("[SignalingClient] connect", {
+    room: this.room,
+    role: this.role,
+  });
 
+  const doJoin = () => {
     this.socket.emit(
       "room:join",
       { room: this.room, who: `call:${this.role}` },
@@ -29,9 +30,18 @@ export default class SignalingClient {
         this.joined = !!ack?.ok;
       }
     );
+  };
 
-    return this.socket;
+  // 🔥 CRITICAL FIX: wait until the socket is actually connected
+  if (this.socket.connected) {
+    doJoin();
+  } else {
+    this.socket.once("connect", doJoin);
   }
+
+  return this.socket;
+}
+
 
   // listen for signaling events
   on(evt, handler) {
