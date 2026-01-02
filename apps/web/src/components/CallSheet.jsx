@@ -537,7 +537,26 @@ pcNew.oniceconnectionstatechange = () => {
       stopAllTones();
       setHasAccepted(true);              // 👈 receiver has accepted
       await safeUpdateStatus("accepted");
-      await setupPeerConnection(false);
+      const pcNew = await setupPeerConnection(false);
+
+// 🔴 Process any stashed offer that arrived before accept
+if (pendingOfferRef.current) {
+  console.log("[CallSheet] processing stashed offer after accept (from acceptIncoming)");
+  // we can reuse handleOffer from setupPeerConnection
+  try {
+    const remoteSdp = pendingOfferRef.current?.payload || pendingOfferRef.current;
+    await pcNew.setRemoteDescription(new RTCSessionDescription(remoteSdp));
+    // create answer since we're receiver
+    const answer = await pcNew.createAnswer();
+    await pcNew.setLocalDescription(answer);
+    sig.emit("webrtc:answer", answer);
+  } catch (e) {
+    console.error("[CallSheet] processing stashed offer failed:", e);
+  } finally {
+    pendingOfferRef.current = null;
+  }
+}
+
 
     } catch (e) {
       console.error("accept call failed:", e);
