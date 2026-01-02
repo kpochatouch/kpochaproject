@@ -249,14 +249,26 @@ export default function CallSheet({
 
 
   async function setupPeerConnection(asCaller) {
-    if (!sig || !room) return null;
+  if (!sig || !room) return null;
 
-    const wantVideo = mode === "video" && !camOff;
+  // 🔒 PREVENT DUPLICATE PEER CONNECTIONS
+  if (pc) {
+    console.warn("[CallSheet] PeerConnection already exists");
+    return pc;
+  }
 
-    const iceServers = await SignalingClient.getIceServers();
+  const wantVideo = mode === "video" && !camOff;
 
-    const pcNew = new RTCPeerConnection({ iceServers });
-    setPc(pcNew);
+  const iceServers = await SignalingClient.getIceServers();
+
+  const pcNew = new RTCPeerConnection({ iceServers });
+  setPc(pcNew);
+
+
+    // --- ICE buffering (CRITICAL FIX) ---
+    const pendingIce = [];
+    let remoteDescSet = false;
+
 
     // local media
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -310,11 +322,33 @@ export default function CallSheet({
 };
 
 
+// ✅ REGISTER ONCE — not nested
+pcNew.oniceconnectionstatechange = () => {
+  const st = pcNew.iceConnectionState;
+  console.log("[CallSheet] ICE state:", st);
+
+  if (st === "connected" || st === "completed") {
+    setHasConnected(true);
+  }
+};
+
+
        // signaling listeners
     const handleOffer = async (msg) => {
       try {
-        const remoteSdp = msg?.payload || msg; // unwrap payload
-        await pcNew.setRemoteDescription(new RTCSessionDescription(remoteSdp));
+        const remoteSdp = msg?.payload || msg;
+
+        await pcNew.setRemoteDescription(
+          new RTCSessionDescription(remoteSdp)
+        );
+        remoteDescSet = true;
+
+        // flush buffered ICE
+        pendingIce.forEach((c) =>
+          pcNew.addIceCandidate(new RTCIceCandidate(c))
+        );
+        pendingIce.length = 0;
+
         if (!asCaller) {
           const answer = await pcNew.createAnswer();
           await pcNew.setLocalDescription(answer);
@@ -324,6 +358,7 @@ export default function CallSheet({
         console.error("[CallSheet] handle offer failed:", e);
       }
     };
+
 
     sig.on("webrtc:offer", handleOffer);
 
@@ -337,32 +372,45 @@ export default function CallSheet({
 
   sig.on("webrtc:answer", async (msg) => {
   try {
-    if (asCaller) {
-      const remoteSdp = msg?.payload || msg; // unwrap payload
-      await pcNew.setRemoteDescription(
-        new RTCSessionDescription(remoteSdp)
-      );
+    if (!asCaller) return;
 
-      // 👇 peer has tapped "Accept" → stop ringing on caller side
-      stopAllTones();
-      setPeerAccepted(true);
-    }
+    const remoteSdp = msg?.payload || msg;
+    await pcNew.setRemoteDescription(
+      new RTCSessionDescription(remoteSdp)
+    );
+    remoteDescSet = true;
+
+    // flush buffered ICE
+    pendingIce.forEach((c) =>
+      pcNew.addIceCandidate(new RTCIceCandidate(c))
+    );
+    pendingIce.length = 0;
+
+    stopAllTones();
+    setPeerAccepted(true);
   } catch (e) {
     console.error("[CallSheet] handle answer failed:", e);
   }
 });
 
+
     sig.on("webrtc:ice", async (msg) => {
       try {
-        const cand = msg?.payload || msg; // unwrap payload
-        if (cand) {
-          console.log("[CallSheet] remote ICE candidate:", cand.type, cand.protocol);
-          await pcNew.addIceCandidate(cand);
+        const cand = msg?.payload || msg;
+        if (!cand) return;
+
+        if (remoteDescSet) {
+          await pcNew.addIceCandidate(
+            new RTCIceCandidate(cand)
+          );
+        } else {
+          pendingIce.push(cand);
         }
       } catch (e) {
         console.warn("[CallSheet] addIceCandidate failed:", e?.message || e);
       }
     });
+
 
     // caller creates offer immediately
     if (asCaller) {
