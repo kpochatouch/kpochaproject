@@ -11,6 +11,7 @@ import {
 import { useMe } from "../context/MeContext.jsx";
 import InboxList from "../components/Inbox.jsx"; // or the correct relative path
 import RouteLoader from "../components/RouteLoader.jsx";
+import useNotifications from "../hooks/useNotifications";
 
 
 /* Configuration */
@@ -141,6 +142,7 @@ function normalizeThread(raw = {}, currentUid) {
 export default function Inbox() {
   const navigate = useNavigate();
   const { me: currentUser, loading: meLoading } = useMe();
+    const { refreshCounts } = useNotifications();
 
   const [threads, setThreads] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -477,6 +479,8 @@ useEffect(() => {
         // Fallback: DM pair-based read
         await markThreadRead(t.peerUid);
       }
+      await refreshCounts();
+
     } catch (e) {
       console.warn("[Inbox] markThreadRead/markRoomRead failed:", e?.message || e);
     }

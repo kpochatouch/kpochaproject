@@ -134,16 +134,24 @@ export default function Navbar() {
           )}
 
           {/* Inbox / Chat link (desktop) */}
-          {token && (
-            <NavLink to="/inbox" className="relative">
-              <span className={navLinkClass}>Chat</span>
-              {unread > 0 && (
-                <span className="absolute -top-2 -right-3 text-[10px] bg-red-600 text-white rounded-full px-1.5 py-0.5 leading-none font-semibold">
-                  {unread > 99 ? "99+" : unread}
-                </span>
-              )}
-            </NavLink>
-          )}
+         {token && (
+          <NavLink
+            to="/inbox"
+            className={({ isActive }) =>
+              `relative ${
+                isActive ? "text-gold font-medium" : "hover:text-gold"
+              }`
+            }
+          >
+            <span>Chat</span>
+            {unread > 0 && (
+              <span className="absolute -top-2 -right-3 text-[10px] bg-red-600 text-white rounded-full px-1.5 py-0.5 leading-none font-semibold">
+                {unread > 99 ? "99+" : unread}
+              </span>
+            )}
+          </NavLink>
+        )}
+
 
           {!isPro && token && (
             <NavLink to="/become" className={navLinkClass}>
