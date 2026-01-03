@@ -22,64 +22,86 @@ function formatTime(ts) {
 }
 
 /**
- * Turn raw notification → human sentence
- * This is the “missing realism” layer
+ * Inbox-style semantic presentation
  */
 function presentNotification(n) {
-  const type = n.type;
   const data = n.data || {};
+  const meta = n.meta || {};
 
-  switch (type) {
-    case "chat_message":
-      return {
-        title: "New message",
-        body: data.body || data.message || "You received a new message",
-        target: "/inbox",
-        icon: "💬",
-      };
+  // ---- Calls ----
+  if (meta.call || n.type === "call_missed") {
+    const call = meta.call || {};
+    const typeLabel = call.type === "video" ? "Video call" : "Voice call";
 
-    case "call_missed":
+    if (call.status === "missed" || n.type === "call_missed") {
       return {
-        title: "Missed call",
-        body: "You missed a call",
-        target: "/inbox",
         icon: "📞",
+        title: "Missed call",
+        body: `Missed ${typeLabel}`,
+        target: "/inbox",
       };
+    }
 
-    case "post_like":
-      return {
-        title: "New like",
-        body: data.message || "Someone liked your post",
-        target: data.postId ? `/post/${data.postId}` : "/",
-        icon: "❤️",
-      };
-
-    case "booking_update":
-      return {
-        title: "Booking update",
-        body: data.message || "Your booking was updated",
-        target: "/my-bookings",
-        icon: "📅",
-      };
-
-    case "follow":
-      return {
-        title: "New follower",
-        body: "Someone started following you",
-        target: data.username
-          ? `/profile/${data.username}`
-          : "/profile",
-        icon: "👤",
-      };
-
-    default:
-      return {
-        title: "Notification",
-        body: data.body || data.message || "",
-        target: "/",
-        icon: "🔔",
-      };
+    return {
+      icon: "📞",
+      title: typeLabel,
+      body:
+        call.direction === "outgoing"
+          ? `${typeLabel} (you called)`
+          : `${typeLabel} (incoming)`,
+      target: "/inbox",
+    };
   }
+
+  // ---- Chat ----
+  if (n.type === "chat_message") {
+    return {
+      icon: "💬",
+      title: "New message",
+      body: data.body || data.message || "You received a new message",
+      target: "/inbox",
+    };
+  }
+
+  // ---- Social ----
+  if (n.type === "post_like") {
+    return {
+      icon: "❤️",
+      title: "New like",
+      body: data.message || "Someone liked your post",
+      target: data.postId ? `/post/${data.postId}` : "/",
+    };
+  }
+
+  // ---- Booking ----
+  if (n.type === "booking_update") {
+    return {
+      icon: "📅",
+      title: "Booking update",
+      body: data.message || "Your booking was updated",
+      target: "/my-bookings",
+    };
+  }
+
+  // ---- Fallback ----
+  return {
+    icon: "🔔",
+    title: "Notification",
+    body: data.body || data.message || "",
+    target: "/",
+  };
+}
+
+/**
+ * ✅ Safe avatar rule
+ * No fetch, no crash, graceful fallback
+ */
+function getAvatar(n) {
+  return (
+    n?.meta?.actorAvatar ||
+    n?.data?.actorAvatar ||
+    null
+  );
 }
 
 /* ---------------------------
@@ -93,7 +115,7 @@ export default function NotificationBell() {
   const [open, setOpen] = useState(false);
   const rootRef = useRef(null);
 
-  /* Close on outside click */
+  // Close on outside click
   useEffect(() => {
     function onGlobalClick(e) {
       const target = e?.detail?.target;
@@ -106,15 +128,20 @@ export default function NotificationBell() {
     return () => window.removeEventListener("global-click", onGlobalClick);
   }, []);
 
+  // Enhance once
   const enhanced = useMemo(
     () =>
-      items.map((n) => ({
-        ...presentNotification(n),
-        id: n._id || n.id,
-        seen: n.seen,
-        createdAt: n.createdAt,
-        raw: n,
-      })),
+      items.map((n) => {
+        const view = presentNotification(n);
+        return {
+          ...view,
+          id: n._id || n.id,
+          seen: n.seen,
+          createdAt: n.createdAt,
+          avatar: getAvatar(n),
+          raw: n,
+        };
+      }),
     [items]
   );
 
@@ -175,7 +202,15 @@ export default function NotificationBell() {
                       hover:bg-zinc-800`}
                   >
                     <div className="flex items-start gap-3">
-                      <div className="text-lg">{n.icon}</div>
+                      {n.avatar ? (
+                        <img
+                          src={n.avatar}
+                          alt=""
+                          className="w-8 h-8 rounded-full object-cover"
+                        />
+                      ) : (
+                        <div className="text-lg">{n.icon}</div>
+                      )}
 
                       <div className="flex-1">
                         <div className="text-[12px] font-semibold">
