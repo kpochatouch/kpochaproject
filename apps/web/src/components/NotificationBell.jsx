@@ -1,113 +1,155 @@
 // apps/web/src/components/NotificationBell.jsx
 import React, { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import useNotifications from "../hooks/useNotifications";
 
-export default function NotificationBell() {
-  const { items, unread, markAll } = useNotifications();
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef(null); // 👈 to detect outside clicks
+function resolveTarget(notification) {
+  const { type, data = {}, meta = {} } = notification;
 
-  async function handleToggle() {
-    const willOpen = !open;
-    setOpen(willOpen);
+  switch (type) {
+    case "chat_message":
+      if (data.room) return `/chat?room=${encodeURIComponent(data.room)}`;
+      if (data.withUid) return `/chat?with=${encodeURIComponent(data.withUid)}`;
+      return "/inbox";
 
-    // When opening and we have unread, mark all as read
-    if (willOpen && unread > 0) {
-      try {
-        await markAll();
-      } catch (e) {
-        console.warn("[NotificationBell] markAll failed:", e?.message || e);
-      }
-    }
+    case "call_missed":
+      return "/inbox";
+
+    case "post_like":
+      return data.postId ? `/post/${data.postId}` : "/";
+
+    case "booking_update":
+      return data.bookingId ? `/bookings/${data.bookingId}` : "/my-bookings";
+
+    case "follow":
+      return data.username
+        ? `/profile/${data.username}`
+        : data.actorUid
+        ? `/profile/${data.actorUid}`
+        : "/";
+
+    default:
+      return "/";
   }
+}
 
-  // 👇 close when clicking anywhere outside (uses ClickOutsideLayer)
+export default function NotificationBell() {
+  const navigate = useNavigate();
+  const { items, unread, markRead } = useNotifications();
+
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef(null);
+
+  /* ---------------- Outside click ---------------- */
   useEffect(() => {
-    function handleGlobalClick(evt) {
-      if (!rootRef.current) return;
-      const originalEvent = evt.detail;
-      const target = originalEvent?.target;
+    function onGlobalClick(e) {
+      const target = e?.detail?.target;
       if (!target) return;
-
-      // if click is inside the bell or dropdown, ignore
-      if (rootRef.current.contains(target)) return;
-
-      // click outside → close
+      if (rootRef.current?.contains(target)) return;
       setOpen(false);
     }
 
-    window.addEventListener("global-click", handleGlobalClick);
-    return () => window.removeEventListener("global-click", handleGlobalClick);
+    window.addEventListener("global-click", onGlobalClick);
+    return () => window.removeEventListener("global-click", onGlobalClick);
   }, []);
 
+  /* ---------------- Click handler ---------------- */
+  async function handleItemClick(n) {
+    try {
+      if (!n.seen && (n._id || n.id)) {
+        await markRead(n._id || n.id);
+      }
+    } catch {}
+
+    setOpen(false);
+
+    const target = resolveTarget(n);
+    if (target) navigate(target);
+  }
+
   return (
-    <div className="relative" ref={rootRef}>
+    <div ref={rootRef} className="relative">
+      {/* Bell */}
       <button
-        onClick={handleToggle}
         type="button"
-        className="relative inline-flex items-center justify-center w-9 h-9 rounded-full border border-zinc-800 bg-black/40 hover:bg-zinc-900 transition"
+        aria-label="Notifications"
+        onClick={() => setOpen((o) => !o)}
+        className="relative inline-flex items-center justify-center w-9 h-9 rounded-full
+                   border border-zinc-800 bg-black/40 hover:bg-zinc-900 transition"
       >
         <span aria-hidden="true">🔔</span>
+
         {unread > 0 && (
-          <span className="absolute -top-1 -right-1 text-[10px] bg-red-600 text-white rounded-full px-1.5 py-0.5 leading-none font-semibold">
+          <span
+            className="absolute -top-1 -right-1 min-w-[16px] px-1.5 py-0.5
+                       text-[10px] rounded-full bg-red-600 text-white font-semibold"
+          >
             {unread > 99 ? "99+" : unread}
           </span>
         )}
       </button>
 
+      {/* Dropdown */}
       {open && (
-        <div className="absolute right-0 mt-2 w-80 max-h-80 overflow-auto bg-black border border-zinc-800 rounded-xl p-2 shadow-lg z-40">
+        <div
+          className="absolute right-0 mt-2 w-80 max-h-[70vh] overflow-y-auto
+                     bg-black border border-zinc-800 rounded-xl shadow-xl z-40"
+        >
           {items.length === 0 ? (
-            <div className="text-xs text-zinc-500 px-2 py-3 text-center">
-              No notifications yet.
+            <div className="p-4 text-xs text-zinc-500 text-center">
+              No notifications yet
             </div>
           ) : (
-            <div className="space-y-1">
+            <ul className="divide-y divide-zinc-800">
               {items.map((n) => {
                 const id = n._id || n.id;
-                const createdAt = n.createdAt ? new Date(n.createdAt) : null;
-                const timeText = createdAt ? createdAt.toLocaleString() : "";
+                const createdAt = n.createdAt
+                  ? new Date(n.createdAt)
+                  : null;
 
-                // 👇 Always have *something* to show as title
                 const title =
-                  n.title ||
+                  n.data?.title ||
+                  n.meta?.label ||
                   n.type ||
-                  (n.meta && n.meta.label) ||
                   "Notification";
 
-                // 👇 Try multiple places for the message body
-                let body =
-                  n.body ||
-                  (n.meta &&
-                    (n.meta.preview || n.meta.message || n.meta.text)) ||
-                  n.message;
+                const body =
+                  n.data?.body ||
+                  n.data?.message ||
+                  n.meta?.preview ||
+                  "";
 
                 return (
-                  <div
-                    key={id}
-                    className={`p-2 rounded-md text-xs ${
-                      n.read ? "opacity-80" : "bg-zinc-900/40"
-                    }`}
-                  >
-                    <div className="text-[11px] font-semibold mb-0.5">
-                      {title}
-                    </div>
+                  <li key={id}>
+                    <button
+                      type="button"
+                      onClick={() => handleItemClick(n)}
+                      className={`w-full text-left p-3 transition
+                        ${n.seen ? "bg-black" : "bg-zinc-900/60"}
+                        hover:bg-zinc-800`}
+                    >
+                      <div className="flex flex-col gap-1">
+                        <div className="text-[12px] font-semibold">
+                          {title}
+                        </div>
 
-                    {body && (
-                      <div className="text-[11px] text-zinc-300">
-                        {body}
-                      </div>
-                    )}
+                        {body && (
+                          <div className="text-[11px] text-zinc-300">
+                            {body}
+                          </div>
+                        )}
 
-                    {timeText && (
-                      <div className="text-[10px] text-zinc-500 mt-1">
-                        {timeText}
+                        {createdAt && (
+                          <div className="text-[10px] text-zinc-500">
+                            {createdAt.toLocaleString()}
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
+                    </button>
+                  </li>
                 );
               })}
-            </div>
+            </ul>
           )}
         </div>
       )}
