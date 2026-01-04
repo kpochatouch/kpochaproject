@@ -198,21 +198,20 @@ export default function NotificationBell() {
             Notifications
           </span>
 
-          {unread > 0 && (
-            <button
-              type="button"
-              onClick={async () => {
-                try {
-                  await markAll();
-                } catch {}
-              }}
-              className="text-xs text-gold hover:underline"
-            >
-              Mark all read
-            </button>
-          )}
+          {enhanced.length > 0 && (
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                await markAll();
+              } catch {}
+            }}
+            className="text-xs text-gold hover:underline"
+          >
+            Mark all read
+          </button>
+        )}
         </div>
-
 
 
           {enhanced.length === 0 ? (

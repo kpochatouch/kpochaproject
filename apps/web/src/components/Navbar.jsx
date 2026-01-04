@@ -4,7 +4,6 @@ import { useEffect, useState, useRef } from "react";
 import { getAuth, onIdTokenChanged, signOut } from "firebase/auth";
 import { api } from "../lib/api";
 import NotificationBell from "./NotificationBell.jsx";
-import useNotifications from "../hooks/useNotifications"; // added for unread badge
 
 export default function Navbar() {
   const [me, setMe] = useState(null);
@@ -13,10 +12,6 @@ export default function Navbar() {
   );
   const [open, setOpen] = useState(false);
   const headerRef = useRef(null); // 👈 keep this
-
-  // new: get unread from the shared notifications hook (lightweight)
-  // This keeps the small chat/inbox unread bubble in sync with the bell
-  const { unread = 0 } = useNotifications();
 
   // watch firebase auth → keep token in localStorage
   useEffect(() => {
@@ -133,8 +128,8 @@ export default function Navbar() {
             </NavLink>
           )}
 
-          {/* Inbox / Chat link (desktop) */}
-         {token && (
+        {/* Inbox / Chat link (desktop) */}
+        {token && (
           <NavLink
             to="/inbox"
             className={({ isActive }) =>
@@ -143,12 +138,7 @@ export default function Navbar() {
               }`
             }
           >
-            <span>Chat</span>
-            {unread > 0 && (
-              <span className="absolute -top-2 -right-3 text-[10px] bg-red-600 text-white rounded-full px-1.5 py-0.5 leading-none font-semibold">
-                {unread > 99 ? "99+" : unread}
-              </span>
-            )}
+            Inbox
           </NavLink>
         )}
 
@@ -279,21 +269,17 @@ export default function Navbar() {
               Profile
             </NavLink>
 
-            {/* Mobile Inbox entry */}
-            {token && (
-              <NavLink
-                to="/inbox"
-                onClick={() => setOpen(false)}
-                className="flex items-center justify-between"
-              >
-                <span className={navLinkClass}>Inbox</span>
-                {unread > 0 && (
-                  <span className="ml-2 text-[10px] bg-red-600 text-white rounded-full px-1.5 py-0.5 leading-none font-semibold">
-                    {unread > 99 ? "99+" : unread}
-                  </span>
-                )}
-              </NavLink>
-            )}
+              {/* Mobile Inbox entry */}
+              {token && (
+                <NavLink
+                  to="/inbox"
+                  onClick={() => setOpen(false)}
+                  className={navLinkClass}
+                >
+                  Inbox
+                </NavLink>
+              )}
+
 
             {token && (
               <NavLink
