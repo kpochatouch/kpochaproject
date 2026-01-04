@@ -1,3 +1,4 @@
+//apps/web/src/components/NotificationBell.jsx
 import React, { useEffect, useRef, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import useNotifications from "../hooks/useNotifications";
@@ -110,7 +111,7 @@ function getAvatar(n) {
 
 export default function NotificationBell() {
   const navigate = useNavigate();
-  const { items, unread, markRead } = useNotifications();
+  const { items, unread, markRead, markAll } = useNotifications();
 
   const [open, setOpen] = useState(false);
   const rootRef = useRef(null);
@@ -192,12 +193,34 @@ export default function NotificationBell() {
         "
       >
 
+        <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
+          <span className="text-xs font-semibold text-zinc-300">
+            Notifications
+          </span>
+
+          {unread > 0 && (
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  await markAll();
+                } catch {}
+              }}
+              className="text-xs text-gold hover:underline"
+            >
+              Mark all read
+            </button>
+          )}
+        </div>
+
+
+
           {enhanced.length === 0 ? (
             <div className="p-4 text-xs text-zinc-500 text-center">
               No notifications yet
             </div>
           ) : (
-            <ul className="divide-y divide-zinc-800">
+            <ul className="divide-y divide-zinc-800 overscroll-contain">
               {enhanced.map((n) => (
                 <li key={n.id}>
                   <button
