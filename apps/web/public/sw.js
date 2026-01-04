@@ -5,3 +5,6 @@ self.addEventListener("install", () => {
 self.addEventListener("activate", (event) => {
   event.waitUntil(self.clients.claim());
 });
+
+// 🔑 harmless presence-only fetch handler
+self.addEventListener("fetch", () => {});
