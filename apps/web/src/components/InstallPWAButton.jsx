@@ -22,33 +22,24 @@ export default function InstallPWAButton() {
   useEffect(() => {
     if (isStandalone) return;
 
-    const onBip = (e) => {
-      e.preventDefault();
-      setDeferredPrompt(e);
-    };
+      const onBip = (e) => {
+        e.preventDefault();
 
-    const onInstalled = () => {
-      setOpen(false);
-      setDeferredPrompt(null);
-      try {
-        localStorage.removeItem(KEY_LAST_NAG);
-      } catch {}
-    };
-
-    window.addEventListener("beforeinstallprompt", onBip);
-    window.addEventListener("appinstalled", onInstalled);
-
-    // decide whether to open modal (every 12 hours)
-    try {
-      const last = Number(localStorage.getItem(KEY_LAST_NAG) || "0");
-      const now = Date.now();
-      if (!last || now - last >= NAG_EVERY_MS) {
+        // ✅ install is NOW allowed
+        if (deferredPrompt) return; // prevent duplicate opens
+        setDeferredPrompt(e);
         setOpen(true);
-        localStorage.setItem(KEY_LAST_NAG, String(now));
-      }
-    } catch {
-      setOpen(true);
-    }
+
+      };
+
+      const onInstalled = () => {
+        setOpen(false);
+        setDeferredPrompt(null);
+      };
+
+      window.addEventListener("beforeinstallprompt", onBip);
+      window.addEventListener("appinstalled", onInstalled);
+
 
     return () => {
       window.removeEventListener("beforeinstallprompt", onBip);
