@@ -12,6 +12,7 @@ import { useMe } from "../context/MeContext.jsx";
 import InboxList from "../components/Inbox.jsx"; // or the correct relative path
 import RouteLoader from "../components/RouteLoader.jsx";
 import useNotifications from "../hooks/useNotifications";
+import MobileBackButton from "../components/MobileBackButton";
 
 
 /* Configuration */
@@ -496,65 +497,70 @@ useEffect(() => {
 }
 
 
-  return (
-    <div className="max-w-4xl mx-auto px-4 py-6 space-y-4">
-      <div className="flex items-center justify-between gap-3">
+return (
+  <div className="flex flex-col gap-4">
+    <div className="flex items-center justify-between gap-3">
+      <div className="flex items-center gap-2">
+        {/* Mobile back button */}
+        <MobileBackButton fallback="/" />
+
         <div>
           <h1 className="text-2xl font-semibold">Messages</h1>
-          <p className="text-xs text-zinc-500">Your social and everyday chats with other users.</p>
-        </div>
-      </div>
-
-      <div className="flex items-center gap-2">
-        <input
-          aria-label="Search conversations"
-          type="text"
-          className="flex-1 bg-black border border-zinc-800 rounded-lg px-3 py-2 text-sm"
-          placeholder="Search conversations…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        <button
-          type="button"
-          onClick={() => loadInbox()}
-          title="Refresh"
-          className="px-3 py-2 rounded-lg border border-zinc-800 text-sm"
-        >
-          Refresh
-        </button>
-      </div>
-
-      {errorMsg && (
-        <div className="text-xs text-red-400 border border-red-800/60 bg-red-950/10 rounded-lg px-3 py-2 flex items-center justify-between">
-          <span>{errorMsg}</span>
-          <button onClick={() => loadInbox()} className="text-xs underline">
-            Retry
-          </button>
-        </div>
-      )}
-
-      
-
-      {!loading && filteredThreads.length === 0 && !errorMsg && (
-        <div className="border border-zinc-800 rounded-xl bg-black/40 px-4 py-10 text-center text-sm text-zinc-400">
-          <p>No conversations yet.</p>
-          <p className="mt-1">
-            Open someone&apos;s profile and tap <span className="font-semibold">Message</span> to start chatting.
+          <p className="text-xs text-zinc-500">
+            Your social and everyday chats with other users.
           </p>
         </div>
-      )}
-
-        {!loading && filteredThreads.length > 0 && (
-          <InboxList
-            threads={filteredThreads}
-            onOpen={openThread}
-            loading={loading}
-            hasMore={hasMore}
-            loadingMore={loadingMore}
-            onLoadMore={handleLoadMore}
-            formatTime={formatTime}
-          />
-        )}
+      </div>
     </div>
-  );
+
+    <div className="flex items-center gap-2">
+      <input
+        aria-label="Search conversations"
+        type="text"
+        className="flex-1 bg-black border border-zinc-800 rounded-lg px-3 py-2 text-sm"
+        placeholder="Search conversations…"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+      />
+      <button
+        type="button"
+        onClick={() => loadInbox()}
+        title="Refresh"
+        className="px-3 py-2 rounded-lg border border-zinc-800 text-sm"
+      >
+        Refresh
+      </button>
+    </div>
+
+    {errorMsg && (
+      <div className="text-xs text-red-400 border border-red-800/60 bg-red-950/10 rounded-lg px-3 py-2 flex items-center justify-between">
+        <span>{errorMsg}</span>
+        <button onClick={() => loadInbox()} className="text-xs underline">
+          Retry
+        </button>
+      </div>
+    )}
+
+    {!loading && filteredThreads.length === 0 && !errorMsg && (
+      <div className="border border-zinc-800 rounded-xl bg-black/40 px-4 py-10 text-center text-sm text-zinc-400">
+        <p>No conversations yet.</p>
+        <p className="mt-1">
+          Open someone&apos;s profile and tap <span className="font-semibold">Message</span> to start chatting.
+        </p>
+      </div>
+    )}
+
+    {!loading && filteredThreads.length > 0 && (
+      <InboxList
+        threads={filteredThreads}
+        onOpen={openThread}
+        loading={loading}
+        hasMore={hasMore}
+        loadingMore={loadingMore}
+        onLoadMore={handleLoadMore}
+        formatTime={formatTime}
+      />
+    )}
+  </div>
+);
 }

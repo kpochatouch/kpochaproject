@@ -13,6 +13,7 @@ import { useMe } from "../context/MeContext.jsx";
 import ChatPane from "../components/ChatPane.jsx";
 import CallSheet from "../components/CallSheet.jsx";
 import RouteLoader from "../components/RouteLoader.jsx";
+import MobileBackButton from "../components/MobileBackButton.jsx";
 
 function useQuery() {
   const { search } = useLocation();
@@ -414,42 +415,47 @@ export default function Chat() {
       {/* header like Messenger / TikTok center panel */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          {peerAvatar ? (
-            <img
-              src={peerAvatar}
-              alt={peerName}
-              className="w-10 h-10 rounded-full object-cover border border-zinc-700"
-            />
-          ) : (
-            <div className="w-10 h-10 rounded-full bg-zinc-800 flex items-center justify-center text-sm">
-              {peerName.slice(0, 1).toUpperCase()}
+          <div className="flex items-center gap-2">
+            {/* Mobile back button */}
+            <MobileBackButton fallback="/inbox" />
+
+            {peerAvatar ? (
+              <img
+                src={peerAvatar}
+                alt={peerName}
+                className="w-10 h-10 rounded-full object-cover border border-zinc-700"
+              />
+            ) : (
+              <div className="w-10 h-10 rounded-full bg-zinc-800 flex items-center justify-center text-sm">
+                {peerName.slice(0, 1).toUpperCase()}
+              </div>
+            )}
+            <div>
+              <h1 className="text-lg font-semibold">{peerName}</h1>
+              <p className="text-xs text-zinc-500">
+                Social and everyday conversation (not tied to bookings).
+              </p>
             </div>
-          )}
-          <div>
-            <h1 className="text-lg font-semibold">{peerName}</h1>
-            <p className="text-xs text-zinc-500">
-              Social and everyday conversation (not tied to bookings).
-            </p>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Voice / Audio call */}
+          {/* Voice call */}
           <button
             onClick={() => handleStartCall("audio")}
-            className="px-4 py-2 rounded-lg bg-gold text-black font-semibold text-sm"
-            type="button"
+            title="Voice call"
+            className="p-2 rounded-full bg-zinc-800 hover:bg-zinc-700"
           >
-            Voice Call
+            📞
           </button>
 
           {/* Video call */}
           <button
             onClick={() => handleStartCall("video")}
-            className="px-4 py-2 rounded-lg border border-gold text-gold font-semibold text-sm"
-            type="button"
+            title="Video call"
+            className="p-2 rounded-full bg-zinc-800 hover:bg-zinc-700"
           >
-            Video Call
+            🎥
           </button>
         </div>
       </div>
