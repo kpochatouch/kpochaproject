@@ -2,6 +2,8 @@
 import redisClient from "../redis.js";
 import { getIO } from "../sockets/index.js";
 import Notification from "../models/Notification.js";
+import { ClientProfile } from "../models/Profile.js";
+import { Pro } from "../models.js";
 
 /**
  * Normalize input and support legacy keys
@@ -42,6 +44,53 @@ function normalizeCreateArgs(args = {}) {
     priority,
   };
 }
+
+async function resolveActorSnapshot(uid) {
+  if (!uid) return null;
+
+  try {
+    // 1️⃣ Try ClientProfile (normal users)
+    const client = await ClientProfile.findOne({ uid })
+      .select("displayName fullName username photoUrl identity")
+      .lean()
+      .catch(() => null);
+
+    if (client) {
+      return {
+        actorName:
+          client.displayName ||
+          client.fullName ||
+          client.username ||
+          null,
+        actorAvatar:
+          client.photoUrl ||
+          (client.identity && client.identity.photoUrl) ||
+          null,
+      };
+    }
+
+    // 2️⃣ Try Pro profile
+    const pro = await Pro.findOne({ ownerUid: uid })
+      .select("name username photoUrl")
+      .lean()
+      .catch(() => null);
+
+    if (pro) {
+      return {
+        actorName: pro.name || pro.username || null,
+        actorAvatar: pro.photoUrl || null,
+      };
+    }
+  } catch (e) {
+    console.warn(
+      "[notificationService] resolveActorSnapshot failed:",
+      e?.message || e
+    );
+  }
+
+  return null;
+}
+
 
 /**
  * Increment unread counter in Redis (non-fatal)
@@ -129,18 +178,28 @@ export async function createNotification(rawArgs = {}, { lean = false } = {}) {
   } = args;
 
   // Create DB doc
-  const doc = await Notification.create({
-    ownerUid,
-    actorUid: actorUid || "",
-    type,
-    seen: false,
-    readAt: null,
-    data,
-    meta,
-    groupKey,
-    priority,
-    deleted: false,
-  });
+  // 🔥 NEW: attach actor snapshot ONCE
+let actorSnapshot = null;
+if (actorUid) {
+  actorSnapshot = await resolveActorSnapshot(actorUid);
+}
+
+const doc = await Notification.create({
+  ownerUid,
+  actorUid: actorUid || "",
+  type,
+  seen: false,
+  readAt: null,
+  data,
+  meta: {
+    ...meta,
+    ...(actorSnapshot || {}),
+  },
+  groupKey,
+  priority,
+  deleted: false,
+});
+
 
   // Increment unread in Redis (best-effort)
   await incrUnreadCounter(ownerUid, 1);
