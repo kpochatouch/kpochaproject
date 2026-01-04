@@ -182,10 +182,16 @@ export default function NotificationBell() {
       {/* Dropdown */}
       {open && (
         <div
-          className="absolute right-0 mt-2 w-80 max-h-[70vh] overflow-y-auto
-                     bg-black border border-zinc-800 rounded-xl
-                     shadow-xl z-40"
-        >
+        className="
+          absolute mt-2
+          left-1/2 -translate-x-1/2
+          w-[92vw] max-w-sm
+          max-h-[70vh] overflow-y-auto
+          bg-black border border-zinc-800 rounded-xl
+          shadow-xl z-40
+        "
+      >
+
           {enhanced.length === 0 ? (
             <div className="p-4 text-xs text-zinc-500 text-center">
               No notifications yet
