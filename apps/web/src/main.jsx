@@ -61,14 +61,16 @@ createRoot(document.getElementById("root")).render(
 );
 
 // ✅ PWA: register Service Worker (prod only)
-// if (import.meta.env.PROD && "serviceWorker" in navigator) {
-//   window.addEventListener("load", () => {
-//     navigator.serviceWorker.register("/sw.js").catch(console.error);
-//   });
-// }
-
-// 🧹 Force remove any existing Service Workers
-if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.getRegistrations()
-    .then(regs => regs.forEach(r => r.unregister()));
+if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker
+      .register("/sw.js")
+      .then(reg => {
+        console.log("[PWA] Service Worker registered:", reg.scope);
+      })
+      .catch(err => {
+        console.error("[PWA] Service Worker failed:", err);
+      });
+  });
 }
+
