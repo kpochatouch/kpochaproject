@@ -52,8 +52,10 @@ const ForYou = lazy(() => import("./pages/ForYou.jsx"));
 const Inbox = lazy(() => import("./pages/Inbox.jsx"));
 
 /* ---------- Chatbase hook ---------- */
-function useChatbase() {
+function useChatbase(enabled) {
   useEffect(() => {
+    if (!enabled) return;
+
     const CHATBOT_ID = import.meta.env.VITE_CHATBASE_ID;
     if (!CHATBOT_ID) return;
 
@@ -81,7 +83,7 @@ function useChatbase() {
         document.body.appendChild(s);
       }
     })();
-  }, []);
+  }, [enabled]);
 }
 
 /* ---------- role guards ---------- */
@@ -156,8 +158,15 @@ function FindProSmart() {
 
 /* ---------- App ---------- */
 export default function App() {
-  useChatbase();
-    const location = useLocation();
+  const location = useLocation();
+
+const hideChatbase =
+  location.pathname.startsWith("/chat") ||
+  location.pathname.startsWith("/inbox") ||
+  (location.pathname.includes("/bookings/") && location.pathname.endsWith("/chat"));
+
+useChatbase(!hideChatbase);
+
   const navigate = useNavigate();
 
   const { me } = useMe();
