@@ -6,6 +6,7 @@ const NAG_EVERY_MS = 12 * 60 * 60 * 1000;
 export default function InstallPWAButton() {
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [open, setOpen] = useState(false);
+  const [showIOSGuide, setShowIOSGuide] = useState(false);
 
   const isStandalone = useMemo(() => {
     const standaloneMatchMedia =
@@ -21,20 +22,6 @@ export default function InstallPWAButton() {
   useEffect(() => {
     if (isStandalone) return;
 
-    // 1️⃣ Force popup visibility (independent of browser)
-    try {
-      const last = Number(localStorage.getItem(KEY_LAST_NAG) || "0");
-      const now = Date.now();
-
-      if (!last || now - last >= NAG_EVERY_MS) {
-        setOpen(true);
-        localStorage.setItem(KEY_LAST_NAG, String(now));
-      }
-    } catch {
-      setOpen(true);
-    }
-
-    // 2️⃣ Capture native install capability when available
     const onBip = (e) => {
       e.preventDefault();
       setDeferredPrompt(e);
@@ -43,11 +30,26 @@ export default function InstallPWAButton() {
     const onInstalled = () => {
       setOpen(false);
       setDeferredPrompt(null);
-      localStorage.removeItem(KEY_LAST_NAG);
+      setShowIOSGuide(false);
+      try {
+        localStorage.removeItem(KEY_LAST_NAG);
+      } catch {}
     };
 
     window.addEventListener("beforeinstallprompt", onBip);
     window.addEventListener("appinstalled", onInstalled);
+
+    // 🔥 FORCE popup (your original intent)
+    try {
+      const last = Number(localStorage.getItem(KEY_LAST_NAG) || "0");
+      const now = Date.now();
+      if (!last || now - last >= NAG_EVERY_MS) {
+        setOpen(true);
+        localStorage.setItem(KEY_LAST_NAG, String(now));
+      }
+    } catch {
+      setOpen(true);
+    }
 
     return () => {
       window.removeEventListener("beforeinstallprompt", onBip);
@@ -59,7 +61,7 @@ export default function InstallPWAButton() {
   if (!open) return null;
 
   async function handleInstall() {
-    // ✅ Chromium (real install)
+    // ✅ REAL install on Chromium
     if (deferredPrompt) {
       deferredPrompt.prompt();
       await deferredPrompt.userChoice;
@@ -68,14 +70,11 @@ export default function InstallPWAButton() {
       return;
     }
 
-    // ✅ iOS Safari (real install path)
+    // ✅ REAL iOS install path (no dead end)
     if (isIOS) {
-      alert("Tap Share → Add to Home Screen");
+      setShowIOSGuide(true);
       return;
     }
-
-    // Other browsers fallback
-    alert("Open browser menu and tap Install App");
   }
 
   return (
@@ -110,13 +109,24 @@ export default function InstallPWAButton() {
           Install Kpocha Touch for easy access, faster opening, and a clean full-screen experience.
         </div>
 
-        <div style={{ marginTop: 10, opacity: 0.9, fontSize: 13, lineHeight: 1.45 }}>
-          {isIOS ? (
-            <>On iPhone: tap <b>Share</b> → <b>Add to Home Screen</b>.</>
+        <div style={{ marginTop: 12, fontSize: 14, lineHeight: 1.55 }}>
+          {showIOSGuide && isIOS ? (
+            <>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                Install on iPhone
+              </div>
+              <ol style={{ paddingLeft: 18 }}>
+                <li>Tap the <b>Share</b> icon in Safari</li>
+                <li>Select <b>Add to Home Screen</b></li>
+                <li>Tap <b>Add</b> to finish</li>
+              </ol>
+            </>
+          ) : isIOS ? (
+            <>Tap <b>Install</b> to add Kpocha Touch to your Home Screen.</>
           ) : deferredPrompt ? (
-            <>Tap <b>Install</b> to add the app.</>
+            <>Tap <b>Install</b> to install the app.</>
           ) : (
-            <>Open browser menu (⋮) → <b>Install app</b>.</>
+            <>Open your browser menu (⋮) and tap <b>Install app</b>.</>
           )}
         </div>
 
@@ -135,20 +145,22 @@ export default function InstallPWAButton() {
             Not now
           </button>
 
-          <button
-            onClick={handleInstall}
-            style={{
-              flex: 1,
-              padding: "10px 12px",
-              borderRadius: 10,
-              background: "white",
-              border: "1px solid rgba(255,255,255,0.18)",
-              color: "black",
-              fontWeight: 700,
-            }}
-          >
-            Install
-          </button>
+          {!showIOSGuide && (
+            <button
+              onClick={handleInstall}
+              style={{
+                flex: 1,
+                padding: "10px 12px",
+                borderRadius: 10,
+                background: "white",
+                border: "1px solid rgba(255,255,255,0.18)",
+                color: "black",
+                fontWeight: 700,
+              }}
+            >
+              Install
+            </button>
+          )}
         </div>
       </div>
     </div>
