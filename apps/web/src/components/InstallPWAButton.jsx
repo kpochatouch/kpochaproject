@@ -1,4 +1,3 @@
-// apps/web/src/components/InstallPWAButton.jsx
 import { useEffect, useMemo, useState } from "react";
 
 const KEY_LAST_NAG = "kpocha:pwaLastNagAt";
@@ -22,24 +21,33 @@ export default function InstallPWAButton() {
   useEffect(() => {
     if (isStandalone) return;
 
-      const onBip = (e) => {
-        e.preventDefault();
+    // 1️⃣ Force popup visibility (independent of browser)
+    try {
+      const last = Number(localStorage.getItem(KEY_LAST_NAG) || "0");
+      const now = Date.now();
 
-        // ✅ install is NOW allowed
-        if (deferredPrompt) return; // prevent duplicate opens
-        setDeferredPrompt(e);
+      if (!last || now - last >= NAG_EVERY_MS) {
         setOpen(true);
+        localStorage.setItem(KEY_LAST_NAG, String(now));
+      }
+    } catch {
+      setOpen(true);
+    }
 
-      };
+    // 2️⃣ Capture native install capability when available
+    const onBip = (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
 
-      const onInstalled = () => {
-        setOpen(false);
-        setDeferredPrompt(null);
-      };
+    const onInstalled = () => {
+      setOpen(false);
+      setDeferredPrompt(null);
+      localStorage.removeItem(KEY_LAST_NAG);
+    };
 
-      window.addEventListener("beforeinstallprompt", onBip);
-      window.addEventListener("appinstalled", onInstalled);
-
+    window.addEventListener("beforeinstallprompt", onBip);
+    window.addEventListener("appinstalled", onInstalled);
 
     return () => {
       window.removeEventListener("beforeinstallprompt", onBip);
@@ -51,6 +59,7 @@ export default function InstallPWAButton() {
   if (!open) return null;
 
   async function handleInstall() {
+    // ✅ Chromium (real install)
     if (deferredPrompt) {
       deferredPrompt.prompt();
       await deferredPrompt.userChoice;
@@ -59,9 +68,14 @@ export default function InstallPWAButton() {
       return;
     }
 
-    // No prompt available: show instructions only
-    // (button will just close)
-    setOpen(false);
+    // ✅ iOS Safari (real install path)
+    if (isIOS) {
+      alert("Tap Share → Add to Home Screen");
+      return;
+    }
+
+    // Other browsers fallback
+    alert("Open browser menu and tap Install App");
   }
 
   return (
@@ -98,17 +112,11 @@ export default function InstallPWAButton() {
 
         <div style={{ marginTop: 10, opacity: 0.9, fontSize: 13, lineHeight: 1.45 }}>
           {isIOS ? (
-            <>
-              On iPhone: tap <b>Share</b> → <b>Add to Home Screen</b>.
-            </>
+            <>On iPhone: tap <b>Share</b> → <b>Add to Home Screen</b>.</>
           ) : deferredPrompt ? (
-            <>
-              Tap <b>Install</b> to add the app to your phone.
-            </>
+            <>Tap <b>Install</b> to add the app.</>
           ) : (
-            <>
-              If you don’t see an install prompt: open Chrome menu (⋮) → <b>Install app</b>.
-            </>
+            <>Open browser menu (⋮) → <b>Install app</b>.</>
           )}
         </div>
 
