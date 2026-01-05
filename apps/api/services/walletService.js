@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import { Wallet, WalletTx } from "../models/wallet.js";
 import { Booking } from "../models/Booking.js";
 import { Pro } from "../models.js";
+import { createNotification } from "./notificationService.js";
 
 /* ------------------------------------------------------------------ */
 /* Helpers: config with soft dependency on Settings (no hard import)  */
@@ -146,6 +147,20 @@ export async function creditProPendingForBooking(booking, meta = {}) {
     balanceAvailableKobo: w.availableKobo || 0,
     meta: { bookingId: bookingIdStr, proPct, ...meta },
   });
+
+        try {
+        await createNotification({
+          ownerUid,
+          type: "booking_fund",
+          data: {
+            bookingId: bookingIdStr,
+            message: "Payment received. Funds added to pending balance.",
+          },
+        });
+      } catch (e) {
+        // non-fatal
+      }
+
 
   return { ok: true, wallet: w, proPct, creditedKobo: proShareKobo };
 }

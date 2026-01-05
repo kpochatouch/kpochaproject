@@ -2,22 +2,8 @@
 import { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import useNotifications from "../hooks/useNotifications"; // <- unread badge
+import { menuIcons as icons } from "../constants/menuIcons";
 
-const icons = {
-  feed: "/menu/feed.png",
-  browse: "/menu/browse-pros.png",
-  instant: "/menu/bookings.png",
-  profile: "/menu/profile.png",
-  wallet: "/menu/wallet.png",
-  settings: "/menu/settings.png",
-  bookings: "/menu/bookings.png",
-  pro: "/menu/pro.png",
-  chat: "/menu/chat.png",
-  foryou: "/menu/for-you.png",
-  risk: "/menu/risk-logs.png",
-  admin: "/menu/admin.png",
-  help: "/menu/settings.png",
-};
 
 export default function SideMenu({ me }) {
   const navigate = useNavigate();

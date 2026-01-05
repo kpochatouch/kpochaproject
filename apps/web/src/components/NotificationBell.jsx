@@ -3,6 +3,30 @@ import React, { useEffect, useRef, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import useNotifications from "../hooks/useNotifications";
 
+const NOTIFICATION_ROUTES = {
+  chat_message: (n) => {
+    const room = n?.data?.room;
+    return room ? `/chat?room=${encodeURIComponent(room)}` : "/inbox";
+  },
+
+  call_incoming: () => "/inbox",
+  call_missed: () => "/inbox",
+
+  post_like: (n) =>
+    n?.data?.postId ? `/post/${n.data.postId}` : null,
+
+  booking_update: () => "/my-bookings",
+
+  booking_fund: () => "/wallet",
+  booking_fund_refund: () => "/wallet",
+  withdraw: () => "/wallet",
+  withdraw_pending: () => "/wallet",
+  release: () => "/wallet",
+
+  generic: () => null,
+};
+
+
 /* ---------------------------
    Helpers
 ----------------------------*/
@@ -27,71 +51,38 @@ function formatTime(ts) {
  */
 function presentNotification(n) {
   const data = n.data || {};
-  const meta = n.meta || {};
+  const type = n.type || "generic";
 
-  // ---- Calls ----
-  if (meta.call || n.type === "call_missed") {
-    const call = meta.call || {};
-    const typeLabel = call.type === "video" ? "Video call" : "Voice call";
+  const resolver = NOTIFICATION_ROUTES[type];
+  const target = resolver ? resolver(n) : null;
 
-    if (call.status === "missed" || n.type === "call_missed") {
-      return {
-        icon: "📞",
-        title: "Missed call",
-        body: `Missed ${typeLabel}`,
-        target: "/inbox",
-      };
-    }
-
-    return {
-      icon: "📞",
-      title: typeLabel,
-      body:
-        call.direction === "outgoing"
-          ? `${typeLabel} (you called)`
-          : `${typeLabel} (incoming)`,
-      target: "/inbox",
-    };
+  if (type === "chat_message") {
+    return { icon: "💬", title: "New message", body: data.bodyPreview || "New message", target };
   }
 
-  // ---- Chat ----
-  if (n.type === "chat_message") {
-    return {
-      icon: "💬",
-      title: "New message",
-      body: data.body || data.message || "You received a new message",
-      target: "/inbox",
-    };
+  if (type === "call_incoming") {
+    return { icon: "📞", title: "Incoming call", body: "Tap to respond", target };
   }
 
-  // ---- Social ----
-  if (n.type === "post_like") {
-    return {
-      icon: "❤️",
-      title: "New like",
-      body: data.message || "Someone liked your post",
-      target: data.postId ? `/post/${data.postId}` : "/",
-    };
+  if (type === "call_missed") {
+    return { icon: "📞", title: "Missed call", body: "You missed a call", target };
   }
 
-  // ---- Booking ----
-  if (n.type === "booking_update") {
-    return {
-      icon: "📅",
-      title: "Booking update",
-      body: data.message || "Your booking was updated",
-      target: "/my-bookings",
-    };
+  if (type === "post_like") {
+    return { icon: "❤️", title: "New like", body: "Someone liked your post", target };
   }
 
-  // ---- Fallback ----
-  return {
-    icon: "🔔",
-    title: "Notification",
-    body: data.body || data.message || "",
-    target: "/",
-  };
+  if (type === "booking_update") {
+    return { icon: "📅", title: "Booking update", body: "Your booking was updated", target };
+  }
+
+  if (["withdraw","withdraw_pending","booking_fund","booking_fund_refund","release"].includes(type)) {
+    return { icon: "💰", title: "Wallet update", body: "Wallet balance changed", target };
+  }
+
+  return { icon: "🔔", title: "Notification", body: data.message || "", target: null };
 }
+
 
 /**
  * ✅ Safe avatar rule
@@ -154,7 +145,7 @@ export default function NotificationBell() {
     } catch {}
 
     setOpen(false);
-    navigate(entry.target || "/");
+    if (entry.target) navigate(entry.target);
   }
 
   return (
