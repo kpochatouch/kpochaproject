@@ -51,16 +51,18 @@ export default function InstallAppButton() {
       <button
         onClick={handleInstall}
         style={{
-          padding: "10px 14px",
-          borderRadius: 10,
-          fontWeight: 700,
-          background: "white",
-          color: "black",
-          border: "none",
+            padding: "6px 10px",
+            borderRadius: 8,
+            fontWeight: 600,
+            fontSize: 13,
+            background: "white",
+            color: "black",
+            border: "none",
         }}
-      >
+        >
         Install App
-      </button>
+        </button>
+
 
       {showHelp && (
         <div
@@ -93,42 +95,23 @@ export default function InstallAppButton() {
             Follow the steps below to add the app to your Home Screen.
             </div>
 
-
             {isIOS ? (
             isSafari ? (
-                <>
-                <div style={{ fontWeight: 700, marginBottom: 6 }}>
-                    iPhone / iPad (Safari)
-                </div>
                 <ol style={{ paddingLeft: 18, lineHeight: 1.6 }}>
-                    <li>Tap the <b>Share</b> icon at the bottom of Safari</li>
-                    <li>Select <b>Add to Home Screen</b></li>
-                    <li>Tap <b>Add</b> to finish</li>
+                <li>Tap the <b>Share</b> button in Safari</li>
+                <li>Tap <b>Add to Home Screen</b></li>
+                <li>Tap <b>Add</b></li>
                 </ol>
-                </>
             ) : (
-                <>
-                <div style={{ fontWeight: 700, marginBottom: 6 }}>
-                    iPhone / iPad (Other browsers)
-                </div>
                 <p style={{ lineHeight: 1.5 }}>
-                    Apple only allows app installation from Safari.
+                Open this page in <b>Safari</b>, then use
+                <b> Share → Add to Home Screen</b>.
                 </p>
-                <p style={{ fontSize: 14, opacity: 0.85 }}>
-                    Open this page in Safari, then use
-                    <b> Share → Add to Home Screen</b>.
-                </p>
-                </>
             )
             ) : (
-            <>
-                <div style={{ fontWeight: 700, marginBottom: 6 }}>
-                Android / Other browsers
-                </div>
-                <p>
-                Open your browser menu (⋮) and tap <b>Install app</b>.
-                </p>
-            </>
+            <p>
+                Open your browser menu and tap <b>Add to Home Screen</b>.
+            </p>
             )}
 
 
