@@ -1,3 +1,4 @@
+//apps/web/src/components/InstallPWAButton.jsx
 import { useEffect, useMemo, useState } from "react";
 
 const KEY_LAST_NAG = "kpocha:pwaLastNagAt";

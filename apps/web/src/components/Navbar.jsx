@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from "react";
 import { getAuth, onIdTokenChanged, signOut } from "firebase/auth";
 import { api } from "../lib/api";
 import NotificationBell from "./NotificationBell.jsx";
+import InstallAppButton from "./InstallAppButton.jsx";
 
 export default function Navbar() {
   const [me, setMe] = useState(null);
@@ -179,11 +180,16 @@ export default function Navbar() {
           )}
         </nav>
 
-        {/* mobile btn */}
-        <button
-          onClick={() => setOpen((o) => !o)}
-          className="md:hidden inline-flex items-center justify-center rounded-lg border border-zinc-700 p-2 text-zinc-200"
-        >
+      <div className="md:hidden flex items-center gap-2">
+  {/* Install App (mobile only, never cooldowns) */}
+  <InstallAppButton />
+
+  {/* Hamburger */}
+  <button
+    onClick={() => setOpen((o) => !o)}
+    className="inline-flex items-center justify-center rounded-lg border border-zinc-700 p-2 text-zinc-200"
+  >
+
           {open ? (
             <svg
               className="h-5 w-5"
@@ -336,6 +342,7 @@ export default function Navbar() {
           </div>
         </div>
       )}
+      </div>
     </header>
   );
 }
