@@ -44,20 +44,24 @@ export default function PaymentConfirm() {
         let j = null;
         try { j = await r.json(); } catch { /* ignore */ }
 
-        if (!r.ok) {
-          setStatus("❌ Verification failed on the server. Please try again or contact support.");
-          return;
-        }
+if (!r.ok) {
+  setStatus("❌ Verification failed on the server. Please try again or contact support.");
+  return;
+}
 
-        if (j?.ok) {
-          setStatus("✅ Payment confirmed! Your booking is now paid.");
-          // Clean up local hint
-          sessionStorage.removeItem("pay_ref");
-          // Optional redirect:
-          // window.location.assign(`/bookings/${bookingId}`);
-        } else {
-          setStatus("❌ Payment not confirmed yet. If you were charged, please contact support.");
-        }
+if (j?.ok) {
+  setStatus("✅ Payment confirmed! Redirecting…");
+  sessionStorage.removeItem("pay_ref");
+
+  // ✅ redirect to booking details
+  setTimeout(() => {
+  window.location.assign(`/bookings/${bookingId}`);
+}, 800);
+
+  return;
+} else {
+  setStatus("❌ Payment not confirmed yet. If you were charged, please contact support.");
+}
       } catch {
         setStatus("❌ Could not verify payment. Please try again or contact support.");
       }
@@ -92,34 +96,21 @@ export default function PaymentConfirm() {
         </div>
       )}
 
-      <div style={{ marginTop: 20, display: "flex", gap: 8 }}>
-        <button
-          onClick={() => window.location.assign("/")}
-          style={{
-            padding: "10px 14px",
-            background: "#fff",
-            color: "#000",
-            borderRadius: 8,
-            border: "none",
-            cursor: "pointer",
-          }}
-        >
-          Go to Home
-        </button>
-        <button
-          onClick={() => window.location.reload()}
-          style={{
-            padding: "10px 14px",
-            background: "#222",
-            color: "#fff",
-            borderRadius: 8,
-            border: "1px solid #333",
-            cursor: "pointer",
-          }}
-        >
-          Try Again
-        </button>
-      </div>
-    </div>
+<div style={{ marginTop: 20 }}>
+  <button
+    onClick={() => window.location.reload()}
+    style={{
+      padding: "10px 14px",
+      background: "#222",
+      color: "#fff",
+      borderRadius: 8,
+      border: "1px solid #333",
+      cursor: "pointer",
+    }}
+  >
+    Try Again
+  </button>
+</div>
+ </div>
   );
 }

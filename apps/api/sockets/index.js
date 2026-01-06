@@ -7,8 +7,6 @@ import admin from "firebase-admin";
 
 import * as chatService from "../services/chatService.js";
 import * as callService from "../services/callService.js";
-import { ClientProfile } from "../models/Profile.js";
-import { Pro } from "../models.js";
 
 /* ---------------------------------------------------
    IO reference (services use getIO without import loop)

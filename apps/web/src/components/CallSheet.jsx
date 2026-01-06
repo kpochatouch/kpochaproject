@@ -198,7 +198,7 @@ export default function CallSheet({
       setCallFailed(true);
 
       // 3) Let backend know it failed because of timeout (optional)
-      safeUpdateStatus("declined", { reason: "timeout_no_connection" });
+      safeUpdateStatus("failed", { reason: "timeout_no_connection" });
 
       // 4) Auto hang up after a short pause so user can briefly see "Call failed"
       setTimeout(() => {
@@ -271,20 +271,24 @@ export default function CallSheet({
       if (remoteRef.current) remoteRef.current.srcObject = ev.streams[0];
     };
 
-    // ICE
-    pcNew.onicecandidate = (ev) => {
-      if (ev.candidate) {
-        try {
-          sig.emit("webrtc:ice", ev.candidate);
-        } catch (e) {
-          console.warn("[CallSheet] emit ice failed:", e?.message || e);
-        }
+// ICE
+pcNew.onicecandidate = (ev) => {
+  if (ev.candidate) {
+    try {
+      sig.emit("webrtc:ice", ev.candidate);
+    } catch (e) {
+      console.warn("[CallSheet] emit ice failed:", e?.message || e);
+    }
   } else {
     console.log("[CallSheet] ICE gathering complete");
   }
 };
 
-    pcNew.onconnectionstatechange = () => {
+pcNew.oniceconnectionstatechange = () => {
+  console.log("[CallSheet] iceConnectionState:", pcNew.iceConnectionState);
+};
+
+pcNew.onconnectionstatechange = () => {
   const st = pcNew.connectionState;
 
   console.log("[CallSheet] connectionState change:", {
@@ -352,17 +356,17 @@ export default function CallSheet({
   }
 });
 
-    sig.on("webrtc:ice", async (msg) => {
-      try {
-        const cand = msg?.payload || msg; // unwrap payload
-        if (cand) {
-          console.log("[CallSheet] remote ICE candidate:", cand.type, cand.protocol);
-          await pcNew.addIceCandidate(cand);
-        }
-      } catch (e) {
-        console.warn("[CallSheet] addIceCandidate failed:", e?.message || e);
-      }
-    });
+   sig.on("webrtc:ice", async (msg) => {
+  try {
+    const cand = msg?.payload || msg;
+    if (cand) {
+      await pcNew.addIceCandidate(new RTCIceCandidate(cand));
+    }
+  } catch (e) {
+    console.warn("[CallSheet] addIceCandidate failed:", e?.message || e);
+  }
+});
+
 
     // caller creates offer immediately
     if (asCaller) {
