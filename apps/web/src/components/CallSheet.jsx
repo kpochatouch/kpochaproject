@@ -126,6 +126,7 @@ export default function CallSheet({
     sc.connect();
     setSig(sc);
 
+    let stashOffer = null;
     if (role !== "caller") {
       // incoming side: start ringtone immediately
       try {
@@ -136,23 +137,29 @@ export default function CallSheet({
       } catch {}
 
       // 🔴 NEW: stash incoming offer that may arrive BEFORE user taps Accept
-      sc.on("webrtc:offer", (msg) => {
+      stashOffer = (msg) => {
         console.log("[CallSheet] stashed incoming offer before accept");
         pendingOfferRef.current = msg;
-      });
+      };
+      sc.on("webrtc:offer", stashOffer);
     }
 
     return () => {
-      try {
-        sc.disconnect();
-      } catch {}
-      setSig(null);
-      stopAllTones();
-      setAutoStarted(false);
-      setElapsedSeconds(0);
-      setHasAccepted(false);
-      setCallFailed(false);
-    };
+  try {
+    if (stashOffer) sc.off("webrtc:offer", stashOffer);
+  } catch {}
+
+  try {
+    sc.disconnect();
+  } catch {}
+
+  setSig(null);
+  stopAllTones();
+  setAutoStarted(false);
+  setElapsedSeconds(0);
+  setHasAccepted(false);
+  setCallFailed(false);
+};
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, room, role]);
@@ -275,7 +282,9 @@ export default function CallSheet({
 pcNew.onicecandidate = (ev) => {
   if (ev.candidate) {
     try {
-      sig.emit("webrtc:ice", ev.candidate);
+      const out = ev.candidate.toJSON ? ev.candidate.toJSON() : ev.candidate;
+sig.emit("webrtc:ice", out);
+
     } catch (e) {
       console.warn("[CallSheet] emit ice failed:", e?.message || e);
     }
@@ -329,7 +338,9 @@ pcNew.onconnectionstatechange = () => {
       }
     };
 
-    sig.on("webrtc:offer", handleOffer);
+    if (!asCaller) {
+  sig.on("webrtc:offer", handleOffer);
+}
 
     // 🔴 NEW: if we already received an offer BEFORE Accept, handle it now
     if (!asCaller && pendingOfferRef.current) {
@@ -339,7 +350,7 @@ pcNew.onconnectionstatechange = () => {
     }
 
 
-sig.on("webrtc:answer", async (msg) => {
+const onAnswer = async (msg) => {
   try {
     if (!asCaller) return;
 
@@ -360,10 +371,9 @@ sig.on("webrtc:answer", async (msg) => {
   } catch (e) {
     console.error("[CallSheet] handle answer failed:", e);
   }
-});
+};
 
-
-   sig.on("webrtc:ice", async (msg) => {
+const onIce = async (msg) => {
   try {
     const cand = msg?.payload || msg;
     if (!cand) return;
@@ -373,8 +383,13 @@ sig.on("webrtc:answer", async (msg) => {
   } catch (e) {
     console.warn("[CallSheet] addIceCandidate failed:", e?.message || e);
   }
-});
+};
 
+sig.on("webrtc:answer", onAnswer);
+sig.on("webrtc:ice", onIce);
+
+// ✅ store handlers so cleanupPeer can remove them later
+pcNew.__sigHandlers = { onAnswer, onIce, onOffer: handleOffer };
 
 
     // caller creates offer immediately
@@ -392,6 +407,16 @@ sig.on("webrtc:answer", async (msg) => {
 
   function cleanupPeer() {
     stopAllTones();
+
+   // ✅ remove signaling listeners attached in setupPeerConnection()
+    try {
+      const h = pc?.__sigHandlers;
+      if (h && sig) {
+        if (h.onAnswer) sig.off("webrtc:answer", h.onAnswer);
+        if (h.onIce) sig.off("webrtc:ice", h.onIce);
+        if (h.onOffer) sig.off("webrtc:offer", h.onOffer);
+      }
+    } catch {}
 
     try {
       if (pc) {
