@@ -198,7 +198,7 @@ export default function CallSheet({
       setCallFailed(true);
 
       // 3) Let backend know it failed because of timeout (optional)
-      safeUpdateStatus("failed", { reason: "timeout_no_connection" });
+      safeUpdateStatus("declined", { reason: "timeout_no_connection" });
 
       // 4) Auto hang up after a short pause so user can briefly see "Call failed"
       setTimeout(() => {
@@ -339,33 +339,42 @@ pcNew.onconnectionstatechange = () => {
     }
 
 
-  sig.on("webrtc:answer", async (msg) => {
+sig.on("webrtc:answer", async (msg) => {
   try {
-    if (asCaller) {
-      const remoteSdp = msg?.payload || msg; // unwrap payload
-      await pcNew.setRemoteDescription(
-        new RTCSessionDescription(remoteSdp)
-      );
+    if (!asCaller) return;
 
-      // 👇 peer has tapped "Accept" → stop ringing on caller side
-      stopAllTones();
-      setPeerAccepted(true);
+    // ✅ IMPORTANT: Only accept answer when we actually have a local offer
+    if (pcNew.signalingState !== "have-local-offer") {
+      console.warn(
+        "[CallSheet] ignoring duplicate/late answer; signalingState:",
+        pcNew.signalingState
+      );
+      return;
     }
+
+    const remoteSdp = msg?.payload || msg;
+    await pcNew.setRemoteDescription(new RTCSessionDescription(remoteSdp));
+
+    stopAllTones();
+    setPeerAccepted(true);
   } catch (e) {
     console.error("[CallSheet] handle answer failed:", e);
   }
 });
 
+
    sig.on("webrtc:ice", async (msg) => {
   try {
     const cand = msg?.payload || msg;
-    if (cand) {
-      await pcNew.addIceCandidate(new RTCIceCandidate(cand));
-    }
+    if (!cand) return;
+
+    // ✅ Always wrap ICE candidate for cross-device consistency
+    await pcNew.addIceCandidate(new RTCIceCandidate(cand));
   } catch (e) {
     console.warn("[CallSheet] addIceCandidate failed:", e?.message || e);
   }
 });
+
 
 
     // caller creates offer immediately
