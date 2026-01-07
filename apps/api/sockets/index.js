@@ -298,38 +298,53 @@ if (!text && attachmentsRaw.length === 0 && !hasCallMeta) {
     });
 
 
-  /* ---------------------------------------------------
-   WebRTC signaling (extra debug)
+/* ---------------------------------------------------
+   WebRTC signaling (PROOF-BASED)
+   - ack now tells you deliveredTo count
 --------------------------------------------------- */
 ["webrtc:offer", "webrtc:answer", "webrtc:ice"].forEach((evt) => {
   socket.on(evt, async (raw = {}, cb) => {
     await authReady;
 
-    // raw is whatever the client sent
-    console.log(`[socket] ${evt} RAW from ${socket.id}:`, raw);
-
     const r = roomName(raw.room) || socket.data.room;
-    const payload = raw.payload ?? raw;
+    const payload = raw?.payload ?? raw;
 
     if (!r || payload == null) {
-      console.warn(`[socket] ${evt} missing room or payload`, { r, hasPayload: !!payload });
       cb?.({ ok: false, error: "room_or_payload_required" });
       return;
     }
 
-    console.log(`[socket] ${evt} FORWARD to room ${r} from ${socket.id}`, {
-      hasPayload: !!payload,
-    });
+    // Count recipients in the room (excluding sender)
+    const roomSet = io.sockets.adapter.rooms.get(r);
+    const totalInRoom = roomSet ? roomSet.size : 0;
+    const deliveredTo = Math.max(0, totalInRoom - 1);
 
+    // Forward to everyone else in the room
     socket.to(r).emit(evt, {
       payload,
       from: socket.data.uid || hinted || socket.id,
+      room: r,
+      ts: Date.now(),
     });
 
-    cb?.({ ok: true });
+    // ✅ This ACK is the KEY: it proves delivery count
+    cb?.({
+      ok: true,
+      room: r,
+      deliveredTo,
+      totalInRoom,
+    });
+
+    // Optional: warn when forwarding into empty room
+    if (deliveredTo === 0) {
+      console.warn(`[webrtc] ${evt} deliveredTo=0`, {
+        room: r,
+        fromSocket: socket.id,
+        fromUid: socket.data.uid || hinted || null,
+      });
+    }
   });
 });
-
 
 
     /* ---------------------------------------------------
