@@ -822,9 +822,16 @@ function formatCallLabel(call) {
   // 2) Cancelled before connect
   //    - Caller (isMe) → "Cancelled"
   //    - Receiver (!isMe) → "Missed Call"
-  if (status === "cancelled") {
-    return isMe ? "Cancelled" : "Missed Call";
-  }
+// 2) No answer / missed
+if (status === "missed") {
+  return isMe ? "No answer" : "Missed Call";
+}
+
+// 3) Caller cancelled before answer
+if (status === "cancelled") {
+  return isMe ? "Cancelled" : "Missed Call";
+}
+
 
   // 3) Declined as receiver → "Declined" (both sides)
   if (status === "declined") {

@@ -29,3 +29,12 @@ npm run dev:web
 - **Render** → root: `apps/api` → Start: `node server.js`
 - **Vercel** → root: `apps/web` → Build: `npm run build` → Output: `dist`
 
+## WebRTC Calls
+
+We use WebRTC for real-time audio/video calls.
+
+👉 **Implementation notes & debugging guide:**  
+See [`docs/webrtc.md`](docs/webrtc.md) for a detailed explanation of:
+- why calls failed across networks
+- how the “stash + flush” signaling fix works
+- a manual regression checklist

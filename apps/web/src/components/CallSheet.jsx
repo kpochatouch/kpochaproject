@@ -1,3 +1,5 @@
+
+
 // apps/web/src/components/CallSheet.jsx
 import { useEffect, useRef, useState } from "react";
 import SignalingClient from "../lib/webrtc/SignalingClient";
@@ -96,7 +98,7 @@ const pendingIceRef = useRef([]);
 
     const callMeta = {
       type: callType || (mode === "video" ? "video" : "audio"),
-      status, // "ended" | "cancelled" | "declined"
+      status, // "ended" | "cancelled" | "declined" | "missed" | "failed"
       hasConnected,
       durationSec: hasConnected ? elapsedSeconds : 0,
     };
@@ -131,32 +133,34 @@ const pendingIceRef = useRef([]);
     setSig(sc);
 
     let stashOffer = null;
-    if (role !== "caller") {
-      // incoming side: start ringtone immediately
-      try {
-        const audio = new Audio("/sound/incoming.mp3");
-        audio.loop = true;
-        incomingToneRef.current = audio;
-        audio.play().catch(() => {});
-      } catch {}
+let stashIce = null;
 
-      // 🔴 NEW: stash incoming offer that may arrive BEFORE user taps Accept
-      stashOffer = (msg) => {
-        console.log("[CallSheet] stashed incoming offer before accept");
-        pendingOfferRef.current = msg;
-      };
-      sc.on("webrtc:offer", stashOffer);
+if (role !== "caller") {
+  // incoming side: start ringtone immediately
+  try {
+    const audio = new Audio("/sound/incoming.mp3");
+    audio.loop = true;
+    incomingToneRef.current = audio;
+    audio.play().catch(() => {});
+  } catch {}
 
-      // ✅ ALSO stash ICE candidates that arrive BEFORE Accept
-      const stashIce = (msg) => {
-        const cand = msg?.payload || msg;
-        if (!cand) return;
-        pendingIceRef.current.push(cand);
-        console.log("[CallSheet] stashed ICE before accept", pendingIceRef.current.length);
-      };
-      sc.on("webrtc:ice", stashIce);
+  // stash offer (may arrive before Accept)
+  stashOffer = (msg) => {
+    console.log("[CallSheet] stashed incoming offer before accept");
+    pendingOfferRef.current = msg;
+  };
+  sc.on("webrtc:offer", stashOffer);
 
-    }
+  // stash ICE (may arrive before Accept)
+  stashIce = (msg) => {
+    const cand = msg?.payload || msg;
+    if (!cand) return;
+    pendingIceRef.current.push(cand);
+    console.log("[CallSheet] stashed ICE before accept", pendingIceRef.current.length);
+  };
+  sc.on("webrtc:ice", stashIce);
+}
+
 
     return () => {
   try {
@@ -167,6 +171,9 @@ const pendingIceRef = useRef([]);
   try {
     sc.disconnect();
   } catch {}
+
+  pendingOfferRef.current = null;
+  pendingIceRef.current = [];
 
   setSig(null);
   stopAllTones();
@@ -195,6 +202,26 @@ const pendingIceRef = useRef([]);
     return () => clearInterval(id);
   }, [open, hasConnected]);
 
+  // ⏳ ring timeout: if receiver never answers, end as "missed"
+useEffect(() => {
+  if (!open) return;
+  if (role !== "caller") return;
+
+  // if already connected or receiver accepted, don't ring-timeout
+  if (hasConnected || peerAccepted || hasAccepted) return;
+
+  // start countdown once caller sheet is open and dialing
+  const id = setTimeout(() => {
+    console.warn("[CallSheet] Ring timeout: no answer");
+
+    // End as "missed" (not failed)
+    hangup("missed");
+  }, 30000); // 30s (adjust if you want)
+
+  return () => clearTimeout(id);
+}, [open, role, hasConnected, peerAccepted, hasAccepted]);
+
+
     // ⏲️ fail-safe: if call is accepted but never connects, fail after ~20s
   useEffect(() => {
     if (!open) return;
@@ -220,11 +247,11 @@ const pendingIceRef = useRef([]);
       setCallFailed(true);
 
       // 3) Let backend know it failed because of timeout (optional)
-      safeUpdateStatus("declined", { reason: "timeout_no_connection" });
+      safeUpdateStatus("failed", { reason: "timeout_no_connection" });
 
       // 4) Auto hang up after a short pause so user can briefly see "Call failed"
       setTimeout(() => {
-        hangup();
+        hangup("failed");
       }, 1500);
     }, 20000); // 20,000 ms = 20 seconds
 
@@ -458,6 +485,10 @@ pcNew.__sigHandlers = { onAnswer, onIce, onOffer: handleOffer };
   function cleanupPeer() {
     stopAllTones();
 
+    // 🔽 clear any stashed signaling so it never leaks into next call
+    pendingOfferRef.current = null;
+    pendingIceRef.current = [];
+
    // ✅ remove signaling listeners attached in setupPeerConnection()
     try {
       const h = pc?.__sigHandlers;
@@ -602,10 +633,13 @@ pcNew.__sigHandlers = { onAnswer, onIce, onOffer: handleOffer };
 
   // ---- hangup (both roles) ----
 
-  async function hangup() {
+  async function hangup(forceStatus = null) {
     stopAllTones();
     const endedStatus =
-      hasConnected ? "ended" : role === "caller" ? "cancelled" : "declined";
+  forceStatus ||
+  (hasConnected ? "ended" : role === "caller" ? "cancelled" : "declined");
+
+
 
     await safeUpdateStatus(endedStatus);
     await sendCallSummaryMessage(endedStatus);
