@@ -384,11 +384,23 @@ export async function endCall(callId, endedStatus = "ended", endedByUid = null) 
 
 /**
  * getCallById
+ * - supports either Mongo _id OR callId string
  */
-export async function getCallById(callId) {
-  if (!callId) throw new Error("callId required");
-  return CallRecord.findOne({ callId }).lean();
+export async function getCallById(idOrCallId) {
+  if (!idOrCallId) throw new Error("callId required");
+
+  const v = String(idOrCallId).trim();
+
+  // if it looks like a Mongo ObjectId, fetch by _id
+  if (mongoose.Types.ObjectId.isValid(v)) {
+    const byId = await CallRecord.findById(v).lean();
+    if (byId) return byId;
+  }
+
+  // otherwise (or fallback), fetch by callId
+  return CallRecord.findOne({ callId: v }).lean();
 }
+
 
 /**
  * listRecentCallsForUser(uid, { limit = 50 })
@@ -412,7 +424,7 @@ export async function getActiveCallForUser(uid) {
   if (!uid) throw new Error("uid required");
   return CallRecord.findOne({
     "participants.uid": uid,
-    endedAt: { $exists: false },
+    endedAt: null,
     status: { $nin: ["ended", "missed", "cancelled", "declined", "failed"] },
   }).sort({ createdAt: -1 });
 }

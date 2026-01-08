@@ -65,6 +65,10 @@ export default function CallSheet({
   // NEW: stash offer that arrives before receiver taps "Accept"
   const pendingOfferRef = useRef(null);
 
+  // NEW: queue ICE candidates until remoteDescription is set
+const pendingIceRef = useRef([]);
+
+
   function stopAllTones() {
     [callerToneRef, incomingToneRef].forEach((ref) => {
       try {
@@ -328,6 +332,21 @@ pcNew.onconnectionstatechange = () => {
       try {
         const remoteSdp = msg?.payload || msg; // unwrap payload
         await pcNew.setRemoteDescription(new RTCSessionDescription(remoteSdp));
+
+        // NEW: flush any ICE that arrived early (receiver side too)
+        if (pendingIceRef.current.length) {
+          const queued = [...pendingIceRef.current];
+          pendingIceRef.current = [];
+          for (const c of queued) {
+            try {
+              await pcNew.addIceCandidate(new RTCIceCandidate(c));
+            } catch (e) {
+              console.warn("[CallSheet] flush addIceCandidate failed:", e?.message || e);
+            }
+          }
+        }
+
+
         if (!asCaller) {
           const answer = await pcNew.createAnswer();
           await pcNew.setLocalDescription(answer);
@@ -366,6 +385,20 @@ const onAnswer = async (msg) => {
     const remoteSdp = msg?.payload || msg;
     await pcNew.setRemoteDescription(new RTCSessionDescription(remoteSdp));
 
+    // NEW: flush any ICE that arrived early
+if (pendingIceRef.current.length) {
+  const queued = [...pendingIceRef.current];
+  pendingIceRef.current = [];
+  for (const c of queued) {
+    try {
+      await pcNew.addIceCandidate(new RTCIceCandidate(c));
+    } catch (e) {
+      console.warn("[CallSheet] flush addIceCandidate failed:", e?.message || e);
+    }
+  }
+}
+
+
     stopAllTones();
     setPeerAccepted(true);
   } catch (e) {
@@ -378,12 +411,18 @@ const onIce = async (msg) => {
     const cand = msg?.payload || msg;
     if (!cand) return;
 
-    // ✅ Always wrap ICE candidate for cross-device consistency
+    // If remoteDescription not ready yet, store candidate
+    if (!pcNew.remoteDescription) {
+      pendingIceRef.current.push(cand);
+      return;
+    }
+
     await pcNew.addIceCandidate(new RTCIceCandidate(cand));
   } catch (e) {
     console.warn("[CallSheet] addIceCandidate failed:", e?.message || e);
   }
 };
+
 
 sig.on("webrtc:answer", onAnswer);
 sig.on("webrtc:ice", onIce);

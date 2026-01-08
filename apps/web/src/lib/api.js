@@ -577,12 +577,18 @@ export async function updateCallStatus({ id = null, callId = null, status, meta 
 
 async function _updateCallStatusRest({ id = null, callId = null, status, meta = {} } = {}) {
   try {
-    // backend: PUT /api/call/:id/status OR PUT /api/call/:callId/status (both allowed by server)
-    if (id) {
-      const { data } = await api.put(`/api/call/${encodeURIComponent(String(id))}/status`, { status, meta });
+    // Prefer canonical callId first
+    if (callId) {
+      const { data } = await api.put(
+        `/api/call/${encodeURIComponent(String(callId))}/status`,
+        { status, meta }
+      );
       return data;
-    } else if (callId) {
-      const { data } = await api.put(`/api/call/${encodeURIComponent(String(callId))}/status`, { status, meta });
+    } else if (id) {
+      const { data } = await api.put(
+        `/api/call/${encodeURIComponent(String(id))}/status`,
+        { status, meta }
+      );
       return data;
     } else {
       throw new Error("id_or_callId_required");
@@ -591,6 +597,7 @@ async function _updateCallStatusRest({ id = null, callId = null, status, meta = 
     throw new Error(e?.response?.data?.error || e?.message || "call_status_failed");
   }
 }
+
 
 /* -----------------------
    WEBRTC signaling helpers (emit & register)
