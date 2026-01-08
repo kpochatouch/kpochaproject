@@ -146,11 +146,22 @@ const pendingIceRef = useRef([]);
         pendingOfferRef.current = msg;
       };
       sc.on("webrtc:offer", stashOffer);
+
+      // ✅ ALSO stash ICE candidates that arrive BEFORE Accept
+      const stashIce = (msg) => {
+        const cand = msg?.payload || msg;
+        if (!cand) return;
+        pendingIceRef.current.push(cand);
+        console.log("[CallSheet] stashed ICE before accept", pendingIceRef.current.length);
+      };
+      sc.on("webrtc:ice", stashIce);
+
     }
 
     return () => {
   try {
     if (stashOffer) sc.off("webrtc:offer", stashOffer);
+    if (stashIce) sc.off("webrtc:ice", stashIce);
   } catch {}
 
   try {
