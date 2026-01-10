@@ -25,10 +25,13 @@ import { Booking } from "./models/Booking.js";
 // Wallet & Ledger
 import { withAuth as walletWithAuth } from "./routes/wallets.js";
 import {
-  creditProPendingForBooking,
   releasePendingToAvailableForBooking,
   cancelBookingAndRefund,
+  fundEscrowFromPaystackForBooking,
 } from "./services/walletService.js";
+
+import { ensureWalletIndexes } from "./models/wallet.js";
+
 
 // Feature routers (factories)
 import pinRoutes from "./routes/pin.js";
@@ -174,8 +177,11 @@ const PayoutsSchema = new mongoose.Schema(
   {
     releaseDays: { type: Number, default: 7 },
     instantCashoutFeePercent: { type: Number, default: 3 },
+    // ⏳ Safety hold before instant cashout from pending
+    instantCashoutHoldDays: { type: Number, default: 3 },
     enableAutoRelease: { type: Boolean, default: true },
     autoReleaseCron: { type: String, default: "0 2 * * *" },
+     platformRecipientCode: { type: String, default: "" },
   },
   { _id: false }
 );
@@ -262,12 +268,12 @@ try {
   await mongoose.connect(MONGODB_URI);
   console.log("[mongo] ✅ Connected:", mongoose.connection?.db?.databaseName);
   await fixWalletCollectionOnce();
+  await ensureWalletIndexes();
   await loadSettings({ force: true });
 } catch (err) {
   console.error("[mongo] ❌ Connection error:", err?.message || err);
 }
 
-/* ------------------- Schedulers ------------------- */
 /* ------------------- Schedulers ------------------- */
 let CRON_TASKS = [];
 
@@ -335,12 +341,25 @@ async function initSchedulers() {
         const cutoff = new Date(Date.now() - timeoutMs);
 
         // "Ringing" = paid + scheduled + still not accepted (no acceptedAt)
-        const ringing = await Booking.find({
+       const ringing = await Booking.find({
+        status: "scheduled",
+        paymentStatus: "paid",
+        acceptedAt: { $in: [null, undefined] },
+        ringingStartedAt: { $exists: true, $lte: cutoff },
+      }).limit(200);
+
+      // fallback for old bookings that don't have ringingStartedAt yet
+      if (!ringing.length) {
+        const legacy = await Booking.find({
           status: "scheduled",
           paymentStatus: "paid",
-          acceptedAt: { $exists: false },
+          acceptedAt: { $in: [null, undefined] },
+          ringingStartedAt: { $exists: false },
           createdAt: { $lte: cutoff },
         }).limit(200);
+
+        ringing.push(...legacy);
+      }
 
         for (const b of ringing) {
           try {
@@ -1116,16 +1135,28 @@ app.use("/api", bookingsRouter);
 app.use("/api", matcherRouter);
 console.log("[api] ✅ Matcher routes mounted");
 
-// wallet write guard
+// wallet write guard (ONLY protect pro-only wallet actions)
+// ✅ client is allowed to: POST /wallet/pay-booking
+// ✅ client is allowed to: GET /wallet/topup/* and GET /wallet/client/me
 app.use("/api/wallet", requireAuth, (req, res, next) => {
-  const write =
-    req.method === "POST" ||
-    req.method === "PUT" ||
-    req.method === "DELETE" ||
-    req.method === "PATCH";
-  if (!write) return next();
+  const p = req.path || ""; // NOTE: here it's "/pay-booking", "/topup/init", "/client/me"
+
+  // Allow client endpoints (even if POST)
+  if (p.startsWith("/pay-booking")) return next();
+
+  // Allow topups (GET)
+  if (p.startsWith("/topup")) return next();
+
+  // Allow client wallet read
+  if (p.startsWith("/client")) return next();
+
+  const isWrite = ["POST", "PUT", "PATCH", "DELETE"].includes(req.method);
+  if (!isWrite) return next();
+
   return requirePro(req, res, next);
 });
+
+
 app.use("/api", walletWithAuth(requireAuth, requireAdmin));
 
 app.use("/api", pinRoutes({ requireAuth, Application }));
@@ -1872,17 +1903,30 @@ async function handlePaystackEvent(event) {
         console.warn("[paystack] amount mismatch for", ref, amount, "vs", booking.amountKobo);
       }
 
-      booking.paymentStatus = "paid";
+     booking.paymentStatus = "paid";
       if (booking.status === "pending_payment") booking.status = "scheduled";
+
+      // ✅ mark ringing start (used by ring-timeout cron)
+      if (!booking.ringingStartedAt) booking.ringingStartedAt = new Date();
+
       await booking.save();
 
-      try {
-        await creditProPendingForBooking(booking, { paystackRef: ref });
-      } catch (err) {
-        console.error("[wallet] credit pending error:", err);
-      }
+// ✅ IMPORTANT: fund escrow ledger for card payments (idempotent)
+try {
+  await fundEscrowFromPaystackForBooking(booking, { reference: ref });
+  console.log("[paystack] ✅ escrow funded for booking:", booking._id.toString());
+} catch (e) {
+  console.error(
+    "[paystack] ❌ escrow funding failed for booking:",
+    booking._id.toString(),
+    e?.message || e
+  );
+}
 
-      console.log("[paystack] ✅ booking funded:", booking._id.toString());
+// ✅ Option A: do NOT credit pro pending on payment anymore
+console.log("[paystack] ✅ booking paid (escrow held):", booking._id.toString());
+
+
     } catch (err) {
       console.error("[paystack] update booking error:", err);
     }

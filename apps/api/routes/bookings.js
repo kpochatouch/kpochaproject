@@ -11,6 +11,7 @@ import { getIO } from "../sockets/index.js";
 import { ClientProfile } from "../models/Profile.js";
 import { cancelBookingAndRefund } from "../services/walletService.js";
 import { createNotification } from "../services/notificationService.js";
+import { creditProPendingForBooking } from "../services/walletService.js";
 
 
 const router = express.Router();
@@ -659,6 +660,7 @@ router.put("/bookings/:id/accept", requireAuth, async (req, res) => {
     b.acceptedAt = new Date(); // for ring-timeout / analytics
     await b.save();
 
+
     // --- Socket: notify both client and pro so chat can open ---
     try {
       const io = getIO();
@@ -771,6 +773,10 @@ router.put("/bookings/:id/complete", requireAuth, async (req, res) => {
         .json({ error: `Cannot complete when status is ${b.status}` });
     }
 
+    if (b.paymentStatus !== "paid") {
+  return res.status(400).json({ error: "Cannot complete before payment" });
+}
+
     b.status = "completed";
     b.completedAt = new Date(); // important for auto-release scheduler
 
@@ -783,6 +789,14 @@ router.put("/bookings/:id/complete", requireAuth, async (req, res) => {
     b.meta = meta;
 
     await b.save();
+
+    // ✅ move escrow → pro pending AFTER completion (true escrow)
+    try {
+      await creditProPendingForBooking(b, { reason: "completed" });
+    } catch (e) {
+      console.error("[bookings:complete] creditProPendingForBooking failed:", e?.message || e);
+    }
+
 
     // --- update Pro jobsCompleted metric, invalidate cache and emit socket update ---
     try {

@@ -1,5 +1,6 @@
 // apps/web/src/pages/PaymentConfirm.jsx
 import { useEffect, useRef, useState } from "react";
+import { api } from "../lib/api";
 
 export default function PaymentConfirm() {
   const [status, setStatus] = useState("Verifying payment…");
@@ -29,39 +30,39 @@ export default function PaymentConfirm() {
           return;
         }
 
-        // 3) Build API URL (prefer env; fallback to same-origin)
-        const base = import.meta.env.VITE_API_BASE_URL || "";
-        const url = `${base}/api/payments/verify`;
-
-        // 4) Verify with backend (public in your server; no token required)
-        const r = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ bookingId, reference }),
+        try {
+        const { data: j } = await api.post("/api/payments/verify", {
+          bookingId,
+          reference,
         });
 
-        // Network / parse guards
-        let j = null;
-        try { j = await r.json(); } catch { /* ignore */ }
+        if (j?.ok) {
+          setStatus("✅ Payment confirmed! Redirecting…");
+          sessionStorage.removeItem("pay_ref");
 
-if (!r.ok) {
-  setStatus("❌ Verification failed on the server. Please try again or contact support.");
-  return;
-}
+          setTimeout(() => {
+            window.location.assign(`/bookings/${bookingId}`);
+          }, 800);
 
-if (j?.ok) {
-  setStatus("✅ Payment confirmed! Redirecting…");
-  sessionStorage.removeItem("pay_ref");
+          return;
+        }
 
-  // ✅ redirect to booking details
-  setTimeout(() => {
-  window.location.assign(`/bookings/${bookingId}`);
-}, 800);
+        setStatus("❌ Payment not confirmed yet. If you were charged, please contact support.");
+      } catch (e) {
+        const code = e?.response?.status;
+        const msg = e?.response?.data?.error || e?.response?.data?.message;
 
-  return;
-} else {
-  setStatus("❌ Payment not confirmed yet. If you were charged, please contact support.");
-}
+        if (code === 401) {
+          setStatus("🔒 You are not logged in. Please login again, then return to verify payment.");
+        } else if (code === 403 && msg === "not_your_booking") {
+          setStatus("❌ This booking does not belong to you.");
+        } else if (msg === "reference_mismatch") {
+          setStatus("❌ Payment reference mismatch. Please contact support.");
+        } else {
+          setStatus("❌ Could not verify payment. Please try again or contact support.");
+        }
+      }
+
       } catch {
         setStatus("❌ Could not verify payment. Please try again or contact support.");
       }

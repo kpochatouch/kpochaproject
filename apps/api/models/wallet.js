@@ -30,23 +30,36 @@ const WalletTxSchema = new mongoose.Schema(
     // e.g. "topup", "booking_hold", "booking_release", "refund", "withdraw", "fee"
     type: { type: String, required: true },
 
-    // "credit" or "debit"
-    direction: { type: String, enum: ["credit", "debit"], required: true },
+    // "credit" or "debit" or "neutral"
+    direction: { type: String, enum: ["credit", "debit", "neutral"], required: true },
 
-    amountKobo: { type: Number, required: true, min: 1 },
+    // tx amount (0 allowed for neutral/init records)
+    amountKobo: { type: Number, required: true, min: 0 },
 
     // snapshot balances after this tx
     balancePendingKobo: { type: Number, default: 0 },
     balanceAvailableKobo: { type: Number, default: 0 },
 
-    // anything helpful (bookingId, paystackRef, feeKobo, intentId, etc.)
+    // Paystack reference (top-level, indexable) - used for idempotency
+    reference: { type: String, default: null, index: true },
+
+    // anything helpful (bookingId, paystack payload, etc.)
     meta: { type: mongoose.Schema.Types.Mixed, default: {} },
   },
   { timestamps: true }
 );
 
+
 // helpful index for recent history per user
 WalletTxSchema.index({ ownerUid: 1, createdAt: -1 });
+
+// Prevent double-credit for the same Paystack reference
+// (Only applies when reference is present, mainly topup_credit)
+WalletTxSchema.index(
+  { ownerUid: 1, type: 1, reference: 1 },
+  { unique: true, partialFilterExpression: { reference: { $type: "string" } } }
+);
+
 
 /**
  * Top-up intent: created before redirect/inline; verified once by Paystack callback.
@@ -80,27 +93,46 @@ export const WalletTopupIntent =
  * and ensure the correct unique index on `ownerUid`.
  */
 export async function ensureWalletIndexes() {
+  // One-time safety: drop any old unique index on `userUid`
   try {
     await Wallet.collection.dropIndex("userUid_1");
   } catch (e) {
     // ignore if not present
   }
+
+  // Ensure correct unique wallet per user
   try {
     await Wallet.collection.createIndex({ ownerUid: 1 }, { unique: true });
   } catch (e) {
     // ignore if already exists
   }
+
+  // Keep topup intent reference unique (if you ever use WalletTopupIntent)
   try {
     await WalletTopupIntent.collection.createIndex({ reference: 1 }, { unique: true });
   } catch (e) {
     // ignore
   }
+
+  // Helpful history index
   try {
     await WalletTx.collection.createIndex({ ownerUid: 1, createdAt: -1 });
   } catch (e) {
     // ignore
   }
+
+  // Strong idempotency for topups
+  try {
+    await WalletTx.collection.createIndex(
+      { ownerUid: 1, type: 1, reference: 1 },
+      { unique: true, partialFilterExpression: { reference: { $type: "string" } } }
+    );
+  } catch (e) {
+    // ignore
+  }
 }
+
+
 
 /* =============================== Helper APIs ============================== */
 

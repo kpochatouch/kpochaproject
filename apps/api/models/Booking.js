@@ -113,6 +113,12 @@ const BookingSchema = new mongoose.Schema(
       index: true,
     },
     acceptedAt: { type: Date }, // when pro accepts (ring timeout / analytics)
+        // Ringing window (starts when payment becomes paid/scheduled)
+    ringingStartedAt: { type: Date, index: true },
+
+    // When booking was cancelled (client/system/admin)
+    cancelledAt: { type: Date, index: true },
+
 
     // When pro declines
     decline: {
@@ -159,6 +165,7 @@ BookingSchema.pre("validate", function (next) {
 /* --------------------------------- Indexes ---------------------------------- */
 BookingSchema.index({ proId: 1, scheduledFor: -1 });
 BookingSchema.index({ clientUid: 1, createdAt: -1 });
+BookingSchema.index({ status: 1, paymentStatus: 1, acceptedAt: 1, ringingStartedAt: 1 });
 
 export const Booking =
   mongoose.models.Booking || mongoose.model("Booking", BookingSchema);

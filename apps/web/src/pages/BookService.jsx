@@ -364,17 +364,20 @@ const payload = {
   serviceName,
   amountKobo,
   addressText: address.trim(),
-  client: {
-    name: client.fullName,
-    phone: client.phone,
-  },
+
+  // ✅ match backend fields (/bookings/instant expects these)
+  clientName: client.fullName,
+  clientPhone: client.phone,
+
   country: "Nigeria",
   state: carriedState || client.state || "",
   lga: carriedLga || client.lga || "",
-  coords: normalizedCoords, // <- normalized { lat, lng } or null
-  instant: true,
+  coords: normalizedCoords,
+
+  // backend uses paymentMethodRequested in meta
   paymentMethod: "card",
 };
+
 
 try {
   setBusy(true);

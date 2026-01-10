@@ -72,7 +72,7 @@ export default function ClientWallet() {
     (async () => {
       try {
         setErr("");
-        await api.post("/api/wallet/topup/verify", { reference });
+        await api.get("/api/wallet/topup/verify", { params: { reference } });
         if (!on) return;
         await refreshWallet();
         // Clean the URL (remove the reference param) for a tidy state
@@ -109,11 +109,13 @@ async function startTopupInline(amountKobo) {
       callback: function (response) {
         (async () => {
           try {
-            const verify = await api.post("/api/wallet/topup/verify", {
-              reference: response.reference,
-            });
+            const verify = await api.get("/api/wallet/topup/verify", {
+            params: { reference: response.reference },
+          });
+
             if (verify?.data?.ok) {
               await refreshWallet();
+              setTopupNaira("");
               resolve();
             } else {
               reject(new Error("verify_failed"));
@@ -136,7 +138,10 @@ async function startTopupInline(amountKobo) {
 
   // ---------- redirect/init flow ----------
   async function startTopupRedirect(amountKobo) {
-    const { data } = await api.post("/api/wallet/topup/init", { amountKobo });
+    const { data } = await api.get("/api/wallet/topup/init", {
+    params: { amountKobo },
+   });
+
     if (!data?.authorization_url) throw new Error("init_failed");
     // Optional: stash context if you want to show a message on return
     sessionStorage.setItem("topup_pending", String(amountKobo));

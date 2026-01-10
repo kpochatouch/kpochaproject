@@ -634,6 +634,9 @@ pcNew.__sigHandlers = { onAnswer, onIce, onOffer: handleOffer };
   // ---- hangup (both roles) ----
 
   async function hangup(forceStatus = null) {
+    if (forceStatus && typeof forceStatus !== "string") {
+  forceStatus = null;
+}
     stopAllTones();
     const endedStatus =
   forceStatus ||
@@ -710,7 +713,7 @@ pcNew.__sigHandlers = { onAnswer, onIce, onOffer: handleOffer };
           </div>
           <button
             className="text-xs px-3 py-1 rounded-full border border-zinc-700 text-zinc-300 hover:bg-zinc-800"
-            onClick={hangup}
+            onClick={() => hangup()}
             type="button"
           >
             Close
@@ -822,7 +825,7 @@ pcNew.__sigHandlers = { onAnswer, onIce, onOffer: handleOffer };
               ) : (
                 <button
                   className="flex items-center justify-center w-14 h-14 rounded-full bg-rose-600 text-white text-xl shadow-lg mx-auto"
-                  onClick={hangup}
+                  onClick={() => hangup()}
                   type="button"
                 >
                   📞

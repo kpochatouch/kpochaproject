@@ -2,8 +2,8 @@
 import express from "express";
 import fetch from "node-fetch"; // ✅ ensure fetch is available (consistent with other files)
 import { Booking } from "../models/Booking.js";
-import { creditProPendingForBooking } from "../services/walletService.js";
 import { getIO } from "../sockets/index.js";
+import { fundEscrowFromPaystackForBooking } from "../services/walletService.js";
 
 /**
  * Export a router factory so we can inject requireAuth from the host app.
@@ -69,8 +69,8 @@ export default function paymentsRouter({ requireAuth }) {
     }
   });
 
-    /** Verify (used by inline & post-redirect confirmation) — public */
-  router.post("/payments/verify", async (req, res) => {
+    /** Verify (used by inline & post-redirect confirmation) — authenticated */
+  router.post("/payments/verify", requireAuth, async (req, res) => {
     try {
       const { bookingId, reference } = req.body || {};
       if (!bookingId || !reference) {
@@ -103,17 +103,41 @@ export default function paymentsRouter({ requireAuth }) {
       }
 
       const booking = await Booking.findById(bookingId);
-      if (!booking)
-        return res.status(404).json({ error: "Booking not found" });
+      if (!booking) {
+        return res.status(404).json({ error: "booking_not_found" });
+      }
 
 
-        // ✅ ADD THIS SAFETY CHECK HERE
+      // ✅ Guard: don’t allow paying for cancelled/refunded bookings
+      if (booking.status === "cancelled" || booking.paymentStatus === "refunded") {
+        return res.status(400).json({ error: "booking_not_payable" });
+      }
+
+       // 🔒 Only the booking owner can verify
+      if (String(booking.clientUid) !== String(req.user.uid)) {
+        return res.status(403).json({ error: "not_your_booking" });
+      }
+
+      // ✅ Use server-stored reference as canonical (prevents client sending a random reference)
+      if (booking.paystackReference && booking.paystackReference !== reference) {
+        return res.status(400).json({
+          error: "reference_mismatch",
+          expected: booking.paystackReference,
+        });
+      }
+
+
         if (
-          booking.paymentStatus === "paid" &&
-          booking.paystackReference === reference
-        ) {
-          return res.json({ ok: true, status: "success", alreadyPaid: true });
+        booking.paymentStatus === "paid" &&
+        booking.paystackReference === reference
+      ) {
+        if (!booking.ringingStartedAt) {
+          booking.ringingStartedAt = new Date();
+          await booking.save();
         }
+        return res.json({ ok: true, status: "success", alreadyPaid: true });
+      }
+
 
 
       if (booking.amountKobo && Number(amount) !== Number(booking.amountKobo)) {
@@ -128,7 +152,25 @@ export default function paymentsRouter({ requireAuth }) {
       booking.paymentStatus = "paid";
       if (booking.status === "pending_payment") booking.status = "scheduled";
       booking.paystackReference = reference;
+
+      // ✅ mark ringing start (used by ring-timeout cron)
+      if (!booking.ringingStartedAt) booking.ringingStartedAt = new Date();
+
       await booking.save();
+
+
+      // ✅ Fund platform escrow ledger for CARD payments (idempotent)
+try {
+  await fundEscrowFromPaystackForBooking(booking, { reference });
+} catch (e) {
+  console.error("[payments/verify] fundEscrowFromPaystackForBooking failed:", e?.message || e);
+  // Decide your policy:
+  // - If you want to be strict: return 500 and treat payment as not finalized
+  // - If you want to be fail-soft: continue (booking is paid, but escrow ledger missing)
+  //
+  // I recommend FAIL-SOFT for now so users don't get stuck after Paystack success.
+}
+
 
       // 🔔 Notify both pro + client in real-time that payment is confirmed
       try {
@@ -156,13 +198,6 @@ export default function paymentsRouter({ requireAuth }) {
           "[payments/verify] socket emit booking:paid failed:",
           err?.message || err
         );
-      }
-
-      // Keep your wallet pending credit (non-fatal)
-      try {
-        await creditProPendingForBooking(booking, { paystackRef: reference });
-      } catch (err) {
-        console.error("[wallet] credit pending error:", err);
       }
 
       return res.json({ ok: true, status: "success" });
