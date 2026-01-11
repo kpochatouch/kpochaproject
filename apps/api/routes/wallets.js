@@ -510,24 +510,38 @@ async function getPlatformRecipientCode() {
       const pinRes = await verifyPinForUid(req.user.uid, pin);
       if (!pinRes.ok) return res.status(400).json({ error: pinRes.code });
 
-            // ✅ Reserve funds FIRST to prevent double-spend on repeated requests
-      const w = await Wallet.findOneAndUpdate(
+          const PAYSTACK_SECRET_KEY = requirePaystackKey(res);
+        if (!PAYSTACK_SECRET_KEY) return;
+
+        // Get user's payout account (MUST be checked before reserving funds)
+        const appDoc = await Application.findOne({ uid: req.user.uid }).lean();
+        const bank = appDoc?.payoutBank || {};
+        if (!bank.accountNumber || !bank.code) {
+          return res.status(400).json({ error: "no_payout_account" });
+        }
+
+        // ✅ Reserve funds AFTER prerequisites to prevent "stuck" deductions
+        const w = await Wallet.findOneAndUpdate(
         { ownerUid: req.user.uid, availableKobo: { $gte: amt } },
         { $inc: { availableKobo: -amt } },
-        { new: true }
+        { new: true, upsert: true, setDefaultsOnInsert: true }
       );
       if (!w) return res.status(400).json({ error: "insufficient_available" });
 
 
-      const PAYSTACK_SECRET_KEY = requirePaystackKey(res);
-      if (!PAYSTACK_SECRET_KEY) return;
+        // (optional but useful) record that we reserved funds
+        try {
+          await WalletTx.create({
+            ownerUid: req.user.uid,
+            type: "cashout_reserve",
+            direction: "debit",
+            amountKobo: amt,
+            balancePendingKobo: Number(w.pendingKobo || 0),
+            balanceAvailableKobo: Number(w.availableKobo || 0),
+            meta: { stage: "reserved" },
+          });
+        } catch {}
 
-      // Get user's payout account
-      const appDoc = await Application.findOne({ uid: req.user.uid }).lean();
-      const bank = appDoc?.payoutBank || {};
-      if (!bank.accountNumber || !bank.code) {
-        return res.status(400).json({ error: "no_payout_account" });
-      }
 
       // Create recipient
       const createRecipient = await fetch("https://api.paystack.co/transferrecipient", {
@@ -616,15 +630,14 @@ async function getPlatformRecipientCode() {
 
 
       await WalletTx.create({
-        ownerUid: req.user.uid,
-        type: "cashout_transfer",
-        direction: "debit",
-        amountKobo: amt,
-        balancePendingKobo: Number(w.pendingKobo || 0),
-        balanceAvailableKobo: Number(w.availableKobo || 0),
-        meta: { paystack: payData.data },
-      });
-
+      ownerUid: req.user.uid,
+      type: "cashout_transfer",
+      direction: "neutral",     // ✅ finalization only; reserve already debited
+      amountKobo: 0,            // ✅ prevents “double debit” confusion
+      balancePendingKobo: Number(w.pendingKobo || 0),
+      balanceAvailableKobo: Number(w.availableKobo || 0),
+      meta: { paystack: payData.data, reservedAmountKobo: amt },
+    });
 
       res.json({ ok: true, transfer: payData.data });
 
@@ -640,26 +653,31 @@ async function getPlatformRecipientCode() {
   router.post("/wallet/release", requireAuth, requireAdmin, async (req, res) => {
     try {
       const { uid = req.user.uid } = req.body || {};
-      const w = await ensureWallet(uid);
-      const amt = w.pendingKobo;
-      if (!amt) return res.json({ ok: true, releasedKobo: 0 });
+      // ✅ Atomic release: move ALL pending -> available in one DB operation
+const before = await ensureWallet(uid); // ensures wallet exists; gives us the pending amount for logging
+const amt = Number(before.pendingKobo || 0);
+if (!amt) return res.json({ ok: true, releasedKobo: 0 });
 
-     w.pendingKobo = 0;
-    w.availableKobo = Number(w.availableKobo || 0) + amt;
-    await w.save();
+const after = await Wallet.findOneAndUpdate(
+  { ownerUid: uid, pendingKobo: { $gte: amt } },
+  { $inc: { pendingKobo: -amt, availableKobo: amt } },
+  { new: true }
+);
 
-        await WalletTx.create({
-      ownerUid: uid,
-      type: "admin_release",
-      direction: "credit",
-      amountKobo: amt,
-      balancePendingKobo: Number(w.pendingKobo || 0),
-      balanceAvailableKobo: Number(w.availableKobo || 0),
-      meta: { source: "admin_release" },
-    });
+if (!after) return res.json({ ok: true, releasedKobo: 0 });
 
+await WalletTx.create({
+  ownerUid: uid,
+  type: "admin_release",
+  direction: "credit",
+  amountKobo: amt,
+  balancePendingKobo: Number(after.pendingKobo || 0),
+  balanceAvailableKobo: Number(after.availableKobo || 0),
+  meta: { source: "admin_release" },
+});
 
-    res.json({ ok: true, releasedKobo: amt });
+return res.json({ ok: true, releasedKobo: amt });
+
 
     } catch (e) {
       console.error("[wallet/release] error:", e);

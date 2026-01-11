@@ -15,34 +15,52 @@ export default function paymentsRouter({ requireAuth }) {
   /** Init (for redirect fallback) */
   router.post("/payments/init", requireAuth, async (req, res) => {
     try {
-      const { bookingId, amountKobo, email } = req.body || {};
-      if (!bookingId || !amountKobo) {
-        return res.status(400).json({ error: "bookingId and amountKobo required" });
-      }
-      if (!process.env.PAYSTACK_SECRET_KEY) {
-        return res.status(500).json({ error: "paystack_secret_missing" });
-      }
+      const { bookingId, email } = req.body || {};
+if (!bookingId) {
+  return res.status(400).json({ error: "bookingId required" });
+}
 
-      const booking = await Booking.findById(bookingId);
-      if (!booking) return res.status(404).json({ error: "booking_not_found" });
+const booking = await Booking.findById(bookingId);
+if (!booking) return res.status(404).json({ error: "booking_not_found" });
 
-      const initResp = await fetch("https://api.paystack.co/transaction/initialize", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          email: email || req.user.email || "customer@example.com",
-          amount: Number(amountKobo), // kobo
-          reference: `BOOKING-${booking._id}`,
-          metadata: {
-            custom_fields: [
-              { display_name: "Booking", variable_name: "bookingId", value: String(booking._id) }
-            ],
-          },
-        }),
-      });
+// 🔒 Only the booking owner can init payment
+if (String(booking.clientUid) !== String(req.user.uid)) {
+  return res.status(403).json({ error: "not_your_booking" });
+}
+
+// ✅ Always bill the real booking amount (never trust client body)
+const amountKobo = Math.floor(Number(booking.amountKobo || 0));
+if (!amountKobo || amountKobo <= 0) {
+  return res.status(400).json({ error: "invalid_booking_amount" });
+}
+
+const reference = `BOOKING-${booking._id}-${Date.now()}`;
+
+if (!process.env.PAYSTACK_SECRET_KEY) {
+  return res.status(500).json({ error: "paystack_secret_missing" });
+}
+
+const initResp = await fetch("https://api.paystack.co/transaction/initialize", {
+
+  method: "POST",
+  headers: {
+    Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    email: email || req.user.email || "customer@example.com",
+    amount: amountKobo,
+    reference,
+    metadata: {
+      bookingId: String(booking._id),
+      clientUid: String(booking.clientUid || ""),
+      custom_fields: [
+        { display_name: "Booking", variable_name: "bookingId", value: String(booking._id) },
+      ],
+    },
+  }),
+});
+
 
       const initJson = await initResp.json();
       if (!initResp.ok || !initJson?.status || !initJson?.data?.authorization_url) {
@@ -52,7 +70,7 @@ export default function paymentsRouter({ requireAuth }) {
         });
       }
 
-      booking.paystackReference = initJson.data.reference || `BOOKING-${booking._id}`;
+      booking.paystackReference = initJson?.data?.reference || reference;
       if (booking.paymentStatus !== "paid") {
         booking.paymentStatus = "pending";
         booking.status = booking.status === "scheduled" ? booking.status : "pending_payment";
@@ -60,9 +78,10 @@ export default function paymentsRouter({ requireAuth }) {
       await booking.save();
 
       return res.json({
-        authorization_url: initJson.data.authorization_url,
-        reference: initJson.data.reference,
-      });
+      authorization_url: initJson.data.authorization_url,
+      reference: booking.paystackReference, // always defined now
+    });
+
     } catch (e) {
       console.error("[payments/init] error:", e);
       res.status(500).json({ error: "init_error" });
@@ -140,14 +159,21 @@ export default function paymentsRouter({ requireAuth }) {
 
 
 
-      if (booking.amountKobo && Number(amount) !== Number(booking.amountKobo)) {
-        console.warn(
-          "[paystack] amount mismatch",
-          amount,
-          "vs",
-          booking.amountKobo
-        );
+      const expected = Math.floor(Number(booking.amountKobo || 0));
+      const paid = Math.floor(Number(amount || 0));
+
+      if (!expected || expected <= 0) {
+        return res.status(400).json({ error: "invalid_booking_amount" });
       }
+
+      if (paid !== expected) {
+        return res.status(400).json({
+          error: "amount_mismatch",
+          expectedKobo: expected,
+          paidKobo: paid,
+        });
+      }
+
 
       booking.paymentStatus = "paid";
       if (booking.status === "pending_payment") booking.status = "scheduled";
