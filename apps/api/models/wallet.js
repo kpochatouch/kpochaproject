@@ -49,6 +49,18 @@ const WalletTxSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// One-time booking-scoped idempotency (bulletproof under concurrency)
+WalletTxSchema.index(
+  { ownerUid: 1, type: 1, "meta.bookingId": 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      type: { $in: ["booking_fund", "escrow_hold_in", "platform_cancel_fee_in", "cancel_fee_compensation"] },
+      "meta.bookingId": { $exists: true, $type: "string" },
+    },
+  }
+);
+
 
 // helpful index for recent history per user
 WalletTxSchema.index({ ownerUid: 1, createdAt: -1 });
@@ -121,7 +133,7 @@ export async function ensureWalletIndexes() {
     // ignore
   }
 
-  // Strong idempotency for topups
+    // Strong idempotency for topups
   try {
     await WalletTx.collection.createIndex(
       { ownerUid: 1, type: 1, reference: 1 },
@@ -130,4 +142,28 @@ export async function ensureWalletIndexes() {
   } catch (e) {
     // ignore
   }
+
+  // Strong idempotency for booking-scoped one-time txs ✅ ADD THIS RIGHT HERE
+  try {
+    await WalletTx.collection.createIndex(
+      { ownerUid: 1, type: 1, "meta.bookingId": 1 },
+      {
+        unique: true,
+        partialFilterExpression: {
+          type: {
+            $in: [
+              "booking_fund",
+              "escrow_hold_in",
+              "platform_cancel_fee_in",
+              "cancel_fee_compensation",
+            ],
+          },
+          "meta.bookingId": { $exists: true, $type: "string" },
+        },
+      }
+    );
+  } catch (e) {
+    // ignore
+  }
 }
+

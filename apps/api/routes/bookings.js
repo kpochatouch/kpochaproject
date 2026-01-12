@@ -594,7 +594,8 @@ router.put("/bookings/:id/cancel", requireAuth, async (req, res) => {
     }
 
     // ✅ This will:
-    // - reverse pro pending (if funded)
+    // - Under Option A, pro is NOT funded at payment/accept, so cancellation does not reverse pro funds.
+    // - Refund comes from escrow to client wallet (minus possible cancel fee after accept).
     // - only apply fee when client cancels AFTER accept (booking.status === "accepted")
     // - set booking.status = "cancelled" and paymentStatus = "refunded"
     const refundInfo = await cancelBookingAndRefund(b, {
@@ -605,21 +606,40 @@ router.put("/bookings/:id/cancel", requireAuth, async (req, res) => {
     // 🔔 Notify pro owner that client cancelled
     try {
       if (b.proOwnerUid) {
-        await createNotification({
-          toUid: b.proOwnerUid,
-          fromUid: req.user.uid,
-          type: "booking_cancelled",
-          title: "Booking cancelled",
-          body:
-            "The client cancelled a booking for " +
-            (b?.service?.serviceName || "a service") +
-            (reason ? ` (reason: ${reason})` : ""),
-          data: {
-            bookingId: b._id.toString(),
-            status: b.status,
-            paymentStatus: b.paymentStatus,
-          },
-        });
+        const feeAppliedKobo = Number(refundInfo?.cancelFeeKobo || 0);
+const platformFeeKobo = Math.floor(feeAppliedKobo / 2);
+const proCompKobo = Math.max(0, feeAppliedKobo - platformFeeKobo);
+
+const base = "The client cancelled a booking for " + (b?.service?.serviceName || "a service");
+const reasonTxt = reason ? ` (reason: ${reason})` : "";
+
+const body =
+  feeAppliedKobo > 0
+    ? `${base}. Cancel fee applied: ₦${(feeAppliedKobo / 100).toFixed(2)}. ` +
+      (b.proOwnerUid
+        ? `You received compensation: ₦${(proCompKobo / 100).toFixed(2)} (added to pending).`
+        : `Compensation could not be credited (missing proOwnerUid).`) +
+      reasonTxt
+    : `${base}. No cancellation fee applied.` + reasonTxt;
+
+
+    await createNotification({
+      toUid: b.proOwnerUid,
+      fromUid: req.user.uid,
+      type: "booking_cancelled",
+      title: "Booking cancelled",
+      body,
+      data: {
+        bookingId: b._id.toString(),
+        status: b.status,
+        paymentStatus: b.paymentStatus,
+        cancelFeeKobo: feeAppliedKobo,
+        proCompKobo,
+        platformFeeKobo,
+        refundedAmountKobo: Number(refundInfo?.refundAmountKobo || 0),
+      },
+    });
+
       }
     } catch (notifyErr) {
       console.warn(
@@ -638,6 +658,61 @@ router.put("/bookings/:id/cancel", requireAuth, async (req, res) => {
     res.status(500).json({ error: "Failed to cancel booking" });
   }
 });
+
+/** Pro: cancel booking (after scheduled or accepted) */
+router.put("/bookings/:id/cancel-by-pro", requireAuth, async (req, res) => {
+  try {
+    const reason =
+      (req.body && (req.body.reason || req.body.reasonText || "")) || "";
+
+    const b = await Booking.findById(req.params.id);
+    if (!b) return res.status(404).json({ error: "Not found" });
+
+    // only assigned pro can cancel
+    if (b.proOwnerUid !== req.user.uid) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    // only allow in these states
+    if (!["scheduled", "accepted"].includes(b.status)) {
+      return res.status(400).json({ error: `Cannot cancel when status is ${b.status}` });
+    }
+
+    // ✅ this triggers FULL refund (no fee) because cancelledBy !== "client"
+    const refundInfo = await cancelBookingAndRefund(b, {
+      cancelledBy: "pro",
+      reason,
+    });
+
+    // apology notification to client
+    try {
+      if (b.clientUid) {
+        const amt = Number(refundInfo?.refundAmountKobo || 0);
+        await createNotification({
+          toUid: b.clientUid,
+          fromUid: b.proOwnerUid,
+          type: "booking_cancelled",
+          title: "Booking cancelled by professional",
+          body:
+            "Sorry — the professional cancelled this booking. " +
+            `Refund: ₦${(amt / 100).toFixed(2)} has been sent to your wallet.`,
+          data: {
+            bookingId: b._id.toString(),
+            refundAmountKobo: amt,
+            cancelledBy: "pro",
+            reason,
+          },
+        });
+      }
+    } catch {}
+
+    return res.json({ ok: true, booking: sanitizeBookingFor(req, b), refund: refundInfo });
+  } catch (err) {
+    console.error("[bookings:cancel-by-pro] error:", err);
+    return res.status(500).json({ error: "Failed to cancel booking" });
+  }
+});
+
 
 /** Pro: accept booking */
 router.put("/bookings/:id/accept", requireAuth, async (req, res) => {

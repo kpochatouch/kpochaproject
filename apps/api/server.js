@@ -272,6 +272,7 @@ try {
   await loadSettings({ force: true });
 } catch (err) {
   console.error("[mongo] ❌ Connection error:", err?.message || err);
+  process.exit(1);
 }
 
 /* ------------------- Schedulers ------------------- */

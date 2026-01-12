@@ -688,10 +688,14 @@ return res.json({ ok: true, releasedKobo: amt });
   /**
  * POST /api/wallet/pay-booking
  * Body: { bookingId }
- * - Debits client wallet
- * - Marks booking as paid
- * - Credits pro pending via walletService.creditProPendingForBooking()
+ * - Debits client wallet (available)
+ * - Holds funds in platform escrow (__ESCROW__)
+ * - Marks booking as paid (scheduled)
+ * - Does NOT credit pro pending here
+ * - Pro pending is credited ONLY after booking is marked COMPLETED
+ *   (in bookings.js via creditProPendingForBooking)
  */
+
 router.post("/wallet/pay-booking", requireAuth, async (req, res) => {
   try {
     const { bookingId } = req.body || {};
@@ -729,7 +733,14 @@ router.post("/wallet/pay-booking", requireAuth, async (req, res) => {
     booking.status =
       booking.status === "pending_payment" ? "scheduled" : booking.status;
     booking.paystackReference = `WALLET-${Date.now()}`;
+
+    // ✅ START connection window immediately (same as Paystack flow)
+    if (!booking.ringingStartedAt) {
+      booking.ringingStartedAt = new Date();
+    }
+
     await booking.save();
+
 
     // Option A escrow: do NOT credit pro pending on payment.
     // Pro pending is credited only when booking is marked COMPLETED (in bookings.js).
