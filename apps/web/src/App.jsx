@@ -17,6 +17,7 @@ import ClickOutsideLayer from "./components/ClickOutsideLayer.jsx";
 import RequireAuth from "./components/RequireAuth.jsx";
 import RouteLoader from "./components/RouteLoader.jsx";
 import { useMe } from "./context/MeContext.jsx";
+import BookingAlert from "./components/BookingAlert.jsx";
 
 // ---------- pages (lazy) ----------
 const Home = lazy(() => import("./pages/Home.jsx"));
@@ -260,6 +261,15 @@ useChatbase(!hideChatbase);
       <ClickOutsideLayer />
 
       {!hideChrome && <Navbar />}
+
+      {!hideChrome && me?.isPro && (
+      <BookingAlert
+        pollMs={15000}
+        playSound={true}
+      />
+    )}
+
+
 
       <main className={hideChrome ? "flex-1 bg-black" : "flex-1"}>
         <Suspense fallback={<RouteLoader full />}>

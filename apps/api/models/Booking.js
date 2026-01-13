@@ -47,10 +47,10 @@ const ClientContactPrivateSchema = new mongoose.Schema(
 const ClientPublicSchema = new mongoose.Schema(
   {
     name: { type: String, default: "" },
-    phone: { type: String, default: "" },
   },
   { _id: false }
 );
+
 
 /* --------------------------------- Booking --------------------------------- */
 const BookingSchema = new mongoose.Schema(

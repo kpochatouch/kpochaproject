@@ -1,6 +1,6 @@
 // apps/web/src/pages/ProDashboard.jsx
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getProBookings, acceptBooking, completeBooking } from "../lib/api";
+import { getProBookings, acceptBooking, completeBooking, cancelBookingByPro } from "../lib/api";
 import { Link } from "react-router-dom";
 
 /* ---------- utils ---------- */
@@ -177,10 +177,16 @@ export default function ProDashboard() {
       flashOK("Booking completed.");
     } catch (e) {
       console.error(e);
-      setErr("Could not complete booking.");
+     const msg = e?.response?.data?.message || e?.response?.data?.error;
+      setErr(
+        msg === "client_must_complete_first"
+          ? "Client must mark completed first. If they don’t respond, you can complete after the fallback time."
+          : (msg || "Could not complete booking.")
+      );
       load();
-    }
-  }
+
+          }
+        }
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-10">
@@ -260,10 +266,7 @@ export default function ProDashboard() {
                 ? "amber"
                 : "amber";
 
-            const canAccept =
-              b.paymentStatus === "paid" &&
-              (b.status === "scheduled" ||
-                b.status === "pending_payment");
+            const canAccept = b.paymentStatus === "paid" && b.status === "scheduled";
 
             // 2-hour rule: how long since accepted?
             const acceptedAt = toDate(b.acceptedAt);
@@ -350,26 +353,82 @@ export default function ProDashboard() {
                   </div>
                 </div>
 
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <button
-                    onClick={() => onAccept(b._id)}
-                    disabled={!canAccept}
-                    className="rounded-lg border border-emerald-700 text-emerald-300 px-3 py-1.5 text-sm hover:bg-emerald-950/40 disabled:opacity-40"
-                    title="Accept the job (available when payment is paid)"
-                  >
-                    Accept
-                  </button>
-
-                  {proCanCompleteFallback && (
+               <div className="mt-3 flex flex-wrap gap-2">
+                {/* Scheduled + paid: show Accept + Decline */}
+                {b.paymentStatus === "paid" && b.status === "scheduled" ? (
+                  <>
                     <button
-                      onClick={() => onCompleteAsPro(b._id, true)}
-                      className="rounded-lg border border-sky-700 text-sky-300 px-3 py-1.5 text-sm hover:bg-sky-950/40"
-                      title="Client not responding – close job and (optionally) add a note"
+                      onClick={() => onAccept(b._id)}
+                      className="rounded-lg border border-emerald-700 text-emerald-300 px-3 py-1.5 text-sm hover:bg-emerald-950/40"
+                      title="Accept the job"
                     >
-                      Close job & add note
+                      Accept
                     </button>
-                  )}
-                </div>
+
+                    <button
+                      onClick={async () => {
+                        const reason = window.prompt("Reason (optional):", "") || "";
+                        try {
+                          await cancelBookingByPro(b._id, { reason });
+                          flashOK("Booking declined (client refunded).");
+                          load();
+                        } catch (e) {
+                          console.error(e);
+                          setErr("Could not decline booking.");
+                          load();
+                        }
+                      }}
+                      className="rounded-lg border border-amber-700 text-amber-300 px-3 py-1.5 text-sm hover:bg-amber-950/40"
+                      title="Decline (refund client)"
+                    >
+                      Decline
+                    </button>
+                  </>
+                ) : null}
+
+                {/* Accepted + paid: show Cancel */}
+                {b.paymentStatus === "paid" && b.status === "accepted" ? (
+                  <button
+                    onClick={async () => {
+                      const reason = window.prompt("Reason (optional):", "") || "";
+                      try {
+                        await cancelBookingByPro(b._id, { reason });
+                        flashOK("Booking cancelled (client refunded).");
+                        setItems(prev => prev.filter(x => x._id !== b._id));
+
+                      } catch (e) {
+                        console.error(e);
+                        setErr("Could not cancel booking.");
+                        load();
+                      }
+                    }}
+                    className="rounded-lg border border-amber-700 text-amber-300 px-3 py-1.5 text-sm hover:bg-amber-950/40"
+                    title="Cancel after accepting (refund client)"
+                  >
+                    Cancel
+                  </button>
+                ) : null}
+
+                {/* If unpaid or other states, show the hint */}
+                {b.paymentStatus !== "paid" && b.status === "scheduled" ? (
+                  <span
+                    className="rounded-lg border border-zinc-800 text-zinc-500 px-3 py-1.5 text-sm"
+                    title="You can accept only after payment is confirmed"
+                  >
+                    Awaiting payment
+                  </span>
+                ) : null}
+
+                {proCanCompleteFallback && (
+                  <button
+                    onClick={() => onCompleteAsPro(b._id, true)}
+                    className="rounded-lg border border-sky-700 text-sky-300 px-3 py-1.5 text-sm hover:bg-sky-950/40"
+                    title="Client not responding – close job and (optionally) add a note"
+                  >
+                    Close job & add note
+                  </button>
+                )}
+              </div>
               </div>
             );
           })}

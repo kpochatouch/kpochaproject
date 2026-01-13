@@ -16,6 +16,102 @@ export function createDMRoom(uidA, uidB) {
   return uidA < uidB ? `dm:${uidA}:${uidB}` : `dm:${uidB}:${uidA}`;
 }
 
+/* =========================
+   BOOKING UI HELPERS (backend-truth)
+   ========================= */
+
+/** Convert kobo -> ₦ string (safe) */
+export function fmtNairaFromKobo(kobo) {
+  const n = Math.floor(Number(kobo || 0));
+  return (n / 100).toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+/** Read ring timeout from /api/settings.bookingRules.ringTimeoutSeconds (default 120s). */
+export function getRingTimeoutMsFromSettings(settings) {
+  const secs = Number(settings?.bookingRules?.ringTimeoutSeconds ?? 120);
+  return (Number.isFinite(secs) && secs > 0 ? secs : 120) * 1000;
+}
+
+/** Ringing remaining ms for scheduled+paid bookings. */
+export function getRingingRemainingMs(booking, timeoutMs = 120_000) {
+  if (!booking) return 0;
+  if (booking.status !== "scheduled") return 0;
+  if (booking.paymentStatus !== "paid") return 0;
+
+  const started = booking.ringingStartedAt
+    ? new Date(booking.ringingStartedAt).getTime()
+    : 0;
+  if (!started) return 0;
+
+  const elapsed = Date.now() - started;
+  return Math.max(0, timeoutMs - elapsed);
+}
+
+/**
+ * Booking status label (backend-truth).
+ * - status drives the flow
+ * - paymentStatus clarifies messaging (paid/refunded)
+ */
+export function getBookingUiLabel(booking) {
+  if (!booking) return "—";
+
+  const s = booking.status;
+  const p = booking.paymentStatus;
+
+  // If refunded, always show refunded (even if status is cancelled)
+  if (p === "refunded") return "Cancelled — refunded to wallet";
+
+  if (s === "pending_payment") return "Awaiting payment";
+  if (s === "scheduled") return p === "paid" ? "Paid — waiting for pro response" : "Awaiting payment";
+  if (s === "accepted") return "Accepted — job in progress";
+  if (s === "completed") return "Completed";
+  if (s === "cancelled") return "Cancelled";
+
+  return s || "Unknown";
+}
+
+/**
+ * IMPORTANT:
+ * Instant cashout eligibility cannot be computed from booking.meta in this backend.
+ * Payout logic is NOT stored as booking.meta.instantCashout.
+ *
+ * Backend truth:
+ * - Pro pending is credited ONLY on booking completion (creditProPendingForBooking)
+ * - Auto-release pending→available after settings.payouts.releaseDays (default 7)
+ * - Instant cashout (if you expose it) is usually: pending→available with fee (withdrawPendingWithFee)
+ *
+ * Therefore, UI should NOT guess per-booking cashout eligibility from booking.meta.
+ * Instead, show cashout button based on wallet.pendingKobo > 0 and (optional) a hold window.
+ */
+export function getInstantCashoutEligibility({ booking, settings, wallet } = {}) {
+  const holdDays = Number(settings?.payouts?.instantCashoutHoldDays ?? 3);
+
+  // if no pending balance, nothing to cashout
+  const pending = Number(wallet?.wallet?.pendingKobo ?? wallet?.pendingKobo ?? 0);
+  if (!pending || pending <= 0) return { eligible: false, reason: "no_pending", holdDays };
+
+  // If you want a strict hold, enforce it *only if booking.completedAt exists*
+  // (best-effort: hold is about time after completion)
+  const completedAtMs = booking?.completedAt ? new Date(booking.completedAt).getTime() : 0;
+  if (!completedAtMs) return { eligible: true, reason: "ok_wallet_based", holdDays };
+
+  const cutoff = Date.now() - holdDays * 24 * 60 * 60 * 1000;
+  if (completedAtMs > cutoff) {
+    return {
+      eligible: false,
+      reason: "hold_active",
+      holdDays,
+      availableAtMs: completedAtMs + holdDays * 24 * 60 * 60 * 1000,
+    };
+  }
+
+  return { eligible: true, reason: "ok", holdDays };
+}
+
+
 
 /* =========================================
    BASE URL (normalize, no trailing slash, no /api suffix)
@@ -183,21 +279,18 @@ function _getAuthPayload() {
     } catch {}
   }
 
-  if (latestToken) {
-    payload.token = latestToken;
-  }
+  if (latestToken) payload.token = latestToken;
 
-  // ALSO hint uid if Firebase knows it
+  // Always hint uid if Firebase knows it (backend uses it if token missing)
   try {
-    if (firebaseAuth && firebaseAuth.currentUser) {
+    if (firebaseAuth && firebaseAuth.currentUser?.uid) {
       payload.uid = firebaseAuth.currentUser.uid;
     }
-  } catch {
-    // ignore
-  }
+  } catch {}
 
   return payload;
 }
+
 
 /* generic dispatcher: forwards payload to registered handlers */
 function _dispatch(event, payload) {
@@ -250,7 +343,7 @@ onTokenChange = (newToken) => {
 
 
 /* connectSocket: idempotent, registers optional callbacks */
-export function connectSocket({ onNotification, onBookingAccepted, onCallEvent } = {}) {
+export function connectSocket({ onNotification, onBookingAccepted, onBookingPaid, onCallEvent } = {}) {
   // add listeners to registry (idempotent) — add directly to socketListeners to avoid recursion
   if (onNotification) {
     if (!socketListeners.has("notification:received")) socketListeners.set("notification:received", new Set());
@@ -260,71 +353,74 @@ export function connectSocket({ onNotification, onBookingAccepted, onCallEvent }
     if (!socketListeners.has("booking:accepted")) socketListeners.set("booking:accepted", new Set());
     socketListeners.get("booking:accepted").add(onBookingAccepted);
   }
+  if (onBookingPaid) {
+    if (!socketListeners.has("booking:paid")) socketListeners.set("booking:paid", new Set());
+    socketListeners.get("booking:paid").add(onBookingPaid);
+  }
   if (onCallEvent) {
     if (!socketListeners.has("call:status")) socketListeners.set("call:status", new Set());
     socketListeners.get("call:status").add(onCallEvent);
   }
 
   // 🔐 HARD GUARD: socket bootstrap must run once per tab lifetime
-if (socketBootstrapStarted) {
-  return socket;
-}
-socketBootstrapStarted = true;
-
+  if (socketBootstrapStarted) {
+    return socket;
+  }
+  socketBootstrapStarted = true;
 
   try {
     const opts = {
-  autoConnect: false,
-  transports: ["websocket", "polling"],
-  path: "/socket.io",
-  // 🔥 ask Firebase for a fresh token on each (re)connect
-  auth: (cb) => {
-    try {
-      const auth = firebaseAuth || getAuth();
-      const user = auth.currentUser;
-      if (!user) {
-        cb(_getAuthPayload()); // probably just uid hint or empty
-        return;
-      }
+      autoConnect: false,
+      transports: ["websocket", "polling"],
+      path: "/socket.io",
+      // 🔥 ask Firebase for a fresh token on each (re)connect
+      auth: (cb) => {
+        try {
+          const auth = firebaseAuth || getAuth();
+          const user = auth.currentUser;
+          if (!user) {
+            cb(_getAuthPayload()); // probably just uid hint or empty
+            return;
+          }
 
-      // force refresh, then update our cache + send to server
-      user
-        .getIdToken(true)
-        .then((t) => {
-          latestToken = t;
-          try {
-            localStorage.setItem("token", t);
-          } catch {}
-          cb({
-            ..._getAuthPayload(),
-            token: t,
-            uid: user.uid,
-          });
-        })
-        .catch((err) => {
-          console.warn("[socket] getIdToken(true) failed:", err?.message || err);
-          cb(_getAuthPayload()); // fallback to whatever we have
-        });
-    } catch (e) {
-      console.warn("[socket] auth callback failed:", e?.message || e);
-      cb(_getAuthPayload());
-    }
-  },
-};
+          // force refresh, then update our cache + send to server
+          user
+            .getIdToken(true)
+            .then((t) => {
+              latestToken = t;
+              try {
+                localStorage.setItem("token", t);
+              } catch {}
+              cb({
+                ..._getAuthPayload(),
+                token: t,
+                uid: user.uid,
+              });
+            })
+            .catch((err) => {
+              console.warn("[socket] getIdToken(true) failed:", err?.message || err);
+              cb(_getAuthPayload()); // fallback to whatever we have
+            });
+        } catch (e) {
+          console.warn("[socket] auth callback failed:", e?.message || e);
+          cb(_getAuthPayload());
+        }
+      },
+    };
 
-socket = ioClient(ROOT, opts);
-
+    socket = ioClient(ROOT, opts);
 
     socket.on("connect", () => {
       socketConnected = true;
       reconnectAttempts = 0;
 
-       wiredEvents.clear();
+      wiredEvents.clear();
 
       // wire already-registered events
       for (const ev of socketListeners.keys()) {
         _ensureWire(ev);
       }
+
       // common server events we want always
       _ensureWire("notification:new");
       _ensureWire("notification:received");
@@ -335,7 +431,12 @@ socket = ioClient(ROOT, opts);
       _ensureWire("call:accepted");
       _ensureWire("call:ended");
       _ensureWire("call:missed");
+
+      // ✅ bookings
       _ensureWire("booking:accepted");
+      _ensureWire("booking:paid"); // ✅ emitted by payments/verify
+
+      // webrtc
       _ensureWire("webrtc:offer");
       _ensureWire("webrtc:answer");
       _ensureWire("webrtc:ice");
@@ -345,7 +446,6 @@ socket = ioClient(ROOT, opts);
       socketConnected = false;
       // do not clear listeners — keep registry for next connect
       if (reason === "io server disconnect") {
-        // server forced disconnect – try to reconnect manually
         try { socket.connect(); } catch {}
       } else {
         _reconnectWithBackoff();
@@ -362,6 +462,12 @@ socket = ioClient(ROOT, opts);
     socket.on("notification:new", (payload) => _dispatch("notification:received", payload));
     socket.on("notification:received", (payload) => _dispatch("notification:received", payload));
 
+    // Ensure we always listen for booking events on user room.
+// NOTE: server emits booking:accepted to `user:<uid>` and also `booking:<id>`.
+// booking:paid may NOT always be emitted (webhook path doesn't emit sockets),
+// so UI must still verify/poll booking status after payment redirect.
+
+
     socket.connect();
   } catch (e) {
     console.warn("[socket] connect failed:", e?.message || e);
@@ -370,6 +476,7 @@ socket = ioClient(ROOT, opts);
 
   return socket;
 }
+
 
 /** disconnect and clear handlers */
 export function disconnectSocket() {
@@ -729,10 +836,11 @@ export async function verifyPayment({ bookingId, reference }) {
   const { data } = await api.post("/api/payments/verify", { bookingId, reference });
   return data;
 }
-export async function initPayment({ bookingId, amountKobo, email }) {
-  const { data } = await api.post("/api/payments/init", { bookingId, amountKobo, email });
+export async function initPayment({ bookingId, email }) {
+  const { data } = await api.post("/api/payments/init", { bookingId, email });
   return data;
 }
+
 
 /* Bookings client */
 export async function createBooking(payload) { const { data } = await api.post("/api/bookings", payload); return data.booking; }
@@ -745,8 +853,37 @@ export async function cancelBooking(id) { const { data } = await api.put(`/api/b
 /* Bookings - pro */
 export async function getProBookings() { const { data } = await api.get("/api/bookings/pro/me"); return data; }
 export async function acceptBooking(id) { const { data } = await api.put(`/api/bookings/${id}/accept`); return data.booking; }
-export async function declineBooking(id, payload = {}) { const { data } = await api.put(`/api/bookings/${id}/decline`, payload); return data.booking; }
+export async function declineBooking(id, payload = {}) {
+  const { data } = await api.put(`/api/bookings/${id}/cancel-by-pro`, payload);
+  return data.booking || data;
+}
+
 export async function completeBooking(id, payload = {}) { const { data } = await api.put(`/api/bookings/${id}/complete`, payload); return data.booking; }
+
+/* Bookings - pro (extra) */
+export async function cancelBookingByPro(id, payload = {}) {
+  const { data } = await api.put(`/api/bookings/${id}/cancel-by-pro`, payload);
+  return data.booking || data;
+}
+
+/* Admin wallets */
+export async function getEscrowWalletAdmin() {
+  const { data } = await api.get("/api/wallet/escrow");
+  return data;
+}
+export async function getPlatformWalletAdmin() {
+  const { data } = await api.get("/api/wallet/platform");
+  return data;
+}
+export async function setPlatformRecipientCode(recipientCode) {
+  const { data } = await api.post("/api/wallet/platform/recipient", { recipientCode });
+  return data;
+}
+export async function withdrawPlatformToBank(amountKobo) {
+  const { data } = await api.post("/api/wallet/platform/withdraw", { amountKobo });
+  return data;
+}
+
 
 /* Reviews (unchanged) */
 export async function createProReview(opts) { const { data } = await api.post("/api/reviews", opts); return data; }
@@ -760,12 +897,26 @@ export async function getMyReviewOnClient(clientUid) { const { data } = await ap
 export async function getWalletMe() { const { data } = await api.get("/api/wallet/me"); return data; }
 export async function initWalletTopup(amountKobo) { const { data } = await api.get("/api/wallet/topup/init", { params: { amountKobo } }); return data; }
 export async function verifyWalletTopup(reference) { const { data } = await api.get("/api/wallet/topup/verify", { params: { reference } }); return data; }
-export async function withdrawPendingToAvailable({ amountKobo, pin }) { const { data } = await api.post("/api/wallet/withdraw-pending", { amountKobo, pin }); return data; }
+export async function withdrawPendingToAvailable() {
+  throw new Error("withdraw_pending_endpoint_removed_use_instantCashoutForBooking");
+}
+
 export async function withdrawToBank({ amountKobo, pin }) { const { data } = await api.post("/api/wallet/withdraw", { amountKobo, pin }); return data; }
 export const getMyWallet = getWalletMe;
 export async function getMyTransactions() { const data = await getWalletMe(); return data?.transactions || []; }
 export async function getClientWalletMe() { const { data } = await api.get("/api/wallet/client/me"); return data; }
 export async function payBookingWithWallet(bookingId) { const { data } = await api.post("/api/wallet/pay-booking", { bookingId }); return data; }
+
+
+/* Payout (instant cashout per booking) */
+export async function instantCashoutForBooking(bookingId) {
+  if (!bookingId) throw new Error("bookingId required");
+  const { data } = await api.post(
+    `/api/payouts/instant-cashout/${encodeURIComponent(String(bookingId))}`
+  );
+  return data;
+}
+
 
 /* PIN */
 export async function setWithdrawPin(pin) { const { data } = await api.post("/api/pin/me/set", { pin }); return data; }
@@ -846,4 +997,24 @@ export default {
   ensureClientProfile,
   loadMeBundle,
 
+    // booking UI helpers
+  fmtNairaFromKobo,
+  getRingingRemainingMs,
+  getBookingUiLabel,
+  getInstantCashoutEligibility,
+
+  // payout
+  instantCashoutForBooking,
+  // booking (extra)
+  cancelBookingByPro,
+   declineBooking,
+
+  // admin wallets
+  getEscrowWalletAdmin,
+  getPlatformWalletAdmin,
+  setPlatformRecipientCode,
+  withdrawPlatformToBank,
+
+  // booking helper
+  getRingTimeoutMsFromSettings,
 };

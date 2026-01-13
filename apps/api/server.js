@@ -197,6 +197,7 @@ const BookingRulesSchema = new mongoose.Schema(
 
     // NEW: reminder configuration
     completionReminderHours: { type: Number, default: 2 }, // wait before first reminder
+    proCompleteFallbackHours: { type: Number, default: 2 },
     completionReminderRepeat: { type: Number, default: 1 }, // how many times max
     completionReminderToPro: { type: Boolean, default: true },
     completionReminderToClient: { type: Boolean, default: false },
@@ -1116,10 +1117,10 @@ app.use("/api/bookings", requireAuth, async (req, _res, next) => {
     req.body.clientName = fullName || req.body.clientName || "";
     req.body.clientPhone = phone || req.body.clientPhone || "";
     req.body.client = {
-      ...(req.body.client || {}),
-      name: fullName || req.body?.client?.name || "",
-      phone: phone || req.body?.client?.phone || "",
-    };
+    ...(req.body.client || {}),
+    name: fullName || req.body?.client?.name || "",
+  };
+
     req.body.clientUid = req.user.uid;
 
     next();

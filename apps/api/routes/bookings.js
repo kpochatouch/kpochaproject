@@ -41,6 +41,20 @@ function isAdminReq(req) {
   return !!(req?.user?.uid && adminUids.includes(req.user.uid));
 }
 
+async function getCompletionProFallbackHours() {
+  // Prefer Settings.bookingRules.proCompleteFallbackHours, fallback to 2
+  try {
+    const Settings = mongoose.models.Settings;
+    if (!Settings) return 2;
+    const s = await Settings.findOne().lean();
+    const h = Number(s?.bookingRules?.proCompleteFallbackHours);
+    return Number.isFinite(h) && h > 0 ? h : 2;
+  } catch {
+    return 2;
+  }
+}
+
+
 /**
  * Hide private contact depending on viewer:
  *
@@ -470,25 +484,25 @@ try {
   console.warn("[bookings:instant] ensure booking thread failed:", e?.message || e);
 }
 
+    // Card flow → FE opens Paystack, then POST /api/payments/verify
+if (paymentMethod === "card") {
+  return res.json({
+    ok: true,
+    booking: sanitizeBookingFor(req, b),
+    amountKobo: b.amountKobo,
+  });
+}
 
+// ✅ Wallet flow → FE will call POST /api/wallet/pay-booking
+if (paymentMethod === "wallet") {
+  return res.json({
+    ok: true,
+    booking: sanitizeBookingFor(req, b),
+    amountKobo: b.amountKobo,
+    walletPayable: true, // FE signal
+  });
+}
 
-
-    // For card, FE will open Paystack and then call /api/payments/verify
-    if (paymentMethod === "card") {
-      return res.json({
-        ok: true,
-        booking: sanitizeBookingFor(req, b),
-        amountKobo: b.amountKobo,
-      });
-    }
-
-    // Wallet path (to be wired when wallet debit is ready)
-    // Example:
-    //   const ok = await debitClientWallet(req.user.uid, b.amountKobo, { bookingId: b._id });
-    //   if (!ok) return res.status(400).json({ ok:false, message:"wallet_debit_failed" });
-    //   b.paymentStatus = "paid"; b.status = "scheduled"; await b.save();
-    //   return res.json({ ok:true, booking: sanitizeBookingFor(req, b) });
-    return res.status(400).json({ ok: false, message: "wallet_not_configured" });
   } catch (err) {
     console.error("[bookings:instant] error:", err);
     res.status(500).json({ error: "Failed to create instant booking" });
@@ -836,10 +850,38 @@ router.put("/bookings/:id/complete", requireAuth, async (req, res) => {
     const isClient = b.clientUid === req.user.uid;
     const isProOwner = b.proOwnerUid === req.user.uid;
     const isAdmin = isAdminReq(req);
+    const actingAsProFallback = isProOwner && !isClient && !isAdmin;
 
     if (!isClient && !isProOwner && !isAdmin) {
       return res.status(403).json({ error: "Forbidden" });
     }
+
+    // ✅ RULE: Client completes. Pro can only complete after fallback window.
+    if (isProOwner && !isAdmin && !isClient) {
+      const hours = await getCompletionProFallbackHours(); // usually 2
+      const acceptedAt = b.acceptedAt ? new Date(b.acceptedAt).getTime() : 0;
+
+      // If acceptedAt missing, block pro completion (client/admin can still complete)
+      if (!acceptedAt) {
+        return res.status(403).json({
+          error: "client_must_complete_first",
+          message: "Client must mark completed. Pro fallback is not available yet.",
+        });
+      }
+
+      const waitMs = hours * 60 * 60 * 1000;
+      const elapsedMs = Date.now() - acceptedAt;
+
+      if (elapsedMs < waitMs) {
+        const waitSeconds = Math.max(0, Math.ceil((waitMs - elapsedMs) / 1000));
+        return res.status(403).json({
+          error: "client_must_complete_first",
+          message: `Client should mark this completed. If they don't respond, you can complete after ${hours} hour(s).`,
+          waitSeconds,
+        });
+      }
+    }
+
 
     // Only allow completion from ACCEPTED state
     if (b.status !== "accepted") {
@@ -849,18 +891,23 @@ router.put("/bookings/:id/complete", requireAuth, async (req, res) => {
     }
 
     if (b.paymentStatus !== "paid") {
-  return res.status(400).json({ error: "Cannot complete before payment" });
-}
+    return res.status(400).json({ error: "Cannot complete before payment" });
+    }
 
     b.status = "completed";
     b.completedAt = new Date(); // important for auto-release scheduler
 
     const meta = b.meta || {};
     meta.completedBy = isClient ? "client" : isProOwner ? "pro" : "admin";
+    meta.proFallback = !!actingAsProFallback;
+
     const finalNote = (completionNote || note || "").trim();
     if (finalNote) {
       meta.completionNote = finalNote;
+    } else if (actingAsProFallback) {
+      meta.completionNote = "Pro completed after fallback window (client did not confirm).";
     }
+
     b.meta = meta;
 
     await b.save();

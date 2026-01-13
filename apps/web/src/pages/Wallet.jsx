@@ -1,6 +1,12 @@
 // apps/web/src/pages/Wallet.jsx
 import { useEffect, useMemo, useState } from "react";
-import { api } from "../lib/api";
+import {
+  api,
+  getProBookings,
+  instantCashoutForBooking,
+  fmtNairaFromKobo,
+} from "../lib/api";
+
 import {
   getAuth,
   EmailAuthProvider,
@@ -19,7 +25,9 @@ export default function WalletPage() {
   const [wallet, setWallet] = useState(null);
   const [tx, setTx] = useState([]);
 
-  const [amtFromPending, setAmtFromPending] = useState("");
+  const [proBookings, setProBookings] = useState([]);
+  const [cashoutBusy, setCashoutBusy] = useState({}); // bookingId -> true
+
   const [amtFromAvailable, setAmtFromAvailable] = useState("");
 
   // settings (best-effort)
@@ -39,14 +47,20 @@ export default function WalletPage() {
     setErr("");
     setLoading(true);
     try {
-      const [meRes, wRes, sRes] = await Promise.allSettled([
-        api.get("/api/me"),
-        api.get("/api/wallet/me"),
-        api.get("/api/settings"),
-      ]);
+      const [meRes, wRes, sRes, bRes] = await Promise.allSettled([
+      api.get("/api/me"),
+      api.get("/api/wallet/me"),
+      api.get("/api/settings"),
+      getProBookings(), // ✅ pro bookings for cashout list
+    ]);
+
       const meData = meRes.status === "fulfilled" ? meRes.value.data : null;
       const wData  = wRes.status  === "fulfilled" ? wRes.value.data  : null;
       const sData  = sRes.status  === "fulfilled" ? sRes.value.data  : null;
+
+      const bData = bRes.status === "fulfilled" ? bRes.value : [];
+      setProBookings(Array.isArray(bData) ? bData : (bData?.bookings || []));
+
 
       setMe(meData);
       setMeHasPin(!!meData?.hasPin);
@@ -76,26 +90,6 @@ export default function WalletPage() {
     }));
   }
 
-  // ----------------- Withdraw from Pending (fee) -----------------
-  async function withdrawFromPending() {
-    const naira = Number(amtFromPending);
-    if (!Number.isFinite(naira) || naira <= 0) return alert("Enter a valid amount in ₦.");
-    const max = (wallet?.pendingKobo || 0) / 100;
-    if (naira > max) return alert(`You can withdraw at most ₦${max.toLocaleString()} from Pending.`);
-    const amountKobo = Math.floor(naira * 100);
-
-    openWithdrawPinPrompt(async (pin) => {
-      try {
-        await api.post("/api/wallet/withdraw-pending", { amountKobo, pin });
-        setAmtFromPending("");
-        setPinPrompt({ open: false, onSubmit: null, error: "" });
-        await load();
-      } catch (e) {
-        showInvalidPin(e?.response?.data?.error);
-      }
-    });
-  }
-
   // ----------------- Withdraw from Available -----------------
   async function withdrawFromAvailable() {
     const naira = Number(amtFromAvailable);
@@ -115,6 +109,30 @@ export default function WalletPage() {
       }
     });
   }
+
+  async function cashoutBooking(booking) {
+  const bookingId = booking?._id;
+  if (!bookingId) return;
+
+  setCashoutBusy((m) => ({ ...m, [bookingId]: true }));
+  try {
+    await instantCashoutForBooking(bookingId);
+    await load();
+  } catch (e) {
+    const msg =
+      e?.response?.data?.message ||
+      e?.response?.data?.error ||
+      e?.message ||
+      "Instant cashout failed";
+    alert(msg);
+  } finally {
+    setCashoutBusy((m) => {
+      const copy = { ...m };
+      delete copy[bookingId];
+      return copy;
+    });
+  }
+}
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-10">
@@ -139,8 +157,14 @@ export default function WalletPage() {
       </div>
 
       <p className="text-zinc-400 mt-2">
-        Earnings appear in <span className="inline-block px-2 bg-zinc-800 rounded">Pending</span> after payment.
-      </p>
+      Earnings move to{" "}
+      <span className="inline-block px-2 bg-zinc-800 rounded">Pending</span>{" "}
+      only after the job is completed.
+    </p>
+    <p className="text-zinc-500 text-xs mt-1">
+      Instant cashout moves money from Pending → Available (not to bank). Bank withdrawal uses Available.
+    </p>
+
       <p className="text-zinc-500 text-xs mt-1 mb-6">
         Instant cashout fee from Pending: <strong>{feePct}%</strong>
         <span className="mx-2">•</span>
@@ -163,25 +187,69 @@ export default function WalletPage() {
             <Card title="Earned (lifetime)" value={fmt(wallet?.earnedKobo)} />
           </div>
 
-          <div className="flex flex-col md:flex-row gap-4 mb-8">
-            <div className="flex gap-2 items-center">
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                placeholder={`Amount from Pending (₦) — ${feePct}% fee`}
-                className="bg-black border border-zinc-800 rounded-lg px-3 py-2 w-72"
-                value={amtFromPending}
-                onChange={(e) => setAmtFromPending(e.target.value)}
-              />
-              <button
-                onClick={withdrawFromPending}
-                className="rounded-lg bg-gold text-black px-4 py-2 font-semibold"
-                title={`Withdraw from Pending (${feePct}% fee)`}
-              >
-                Withdraw
-              </button>
+          {/* Instant cashout list (per completed booking) */}
+          <div className="mb-8">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-lg font-semibold">Instant Cashouts</h3>
+              <div className="text-xs text-zinc-500">
+                Fee: <strong>{feePct}%</strong>
+              </div>
             </div>
+
+            <div className="rounded-lg border border-zinc-800 divide-y divide-zinc-800">
+              {(proBookings || [])
+                .filter((b) => b?.status === "completed" && b?.paymentStatus === "paid")
+                .sort((a, b) => new Date(b.completedAt || b.updatedAt || 0) - new Date(a.completedAt || a.updatedAt || 0))
+                .map((b) => {
+                  const already = b?.meta?.instantCashout === true;
+                  const busy = !!cashoutBusy[b._id];
+
+
+                  return (
+                    <div key={b._id} className="p-4 flex items-center justify-between gap-4">
+                      <div>
+                        <div className="text-sm font-medium">
+                          Booking #{String(b._id).slice(-6)}
+                        </div>
+                        <div className="text-xs text-zinc-500 mt-1">
+                          Completed:{" "}
+                          {b.completedAt ? new Date(b.completedAt).toLocaleString() : "—"}
+                          <span className="mx-2">•</span>
+                          Amount: <strong>{fmtNairaFromKobo(b.amountKobo || 0)}</strong>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        {already ? (
+                      <span className="text-xs px-2 py-1 rounded bg-zinc-800 text-green-300">
+                        Cashed out
+                      </span>
+                    ) : (
+                      <button
+                        disabled={busy}
+                        onClick={() => cashoutBooking(b)}
+                        className="rounded-lg bg-gold text-black px-4 py-2 font-semibold disabled:opacity-50"
+                        title={`Cashout (Pending → Available) fee ${feePct}%`}
+                      >
+                        {busy ? "Processing…" : "Cashout now"}
+                      </button>
+                    )}
+
+                      </div>
+                    </div>
+                  );
+                })}
+
+              {(!(proBookings || []).some((b) => b?.status === "completed" && b?.paymentStatus === "paid")) && (
+                <div className="p-6 text-zinc-400 text-sm">
+                  No completed paid bookings yet.
+                </div>
+              )}
+            </div>
+          </div>
+
+
+          <div className="flex flex-col md:flex-row gap-4 mb-8">
 
             <div className="flex gap-2 items-center">
               <input
@@ -235,6 +303,7 @@ export default function WalletPage() {
           </div>
         </>
       )}
+
 
       {/* PIN modals */}
       <PinModal

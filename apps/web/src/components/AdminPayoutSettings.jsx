@@ -1,3 +1,5 @@
+// apps/web/src/components/AdminPayoutSettings.jsx
+
 import { useEffect, useState } from "react";
 import { getSettings, updateSettingsAdmin, adminReleaseBooking } from "../../lib/api";
 

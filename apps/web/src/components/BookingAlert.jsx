@@ -1,28 +1,19 @@
 // apps/web/src/components/BookingAlert.jsx
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getProBookings, acceptBooking } from "../lib/api";
+import { getProBookings, acceptBooking, registerSocketHandler } from "../lib/api";
 import { Link } from "react-router-dom";
 
-/**
- * BookingAlert
- * - Polls bookings assigned to the signed-in pro (every 20s by default)
- * - Shows a compact alert when a NEW booking appears (status scheduled/pending_payment)
- * - Optional chime (off by default)
- *
- * Props:
- *   pollMs?: number        (default 20000)
- *   playSound?: boolean    (default false)
- *   soundSrc?: string      (custom audio file if playSound is true)
- */
 export default function BookingAlert({ pollMs = 20000, playSound = false, soundSrc }) {
-  const [queue, setQueue] = useState([]); // alerts to show (FIFO)
+  const [queue, setQueue] = useState([]);
   const [busy, setBusy] = useState(false);
-  const audioRef = useRef(null);
 
-  // Used to remember what we’ve already alerted about (latest timestamp)
+  const audioRef = useRef(null);
+  const queueRef = useRef([]); // avoid stale closure
   const STORAGE_KEY = "pro:lastBookingAlertAt";
 
-  const current = queue.length ? queue[0] : null;
+  useEffect(() => {
+    queueRef.current = queue;
+  }, [queue]);
 
   // Prepare sound (lazy)
   useEffect(() => {
@@ -34,54 +25,61 @@ export default function BookingAlert({ pollMs = 20000, playSound = false, soundS
     }
   }, [playSound, soundSrc]);
 
-  // Poll bookings
+  async function refreshAndEnqueue() {
+    try {
+      const data = await getProBookings();
+
+      // STRICT actionable: scheduled + paid
+      const actionable = (Array.isArray(data) ? data : []).filter(
+        (b) => b.status === "scheduled" && b.paymentStatus === "paid"
+      );
+
+      const lastAtMs = Number(localStorage.getItem(STORAGE_KEY) || 0);
+
+      const norm = actionable.map((b) => ({
+        ...b,
+        _createdMs: new Date(b.createdAt || b.updatedAt || Date.now()).getTime(),
+      }));
+
+      const existingIds = new Set(queueRef.current.map((q) => q._id));
+
+      const fresh = norm
+        .filter((b) => b._createdMs > lastAtMs && !existingIds.has(b._id))
+        .sort((a, b) => b._createdMs - a._createdMs);
+
+      if (fresh.length) {
+        setQueue((q) => [...q, ...fresh]);
+        localStorage.setItem(STORAGE_KEY, String(fresh[0]._createdMs));
+
+        if (playSound && audioRef.current) {
+          try {
+            audioRef.current.currentTime = 0;
+            audioRef.current.play();
+          } catch {}
+        }
+      }
+    } catch {
+      // ignore; polling will catch later
+    }
+  }
+
+  // Socket-first: booking paid -> refresh
+  useEffect(() => {
+    const off = registerSocketHandler("booking:paid", () => {
+      refreshAndEnqueue();
+    });
+    return () => off?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playSound]); // NOT queue
+
+  // Poll fallback
   useEffect(() => {
     let alive = true;
     let timer;
 
     async function tick() {
-      try {
-        const data = await getProBookings(); // array
-        if (!alive) return;
-
-        // Actionable to notify: 'scheduled' (always), 'pending_payment' (heads-up; accept disabled if unpaid)
-        const actionable = (Array.isArray(data) ? data : []).filter((b) =>
-          ["scheduled", "pending_payment"].includes(b.status)
-        );
-
-        // last time (ms) we alerted
-        const lastAtMs = Number(localStorage.getItem(STORAGE_KEY) || 0);
-
-        // normalize created time (prefer createdAt; fallback to updatedAt or now)
-        const norm = actionable.map((b) => ({
-          ...b,
-          _createdMs: new Date(b.createdAt || b.updatedAt || Date.now()).getTime(),
-        }));
-
-        // Only push items newer than watermark, and avoid duplicates already queued
-        const existingIds = new Set(queue.map((q) => q._id));
-        const fresh = norm
-          .filter((b) => b._createdMs > lastAtMs && !existingIds.has(b._id))
-          .sort((a, b) => b._createdMs - a._createdMs); // newest first
-
-        if (fresh.length) {
-          setQueue((q) => [...q, ...fresh]);
-
-          // watermark = newest created time from this batch
-          localStorage.setItem(STORAGE_KEY, String(fresh[0]._createdMs));
-
-          if (playSound && audioRef.current) {
-            try {
-              audioRef.current.currentTime = 0;
-              audioRef.current.play();
-            } catch {}
-          }
-        }
-      } catch {
-        // silent fail
-      } finally {
-        if (alive) timer = setTimeout(tick, pollMs);
-      }
+      await refreshAndEnqueue();
+      if (alive) timer = setTimeout(tick, pollMs);
     }
 
     tick();
@@ -89,15 +87,15 @@ export default function BookingAlert({ pollMs = 20000, playSound = false, soundS
       alive = false;
       clearTimeout(timer);
     };
-  }, [pollMs, playSound, queue]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pollMs, playSound]);
 
   async function onAccept(id) {
     setBusy(true);
     try {
       await acceptBooking(id);
-      // remove current alert from queue
       setQueue((q) => q.slice(1));
-    } catch (e) {
+    } catch {
       alert("Could not accept booking. Ensure payment is 'paid'.");
     } finally {
       setBusy(false);
@@ -108,7 +106,8 @@ export default function BookingAlert({ pollMs = 20000, playSound = false, soundS
     setQueue((q) => q.slice(1));
   }
 
-  // Read fields safely (instant flow stores a service snapshot)
+  const current = queue.length ? queue[0] : null;
+
   const svcName = useMemo(() => {
     if (!current) return "Service";
     return current.service?.serviceName || current.serviceName || "Service";
@@ -116,7 +115,6 @@ export default function BookingAlert({ pollMs = 20000, playSound = false, soundS
 
   const amountKobo = useMemo(() => {
     if (!current) return 0;
-    // prefer top-level amountKobo written by server; fallback to service snapshot price
     if (Number.isFinite(Number(current.amountKobo))) return Number(current.amountKobo);
     if (Number.isFinite(Number(current.service?.priceKobo))) return Number(current.service.priceKobo);
     return 0;
@@ -124,7 +122,6 @@ export default function BookingAlert({ pollMs = 20000, playSound = false, soundS
 
   const whenText = useMemo(() => {
     if (!current) return "";
-    // Instant booking may have scheduledFor === null
     if (!current.scheduledFor) return "ASAP";
     return formatDate(current.scheduledFor);
   }, [current]);
@@ -136,10 +133,7 @@ export default function BookingAlert({ pollMs = 20000, playSound = false, soundS
 
   const canAccept = useMemo(() => {
     if (!current) return false;
-    return (
-      current.paymentStatus === "paid" &&
-      (current.status === "scheduled" || current.status === "pending_payment")
-    );
+    return current.paymentStatus === "paid" && current.status === "scheduled";
   }, [current]);
 
   if (!current) return null;
@@ -149,13 +143,8 @@ export default function BookingAlert({ pollMs = 20000, playSound = false, soundS
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="text-sm text-amber-300 mb-1">New booking available</div>
-          <div className="font-medium">
-            {svcName} • {formatMoney(amountKobo)}
-          </div>
-          <div className="text-xs text-zinc-400 mt-0.5">
-            {whenText} • {lgaText}
-          </div>
-          {/* Private client contact is not shown here; becomes visible to pro after ACCEPT. */}
+          <div className="font-medium">{svcName} • {formatMoney(amountKobo)}</div>
+          <div className="text-xs text-zinc-400 mt-0.5">{whenText} • {lgaText}</div>
         </div>
 
         <button
@@ -177,7 +166,6 @@ export default function BookingAlert({ pollMs = 20000, playSound = false, soundS
           {busy ? "Working…" : "Accept"}
         </button>
 
-        {/* If you have a booking details page, link it here. Otherwise keep dashboard link. */}
         <Link
           to={`/bookings/${current._id}`}
           className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-900"
@@ -188,7 +176,7 @@ export default function BookingAlert({ pollMs = 20000, playSound = false, soundS
         </Link>
 
         <Link
-          to="/pro"
+          to="/pro-dashboard"
           className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-900"
           title="Open dashboard"
           onClick={onDismiss}
@@ -200,7 +188,6 @@ export default function BookingAlert({ pollMs = 20000, playSound = false, soundS
   );
 }
 
-/* ---- tiny local formatters ---- */
 function formatMoney(kobo = 0) {
   const naira = (Number(kobo) || 0) / 100;
   try {
