@@ -1,5 +1,3 @@
-
-
 // apps/web/src/components/CallSheet.jsx
 import { useEffect, useRef, useState } from "react";
 import SignalingClient from "../lib/webrtc/SignalingClient";
@@ -8,7 +6,6 @@ import {
   sendChatMessage,
   registerSocketHandler,
 } from "../lib/api";
-
 
 /**
  * Props:
@@ -56,7 +53,6 @@ export default function CallSheet({
   const [pipFlipped, setPipFlipped] = useState(false);
   const [isMini, setIsMini] = useState(false);
 
-
   const localRef = useRef(null);
   const remoteRef = useRef(null);
 
@@ -68,8 +64,7 @@ export default function CallSheet({
   const pendingOfferRef = useRef(null);
 
   // NEW: queue ICE candidates until remoteDescription is set
-const pendingIceRef = useRef([]);
-
+  const pendingIceRef = useRef([]);
 
   function stopAllTones() {
     [callerToneRef, incomingToneRef].forEach((ref) => {
@@ -110,10 +105,12 @@ const pendingIceRef = useRef([]);
         meta: { call: callMeta },
       });
     } catch (e) {
-      console.warn("[CallSheet] sendCallSummaryMessage failed:", e?.message || e);
+      console.warn(
+        "[CallSheet] sendCallSummaryMessage failed:",
+        e?.message || e,
+      );
     }
   }
-
 
   // keep mode in sync with callType when prop changes
   useEffect(() => {
@@ -122,70 +119,71 @@ const pendingIceRef = useRef([]);
   }, [callType]);
 
   // setup signaling when modal opens
-   useEffect(() => {
+  useEffect(() => {
     if (!open || !room) return;
 
     const sc = new SignalingClient(
       room,
-      role === "caller" ? "caller" : "receiver"
+      role === "caller" ? "caller" : "receiver",
     );
     sc.connect();
     setSig(sc);
 
     let stashOffer = null;
-let stashIce = null;
+    let stashIce = null;
 
-if (role !== "caller") {
-  // incoming side: start ringtone immediately
-  try {
-    const audio = new Audio("/sound/incoming.mp3");
-    audio.loop = true;
-    incomingToneRef.current = audio;
-    audio.play().catch(() => {});
-  } catch {}
+    if (role !== "caller") {
+      // incoming side: start ringtone immediately
+      try {
+        const audio = new Audio("/sound/incoming.mp3");
+        audio.loop = true;
+        incomingToneRef.current = audio;
+        audio.play().catch(() => {});
+      } catch {}
 
-  // stash offer (may arrive before Accept)
-  stashOffer = (msg) => {
-    console.log("[CallSheet] stashed incoming offer before accept");
-    pendingOfferRef.current = msg;
-  };
-  sc.on("webrtc:offer", stashOffer);
+      // stash offer (may arrive before Accept)
+      stashOffer = (msg) => {
+        console.log("[CallSheet] stashed incoming offer before accept");
+        pendingOfferRef.current = msg;
+      };
+      sc.on("webrtc:offer", stashOffer);
 
-  // stash ICE (may arrive before Accept)
-  stashIce = (msg) => {
-    const cand = msg?.payload || msg;
-    if (!cand) return;
-    pendingIceRef.current.push(cand);
-    console.log("[CallSheet] stashed ICE before accept", pendingIceRef.current.length);
-  };
-  sc.on("webrtc:ice", stashIce);
-}
-
+      // stash ICE (may arrive before Accept)
+      stashIce = (msg) => {
+        const cand = msg?.payload || msg;
+        if (!cand) return;
+        pendingIceRef.current.push(cand);
+        console.log(
+          "[CallSheet] stashed ICE before accept",
+          pendingIceRef.current.length,
+        );
+      };
+      sc.on("webrtc:ice", stashIce);
+    }
 
     return () => {
-  try {
-    if (stashOffer) sc.off("webrtc:offer", stashOffer);
-    if (stashIce) sc.off("webrtc:ice", stashIce);
-  } catch {}
+      try {
+        if (stashOffer) sc.off("webrtc:offer", stashOffer);
+        if (stashIce) sc.off("webrtc:ice", stashIce);
+      } catch {}
 
-  try {
-    sc.disconnect();
-  } catch {}
+      try {
+        sc.disconnect();
+      } catch {}
 
-  pendingOfferRef.current = null;
-  pendingIceRef.current = [];
+      pendingOfferRef.current = null;
+      pendingIceRef.current = [];
 
-  setSig(null);
-  stopAllTones();
-  setAutoStarted(false);
-  setElapsedSeconds(0);
-  setHasAccepted(false);
-  setCallFailed(false);
-};
+      setSig(null);
+      stopAllTones();
+      setAutoStarted(false);
+      setElapsedSeconds(0);
+      setHasAccepted(false);
+      setCallFailed(false);
+    };
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, room, role]);
-
 
   // ⏱ duration timer: start counting only when connected
   useEffect(() => {
@@ -203,26 +201,25 @@ if (role !== "caller") {
   }, [open, hasConnected]);
 
   // ⏳ ring timeout: if receiver never answers, end as "missed"
-useEffect(() => {
-  if (!open) return;
-  if (role !== "caller") return;
+  useEffect(() => {
+    if (!open) return;
+    if (role !== "caller") return;
 
-  // if already connected or receiver accepted, don't ring-timeout
-  if (hasConnected || peerAccepted || hasAccepted) return;
+    // if already connected or receiver accepted, don't ring-timeout
+    if (hasConnected || peerAccepted || hasAccepted) return;
 
-  // start countdown once caller sheet is open and dialing
-  const id = setTimeout(() => {
-    console.warn("[CallSheet] Ring timeout: no answer");
+    // start countdown once caller sheet is open and dialing
+    const id = setTimeout(() => {
+      console.warn("[CallSheet] Ring timeout: no answer");
 
-    // End as "missed" (not failed)
-    hangup("missed");
-  }, 30000); // 30s (adjust if you want)
+      // End as "missed" (not failed)
+      hangup("missed");
+    }, 30000); // 30s (adjust if you want)
 
-  return () => clearTimeout(id);
-}, [open, role, hasConnected, peerAccepted, hasAccepted]);
+    return () => clearTimeout(id);
+  }, [open, role, hasConnected, peerAccepted, hasAccepted]);
 
-
-    // ⏲️ fail-safe: if call is accepted but never connects, fail after ~20s
+  // ⏲️ fail-safe: if call is accepted but never connects, fail after ~20s
   useEffect(() => {
     if (!open) return;
 
@@ -237,7 +234,7 @@ useEffect(() => {
     // Start 20s timeout once we're in "accepted but not connected" state
     const timeoutId = setTimeout(() => {
       console.warn(
-        "[CallSheet] Call failed: no WebRTC connection within 20 seconds"
+        "[CallSheet] Call failed: no WebRTC connection within 20 seconds",
       );
 
       // 1) Stop any ringing / tones
@@ -259,7 +256,7 @@ useEffect(() => {
     return () => clearTimeout(timeoutId);
   }, [open, peerAccepted, hasAccepted, hasConnected]);
 
-    // 🔔 React to backend call:status events for this call
+  // 🔔 React to backend call:status events for this call
   useEffect(() => {
     if (!open || !callId) return;
 
@@ -280,9 +277,7 @@ useEffect(() => {
 
       // if remote ends / cancels / declines, close our sheet too
       if (
-        ["ended", "cancelled", "declined", "missed", "failed"].includes(
-          status
-        )
+        ["ended", "cancelled", "declined", "missed", "failed"].includes(status)
       ) {
         cleanupPeer();
         onClose?.();
@@ -295,7 +290,6 @@ useEffect(() => {
       } catch {}
     };
   }, [open, callId, onClose]);
-
 
   async function setupPeerConnection(asCaller) {
     if (!sig || !room) return null;
@@ -320,52 +314,52 @@ useEffect(() => {
       if (remoteRef.current) remoteRef.current.srcObject = ev.streams[0];
     };
 
-// ICE
-pcNew.onicecandidate = (ev) => {
-  if (ev.candidate) {
-    try {
-      const out = ev.candidate.toJSON ? ev.candidate.toJSON() : ev.candidate;
-sig.emit("webrtc:ice", out);
+    // ICE
+    pcNew.onicecandidate = (ev) => {
+      if (ev.candidate) {
+        try {
+          const out = ev.candidate.toJSON
+            ? ev.candidate.toJSON()
+            : ev.candidate;
+          sig.emit("webrtc:ice", out);
+        } catch (e) {
+          console.warn("[CallSheet] emit ice failed:", e?.message || e);
+        }
+      } else {
+        console.log("[CallSheet] ICE gathering complete");
+      }
+    };
 
-    } catch (e) {
-      console.warn("[CallSheet] emit ice failed:", e?.message || e);
-    }
-  } else {
-    console.log("[CallSheet] ICE gathering complete");
-  }
-};
+    pcNew.oniceconnectionstatechange = () => {
+      console.log("[CallSheet] iceConnectionState:", pcNew.iceConnectionState);
+    };
 
-pcNew.oniceconnectionstatechange = () => {
-  console.log("[CallSheet] iceConnectionState:", pcNew.iceConnectionState);
-};
+    pcNew.onconnectionstatechange = () => {
+      const st = pcNew.connectionState;
 
-pcNew.onconnectionstatechange = () => {
-  const st = pcNew.connectionState;
+      console.log("[CallSheet] connectionState change:", {
+        connectionState: pcNew.connectionState,
+        iceConnectionState: pcNew.iceConnectionState,
+        signalingState: pcNew.signalingState,
+      });
 
-  console.log("[CallSheet] connectionState change:", {
-    connectionState: pcNew.connectionState,
-    iceConnectionState: pcNew.iceConnectionState,
-    signalingState: pcNew.signalingState,
-  });
-
-  if (st === "connected") {
-    setHasConnected((prev) => {
-      if (!prev) {
-        stopAllTones();
-        safeUpdateStatus("accepted", {
-          connectedAt: new Date().toISOString(),
+      if (st === "connected") {
+        setHasConnected((prev) => {
+          if (!prev) {
+            stopAllTones();
+            safeUpdateStatus("accepted", {
+              connectedAt: new Date().toISOString(),
+            });
+          }
+          return true;
         });
       }
-      return true;
-    });
-  }
-  if (["disconnected", "failed", "closed"].includes(st)) {
-    setHasConnected(false);
-  }
-};
+      if (["disconnected", "failed", "closed"].includes(st)) {
+        setHasConnected(false);
+      }
+    };
 
-
-       // signaling listeners
+    // signaling listeners
     const handleOffer = async (msg) => {
       try {
         const remoteSdp = msg?.payload || msg; // unwrap payload
@@ -379,11 +373,13 @@ pcNew.onconnectionstatechange = () => {
             try {
               await pcNew.addIceCandidate(new RTCIceCandidate(c));
             } catch (e) {
-              console.warn("[CallSheet] flush addIceCandidate failed:", e?.message || e);
+              console.warn(
+                "[CallSheet] flush addIceCandidate failed:",
+                e?.message || e,
+              );
             }
           }
         }
-
 
         if (!asCaller) {
           const answer = await pcNew.createAnswer();
@@ -396,8 +392,8 @@ pcNew.onconnectionstatechange = () => {
     };
 
     if (!asCaller) {
-  sig.on("webrtc:offer", handleOffer);
-}
+      sig.on("webrtc:offer", handleOffer);
+    }
 
     // 🔴 NEW: if we already received an offer BEFORE Accept, handle it now
     if (!asCaller && pendingOfferRef.current) {
@@ -406,68 +402,67 @@ pcNew.onconnectionstatechange = () => {
       pendingOfferRef.current = null;
     }
 
+    const onAnswer = async (msg) => {
+      try {
+        if (!asCaller) return;
 
-const onAnswer = async (msg) => {
-  try {
-    if (!asCaller) return;
+        // ✅ IMPORTANT: Only accept answer when we actually have a local offer
+        if (pcNew.signalingState !== "have-local-offer") {
+          console.warn(
+            "[CallSheet] ignoring duplicate/late answer; signalingState:",
+            pcNew.signalingState,
+          );
+          return;
+        }
 
-    // ✅ IMPORTANT: Only accept answer when we actually have a local offer
-    if (pcNew.signalingState !== "have-local-offer") {
-      console.warn(
-        "[CallSheet] ignoring duplicate/late answer; signalingState:",
-        pcNew.signalingState
-      );
-      return;
-    }
+        const remoteSdp = msg?.payload || msg;
+        await pcNew.setRemoteDescription(new RTCSessionDescription(remoteSdp));
 
-    const remoteSdp = msg?.payload || msg;
-    await pcNew.setRemoteDescription(new RTCSessionDescription(remoteSdp));
+        // NEW: flush any ICE that arrived early
+        if (pendingIceRef.current.length) {
+          const queued = [...pendingIceRef.current];
+          pendingIceRef.current = [];
+          for (const c of queued) {
+            try {
+              await pcNew.addIceCandidate(new RTCIceCandidate(c));
+            } catch (e) {
+              console.warn(
+                "[CallSheet] flush addIceCandidate failed:",
+                e?.message || e,
+              );
+            }
+          }
+        }
 
-    // NEW: flush any ICE that arrived early
-if (pendingIceRef.current.length) {
-  const queued = [...pendingIceRef.current];
-  pendingIceRef.current = [];
-  for (const c of queued) {
-    try {
-      await pcNew.addIceCandidate(new RTCIceCandidate(c));
-    } catch (e) {
-      console.warn("[CallSheet] flush addIceCandidate failed:", e?.message || e);
-    }
-  }
-}
+        stopAllTones();
+        setPeerAccepted(true);
+      } catch (e) {
+        console.error("[CallSheet] handle answer failed:", e);
+      }
+    };
 
+    const onIce = async (msg) => {
+      try {
+        const cand = msg?.payload || msg;
+        if (!cand) return;
 
-    stopAllTones();
-    setPeerAccepted(true);
-  } catch (e) {
-    console.error("[CallSheet] handle answer failed:", e);
-  }
-};
+        // If remoteDescription not ready yet, store candidate
+        if (!pcNew.remoteDescription) {
+          pendingIceRef.current.push(cand);
+          return;
+        }
 
-const onIce = async (msg) => {
-  try {
-    const cand = msg?.payload || msg;
-    if (!cand) return;
+        await pcNew.addIceCandidate(new RTCIceCandidate(cand));
+      } catch (e) {
+        console.warn("[CallSheet] addIceCandidate failed:", e?.message || e);
+      }
+    };
 
-    // If remoteDescription not ready yet, store candidate
-    if (!pcNew.remoteDescription) {
-      pendingIceRef.current.push(cand);
-      return;
-    }
+    sig.on("webrtc:answer", onAnswer);
+    sig.on("webrtc:ice", onIce);
 
-    await pcNew.addIceCandidate(new RTCIceCandidate(cand));
-  } catch (e) {
-    console.warn("[CallSheet] addIceCandidate failed:", e?.message || e);
-  }
-};
-
-
-sig.on("webrtc:answer", onAnswer);
-sig.on("webrtc:ice", onIce);
-
-// ✅ store handlers so cleanupPeer can remove them later
-pcNew.__sigHandlers = { onAnswer, onIce, onOffer: handleOffer };
-
+    // ✅ store handlers so cleanupPeer can remove them later
+    pcNew.__sigHandlers = { onAnswer, onIce, onOffer: handleOffer };
 
     // caller creates offer immediately
     if (asCaller) {
@@ -489,7 +484,7 @@ pcNew.__sigHandlers = { onAnswer, onIce, onOffer: handleOffer };
     pendingOfferRef.current = null;
     pendingIceRef.current = [];
 
-   // ✅ remove signaling listeners attached in setupPeerConnection()
+    // ✅ remove signaling listeners attached in setupPeerConnection()
     try {
       const h = pc?.__sigHandlers;
       if (h && sig) {
@@ -508,13 +503,13 @@ pcNew.__sigHandlers = { onAnswer, onIce, onOffer: handleOffer };
         });
         pc.close();
       }
-      } catch {}
+    } catch {}
     setPc(null);
     setHasConnected(false);
     setHasAccepted(false); // 👈 reset accept state
     setPeerAccepted(false);
     setElapsedSeconds(0); // reset duration when call ends
-    setCallFailed(false);  // 👈 reset failure flag
+    setCallFailed(false); // 👈 reset failure flag
 
     try {
       sig?.disconnect();
@@ -545,7 +540,7 @@ pcNew.__sigHandlers = { onAnswer, onIce, onOffer: handleOffer };
     }
   }
 
-    // ---- caller: start as soon as sheet opens ----
+  // ---- caller: start as soon as sheet opens ----
   async function startCaller() {
     if (!sig || !room) return;
     setStarting(true);
@@ -572,7 +567,7 @@ pcNew.__sigHandlers = { onAnswer, onIce, onOffer: handleOffer };
     } catch (e) {
       console.error("call start error:", e);
       alert(
-        "Could not start call. Please check microphone/camera permissions."
+        "Could not start call. Please check microphone/camera permissions.",
       );
       stopAllTones();
     } finally {
@@ -593,7 +588,7 @@ pcNew.__sigHandlers = { onAnswer, onIce, onOffer: handleOffer };
 
   // ---- receiver actions ----
 
-     async function acceptIncoming() {
+  async function acceptIncoming() {
     if (!sig || !room) return;
     setStarting(true);
     try {
@@ -606,14 +601,13 @@ pcNew.__sigHandlers = { onAnswer, onIce, onOffer: handleOffer };
       });
 
       stopAllTones();
-      setHasAccepted(true);              // 👈 receiver has accepted
+      setHasAccepted(true); // 👈 receiver has accepted
       await safeUpdateStatus("accepted");
       await setupPeerConnection(false);
-
     } catch (e) {
       console.error("accept call failed:", e);
       alert(
-        "Could not accept call. Please check microphone/camera permissions."
+        "Could not accept call. Please check microphone/camera permissions.",
       );
       await safeUpdateStatus("declined", { reason: "media_error" });
       cleanupPeer();
@@ -635,14 +629,12 @@ pcNew.__sigHandlers = { onAnswer, onIce, onOffer: handleOffer };
 
   async function hangup(forceStatus = null) {
     if (forceStatus && typeof forceStatus !== "string") {
-  forceStatus = null;
-}
+      forceStatus = null;
+    }
     stopAllTones();
     const endedStatus =
-  forceStatus ||
-  (hasConnected ? "ended" : role === "caller" ? "cancelled" : "declined");
-
-
+      forceStatus ||
+      (hasConnected ? "ended" : role === "caller" ? "cancelled" : "declined");
 
     await safeUpdateStatus(endedStatus);
     await sendCallSummaryMessage(endedStatus);
@@ -673,7 +665,7 @@ pcNew.__sigHandlers = { onAnswer, onIce, onOffer: handleOffer };
     });
   }
 
-      // ---------- render ----------
+  // ---------- render ----------
 
   if (!open || !room) return null;
 
@@ -726,18 +718,17 @@ pcNew.__sigHandlers = { onAnswer, onIce, onOffer: handleOffer };
           style={{ height: "460px" }} // 👈 explicit height, ignores external flex
         >
           {/* VIDEO LAYOUT */}
-    {mode === "video" && (
-  <>
-    {/* big view (also tap to swap) */}
-    <video
-      ref={pipFlipped ? localRef : remoteRef}
-      autoPlay
-      playsInline
-      onClick={() => setPipFlipped((v) => !v)}   // 👈 tap big view to swap
-      className="absolute inset-0 w-full h-full object-cover opacity-90"
-    />
-    <div className="absolute inset-0 bg-black/35" />
-
+          {mode === "video" && (
+            <>
+              {/* big view (also tap to swap) */}
+              <video
+                ref={pipFlipped ? localRef : remoteRef}
+                autoPlay
+                playsInline
+                onClick={() => setPipFlipped((v) => !v)} // 👈 tap big view to swap
+                className="absolute inset-0 w-full h-full object-cover opacity-90"
+              />
+              <div className="absolute inset-0 bg-black/35" />
 
               {/* PiP bottom-right INSIDE video */}
               <video
@@ -752,9 +743,7 @@ pcNew.__sigHandlers = { onAnswer, onIce, onOffer: handleOffer };
               {/* timer / status at bottom centre */}
               <div className="absolute bottom-32 left-0 right-0 flex justify-center z-20">
                 <span className="px-3 py-1 rounded-full bg-black/70 text-xs text-zinc-100">
-                  {hasConnected
-                    ? formatDuration(elapsedSeconds)
-                    : statusText}
+                  {hasConnected ? formatDuration(elapsedSeconds) : statusText}
                 </span>
               </div>
             </>

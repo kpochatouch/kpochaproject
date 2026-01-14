@@ -41,7 +41,7 @@ export default function ClientSettings() {
 
   // upload widget
   const [widgetReady, setWidgetReady] = useState(
-    typeof window !== "undefined" && !!window.cloudinary?.createUploadWidget
+    typeof window !== "undefined" && !!window.cloudinary?.createUploadWidget,
   );
 
   // form state
@@ -71,8 +71,7 @@ export default function ClientSettings() {
       s.async = true;
       s.defer = true;
       s.setAttribute("data-cld", "1");
-      s.onload = () =>
-        setWidgetReady(!!window.cloudinary?.createUploadWidget);
+      s.onload = () => setWidgetReady(!!window.cloudinary?.createUploadWidget);
       document.body.appendChild(s);
     }
 
@@ -106,7 +105,7 @@ export default function ClientSettings() {
         setLoading(true);
         setError("");
         await ensureClientProfile(); // ✅ create profile if missing
-        
+
         const [meRes, geoRes, clientRes, proRes] = await Promise.all([
           api.get("/api/me"),
           api.get("/api/geo/ng"),
@@ -161,7 +160,7 @@ export default function ClientSettings() {
 
         const normalizedState =
           statesRaw.find(
-            (s) => s.toUpperCase() === String(baseState).toUpperCase()
+            (s) => s.toUpperCase() === String(baseState).toUpperCase(),
           ) || String(baseState);
         const lgasForState =
           normalizedState && lgasRaw[normalizedState]
@@ -169,7 +168,7 @@ export default function ClientSettings() {
             : [];
         const normalizedLga =
           lgasForState.find(
-            (x) => x.toUpperCase() === String(baseLga).toUpperCase()
+            (x) => x.toUpperCase() === String(baseLga).toUpperCase(),
           ) || String(baseLga);
 
         const alreadyTerms =
@@ -267,7 +266,7 @@ export default function ClientSettings() {
           if (!err && res && res.event === "success") {
             onUploaded(res.info.secure_url);
           }
-        }
+        },
       );
       w.open();
     } catch {
@@ -290,11 +289,11 @@ export default function ClientSettings() {
       if (sessionId && typeof window !== "undefined") {
         window.dispatchEvent(
           new CustomEvent("aws-liveness:start", {
-                      detail: {
-            sessionId,
-            back: "/settings", // come back here (SettingsSmart will route to ClientSettings)
-          },
-          })
+            detail: {
+              sessionId,
+              back: "/settings", // come back here (SettingsSmart will route to ClientSettings)
+            },
+          }),
         );
         setShowLivenessNotice(true);
       } else {
@@ -303,7 +302,7 @@ export default function ClientSettings() {
     } catch (e) {
       setError(
         e?.response?.data?.error ||
-          "Face verification is required before you can save these changes."
+          "Face verification is required before you can save these changes.",
       );
     }
   }
@@ -345,11 +344,10 @@ export default function ClientSettings() {
       }
 
       // attach the "remember" flag if we just returned from AWS
-const livenessProof = takeAwsLivenessProof();
-if (livenessProof) {
-  payload.liveness = { remember: true };
-}
-
+      const livenessProof = takeAwsLivenessProof();
+      if (livenessProof) {
+        payload.liveness = { remember: true };
+      }
 
       const res = await api.put("/api/profile/me", payload);
       const updated = res?.data || payload;
@@ -483,11 +481,11 @@ if (livenessProof) {
             <div className="grid sm:grid-cols-2 gap-4">
               <Field label="Full / Display Name *">
                 <input
-                    className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2"
-                    value={form.displayName}
-                    onChange={(e) => onChangeField("displayName", e.target.value)}
-                    required
-                  />
+                  className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2"
+                  value={form.displayName}
+                  onChange={(e) => onChangeField("displayName", e.target.value)}
+                  required
+                />
               </Field>
               <Field label="Phone *">
                 <input
@@ -524,7 +522,9 @@ if (livenessProof) {
                   required
                 >
                   <option value="">
-                    {lgaOptions.length ? "Select LGA…" : "Select a state first…"}
+                    {lgaOptions.length
+                      ? "Select LGA…"
+                      : "Select a state first…"}
                   </option>
                   {lgaOptions.map((x) => (
                     <option key={x} value={x}>
@@ -588,9 +588,7 @@ if (livenessProof) {
                   <select
                     className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2"
                     value={form.kycIdType}
-                    onChange={(e) =>
-                      onChangeField("kycIdType", e.target.value)
-                    }
+                    onChange={(e) => onChangeField("kycIdType", e.target.value)}
                   >
                     <option value="">Select…</option>
                     <option value="National ID">National ID</option>
@@ -605,9 +603,7 @@ if (livenessProof) {
                   <input
                     className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2"
                     value={form.kycIdUrl}
-                    onChange={(e) =>
-                      onChangeField("kycIdUrl", e.target.value)
-                    }
+                    onChange={(e) => onChangeField("kycIdUrl", e.target.value)}
                     placeholder="https://…"
                   />
                 </Field>

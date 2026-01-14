@@ -36,8 +36,7 @@ export default function Home() {
     })();
   }, []);
 
-
-    // ✅ unified logic — check client profile only when button is clicked
+  // ✅ unified logic — check client profile only when button is clicked
   const onFindProClick = async () => {
     if (!me?.uid) {
       return navigate("/client/register");
@@ -53,13 +52,11 @@ export default function Home() {
     }
   };
 
-
   // ✅ arrow scroll listeners
   useEffect(() => {
     function onScroll() {
       const nearBottom =
-        window.innerHeight + window.scrollY >=
-        document.body.offsetHeight - 200;
+        window.innerHeight + window.scrollY >= document.body.offsetHeight - 200;
       setAtBottom(nearBottom);
     }
     window.addEventListener("scroll", onScroll, { passive: true });
@@ -123,7 +120,8 @@ export default function Home() {
 
           {/* Heading */}
           <h1 className="text-3xl sm:text-5xl md:text-6xl font-bold tracking-tight mb-3">
-            Kpocha Touch</h1>
+            Kpocha Touch
+          </h1>
 
           <p className="text-zinc-300 max-w-2xl mx-auto mb-8 leading-relaxed text-sm sm:text-base">
             Connecting you to top Professionals across{" "}
@@ -189,9 +187,9 @@ export default function Home() {
           className="text-zinc-300 text-center max-w-3xl mx-auto"
         >
           Kpocha Touch connects clients to{" "}
-          <span className="text-gold">verified</span> professionals in all fields
-          across Nigeria. Discover trusted pros, book instantly, pay securely,
-          and enjoy premium service at home or in-salon.
+          <span className="text-gold">verified</span> professionals in all
+          fields across Nigeria. Discover trusted pros, book instantly, pay
+          securely, and enjoy premium service at home or in-salon.
         </motion.p>
       </section>
 
@@ -307,7 +305,10 @@ export default function Home() {
         </motion.h3>
         <div className="grid md:grid-cols-3 gap-6">
           {[
-            { t: "Find a Professional", d: "Browse verified experts near you." },
+            {
+              t: "Find a Professional",
+              d: "Browse verified experts near you.",
+            },
             {
               t: "Book & Pay",
               d: "Pick a time and pay securely via Paystack.",

@@ -21,10 +21,16 @@ export default function uploadsRoutes({ requireAuth }) {
 
       // Whitelist params we allow the client to include in the signature
       const folder = (req.body?.folder || "kpocha").toString();
-      const public_id = req.body?.public_id ? String(req.body.public_id) : undefined;
+      const public_id = req.body?.public_id
+        ? String(req.body.public_id)
+        : undefined;
       const overwrite =
-        typeof req.body?.overwrite === "boolean" ? req.body.overwrite : undefined;
-      const tags = Array.isArray(req.body?.tags) ? req.body.tags.join(",") : undefined;
+        typeof req.body?.overwrite === "boolean"
+          ? req.body.overwrite
+          : undefined;
+      const tags = Array.isArray(req.body?.tags)
+        ? req.body.tags.join(",")
+        : undefined;
 
       // Build param string in alpha order, omit undefined/empty
       const params = { folder, timestamp: ts, public_id, overwrite, tags };
@@ -32,8 +38,7 @@ export default function uploadsRoutes({ requireAuth }) {
         .filter(([, v]) => v !== undefined && v !== "")
         .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
 
-      const toSign =
-        entries.map(([k, v]) => `${k}=${v}`).join("&") + apiSecret; // Cloudinary: sha1 of "<params><api_secret>"
+      const toSign = entries.map(([k, v]) => `${k}=${v}`).join("&") + apiSecret; // Cloudinary: sha1 of "<params><api_secret>"
       const signature = crypto.createHash("sha1").update(toSign).digest("hex");
 
       return res.json({

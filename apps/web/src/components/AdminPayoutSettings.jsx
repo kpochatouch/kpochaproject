@@ -1,7 +1,11 @@
 // apps/web/src/components/AdminPayoutSettings.jsx
 
 import { useEffect, useState } from "react";
-import { getSettings, updateSettingsAdmin, adminReleaseBooking } from "../../lib/api";
+import {
+  getSettings,
+  updateSettingsAdmin,
+  adminReleaseBooking,
+} from "../../lib/api";
 
 export default function AdminPayoutSettings() {
   const [loading, setLoading] = useState(true);
@@ -30,7 +34,8 @@ export default function AdminPayoutSettings() {
   useEffect(() => {
     (async () => {
       setLoading(true);
-      setErr(""); setMsg("");
+      setErr("");
+      setMsg("");
       try {
         const { data } = await getSettings();
         setForm((p) => ({
@@ -49,19 +54,23 @@ export default function AdminPayoutSettings() {
 
   async function save() {
     setSaving(true);
-    setErr(""); setMsg("");
+    setErr("");
+    setMsg("");
     try {
       const payload = {
         payouts: {
           releaseDays: Number(form.payouts.releaseDays) || 7,
-          instantCashoutFeePercent: Number(form.payouts.instantCashoutFeePercent) || 3,
+          instantCashoutFeePercent:
+            Number(form.payouts.instantCashoutFeePercent) || 3,
           enableAutoRelease: !!form.payouts.enableAutoRelease,
           autoReleaseCron: String(form.payouts.autoReleaseCron || "0 2 * * *"),
         },
         bookingRules: {
           noShowStrikeLimit: Number(form.bookingRules.noShowStrikeLimit) || 2,
           enableNoShowSweep: !!form.bookingRules.enableNoShowSweep,
-          noShowSweepCron: String(form.bookingRules.noShowSweepCron || "0 3 * * *"),
+          noShowSweepCron: String(
+            form.bookingRules.noShowSweepCron || "0 3 * * *",
+          ),
         },
       };
       await updateSettingsAdmin(payload);
@@ -76,7 +85,9 @@ export default function AdminPayoutSettings() {
 
   async function manualRelease() {
     setReleasing(true);
-    setErr(""); setMsg(""); setReleaseResult(null);
+    setErr("");
+    setMsg("");
+    setReleaseResult(null);
     try {
       const { data } = await adminReleaseBooking(bookingId.trim());
       setReleaseResult(data);
@@ -84,7 +95,7 @@ export default function AdminPayoutSettings() {
         setMsg(
           data.alreadyReleased
             ? "Already released earlier."
-            : `Released ₦${((data.releasedKobo || 0) / 100).toLocaleString()} to Available.`
+            : `Released ₦${((data.releasedKobo || 0) / 100).toLocaleString()} to Available.`,
         );
       } else {
         setErr(data?.error || "Release failed.");
@@ -97,7 +108,12 @@ export default function AdminPayoutSettings() {
     }
   }
 
-  if (loading) return <div className="rounded border border-zinc-800 p-4">Loading settings…</div>;
+  if (loading)
+    return (
+      <div className="rounded border border-zinc-800 p-4">
+        Loading settings…
+      </div>
+    );
 
   return (
     <section className="rounded-lg border border-zinc-800 p-4 space-y-6">
@@ -113,7 +129,12 @@ export default function AdminPayoutSettings() {
             min="1"
             className="w-full bg-black border border-zinc-800 rounded px-3 py-2"
             value={form.payouts.releaseDays}
-            onChange={(e) => setForm({ ...form, payouts: { ...form.payouts, releaseDays: e.target.value } })}
+            onChange={(e) =>
+              setForm({
+                ...form,
+                payouts: { ...form.payouts, releaseDays: e.target.value },
+              })
+            }
           />
         </Field>
 
@@ -123,7 +144,15 @@ export default function AdminPayoutSettings() {
             min="0"
             className="w-full bg-black border border-zinc-800 rounded px-3 py-2"
             value={form.payouts.instantCashoutFeePercent}
-            onChange={(e) => setForm({ ...form, payouts: { ...form.payouts, instantCashoutFeePercent: e.target.value } })}
+            onChange={(e) =>
+              setForm({
+                ...form,
+                payouts: {
+                  ...form.payouts,
+                  instantCashoutFeePercent: e.target.value,
+                },
+              })
+            }
           />
         </Field>
 
@@ -132,7 +161,15 @@ export default function AdminPayoutSettings() {
             <input
               type="checkbox"
               checked={!!form.payouts.enableAutoRelease}
-              onChange={(e) => setForm({ ...form, payouts: { ...form.payouts, enableAutoRelease: e.target.checked } })}
+              onChange={(e) =>
+                setForm({
+                  ...form,
+                  payouts: {
+                    ...form.payouts,
+                    enableAutoRelease: e.target.checked,
+                  },
+                })
+              }
             />
             Turn on nightly scheduler
           </label>
@@ -142,7 +179,12 @@ export default function AdminPayoutSettings() {
           <input
             className="w-full bg-black border border-zinc-800 rounded px-3 py-2"
             value={form.payouts.autoReleaseCron}
-            onChange={(e) => setForm({ ...form, payouts: { ...form.payouts, autoReleaseCron: e.target.value } })}
+            onChange={(e) =>
+              setForm({
+                ...form,
+                payouts: { ...form.payouts, autoReleaseCron: e.target.value },
+              })
+            }
             placeholder="0 2 * * *"
           />
         </Field>
@@ -162,7 +204,8 @@ export default function AdminPayoutSettings() {
 
       <h4 className="font-semibold">Manual Release (single booking)</h4>
       <p className="text-sm text-zinc-400 mb-2">
-        Move this booking’s pro share from <em>Pending</em> to <em>Available</em>.
+        Move this booking’s pro share from <em>Pending</em> to{" "}
+        <em>Available</em>.
       </p>
 
       <div className="flex gap-2 flex-col sm:flex-row">
@@ -183,7 +226,7 @@ export default function AdminPayoutSettings() {
 
       {releaseResult && (
         <pre className="mt-3 text-xs bg-zinc-950 border border-zinc-800 rounded p-3 overflow-auto">
-{JSON.stringify(releaseResult, null, 2)}
+          {JSON.stringify(releaseResult, null, 2)}
         </pre>
       )}
     </section>

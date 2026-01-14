@@ -1,11 +1,5 @@
 // apps/web/src/pages/Settings.jsx
-import {
-  useEffect,
-  useRef,
-  useState,
-  useMemo,
-  useCallback,
-} from "react";
+import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import { ensureClientProfile } from "../lib/api";
@@ -19,8 +13,7 @@ const UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET || "";
 /* ---------- username cooldown (3 months) ---------- */
 // Change USERNAME_COOLDOWN_DAYS to 180 if you want 6 months instead
 const USERNAME_COOLDOWN_DAYS = 90;
-const USERNAME_COOLDOWN_MS =
-  USERNAME_COOLDOWN_DAYS * 24 * 60 * 60 * 1000;
+const USERNAME_COOLDOWN_MS = USERNAME_COOLDOWN_DAYS * 24 * 60 * 60 * 1000;
 
 /* ---------- helpers ---------- */
 const digitsOnly = (s = "") => String(s).replace(/\D/g, "");
@@ -54,7 +47,7 @@ function stashSettingsDraft(section, payload) {
   try {
     localStorage.setItem(
       "kpocha:settingsDraft",
-      JSON.stringify({ section, payload, ts: Date.now() })
+      JSON.stringify({ section, payload, ts: Date.now() }),
     );
   } catch {
     /* ignore */
@@ -199,19 +192,19 @@ export default function SettingsPage() {
   }, []);
   const stateList = useMemo(
     () => (allStates || []).slice().sort(),
-    [allStates]
+    [allStates],
   );
 
   function toggleStateCovered(st) {
     const key = st.toUpperCase();
     setStatesCovered((p) =>
-      p.includes(key) ? p.filter((x) => x !== key) : [...p, key]
+      p.includes(key) ? p.filter((x) => x !== key) : [...p, key],
     );
   }
 
   /* ---------- cloudinary ---------- */
   const [widgetReady, setWidgetReady] = useState(
-    typeof window !== "undefined" && !!window.cloudinary?.createUploadWidget
+    typeof window !== "undefined" && !!window.cloudinary?.createUploadWidget,
   );
   useEffect(() => {
     if (widgetReady) return;
@@ -223,8 +216,7 @@ export default function SettingsPage() {
       s.async = true;
       s.defer = true;
       s.setAttribute("data-cld", "1");
-      s.onload = () =>
-        setWidgetReady(!!window.cloudinary?.createUploadWidget);
+      s.onload = () => setWidgetReady(!!window.cloudinary?.createUploadWidget);
       document.body.appendChild(s);
     }
     const poll = setInterval(() => {
@@ -260,7 +252,7 @@ export default function SettingsPage() {
             if (!err && res && res.event === "success") {
               onSuccess(res.info.secure_url);
             }
-          }
+          },
         );
       } catch {
         return null;
@@ -302,7 +294,7 @@ export default function SettingsPage() {
             base.fullName ||
             base?.identity?.fullName ||
             meData?.email ||
-            ""
+            "",
         );
         setPhone(
           clientData?.phone ||
@@ -310,7 +302,7 @@ export default function SettingsPage() {
             proData?.phone ||
             proData?.identity?.phone ||
             meData?.identity?.phone ||
-            ""
+            "",
         );
 
         const st =
@@ -339,10 +331,10 @@ export default function SettingsPage() {
             proData?.identity?.photoUrl ||
             meData?.photoUrl ||
             meData?.identity?.photoUrl ||
-            ""
+            "",
         );
 
-                // username + last change time
+        // username + last change time
         const serverUsername =
           clientData?.username ||
           clientData?.identity?.username ||
@@ -372,32 +364,31 @@ export default function SettingsPage() {
         setUsername(serverUsername || "");
         setUsernameLastChangedAt(lastUsernameChange || null);
 
-
         if (proData) {
           setProfileVisible(
             Boolean(
               proData?.professional?.profileVisible ??
-                proData?.profileVisible ??
-                true
-            )
+              proData?.profileVisible ??
+              true,
+            ),
           );
           setNationwide(Boolean(proData?.professional?.nationwide ?? false));
           setStatesCovered(
             Array.isArray(proData?.availability?.statesCovered)
               ? proData.availability.statesCovered.map((s) =>
-                  s.toString().toUpperCase()
+                  s.toString().toUpperCase(),
                 )
-              : []
+              : [],
           );
 
           setServices(
             Array.isArray(proData?.professional?.services)
               ? proData.professional.services
               : Array.isArray(proData?.services)
-              ? proData.services.map((s) =>
-                  typeof s === "string" ? s : s.name
-                )
-              : []
+                ? proData.services.map((s) =>
+                    typeof s === "string" ? s : s.name,
+                  )
+                : [],
           );
           setYears(proData?.professional?.years || "");
           const hc = String(proData?.professional?.hasCert || "no");
@@ -408,8 +399,8 @@ export default function SettingsPage() {
               proData.professional.workPhotos.length
               ? proData.professional.workPhotos
               : Array.isArray(proData?.gallery) && proData.gallery.length
-              ? proData.gallery
-              : [""]
+                ? proData.gallery
+                : [""],
           );
 
           setProBio(proData?.bio || proData?.description || "");
@@ -417,7 +408,7 @@ export default function SettingsPage() {
             proData?.photoUrl ||
               proData?.identity?.photoUrl ||
               proData?.contactPublic?.shopPhoto ||
-              ""
+              "",
           );
 
           if (
@@ -433,9 +424,12 @@ export default function SettingsPage() {
                   ? formatMoneyForInput(s.promoPrice.toString())
                   : "",
                 otherText: "",
-              }))
+              })),
             );
-          } else if (Array.isArray(proData?.services) && proData.services.length) {
+          } else if (
+            Array.isArray(proData?.services) &&
+            proData.services.length
+          ) {
             setServicesDetailed(
               proData.services.map((s) => {
                 if (typeof s === "string") {
@@ -456,7 +450,7 @@ export default function SettingsPage() {
                     : "",
                   otherText: "",
                 };
-              })
+              }),
             );
           }
 
@@ -531,12 +525,12 @@ export default function SettingsPage() {
             setProfileVisible(
               typeof draft.payload.profileVisible === "boolean"
                 ? draft.payload.profileVisible
-                : true
+                : true,
             );
             setNationwide(!!draft.payload.nationwide);
             if (Array.isArray(draft.payload.statesCovered)) {
               setStatesCovered(
-                draft.payload.statesCovered.map((x) => x.toUpperCase())
+                draft.payload.statesCovered.map((x) => x.toUpperCase()),
               );
             }
             if (Array.isArray(draft.payload.servicesDetailed)) {
@@ -546,7 +540,10 @@ export default function SettingsPage() {
               setBusiness((prev) => ({ ...prev, ...draft.payload.business }));
             }
             if (draft.payload.availability) {
-              setAvailability((prev) => ({ ...prev, ...draft.payload.availability }));
+              setAvailability((prev) => ({
+                ...prev,
+                ...draft.payload.availability,
+              }));
             }
           } else if (draft.section === "bank") {
             setBankName(draft.payload.bankName || "");
@@ -574,23 +571,21 @@ export default function SettingsPage() {
   const hasPro = !!appDoc?._id;
   const canSaveProfile = useMemo(
     () => !!displayName && !!phone && (!!lga || !!stateVal),
-    [displayName, phone, lga, stateVal]
+    [displayName, phone, lga, stateVal],
   );
   const canSavePro = useMemo(() => {
     const hasAnyDetailed = servicesDetailed.some(
-      (s) => (s.name || "").trim() !== ""
+      (s) => (s.name || "").trim() !== "",
     );
     return (
       hasPro &&
-      (
-        services.length > 0 ||
+      (services.length > 0 ||
         hasAnyDetailed ||
         years ||
         hasCert === "yes" ||
         workPhotos.filter(Boolean).length > 0 ||
         proBio ||
-        proPhotoUrl
-      )
+        proPhotoUrl)
     );
   }, [
     hasPro,
@@ -609,7 +604,7 @@ export default function SettingsPage() {
       !!accountName &&
       digitsOnly(accountNumber).length === 10 &&
       digitsOnly(bvn).length === 11,
-    [hasPro, bankName, accountName, accountNumber, bvn]
+    [hasPro, bankName, accountName, accountNumber, bvn],
   );
 
   const profileUrl = useMemo(() => {
@@ -637,8 +632,6 @@ export default function SettingsPage() {
     };
   }, [usernameLastChangedAt]);
 
-
-
   /* ---------- liveness launcher ---------- */
   async function startAwsLivenessFlow() {
     try {
@@ -648,19 +641,21 @@ export default function SettingsPage() {
         window.dispatchEvent(
           new CustomEvent("aws-liveness:start", {
             detail: { sessionId, back: "/settings" }, // <— come back here
-          })
+          }),
         );
       }
       setShowLivenessNotice(true);
     } catch {
-      setErr("Face verification is required before you can save these changes.");
+      setErr(
+        "Face verification is required before you can save these changes.",
+      );
     }
   }
 
   /* ---------- saves ---------- */
 
   // general
-    const saveProfile = useCallback(async () => {
+  const saveProfile = useCallback(async () => {
     if (!canSaveProfile || savingProfile) return;
     clearMsg();
     setSavingProfile(true);
@@ -668,17 +663,14 @@ export default function SettingsPage() {
       const trimmedUsername = (username || "").trim();
 
       const prevUsername =
-        client?.username ||
-        client?.identity?.username ||
-        me?.username ||
-        "";
+        client?.username || client?.identity?.username || me?.username || "";
 
       const usernameChanged =
         trimmedUsername && trimmedUsername !== prevUsername;
 
       if (usernameChanged && !canEditUsername) {
         setErr(
-          "You can only change your username once every 3 months. (Adjustable in code to 6 months.)"
+          "You can only change your username once every 3 months. (Adjustable in code to 6 months.)",
         );
         setSavingProfile(false);
         return;
@@ -699,13 +691,11 @@ export default function SettingsPage() {
         payload.username = trimmedUsername;
       }
 
-
       // attach one-shot liveness remember flag if present
-const livenessProof = takeAwsLivenessProof();
-if (livenessProof) {
-  payload.liveness = { remember: true };
-}
-
+      const livenessProof = takeAwsLivenessProof();
+      if (livenessProof) {
+        payload.liveness = { remember: true };
+      }
 
       let res;
       if (client) {
@@ -715,15 +705,14 @@ if (livenessProof) {
           setLivenessVerifiedAt(res.data.livenessVerifiedAt);
         }
       } else {
-  res = await api.put("/api/profile/me", payload);
-  setClient(res?.data || payload);
-  if (res?.data?.livenessVerifiedAt) {
-    setLivenessVerifiedAt(res.data.livenessVerifiedAt);
-  }
-}
+        res = await api.put("/api/profile/me", payload);
+        setClient(res?.data || payload);
+        if (res?.data?.livenessVerifiedAt) {
+          setLivenessVerifiedAt(res.data.livenessVerifiedAt);
+        }
+      }
 
-
-                  setMe((prev) => ({
+      setMe((prev) => ({
         ...(prev || {}),
         displayName,
         username: trimmedUsername || prev?.username || "",
@@ -735,7 +724,6 @@ if (livenessProof) {
           photoUrl: avatarUrl,
         },
       }));
-
 
       if (usernameChanged) {
         const ts = Date.now();
@@ -749,7 +737,6 @@ if (livenessProof) {
       }
 
       flashOK("Profile saved.");
-
     } catch (e) {
       if (
         e?.response?.status === 403 &&
@@ -771,7 +758,7 @@ if (livenessProof) {
     } finally {
       setSavingProfile(false);
     }
-    }, [
+  }, [
     canSaveProfile,
     savingProfile,
     displayName,
@@ -785,7 +772,6 @@ if (livenessProof) {
     username,
     canEditUsername,
   ]);
-
 
   // pro details
   const saveProDetails = useCallback(async () => {
@@ -831,10 +817,9 @@ if (livenessProof) {
           ...(appDoc?.availability || {}),
           statesCovered: nationwide
             ? stateList
-            : (
-                availability.statesCovered && availability.statesCovered.length
-                  ? availability.statesCovered
-                  : statesCovered
+            : (availability.statesCovered && availability.statesCovered.length
+                ? availability.statesCovered
+                : statesCovered
               ).map((x) => x.toUpperCase()),
           days: availability.days,
           start: availability.start,
@@ -854,11 +839,10 @@ if (livenessProof) {
       };
 
       // attach one-shot liveness remember flag if present
-const livenessProof = takeAwsLivenessProof();
-if (livenessProof) {
-  payload.liveness = { remember: true };
-}
-
+      const livenessProof = takeAwsLivenessProof();
+      if (livenessProof) {
+        payload.liveness = { remember: true };
+      }
 
       const { data } = await api.put("/api/pros/me", payload);
       setAppDoc(data?.item || { ...appDoc, ...payload });
@@ -881,7 +865,9 @@ if (livenessProof) {
         });
         await startAwsLivenessFlow();
       } else {
-        setErr(e?.response?.data?.error || "Failed to save professional details.");
+        setErr(
+          e?.response?.data?.error || "Failed to save professional details.",
+        );
       }
     } finally {
       setSavingPro(false);
@@ -928,11 +914,10 @@ if (livenessProof) {
       };
 
       // attach one-shot liveness remember flag if present
-const livenessProof = takeAwsLivenessProof();
-if (livenessProof) {
-  payload.liveness = { remember: true };
-}
-
+      const livenessProof = takeAwsLivenessProof();
+      if (livenessProof) {
+        payload.liveness = { remember: true };
+      }
 
       const { data } = await api.put("/api/pros/me", payload);
       setAppDoc(data?.item || { ...appDoc, ...payload });
@@ -1000,7 +985,8 @@ if (livenessProof) {
       )}
       {showLivenessNotice && (
         <div className="mt-4 rounded border border-amber-700 bg-amber-900/30 text-amber-100 px-3 py-2 text-sm">
-          Please complete face verification in the popup, then click “Save” again.
+          Please complete face verification in the popup, then click “Save”
+          again.
         </div>
       )}
 
@@ -1030,7 +1016,10 @@ if (livenessProof) {
             )}
 
             {/* General */}
-            <section id="general" className="rounded-lg border border-zinc-800 p-4">
+            <section
+              id="general"
+              className="rounded-lg border border-zinc-800 p-4"
+            >
               <h2 className="text-lg font-semibold mb-3">General</h2>
 
               <div className="flex items-center gap-4 mb-3">
@@ -1056,7 +1045,7 @@ if (livenessProof) {
                 </div>
               </div>
 
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <Input
                   label="Display Name"
                   value={displayName}
@@ -1085,26 +1074,21 @@ if (livenessProof) {
                     canEditUsername
                       ? "You can change your username now."
                       : nextUsernameChangeAt
-                      ? `Next change: ${nextUsernameChangeAt.toLocaleDateString()}`
-                      : "Temporarily locked."
+                        ? `Next change: ${nextUsernameChangeAt.toLocaleDateString()}`
+                        : "Temporarily locked."
                   }
                 />
               </div>
 
-                          {username && profileUrl && (
-              <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <ReadOnly
-                  label="Public profile link"
-                  value={profileUrl}
-                />
-              </div>
-            )}
-
+              {username && profileUrl && (
+                <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <ReadOnly label="Public profile link" value={profileUrl} />
+                </div>
+              )}
 
               <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <ReadOnly label="Email" value={me?.email || ""} />
               </div>
-
 
               <div className="mt-3">
                 <Label>Short bio / about you</Label>
@@ -1143,7 +1127,9 @@ if (livenessProof) {
 
             {/* Pro */}
             <section id="pro" className="rounded-lg border border-zinc-800 p-4">
-              <h2 className="text-lg font-semibold mb-3">Professional Profile</h2>
+              <h2 className="text-lg font-semibold mb-3">
+                Professional Profile
+              </h2>
 
               <div className="mb-4">
                 <Label>Pro profile picture (public)</Label>
@@ -1153,7 +1139,9 @@ if (livenessProof) {
                     onClick={() => proPhotoUrl && setLightboxUrl(proPhotoUrl)}
                   />
                   <UploadButton
-                    title={widgetReady ? "Upload Pro Photo" : "Upload (loading…)"}
+                    title={
+                      widgetReady ? "Upload Pro Photo" : "Upload (loading…)"
+                    }
                     widgetFactory={widgetFactory}
                     onUploaded={setProPhotoUrl}
                     disabled={!widgetReady || !hasPro}
@@ -1265,7 +1253,11 @@ if (livenessProof) {
                               otherText={row.otherText}
                               onOtherText={(txt) => {
                                 const next = [...servicesDetailed];
-                                next[i] = { ...next[i], otherText: txt, name: txt };
+                                next[i] = {
+                                  ...next[i],
+                                  otherText: txt,
+                                  name: txt,
+                                };
                                 setServicesDetailed(next);
                               }}
                               disabled={!hasPro}
@@ -1302,7 +1294,9 @@ if (livenessProof) {
                                 const next = [...servicesDetailed];
                                 next[i] = {
                                   ...next[i],
-                                  promoPrice: formatMoneyForInput(e.target.value),
+                                  promoPrice: formatMoneyForInput(
+                                    e.target.value,
+                                  ),
                                 };
                                 setServicesDetailed(next);
                               }}
@@ -1316,7 +1310,7 @@ if (livenessProof) {
                                 className="text-xs text-red-300"
                                 onClick={() =>
                                   setServicesDetailed((prev) =>
-                                    prev.filter((_, idx) => idx !== i)
+                                    prev.filter((_, idx) => idx !== i),
                                   )
                                 }
                                 disabled={!hasPro}
@@ -1336,7 +1330,13 @@ if (livenessProof) {
                   onClick={() =>
                     setServicesDetailed((prev) => [
                       ...prev,
-                      { id: "", name: "", price: "", promoPrice: "", otherText: "" },
+                      {
+                        id: "",
+                        name: "",
+                        price: "",
+                        promoPrice: "",
+                        otherText: "",
+                      },
                     ])
                   }
                   disabled={!hasPro}
@@ -1375,7 +1375,10 @@ if (livenessProof) {
                         label="Business Address"
                         value={business.shopAddress}
                         onChange={(e) =>
-                          setBusiness({ ...business, shopAddress: e.target.value })
+                          setBusiness({
+                            ...business,
+                            shopAddress: e.target.value,
+                          })
                         }
                         disabled={!hasPro}
                       />
@@ -1454,7 +1457,10 @@ if (livenessProof) {
                     type="time"
                     value={availability.start}
                     onChange={(e) =>
-                      setAvailability({ ...availability, start: e.target.value })
+                      setAvailability({
+                        ...availability,
+                        start: e.target.value,
+                      })
                     }
                     disabled={!hasPro}
                   />
@@ -1471,7 +1477,10 @@ if (livenessProof) {
                     label="Emergency service?"
                     value={availability.emergency}
                     onChange={(e) =>
-                      setAvailability({ ...availability, emergency: e.target.value })
+                      setAvailability({
+                        ...availability,
+                        emergency: e.target.value,
+                      })
                     }
                     options={["no", "yes"]}
                     disabled={!hasPro}
@@ -1482,7 +1491,10 @@ if (livenessProof) {
                     label="Home service?"
                     value={availability.homeService}
                     onChange={(e) =>
-                      setAvailability({ ...availability, homeService: e.target.value })
+                      setAvailability({
+                        ...availability,
+                        homeService: e.target.value,
+                      })
                     }
                     options={["no", "yes"]}
                     disabled={!hasPro}
@@ -1594,7 +1606,10 @@ if (livenessProof) {
             </section>
 
             {/* Payments */}
-            <section id="payments" className="rounded-lg border border-zinc-800 p-4">
+            <section
+              id="payments"
+              className="rounded-lg border border-zinc-800 p-4"
+            >
               <h2 className="text-lg font-semibold mb-3">Payments</h2>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <Input
@@ -1645,7 +1660,10 @@ if (livenessProof) {
             </section>
 
             {me?.isAdmin && (
-              <section id="admin" className="rounded-lg border border-zinc-800 p-4">
+              <section
+                id="admin"
+                className="rounded-lg border border-zinc-800 p-4"
+              >
                 <h2 className="text-lg font-semibold mb-3">Admin</h2>
                 <p className="text-sm text-zinc-400">
                   Configure platform rules in{" "}
@@ -1657,7 +1675,10 @@ if (livenessProof) {
               </section>
             )}
 
-            <section id="advanced" className="rounded-lg border border-zinc-800 p-4">
+            <section
+              id="advanced"
+              className="rounded-lg border border-zinc-800 p-4"
+            >
               <h2 className="text-lg font-semibold mb-3">Advanced</h2>
               <div className="flex flex-col gap-2">
                 <Link
@@ -1667,7 +1688,8 @@ if (livenessProof) {
                   Deactivate Account
                 </Link>
                 <div className="text-xs text-zinc-500">
-                  This won’t delete your data immediately. You’ll submit a request and our team will review it.
+                  This won’t delete your data immediately. You’ll submit a
+                  request and our team will review it.
                 </div>
               </div>
             </section>
@@ -1730,9 +1752,7 @@ function Select({ label, options = [], required, disabled, ...props }) {
         disabled={disabled}
         className="w-full bg-black border border-zinc-800 rounded-lg px-3 py-2 disabled:opacity-50"
       >
-        <option value="">
-          {required ? "Select…" : "Select (optional)…"}
-        </option>
+        <option value="">{required ? "Select…" : "Select (optional)…"}</option>
         {options.map((o) => (
           <option key={o} value={o}>
             {o}
@@ -1742,7 +1762,12 @@ function Select({ label, options = [], required, disabled, ...props }) {
     </label>
   );
 }
-function UploadButton({ title = "Upload", onUploaded, widgetFactory, disabled }) {
+function UploadButton({
+  title = "Upload",
+  onUploaded,
+  widgetFactory,
+  disabled,
+}) {
   function open() {
     const widget = widgetFactory?.(onUploaded);
     if (!widget) {

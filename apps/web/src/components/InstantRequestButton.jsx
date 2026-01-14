@@ -15,10 +15,14 @@ export default function InstantRequestButton({
     // SERVICE MODE requires service + state + lga
     if (mode === "service") {
       if (!service) {
-        return alert("Please choose a service before requesting an instant booking.");
+        return alert(
+          "Please choose a service before requesting an instant booking.",
+        );
       }
       if (!stateName || !lga) {
-        return alert("Please choose a state and LGA (service location) before requesting.");
+        return alert(
+          "Please choose a state and LGA (service location) before requesting.",
+        );
       }
 
       return navigate("/instant-request", {

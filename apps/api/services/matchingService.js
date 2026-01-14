@@ -16,9 +16,7 @@ function proHasService(p = {}, serviceName = "") {
   const fromStringServices =
     Array.isArray(p.services) &&
     p.services.some(
-      (s) =>
-        typeof s === "string" &&
-        s.toLowerCase().includes(needle)
+      (s) => typeof s === "string" && s.toLowerCase().includes(needle),
     );
 
   // 2) top-level services as objects: [{ name, price, ... }]
@@ -34,7 +32,9 @@ function proHasService(p = {}, serviceName = "") {
   const fromDetailed =
     Array.isArray(p.servicesDetailed) &&
     p.servicesDetailed.some((s) =>
-      String(s?.name || "").toLowerCase().includes(needle)
+      String(s?.name || "")
+        .toLowerCase()
+        .includes(needle),
     );
 
   // 4) professional.services (always strings)
@@ -42,14 +42,13 @@ function proHasService(p = {}, serviceName = "") {
     p.professional &&
     Array.isArray(p.professional.services) &&
     p.professional.services.some((s) =>
-      String(s || "").toLowerCase().includes(needle)
+      String(s || "")
+        .toLowerCase()
+        .includes(needle),
     );
 
   return (
-    fromStringServices ||
-    fromObjectServices ||
-    fromDetailed ||
-    fromProfessional
+    fromStringServices || fromObjectServices || fromDetailed || fromProfessional
   );
 }
 
@@ -101,7 +100,7 @@ export async function findCandidate({
       } catch (e) {
         console.warn(
           "[matchingService] geoNear failed — will fallback to $nearSphere / LGA. Error:",
-          e?.message || e
+          e?.message || e,
         );
         // optional nearSphere fallback
         try {
@@ -129,7 +128,7 @@ export async function findCandidate({
         } catch (e2) {
           console.warn(
             "[matchingService] $nearSphere also failed:",
-            e2?.message || e2
+            e2?.message || e2,
           );
           // fall through to LGA/state fallback
         }

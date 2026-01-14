@@ -91,8 +91,6 @@ function sanitizePostForClient(p) {
   };
 }
 
-
-
 /* ============================== ROUTER ============================== */
 const router = express.Router();
 
@@ -186,7 +184,7 @@ router.post("/posts", requireAuth, async (req, res) => {
     await PostStats.findOneAndUpdate(
       { postId: post._id },
       { $setOnInsert: { postId: post._id, trendingScore: 0 } },
-      { upsert: true, new: true }
+      { upsert: true, new: true },
     );
 
     return res.json({ ok: true, post: sanitizePostForClient(post) });
@@ -251,7 +249,7 @@ router.get("/posts/me", requireAuth, async (req, res) => {
       .sort({ createdAt: -1 })
       .limit(100)
       .lean();
-  return res.json(items.map(sanitizePostForClient));
+    return res.json(items.map(sanitizePostForClient));
   } catch (err) {
     console.error("[posts:me] error:", err);
     return res.status(500).json({ error: "posts_load_failed" });
@@ -284,14 +282,12 @@ router.get("/posts/:id/next", tryAuth, async (req, res) => {
 
     const viewerUid = req.user?.uid || null;
 
-        const baseFilter = {
-  isPublic: true,
-  hidden: { $ne: true },
-  deleted: { $ne: true },
-  _id: { $ne: current._id }, // never return the same post again
-};
-
-
+    const baseFilter = {
+      isPublic: true,
+      hidden: { $ne: true },
+      deleted: { $ne: true },
+      _id: { $ne: current._id }, // never return the same post again
+    };
 
     // 1. Same pro (other videos from this stylist)
     const samePro = await Post.find({
@@ -347,7 +343,7 @@ router.get("/posts/:id/next", tryAuth, async (req, res) => {
       const order = new Map(trendingIds.map((pid, idx) => [String(pid), idx]));
       trendingPosts.sort(
         (a, b) =>
-          (order.get(String(a._id)) ?? 0) - (order.get(String(b._id)) ?? 0)
+          (order.get(String(a._id)) ?? 0) - (order.get(String(b._id)) ?? 0),
       );
     }
 
@@ -386,7 +382,6 @@ router.get("/posts/:id/next", tryAuth, async (req, res) => {
     return res.json({ next: null, queue: [] });
   }
 });
-
 
 /* -------------------------------------------------------------------- */
 /* OWNER / MODERATION ACTIONS                                           */
@@ -488,7 +483,10 @@ router.post("/posts/:id/like", requireAuth, async (req, res) => {
     if (!isObjId(id)) return res.status(400).json({ error: "invalid_id" });
 
     const upd = await PostStats.updateOne(
-      { postId: new mongoose.Types.ObjectId(id), likedBy: { $ne: req.user.uid } },
+      {
+        postId: new mongoose.Types.ObjectId(id),
+        likedBy: { $ne: req.user.uid },
+      },
       {
         $addToSet: { likedBy: req.user.uid },
         $inc: { likesCount: 1 },
@@ -504,14 +502,17 @@ router.post("/posts/:id/like", requireAuth, async (req, res) => {
           },
         },
       },
-      { upsert: true }
+      { upsert: true },
     );
 
     const stats = await PostStats.findOne({
       postId: new mongoose.Types.ObjectId(id),
     }).lean();
     const trendingScore = scoreFrom(stats);
-    await PostStats.updateOne({ postId: new mongoose.Types.ObjectId(id) }, { $set: { trendingScore } });
+    await PostStats.updateOne(
+      { postId: new mongoose.Types.ObjectId(id) },
+      { $set: { trendingScore } },
+    );
     return res.json({
       ok: true,
       changed: upd.modifiedCount > 0 || upd.upsertedCount > 0,
@@ -532,7 +533,7 @@ router.delete("/posts/:id/like", requireAuth, async (req, res) => {
 
     await PostStats.updateOne(
       { postId: new mongoose.Types.ObjectId(id), likedBy: req.user.uid },
-      { $pull: { likedBy: req.user.uid }, $inc: { likesCount: -1 } }
+      { $pull: { likedBy: req.user.uid }, $inc: { likesCount: -1 } },
     );
 
     const stats = await PostStats.findOne({
@@ -542,7 +543,7 @@ router.delete("/posts/:id/like", requireAuth, async (req, res) => {
     const trendingScore = scoreFrom({ ...stats, likesCount });
     await PostStats.updateOne(
       { postId: new mongoose.Types.ObjectId(id) },
-      { $set: { likesCount, trendingScore } }
+      { $set: { likesCount, trendingScore } },
     );
 
     return res.json({ ok: true, likesCount, trendingScore });
@@ -598,11 +599,16 @@ router.post("/posts/:id/view", tryAuth, async (req, res) => {
       };
     }
 
-    await PostStats.updateOne({ postId: postObjectId }, update, { upsert: true });
+    await PostStats.updateOne({ postId: postObjectId }, update, {
+      upsert: true,
+    });
 
     const stats = await PostStats.findOne({ postId: postObjectId }).lean();
     const trendingScore = scoreFrom(stats);
-    await PostStats.updateOne({ postId: new mongoose.Types.ObjectId(id) }, { $set: { trendingScore } });
+    await PostStats.updateOne(
+      { postId: new mongoose.Types.ObjectId(id) },
+      { $set: { trendingScore } },
+    );
     return res.json({
       ok: true,
       deduped: !shouldIncrement,
@@ -638,14 +644,17 @@ router.post("/posts/:id/share", requireAuth, async (req, res) => {
           },
         },
       },
-      { upsert: true }
+      { upsert: true },
     );
 
     const stats = await PostStats.findOne({
       postId: new mongoose.Types.ObjectId(id),
     }).lean();
     const trendingScore = scoreFrom(stats);
-    await PostStats.updateOne({ postId: new mongoose.Types.ObjectId(id) }, { $set: { trendingScore } });
+    await PostStats.updateOne(
+      { postId: new mongoose.Types.ObjectId(id) },
+      { $set: { trendingScore } },
+    );
 
     return res.json({
       ok: true,
@@ -665,7 +674,10 @@ router.post("/posts/:id/save", requireAuth, async (req, res) => {
     if (!isObjId(id)) return res.status(400).json({ error: "invalid_id" });
 
     const upd = await PostStats.updateOne(
-      { postId: new mongoose.Types.ObjectId(id), savedBy: { $ne: req.user.uid } },
+      {
+        postId: new mongoose.Types.ObjectId(id),
+        savedBy: { $ne: req.user.uid },
+      },
       {
         $addToSet: { savedBy: req.user.uid },
         $inc: { savesCount: 1 },
@@ -681,14 +693,17 @@ router.post("/posts/:id/save", requireAuth, async (req, res) => {
           },
         },
       },
-      { upsert: true }
+      { upsert: true },
     );
 
     const stats = await PostStats.findOne({
       postId: new mongoose.Types.ObjectId(id),
     }).lean();
     const trendingScore = scoreFrom(stats);
-    await PostStats.updateOne({ postId: new mongoose.Types.ObjectId(id) }, { $set: { trendingScore } });
+    await PostStats.updateOne(
+      { postId: new mongoose.Types.ObjectId(id) },
+      { $set: { trendingScore } },
+    );
 
     return res.json({
       ok: true,
@@ -710,7 +725,7 @@ router.delete("/posts/:id/save", requireAuth, async (req, res) => {
 
     await PostStats.updateOne(
       { postId: new mongoose.Types.ObjectId(id), savedBy: req.user.uid },
-      { $pull: { savedBy: req.user.uid }, $inc: { savesCount: -1 } }
+      { $pull: { savedBy: req.user.uid }, $inc: { savesCount: -1 } },
     );
 
     const stats = await PostStats.findOne({
@@ -720,7 +735,7 @@ router.delete("/posts/:id/save", requireAuth, async (req, res) => {
     const trendingScore = scoreFrom({ ...stats, savesCount });
     await PostStats.updateOne(
       { postId: new mongoose.Types.ObjectId(id) },
-      { $set: { savesCount, trendingScore } }
+      { $set: { savesCount, trendingScore } },
     );
 
     return res.json({ ok: true, savesCount, trendingScore });
@@ -738,12 +753,11 @@ router.get("/posts/for-you/start", tryAuth, async (req, res) => {
     const { lga = "" } = req.query;
     const viewerUid = req.user?.uid || null;
 
-        const baseQuery = {
-  isPublic: true,
-  hidden: { $ne: true },
-  deleted: { $ne: true },
-};
-
+    const baseQuery = {
+      isPublic: true,
+      hidden: { $ne: true },
+      deleted: { $ne: true },
+    };
 
     if (lga) baseQuery.lga = toUpper(String(lga));
 
@@ -781,12 +795,10 @@ router.get("/posts/for-you/start", tryAuth, async (req, res) => {
         ...baseQuery,
       }).lean();
 
-      const order = new Map(
-        candidateIds.map((pid, idx) => [String(pid), idx])
-      );
+      const order = new Map(candidateIds.map((pid, idx) => [String(pid), idx]));
       posts.sort(
         (a, b) =>
-          (order.get(String(a._id)) ?? 0) - (order.get(String(b._id)) ?? 0)
+          (order.get(String(a._id)) ?? 0) - (order.get(String(b._id)) ?? 0),
       );
     }
 
@@ -815,7 +827,6 @@ router.get("/posts/for-you/start", tryAuth, async (req, res) => {
   }
 });
 
-
 /* -------------------------------------------------------------------- */
 /* TRENDING                                                             */
 /* -------------------------------------------------------------------- */
@@ -836,7 +847,8 @@ router.get("/posts/trending", async (req, res) => {
 
     const order = new Map(ids.map((id, idx) => [String(id), idx]));
     posts.sort(
-      (a, b) => (order.get(String(a._id)) ?? 0) - (order.get(String(b._id)) ?? 0)
+      (a, b) =>
+        (order.get(String(a._id)) ?? 0) - (order.get(String(b._id)) ?? 0),
     );
 
     return res.json(posts.slice(0, lim).map(sanitizePostForClient));

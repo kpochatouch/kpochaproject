@@ -8,7 +8,9 @@ async function main() {
   const bookingId = process.argv[2];
 
   if (!bookingId) {
-    console.error("Usage: node scripts/backfill_wallet_for_booking.js <bookingId>");
+    console.error(
+      "Usage: node scripts/backfill_wallet_for_booking.js <bookingId>",
+    );
     process.exit(1);
   }
 

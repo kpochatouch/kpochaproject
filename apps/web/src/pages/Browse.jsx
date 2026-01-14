@@ -1,11 +1,5 @@
 // apps/web/src/pages/Browse.jsx
-import {
-  useEffect,
-  useMemo,
-  useState,
-  useCallback,
-  useRef,
-} from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { api } from "../lib/api";
 import { useMe } from "../context/MeContext.jsx";
@@ -89,7 +83,7 @@ export default function Browse() {
     }
     navigate(
       { pathname: location.pathname, search: qs.toString() },
-      { replace: true }
+      { replace: true },
     );
   }
 
@@ -142,8 +136,8 @@ export default function Browse() {
         const list = Array.isArray(data)
           ? data
           : Array.isArray(data?.items)
-          ? data.items
-          : [];
+            ? data.items
+            : [];
         setPros(list);
       } catch {
         if (!on) return;
@@ -191,7 +185,9 @@ export default function Browse() {
           .toUpperCase();
         const servicesLC = svcArray(p);
 
-        const matchName = term ? name.includes(term) || desc.includes(term) : true;
+        const matchName = term
+          ? name.includes(term) || desc.includes(term)
+          : true;
 
         const matchSvc = selectedServiceName
           ? servicesLC.includes(selectedServiceName)
@@ -206,7 +202,11 @@ export default function Browse() {
         if (selectedState && matchState) score += 2;
         if (term && matchName) score += 1;
 
-        return { p, ok: matchName && matchSvc && matchState && matchLga, score };
+        return {
+          p,
+          ok: matchName && matchSvc && matchState && matchLga,
+          score,
+        };
       })
       .filter((x) => x.ok)
       .sort((a, b) => b.score - a.score)
@@ -256,14 +256,14 @@ export default function Browse() {
         const list = Array.isArray(r.data)
           ? r.data
           : Array.isArray(r.data?.items)
-          ? r.data.items
-          : [];
+            ? r.data.items
+            : [];
 
         if (append) {
           setFeed((prev) => {
             const existingIds = new Set(prev.map((f) => f._id || f.id));
             const newItems = list.filter(
-              (it) => !existingIds.has(it._id || it.id)
+              (it) => !existingIds.has(it._id || it.id),
             );
             return newItems.length ? [...prev, ...newItems] : prev;
           });
@@ -281,7 +281,7 @@ export default function Browse() {
         setLoadingMore(false);
       }
     },
-    [lga, pageSize]
+    [lga, pageSize],
   );
 
   // initial load & when lga or tab changes
@@ -359,7 +359,7 @@ export default function Browse() {
               ...p,
               stats: { ...(p.stats || {}), ...(payload.stats || payload) },
             };
-          })
+          }),
         );
       } catch (err) {
         console.warn("post:stats handler failed", err);
@@ -417,7 +417,7 @@ export default function Browse() {
           }
         }
       },
-      { root: null, rootMargin: "800px", threshold: 0 }
+      { root: null, rootMargin: "800px", threshold: 0 },
     );
 
     observerRef.current.observe(sentinel);
@@ -437,9 +437,7 @@ export default function Browse() {
       : [];
     const svcPrice = svcName
       ? svcList.find(
-          (s) =>
-            String(s.name).toLowerCase() ===
-            String(svcName).toLowerCase()
+          (s) => String(s.name).toLowerCase() === String(svcName).toLowerCase(),
         )?.price
       : undefined;
 
@@ -450,8 +448,7 @@ export default function Browse() {
       state: {
         proId,
         serviceName: svcName || undefined,
-        amountNaira:
-          typeof svcPrice !== "undefined" ? svcPrice : undefined,
+        amountNaira: typeof svcPrice !== "undefined" ? svcPrice : undefined,
         country: "Nigeria",
         state: (stateName || "").toUpperCase(),
         lga: (lga || "").toUpperCase(),
@@ -521,9 +518,7 @@ export default function Browse() {
               {/* ServicePicker meta.name = service NAME filter */}
               <ServicePicker
                 value={service}
-                onChange={(_value, meta) =>
-                  setService(meta?.name || "")
-                }
+                onChange={(_value, meta) => setService(meta?.name || "")}
                 placeholder="All services"
                 includeOther={false}
               />
@@ -609,9 +604,7 @@ export default function Browse() {
               {canPostOnFeed && (
                 <FeedComposer
                   lga={lga}
-                  onPosted={() =>
-                    fetchFeed({ append: false, before: null })
-                  }
+                  onPosted={() => fetchFeed({ append: false, before: null })}
                 />
               )}
 
@@ -641,17 +634,11 @@ export default function Browse() {
                   </div>
 
                   {/* invisible sentinel */}
-                  <div
-                    ref={sentinelRef}
-                    className="h-1 w-full"
-                    aria-hidden
-                  />
+                  <div ref={sentinelRef} className="h-1 w-full" aria-hidden />
 
                   <div className="mt-6 flex justify-center">
                     {loadingMore ? (
-                      <div className="text-sm text-zinc-400">
-                        Loading…
-                      </div>
+                      <div className="text-sm text-zinc-400">Loading…</div>
                     ) : hasMore ? (
                       <button
                         onClick={loadMore}
@@ -677,9 +664,7 @@ export default function Browse() {
                         <span className="text-sm">Load more</span>
                       </button>
                     ) : (
-                      <div className="text-xs text-zinc-500">
-                        No more posts
-                      </div>
+                      <div className="text-xs text-zinc-500">No more posts</div>
                     )}
                   </div>
                 </>
@@ -715,9 +700,7 @@ export default function Browse() {
                         if (!file) return;
                         const localUrl = URL.createObjectURL(file);
                         setAdminAdUrl(localUrl);
-                        setAdMsg(
-                          "Local preview (not uploaded to backend)"
-                        );
+                        setAdMsg("Local preview (not uploaded to backend)");
                       }}
                       className="w-full text-[10px] text-zinc-400"
                     />
@@ -727,10 +710,7 @@ export default function Browse() {
                           if (!adminAdUrl.trim())
                             return setAdMsg("Paste a media URL first.");
                           setAdMsg("Previewing…");
-                          setTimeout(
-                            () => setAdMsg("Preview ready"),
-                            300
-                          );
+                          setTimeout(() => setAdMsg("Preview ready"), 300);
                         }}
                         className="flex-1 rounded-md border border-zinc-700 px-2 py-1 text-xs hover:bg-zinc-900"
                         type="button"
@@ -748,9 +728,7 @@ export default function Browse() {
                               media: [
                                 {
                                   url: adminAdUrl.trim(),
-                                  type: /\.(mp4|mov|webm)$/i.test(
-                                    adminAdUrl
-                                  )
+                                  type: /\.(mp4|mov|webm)$/i.test(adminAdUrl)
                                     ? "video"
                                     : "image",
                                 },
@@ -766,7 +744,7 @@ export default function Browse() {
                           } catch (e) {
                             setAdMsg(
                               e?.response?.data?.error ||
-                                "Failed to publish ad"
+                                "Failed to publish ad",
                             );
                           }
                         }}
@@ -777,9 +755,7 @@ export default function Browse() {
                       </button>
                     </div>
                     {adMsg && (
-                      <p className="text-[10px] text-zinc-500 mt-1">
-                        {adMsg}
-                      </p>
+                      <p className="text-[10px] text-zinc-500 mt-1">{adMsg}</p>
                     )}
                   </div>
                 ) : null}

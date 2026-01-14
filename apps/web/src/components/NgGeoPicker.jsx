@@ -30,7 +30,8 @@ export default function NgGeoPicker({
         setLoading(true);
         const res = await fetch(`${API}/api/geo/ng`);
         const json = await res.json();
-        if (!res.ok) throw new Error(json?.error || "Failed to load NG geo data");
+        if (!res.ok)
+          throw new Error(json?.error || "Failed to load NG geo data");
         if (!alive) return;
 
         // normalize everything to UPPERCASE to match backend + browse.jsx
@@ -165,8 +166,8 @@ function DropdownView({
             {!valueState
               ? "Select a state first…"
               : loading
-              ? "Loading…"
-              : "Select LGA…"}
+                ? "Loading…"
+                : "Select LGA…"}
           </option>
           {lgas.map((l) => (
             <option key={l} value={l}>
@@ -199,13 +200,14 @@ function AccordionView({
             <button
               type="button"
               disabled={disabled}
-              onClick={() =>
-                onChangeState?.(open ? "" : st.toUpperCase())
-              }
+              onClick={() => onChangeState?.(open ? "" : st.toUpperCase())}
               className="w-full text-left px-4 py-2 hover:bg-zinc-900/50 disabled:opacity-50"
             >
               <span className="font-medium">{st}</span>
-              <span className="text-xs text-zinc-500"> ({lgas.length} LGAs)</span>
+              <span className="text-xs text-zinc-500">
+                {" "}
+                ({lgas.length} LGAs)
+              </span>
             </button>
 
             {open && (

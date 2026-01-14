@@ -45,17 +45,34 @@ router.post("/match/request", async (req, res) => {
           payload: JSON.stringify(body),
         });
         await redis.expire(`match:${matchId}`, ttlSeconds);
-        console.log("[matcher] redis: created match key", `match:${matchId}`, "ttl:", ttlSeconds);
+        console.log(
+          "[matcher] redis: created match key",
+          `match:${matchId}`,
+          "ttl:",
+          ttlSeconds,
+        );
       } catch (e) {
-        console.warn("[matcher] redis write failed on create:", e?.message || e);
+        console.warn(
+          "[matcher] redis write failed on create:",
+          e?.message || e,
+        );
       }
     } else {
       setLocalMatch(
         matchId,
-        { status: "searching", createdAt: Date.now().toString(), payload: JSON.stringify(body) },
-        ttlSeconds
+        {
+          status: "searching",
+          createdAt: Date.now().toString(),
+          payload: JSON.stringify(body),
+        },
+        ttlSeconds,
       );
-      console.log("[matcher] using local fallback for match:", matchId, "ttl:", ttlSeconds);
+      console.log(
+        "[matcher] using local fallback for match:",
+        matchId,
+        "ttl:",
+        ttlSeconds,
+      );
     }
 
     // Try synchronous fast-path candidate find
@@ -63,29 +80,51 @@ router.post("/match/request", async (req, res) => {
     const proId = await findCandidate(body);
 
     if (proId) {
-      console.log("[matcher] immediate candidate found for", matchId, "proId:", proId);
+      console.log(
+        "[matcher] immediate candidate found for",
+        matchId,
+        "proId:",
+        proId,
+      );
       if (redis) {
         try {
           await redis.hSet(`match:${matchId}`, { status: "found", proId });
           await redis.expire(`match:${matchId}`, ttlSeconds);
-          console.log("[matcher] redis: set found & expire for", `match:${matchId}`, ttlSeconds);
+          console.log(
+            "[matcher] redis: set found & expire for",
+            `match:${matchId}`,
+            ttlSeconds,
+          );
         } catch (e) {
           console.warn("[matcher] redis set found failed:", e?.message || e);
         }
       } else {
         const existing = getLocalMatch(matchId) || {};
-        setLocalMatch(matchId, { ...existing, status: "found", proId }, ttlSeconds);
+        setLocalMatch(
+          matchId,
+          { ...existing, status: "found", proId },
+          ttlSeconds,
+        );
         console.log("[matcher] local: set found for", matchId);
       }
       return res.json({ ok: true, found: true, proId, matchId });
     }
 
     // No immediate candidate — return matchId for polling.
-    console.log("[matcher] no immediate candidate for", matchId, "- polling enabled (ttlSeconds:", ttlSeconds, ")");
+    console.log(
+      "[matcher] no immediate candidate for",
+      matchId,
+      "- polling enabled (ttlSeconds:",
+      ttlSeconds,
+      ")",
+    );
     return res.json({ ok: true, found: false, matchId });
   } catch (err) {
     console.error("[matcher] request error:", err?.stack || err);
-    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+    res.setHeader(
+      "Cache-Control",
+      "no-store, no-cache, must-revalidate, private",
+    );
     return res.status(500).json({ error: "matcher_error" });
   }
 });
@@ -121,7 +160,10 @@ router.get("/match/:id/status", async (req, res) => {
 
     const out = { status: data.status || "searching" };
     if (data.proId) out.proId = data.proId;
-    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+    res.setHeader(
+      "Cache-Control",
+      "no-store, no-cache, must-revalidate, private",
+    );
     return res.json(out);
   } catch (err) {
     console.error("[matcher] status error:", err?.stack || err);

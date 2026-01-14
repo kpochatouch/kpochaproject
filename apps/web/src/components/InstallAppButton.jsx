@@ -51,18 +51,17 @@ export default function InstallAppButton() {
       <button
         onClick={handleInstall}
         style={{
-            padding: "6px 10px",
-            borderRadius: 8,
-            fontWeight: 600,
-            fontSize: 13,
-            background: "white",
-            color: "black",
-            border: "none",
+          padding: "6px 10px",
+          borderRadius: 8,
+          fontWeight: 600,
+          fontSize: 13,
+          background: "white",
+          color: "black",
+          border: "none",
         }}
-        >
+      >
         Install App
-        </button>
-
+      </button>
 
       {showHelp && (
         <div
@@ -88,32 +87,37 @@ export default function InstallAppButton() {
             }}
           >
             <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 6 }}>
-            Install Kpocha Touch
+              Install Kpocha Touch
             </div>
             <div style={{ fontSize: 14, opacity: 0.85, marginBottom: 12 }}>
-            Your browser doesn’t show an install button automatically.
-            Follow the steps below to add the app to your Home Screen.
+              Your browser doesn’t show an install button automatically. Follow
+              the steps below to add the app to your Home Screen.
             </div>
 
             {isIOS ? (
-            isSafari ? (
+              isSafari ? (
                 <ol style={{ paddingLeft: 18, lineHeight: 1.6 }}>
-                <li>Tap the <b>Share</b> button in Safari</li>
-                <li>Tap <b>Add to Home Screen</b></li>
-                <li>Tap <b>Add</b></li>
+                  <li>
+                    Tap the <b>Share</b> button in Safari
+                  </li>
+                  <li>
+                    Tap <b>Add to Home Screen</b>
+                  </li>
+                  <li>
+                    Tap <b>Add</b>
+                  </li>
                 </ol>
-            ) : (
+              ) : (
                 <p style={{ lineHeight: 1.5 }}>
-                Open this page in <b>Safari</b>, then use
-                <b> Share → Add to Home Screen</b>.
+                  Open this page in <b>Safari</b>, then use
+                  <b> Share → Add to Home Screen</b>.
                 </p>
-            )
+              )
             ) : (
-            <p>
+              <p>
                 Open your browser menu and tap <b>Add to Home Screen</b>.
-            </p>
+              </p>
             )}
-
 
             <button
               onClick={() => setShowHelp(false)}

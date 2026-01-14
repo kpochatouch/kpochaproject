@@ -10,7 +10,7 @@ const MediaSchema = new mongoose.Schema(
     height: { type: Number, default: 0 },
     durationSec: { type: Number, default: 0 }, // for videos
   },
-  { _id: false }
+  { _id: false },
 );
 
 // cached author snapshot for fast feed rendering
@@ -21,14 +21,19 @@ const ProSnapshotSchema = new mongoose.Schema(
     lga: { type: String, default: "" },
     photoUrl: { type: String, default: "" },
   },
-  { _id: false }
+  { _id: false },
 );
 
 const PostSchema = new mongoose.Schema(
   {
     // ownership
     proOwnerUid: { type: String, required: true, index: true }, // Firebase UID of the Pro owner
-    proId: { type: mongoose.Schema.Types.ObjectId, ref: "Pro", required: true, index: true },
+    proId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Pro",
+      required: true,
+      index: true,
+    },
 
     // snapshot of the author (denormalized for speed)
     pro: { type: ProSnapshotSchema, required: true },
@@ -55,7 +60,7 @@ const PostSchema = new mongoose.Schema(
     // edits
     editedAt: { type: Date, default: null },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 // helpful indexes for feeds

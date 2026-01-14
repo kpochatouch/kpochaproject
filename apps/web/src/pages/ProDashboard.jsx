@@ -1,6 +1,11 @@
 // apps/web/src/pages/ProDashboard.jsx
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getProBookings, acceptBooking, completeBooking, cancelBookingByPro } from "../lib/api";
+import {
+  getProBookings,
+  acceptBooking,
+  completeBooking,
+  cancelBookingByPro,
+} from "../lib/api";
 import { Link } from "react-router-dom";
 
 /* ---------- utils ---------- */
@@ -125,8 +130,8 @@ export default function ProDashboard() {
                 status: "accepted",
                 acceptedAt: new Date().toISOString(),
               }
-            : b
-        )
+            : b,
+        ),
       );
       await acceptBooking(id);
       flashOK("Booking accepted.");
@@ -145,7 +150,7 @@ export default function ProDashboard() {
       if (askNote) {
         const note = window.prompt(
           "Optional: add a brief note about this completion (e.g. client did not click complete, but job is done). Leave blank to continue.",
-          ""
+          "",
         );
         if (note && note.trim()) {
           // backend accepts completionNote or note; either works
@@ -169,24 +174,23 @@ export default function ProDashboard() {
                     : {}),
                 },
               }
-            : b
-        )
+            : b,
+        ),
       );
 
       await completeBooking(id, payload);
       flashOK("Booking completed.");
     } catch (e) {
       console.error(e);
-     const msg = e?.response?.data?.message || e?.response?.data?.error;
+      const msg = e?.response?.data?.message || e?.response?.data?.error;
       setErr(
         msg === "client_must_complete_first"
           ? "Client must mark completed first. If they don’t respond, you can complete after the fallback time."
-          : (msg || "Could not complete booking.")
+          : msg || "Could not complete booking.",
       );
       load();
-
-          }
-        }
+    }
+  }
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-10">
@@ -259,21 +263,20 @@ export default function ProDashboard() {
               b.status === "scheduled"
                 ? "sky"
                 : b.status === "accepted"
-                ? "emerald"
-                : b.status === "completed"
-                ? "emerald"
-                : b.status === "cancelled" || b.status === "declined"
-                ? "amber"
-                : "amber";
+                  ? "emerald"
+                  : b.status === "completed"
+                    ? "emerald"
+                    : b.status === "cancelled" || b.status === "declined"
+                      ? "amber"
+                      : "amber";
 
-            const canAccept = b.paymentStatus === "paid" && b.status === "scheduled";
+            const canAccept =
+              b.paymentStatus === "paid" && b.status === "scheduled";
 
             // 2-hour rule: how long since accepted?
             const acceptedAt = toDate(b.acceptedAt);
             const minutesSinceAccepted = acceptedAt
-              ? Math.floor(
-                  (Date.now() - acceptedAt.getTime()) / 60000
-                )
+              ? Math.floor((Date.now() - acceptedAt.getTime()) / 60000)
               : null;
 
             // Pro is only allowed to complete as a fallback after 2 hours
@@ -286,10 +289,10 @@ export default function ProDashboard() {
               b.meta?.completedBy === "client"
                 ? "client"
                 : b.meta?.completedBy === "pro"
-                ? "professional"
-                : b.meta?.completedBy === "admin"
-                ? "admin"
-                : null;
+                  ? "professional"
+                  : b.meta?.completedBy === "admin"
+                    ? "admin"
+                    : null;
 
             return (
               <div
@@ -299,14 +302,14 @@ export default function ProDashboard() {
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <div className="font-medium">
-                    <Link
-                      to={`/bookings/${b._id}`}
-                      className="hover:underline"
-                      title="Open full booking details"
-                    >
-                      {svcName} • {formatMoney(priceKobo)}
-                    </Link>
-                  </div>
+                      <Link
+                        to={`/bookings/${b._id}`}
+                        className="hover:underline"
+                        title="Open full booking details"
+                      >
+                        {svcName} • {formatMoney(priceKobo)}
+                      </Link>
+                    </div>
 
                     <div className="text-sm text-zinc-400">
                       {formatWhen(b.scheduledFor)} — {b.lga}
@@ -340,7 +343,10 @@ export default function ProDashboard() {
 
                     {b.status === "completed" && completedByLabel && (
                       <div className="text-xs text-zinc-500 mt-1">
-                        Completed by: <span className="font-semibold">{completedByLabel}</span>
+                        Completed by:{" "}
+                        <span className="font-semibold">
+                          {completedByLabel}
+                        </span>
                         {b.meta?.completionNote
                           ? ` — Note: ${b.meta.completionNote}`
                           : ""}
@@ -353,82 +359,85 @@ export default function ProDashboard() {
                   </div>
                 </div>
 
-               <div className="mt-3 flex flex-wrap gap-2">
-                {/* Scheduled + paid: show Accept + Decline */}
-                {b.paymentStatus === "paid" && b.status === "scheduled" ? (
-                  <>
-                    <button
-                      onClick={() => onAccept(b._id)}
-                      className="rounded-lg border border-emerald-700 text-emerald-300 px-3 py-1.5 text-sm hover:bg-emerald-950/40"
-                      title="Accept the job"
-                    >
-                      Accept
-                    </button>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {/* Scheduled + paid: show Accept + Decline */}
+                  {b.paymentStatus === "paid" && b.status === "scheduled" ? (
+                    <>
+                      <button
+                        onClick={() => onAccept(b._id)}
+                        className="rounded-lg border border-emerald-700 text-emerald-300 px-3 py-1.5 text-sm hover:bg-emerald-950/40"
+                        title="Accept the job"
+                      >
+                        Accept
+                      </button>
 
+                      <button
+                        onClick={async () => {
+                          const reason =
+                            window.prompt("Reason (optional):", "") || "";
+                          try {
+                            await cancelBookingByPro(b._id, { reason });
+                            flashOK("Booking declined (client refunded).");
+                            load();
+                          } catch (e) {
+                            console.error(e);
+                            setErr("Could not decline booking.");
+                            load();
+                          }
+                        }}
+                        className="rounded-lg border border-amber-700 text-amber-300 px-3 py-1.5 text-sm hover:bg-amber-950/40"
+                        title="Decline (refund client)"
+                      >
+                        Decline
+                      </button>
+                    </>
+                  ) : null}
+
+                  {/* Accepted + paid: show Cancel */}
+                  {b.paymentStatus === "paid" && b.status === "accepted" ? (
                     <button
                       onClick={async () => {
-                        const reason = window.prompt("Reason (optional):", "") || "";
+                        const reason =
+                          window.prompt("Reason (optional):", "") || "";
                         try {
                           await cancelBookingByPro(b._id, { reason });
-                          flashOK("Booking declined (client refunded).");
-                          load();
+                          flashOK("Booking cancelled (client refunded).");
+                          setItems((prev) =>
+                            prev.filter((x) => x._id !== b._id),
+                          );
                         } catch (e) {
                           console.error(e);
-                          setErr("Could not decline booking.");
+                          setErr("Could not cancel booking.");
                           load();
                         }
                       }}
                       className="rounded-lg border border-amber-700 text-amber-300 px-3 py-1.5 text-sm hover:bg-amber-950/40"
-                      title="Decline (refund client)"
+                      title="Cancel after accepting (refund client)"
                     >
-                      Decline
+                      Cancel
                     </button>
-                  </>
-                ) : null}
+                  ) : null}
 
-                {/* Accepted + paid: show Cancel */}
-                {b.paymentStatus === "paid" && b.status === "accepted" ? (
-                  <button
-                    onClick={async () => {
-                      const reason = window.prompt("Reason (optional):", "") || "";
-                      try {
-                        await cancelBookingByPro(b._id, { reason });
-                        flashOK("Booking cancelled (client refunded).");
-                        setItems(prev => prev.filter(x => x._id !== b._id));
+                  {/* If unpaid or other states, show the hint */}
+                  {b.paymentStatus !== "paid" && b.status === "scheduled" ? (
+                    <span
+                      className="rounded-lg border border-zinc-800 text-zinc-500 px-3 py-1.5 text-sm"
+                      title="You can accept only after payment is confirmed"
+                    >
+                      Awaiting payment
+                    </span>
+                  ) : null}
 
-                      } catch (e) {
-                        console.error(e);
-                        setErr("Could not cancel booking.");
-                        load();
-                      }
-                    }}
-                    className="rounded-lg border border-amber-700 text-amber-300 px-3 py-1.5 text-sm hover:bg-amber-950/40"
-                    title="Cancel after accepting (refund client)"
-                  >
-                    Cancel
-                  </button>
-                ) : null}
-
-                {/* If unpaid or other states, show the hint */}
-                {b.paymentStatus !== "paid" && b.status === "scheduled" ? (
-                  <span
-                    className="rounded-lg border border-zinc-800 text-zinc-500 px-3 py-1.5 text-sm"
-                    title="You can accept only after payment is confirmed"
-                  >
-                    Awaiting payment
-                  </span>
-                ) : null}
-
-                {proCanCompleteFallback && (
-                  <button
-                    onClick={() => onCompleteAsPro(b._id, true)}
-                    className="rounded-lg border border-sky-700 text-sky-300 px-3 py-1.5 text-sm hover:bg-sky-950/40"
-                    title="Client not responding – close job and (optionally) add a note"
-                  >
-                    Close job & add note
-                  </button>
-                )}
-              </div>
+                  {proCanCompleteFallback && (
+                    <button
+                      onClick={() => onCompleteAsPro(b._id, true)}
+                      className="rounded-lg border border-sky-700 text-sky-300 px-3 py-1.5 text-sm hover:bg-sky-950/40"
+                      title="Client not responding – close job and (optionally) add a note"
+                    >
+                      Close job & add note
+                    </button>
+                  )}
+                </div>
               </div>
             );
           })}

@@ -1,1 +1,943 @@
-[{"_id":{"$oid":"68fe28fefa9303da361d2a6a"},"ownerUid":"ldzCvKGbGheOtHQ3qvKs1nMRdDg2","__v":0,"availability":{"days":{"Mon":true,"Tue":true,"Wed":true,"Thu":true,"Fri":true,"Sat":true,"Sun":true},"start":"06:00","end":"20:00","emergency":"yes","homeService":"yes","homeServicePrice":"2000","statesCovered":["EDO"]},"badges":[],"bank":{"bankName":"Access Bank","accountName":"Silas Believe Ibhadode","accountNumber":"0019559442","bvn":"22233344499"},"contactPrivate":{"homeAddress":"","altPhone":""},"contactPublic":{"phone":"","shopName":"","shopAddress":""},"createdAt":{"$date":"2025-10-26T13:58:22.492Z"},"email":"princeb75@gmail.com","gallery":[],"identity":{"firstName":"Silas","middleName":"Believe","lastName":"Ibhadode","gender":"Male","dob":"1988-08-02","phone":"07033928277","whatsapp":"","email":"princeb75@gmail.com","state":"EDO","lga":"Esan Central","originState":"","photoUrl":"https://res.cloudinary.com/dupex2y3k/image/upload/v1761460230/kpocha/pro-apps/jrs3sgjbjcn3wgscx3qt.jpg","lat":6.292835,"lon":5.6145,"city":""},"lga":"ESAN CENTRAL","loc":{"type":"Point","coordinates":[5.6145,6.292835]},"metrics":{"totalReviews":0,"avgRating":0,"recentDeclines":0,"totalStrikes":0,"lastDecisionAt":null,"likes":0,"rankScore":0,"rewardPoints":0,"shares":0,"views":0},"name":"Silas B Ibhadode","phone":"07033928277","professional":{"services":["Barbering","Dreadlock / Locs"],"years":"","workPhotos":["https://res.cloudinary.com/dupex2y3k/image/upload/v1761459991/kpocha/pro-apps/azcn4o4swfo5gnrgupqc.jpg"],"hasCert":"no","certUrl":"","profileVisible":true,"nationwide":false},"profileVisible":true,"services":[{"name":"Haircut","price":5000,"visible":true,"description":"","durationMins":0,"category":"Salon & Beauty"},{"name":"Dreadlocks Maintenance","price":5000,"visible":true,"description":"","durationMins":0,"category":"Salon & Beauty"}],"state":"EDO","status":"approved","updatedAt":{"$date":"2025-11-26T14:09:32.894Z"},"photoUrl":"https://res.cloudinary.com/dupex2y3k/image/upload/v1761460230/kpocha/pro-apps/jrs3sgjbjcn3wgscx3qt.jpg","bio":"I am an app developer just testing the web app","servicesDetailed":[{"id":"barbering","name":"Haircut","price":5000,"visible":true,"description":"","durationMins":0,"category":"Salon & Beauty"},{"id":"dreadlocks_locs","name":"Dreadlocks Maintenance","price":5000,"visible":true,"description":"","durationMins":0,"category":"Salon & Beauty"}]},{"_id":{"$oid":"6903bf8cfa9303da361f2dd0"},"ownerUid":"BlqGQDJFfEPYfICDhn0QbfrU3tk2","__v":0,"availability":{"days":{"Mon":true,"Tue":true,"Wed":true,"Thu":true,"Fri":true,"Sat":true,"Sun":true},"start":"07:00","end":"21:00","emergency":"no","homeService":"no","homeServicePrice":"","statesCovered":["Abia","Adamawa","Akwa Ibom","Anambra","Bauchi","Bayelsa","Benue","Borno","Cross River","Delta","Ebonyi","Edo","Ekiti","Enugu","FCT","Gombe","Imo","Jigawa","Kaduna","Kano","Katsina","Kebbi","Kogi","Kwara","Lagos","Nasarawa","Niger","Ogun","Ondo","Osun","Oyo","Plateau","Rivers","Sokoto","Taraba","Yobe","Zamfara"]},"badges":[],"bank":{"bankName":"Diamond Bank","accountName":"Alex Simple MacPherson","accountNumber":"0019559442","bvn":"22234334361"},"contactPrivate":{"homeAddress":"","altPhone":""},"contactPublic":{"phone":"","shopName":"","shopAddress":""},"createdAt":{"$date":"2025-10-30T19:42:04.52Z"},"email":"alexsimple8@gmail.com","gallery":[],"identity":{"firstName":"Alex","middleName":"MacPherson","lastName":"Simple","gender":"Male","dob":"1990-02-19","phone":"","whatsapp":"","email":"alexsimple8@gmail.com","state":"Abia","lga":"Aba South","photoUrl":"https://res.cloudinary.com/dupex2y3k/image/upload/v1761852233/kpocha/pro-apps/fol1exdtjx7ixn7vafpy.jpg","lat":6.292965,"lon":5.61495},"lga":"ABA SOUTH","loc":{"type":"Point","coordinates":[5.61495,6.292965]},"metrics":{"totalReviews":0,"avgRating":0,"recentDeclines":0,"totalStrikes":0,"lastDecisionAt":null,"views":0,"likes":0,"shares":0,"rankScore":0,"rewardPoints":0},"name":"Alex Simple","phone":"09155281961","professional":{"years":"","workPhotos":[""],"hasCert":"no","certUrl":"","profileVisible":true,"nationwide":true,"services":["Dreadlocks Maintenance","Kids’ Cut","Haircut","Beard Trim / Line Up"]},"profileVisible":true,"services":[{"name":"Dreadlocks Maintenance","price":1000,"visible":true,"description":"","durationMins":0,"category":"Salon & Beauty"},{"name":"Kids’ Cut","price":1000,"visible":true,"description":"","durationMins":0,"category":"Salon & Beauty"},{"name":"Haircut","price":1000,"visible":true,"description":"","durationMins":0,"category":"Salon & Beauty"},{"name":"Beard Trim / Line Up","price":0,"visible":true,"description":"","durationMins":0,"category":"Salon & Beauty"}],"state":"ABIA","status":"approved","updatedAt":{"$date":"2025-12-01T04:04:23.132Z"},"photoUrl":"https://res.cloudinary.com/dupex2y3k/image/upload/v1761852233/kpocha/pro-apps/fol1exdtjx7ixn7vafpy.jpg","servicesDetailed":[{"name":"Dreadlocks Maintenance","price":1000,"visible":true,"description":"","durationMins":0,"category":"Salon & Beauty"},{"name":"Kids’ Cut","price":1000,"visible":true,"description":"","durationMins":0,"category":"Salon & Beauty"},{"name":"Haircut","price":1000,"visible":true,"description":"","durationMins":0,"category":"Salon & Beauty"},{"name":"Beard Trim / Line Up","price":0,"visible":true,"description":"","durationMins":0,"category":"Salon & Beauty"}]},{"_id":{"$oid":"69076895fa9303da361f3da6"},"ownerUid":"g2sPTuIcXIODM9zIEJ9FTdzT6Xv2","__v":0,"availability":{"days":{"Mon":true,"Tue":true,"Wed":true,"Thu":true,"Fri":true,"Sat":true,"Sun":true},"start":"","end":"","emergency":"no","homeService":"yes","homeServicePrice":"1,000","statesCovered":["Bayelsa"]},"badges":[],"bank":{"bankName":"The Apostate MFB","accountName":"The Apostate","accountNumber":"6663624100","bvn":"22277996865"},"contactPrivate":{"homeAddress":"","altPhone":""},"contactPublic":{"phone":"","shopName":"","shopAddress":""},"createdAt":{"$date":"2025-11-02T14:20:05.194Z"},"email":"theorderoftheapostate@gmail.com","gallery":[],"identity":{"firstName":"The","middleName":"","lastName":"Apostate","gender":"Male","dob":"1987-10-17","phone":"","whatsapp":"","email":"theorderoftheapostate@gmail.com","state":"Bayelsa","lga":"Nembe","photoUrl":"https://res.cloudinary.com/dupex2y3k/image/upload/v1761972198/kpocha/pro-apps/chjg5l5d5xzgxomboyex.jpg","lat":6.292921,"lon":5.614923},"lga":"NEMBE","loc":{"type":"Point","coordinates":[5.614923,6.292921]},"metrics":{"totalReviews":0,"avgRating":0,"recentDeclines":0,"totalStrikes":0,"lastDecisionAt":null,"views":0,"likes":0,"shares":0,"rankScore":0,"rewardPoints":0},"name":"The Apostate","phone":"","professional":{"years":"","workPhotos":[""],"hasCert":"no","certUrl":"","profileVisible":true,"nationwide":false,"services":["Haircut","Kids’ Cut"]},"profileVisible":true,"services":[{"name":"Haircut","price":1000,"visible":true,"description":"","durationMins":0,"category":"Salon & Beauty"},{"name":"Kids’ Cut","price":1000,"visible":true,"description":"","durationMins":0,"category":"Salon & Beauty"}],"state":"","status":"approved","updatedAt":{"$date":"2025-11-02T14:20:05.194Z"},"photoUrl":"","servicesDetailed":[{"name":"Haircut","price":1000,"visible":true,"description":"","durationMins":0,"category":"Salon & Beauty"},{"name":"Kids’ Cut","price":1000,"visible":true,"description":"","durationMins":0,"category":"Salon & Beauty"}]},{"_id":{"$oid":"6909d767fa9303da361f40bd"},"ownerUid":"DQL66JtBNmfUhJ1ZKdo09KAkwNN2","__v":0,"availability":{"days":{"Mon":true,"Tue":true,"Wed":true,"Thu":true,"Fri":true,"Sat":true,"Sun":true},"start":"09:00","end":"03:00","emergency":"no","homeService":"no","homeServicePrice":"1,200","statesCovered":[]},"badges":[],"bank":{"bankName":"Zenith Bank","accountName":"Emmanuel Ebosetale Ibhadode","accountNumber":"2251700612","bvn":"22190114640"},"contactPrivate":{"homeAddress":"","altPhone":""},"contactPublic":{"phone":"","shopName":"","shopAddress":""},"createdAt":{"$date":"2025-11-04T10:37:26.96Z"},"email":"ibhadode4out@gmail.com","gallery":[],"identity":{"firstName":"Emmanuel","middleName":"Ebosetale","lastName":"Ibhadode","gender":"Male","dob":"1985-12-28","phone":"08130118690","whatsapp":"08130118690","email":"ibhadode4out@gmail.com","state":"EDO","lga":"OREDO","photoUrl":"https://res.cloudinary.com/dupex2y3k/image/upload/v1762251008/kpocha/clients/hos3pltzwl0akjpzvtzy.jpg","lat":6.293025,"lon":5.614941,"city":"EDO"},"lga":"EDO","loc":{"type":"Point","coordinates":[5.614941,6.293025]},"metrics":{"totalReviews":0,"avgRating":0,"recentDeclines":0,"totalStrikes":0,"lastDecisionAt":null,"views":0,"likes":0,"shares":0,"rankScore":0,"rewardPoints":0},"name":"Emmanuel Ebosetale Ibhadode","phone":"08130118690","professional":{"years":"","workPhotos":[""],"hasCert":"no","certUrl":"","profileVisible":true,"nationwide":false,"services":["Haircut"]},"profileVisible":true,"services":[{"name":"Haircut","price":700,"visible":true,"description":"","durationMins":0,"category":"Salon & Beauty"}],"state":"","status":"approved","updatedAt":{"$date":"2025-11-27T12:48:46.988Z"},"photoUrl":"https://res.cloudinary.com/dupex2y3k/image/upload/v1762251008/kpocha/clients/hos3pltzwl0akjpzvtzy.jpg","servicesDetailed":[{"name":"Haircut","price":700,"visible":true,"description":"","durationMins":0,"category":"Salon & Beauty"}]},{"_id":{"$oid":"690c739cbebde9935eebe092"},"ownerUid":"MzGyV7ga1Xb56lgocs0a5xVb6Xy2","__v":0,"availability":{"days":{"Mon":true,"Tue":true,"Wed":true,"Thu":true,"Fri":true,"Sat":true,"Sun":true},"start":"07:01","end":"22:02","emergency":"no","homeService":"yes","homeServicePrice":"10,000","statesCovered":["ABIA","ADAMAWA","AKWA IBOM","ANAMBRA","BAUCHI","BAYELSA","BENUE","BORNO","CROSS RIVER","DELTA","EBONYI","EDO","EKITI","ENUGU","FEDERAL CAPITAL TERRITORY","GOMBE","IMO","JIGAWA","KADUNA","KANO","KATSINA","KEBBI","KOGI","KWARA","LAGOS","NASARAWA","NIGER","OGUN","ONDO","OSUN","OYO","PLATEAU","RIVERS","SOKOTO","TARABA","YOBE","ZAMFARA"]},"badges":[],"bank":{"bankName":"Eco Bank","accountName":"Gianna Diego","accountNumber":"2251700890","bvn":"91736495027"},"contactPrivate":{"homeAddress":"","altPhone":""},"contactPublic":{"phone":"","shopName":"","shopAddress":""},"createdAt":{"$date":"2025-11-06T10:08:28.548Z"},"email":"giannadiego8@gmail.com","gallery":[],"identity":{"firstName":"Gianna","middleName":"","lastName":"Diego","gender":"Female","dob":"1993-10-19","phone":"0813088690","whatsapp":"","email":"giannadiego8@gmail.com","state":"LAGOS","lga":"IKEJA","photoUrl":"https://res.cloudinary.com/dupex2y3k/image/upload/v1762423840/kpocha/clients/nps3axccxjoer0wic1ah.jpg","lat":"","lon":"","city":"IKEJA"},"lga":"IKEJA","loc":{"type":"Point","coordinates":[0,0]},"metrics":{"totalReviews":0,"avgRating":0,"recentDeclines":0,"totalStrikes":0,"lastDecisionAt":null,"views":0,"likes":0,"shares":0,"rankScore":0,"rewardPoints":0},"name":"Gianna Diego","phone":"0813088690","professional":{"years":"","workPhotos":[""],"hasCert":"no","certUrl":"","profileVisible":true,"nationwide":true,"services":["Frontal & Closure Installation (13x4, 4x4, 5x5)"]},"profileVisible":true,"services":[{"name":"Frontal & Closure Installation (13x4, 4x4, 5x5)","price":1200,"visible":true,"description":"","durationMins":0,"category":"Salon & Beauty"}],"state":"","status":"approved","updatedAt":{"$date":"2025-11-26T22:45:38.907Z"},"photoUrl":"https://res.cloudinary.com/dupex2y3k/image/upload/v1762423840/kpocha/clients/nps3axccxjoer0wic1ah.jpg","servicesDetailed":[{"name":"Frontal & Closure Installation (13x4, 4x4, 5x5)","price":1200,"visible":true,"description":"","durationMins":0,"category":"Salon & Beauty"}]},{"_id":{"$oid":"690cc354bebde9935eebe0d6"},"ownerUid":"cjwycDhzq8X0ajAR9f5zpjIVXPI3","__v":0,"availability":{"days":{"Mon":true,"Tue":true,"Wed":true,"Thu":true,"Fri":true,"Sat":true,"Sun":true},"start":"11:45","end":"22:45","emergency":"no","homeService":"yes","homeServicePrice":"","statesCovered":["ABIA","ADAMAWA","AKWA IBOM","ANAMBRA","BAUCHI","BAYELSA","BENUE","BORNO","CROSS RIVER","DELTA","EBONYI","EDO","EKITI","ENUGU","FEDERAL CAPITAL TERRITORY","GOMBE","IMO","JIGAWA","KADUNA","KANO","KATSINA","KEBBI","KOGI","KWARA","LAGOS","NASARAWA","NIGER","OGUN","ONDO","OSUN","OYO","PLATEAU","RIVERS","SOKOTO","TARABA","YOBE","ZAMFARA"]},"badges":[],"bank":{"bankName":"Dream Bank","accountName":"0706846475","accountNumber":"7847475959","bvn":"78474759599"},"contactPrivate":{"homeAddress":"","altPhone":""},"contactPublic":{"phone":"","shopName":"","shopAddress":""},"createdAt":{"$date":"2025-11-06T15:48:36.564Z"},"email":"benbruceout@gmail.com","gallery":[],"identity":{"firstName":"Kathy","middleName":"","lastName":"Lambo","gender":"Female","dob":"1985-05-13","phone":"07055781933","whatsapp":"07055781933","email":"benbruceout@gmail.com","state":"CROSS RIVER","lga":"BAKASSI","photoUrl":"https://res.cloudinary.com/dupex2y3k/image/upload/v1762444199/kpocha/clients/rhad30ctbrkihl0idm21.jpg","lat":"","lon":"","city":"CROSS RIVER"},"lga":"CROSS RIVER","loc":{"type":"Point","coordinates":[0,0]},"metrics":{"totalReviews":0,"avgRating":0,"recentDeclines":0,"totalStrikes":0,"lastDecisionAt":null,"views":0,"likes":0,"shares":0,"rankScore":0,"rewardPoints":0},"name":"benbruceout@gmail.com","phone":"07055781933","professional":{"years":"","workPhotos":[""],"hasCert":"no","certUrl":"","profileVisible":true,"nationwide":true,"services":["Gele only (as add-on)"]},"profileVisible":true,"services":[{"name":"Gele only (as add-on)","price":19000,"visible":true,"description":"","durationMins":0,"category":"Salon & Beauty"}],"state":"","status":"approved","updatedAt":{"$date":"2025-11-26T07:59:02.66Z"},"photoUrl":"https://res.cloudinary.com/dupex2y3k/image/upload/v1762444199/kpocha/clients/rhad30ctbrkihl0idm21.jpg","servicesDetailed":[{"name":"Gele only (as add-on)","price":19000,"visible":true,"description":"","durationMins":0,"category":"Salon & Beauty"}]},{"_id":{"$oid":"690cc35dbebde9935eebe0d8"},"ownerUid":"aF9c8coAnoUw8SbL8A7tLvz1uT72","__v":0,"availability":{"days":{"Mon":true,"Tue":true,"Wed":true,"Thu":true,"Fri":true,"Sat":true,"Sun":true},"start":"07:18","end":"20:17","emergency":"no","homeService":"no","homeServicePrice":"","statesCovered":["ABIA","ADAMAWA","AKWA IBOM","ANAMBRA","BAUCHI","BAYELSA","BENUE","BORNO","CROSS RIVER","DELTA","EBONYI","EDO","EKITI","ENUGU","FEDERAL CAPITAL TERRITORY","GOMBE","IMO","JIGAWA","KADUNA","KANO","KATSINA","KEBBI","KOGI","KWARA","LAGOS","NASARAWA","NIGER","OGUN","ONDO","OSUN","OYO","PLATEAU","RIVERS","SOKOTO","TARABA","YOBE","ZAMFARA"]},"badges":[],"bank":{"bankName":"Zico Bank","accountName":"2251700617","accountNumber":"0813110986","bvn":"08131109864"},"contactPrivate":{"homeAddress":"","altPhone":""},"contactPublic":{"phone":"","shopName":"","shopAddress":""},"createdAt":{"$date":"2025-11-06T15:48:45.776Z"},"email":"hannahben665@gmail.com","gallery":[],"identity":{"firstName":"Hanna","middleName":"","lastName":"Ben","gender":"Female","dob":"1990-03-20","phone":"0803736495","whatsapp":"","email":"hannahben665@gmail.com","state":"FEDERAL CAPITAL TERRITORY","lga":"ABUJA MUNICIPAL AREA COUNCIL","photoUrl":"https://res.cloudinary.com/dupex2y3k/image/upload/v1762452184/kpocha/clients/stota5evxxllclp7znpg.jpg","lat":"","lon":"","city":"ABUJA MUNICIPAL AREA COUNCIL"},"lga":"ABUJA MUNICIPAL AREA COUNCIL","loc":{"type":"Point","coordinates":[0,0]},"metrics":{"totalReviews":0,"avgRating":0,"recentDeclines":0,"totalStrikes":0,"lastDecisionAt":null,"views":0,"likes":0,"shares":0,"rankScore":0,"rewardPoints":0},"name":"Hannah Benjamin","phone":"0803736495","professional":{"years":"","workPhotos":[""],"hasCert":"no","certUrl":"","profileVisible":true,"nationwide":true,"services":["Massage (Relaxation)"]},"profileVisible":true,"services":[{"name":"Silk press","price":20000,"visible":true,"description":"","durationMins":0,"category":"Salon & Beauty"}],"state":"","status":"approved","updatedAt":{"$date":"2025-11-06T18:04:01.979Z"},"photoUrl":"https://res.cloudinary.com/dupex2y3k/image/upload/v1762452184/kpocha/clients/stota5evxxllclp7znpg.jpg","servicesDetailed":[{"name":"Silk press","price":20000,"visible":true,"description":"","durationMins":0,"category":"Salon & Beauty"}]}]
+[
+  {
+    "_id": { "$oid": "68fe28fefa9303da361d2a6a" },
+    "ownerUid": "ldzCvKGbGheOtHQ3qvKs1nMRdDg2",
+    "__v": 0,
+    "availability": {
+      "days": {
+        "Mon": true,
+        "Tue": true,
+        "Wed": true,
+        "Thu": true,
+        "Fri": true,
+        "Sat": true,
+        "Sun": true
+      },
+      "start": "06:00",
+      "end": "20:00",
+      "emergency": "yes",
+      "homeService": "yes",
+      "homeServicePrice": "2000",
+      "statesCovered": ["EDO"]
+    },
+    "badges": [],
+    "bank": {
+      "bankName": "Access Bank",
+      "accountName": "Silas Believe Ibhadode",
+      "accountNumber": "0019559442",
+      "bvn": "22233344499"
+    },
+    "contactPrivate": { "homeAddress": "", "altPhone": "" },
+    "contactPublic": { "phone": "", "shopName": "", "shopAddress": "" },
+    "createdAt": { "$date": "2025-10-26T13:58:22.492Z" },
+    "email": "princeb75@gmail.com",
+    "gallery": [],
+    "identity": {
+      "firstName": "Silas",
+      "middleName": "Believe",
+      "lastName": "Ibhadode",
+      "gender": "Male",
+      "dob": "1988-08-02",
+      "phone": "07033928277",
+      "whatsapp": "",
+      "email": "princeb75@gmail.com",
+      "state": "EDO",
+      "lga": "Esan Central",
+      "originState": "",
+      "photoUrl": "https://res.cloudinary.com/dupex2y3k/image/upload/v1761460230/kpocha/pro-apps/jrs3sgjbjcn3wgscx3qt.jpg",
+      "lat": 6.292835,
+      "lon": 5.6145,
+      "city": ""
+    },
+    "lga": "ESAN CENTRAL",
+    "loc": { "type": "Point", "coordinates": [5.6145, 6.292835] },
+    "metrics": {
+      "totalReviews": 0,
+      "avgRating": 0,
+      "recentDeclines": 0,
+      "totalStrikes": 0,
+      "lastDecisionAt": null,
+      "likes": 0,
+      "rankScore": 0,
+      "rewardPoints": 0,
+      "shares": 0,
+      "views": 0
+    },
+    "name": "Silas B Ibhadode",
+    "phone": "07033928277",
+    "professional": {
+      "services": ["Barbering", "Dreadlock / Locs"],
+      "years": "",
+      "workPhotos": [
+        "https://res.cloudinary.com/dupex2y3k/image/upload/v1761459991/kpocha/pro-apps/azcn4o4swfo5gnrgupqc.jpg"
+      ],
+      "hasCert": "no",
+      "certUrl": "",
+      "profileVisible": true,
+      "nationwide": false
+    },
+    "profileVisible": true,
+    "services": [
+      {
+        "name": "Haircut",
+        "price": 5000,
+        "visible": true,
+        "description": "",
+        "durationMins": 0,
+        "category": "Salon & Beauty"
+      },
+      {
+        "name": "Dreadlocks Maintenance",
+        "price": 5000,
+        "visible": true,
+        "description": "",
+        "durationMins": 0,
+        "category": "Salon & Beauty"
+      }
+    ],
+    "state": "EDO",
+    "status": "approved",
+    "updatedAt": { "$date": "2025-11-26T14:09:32.894Z" },
+    "photoUrl": "https://res.cloudinary.com/dupex2y3k/image/upload/v1761460230/kpocha/pro-apps/jrs3sgjbjcn3wgscx3qt.jpg",
+    "bio": "I am an app developer just testing the web app",
+    "servicesDetailed": [
+      {
+        "id": "barbering",
+        "name": "Haircut",
+        "price": 5000,
+        "visible": true,
+        "description": "",
+        "durationMins": 0,
+        "category": "Salon & Beauty"
+      },
+      {
+        "id": "dreadlocks_locs",
+        "name": "Dreadlocks Maintenance",
+        "price": 5000,
+        "visible": true,
+        "description": "",
+        "durationMins": 0,
+        "category": "Salon & Beauty"
+      }
+    ]
+  },
+  {
+    "_id": { "$oid": "6903bf8cfa9303da361f2dd0" },
+    "ownerUid": "BlqGQDJFfEPYfICDhn0QbfrU3tk2",
+    "__v": 0,
+    "availability": {
+      "days": {
+        "Mon": true,
+        "Tue": true,
+        "Wed": true,
+        "Thu": true,
+        "Fri": true,
+        "Sat": true,
+        "Sun": true
+      },
+      "start": "07:00",
+      "end": "21:00",
+      "emergency": "no",
+      "homeService": "no",
+      "homeServicePrice": "",
+      "statesCovered": [
+        "Abia",
+        "Adamawa",
+        "Akwa Ibom",
+        "Anambra",
+        "Bauchi",
+        "Bayelsa",
+        "Benue",
+        "Borno",
+        "Cross River",
+        "Delta",
+        "Ebonyi",
+        "Edo",
+        "Ekiti",
+        "Enugu",
+        "FCT",
+        "Gombe",
+        "Imo",
+        "Jigawa",
+        "Kaduna",
+        "Kano",
+        "Katsina",
+        "Kebbi",
+        "Kogi",
+        "Kwara",
+        "Lagos",
+        "Nasarawa",
+        "Niger",
+        "Ogun",
+        "Ondo",
+        "Osun",
+        "Oyo",
+        "Plateau",
+        "Rivers",
+        "Sokoto",
+        "Taraba",
+        "Yobe",
+        "Zamfara"
+      ]
+    },
+    "badges": [],
+    "bank": {
+      "bankName": "Diamond Bank",
+      "accountName": "Alex Simple MacPherson",
+      "accountNumber": "0019559442",
+      "bvn": "22234334361"
+    },
+    "contactPrivate": { "homeAddress": "", "altPhone": "" },
+    "contactPublic": { "phone": "", "shopName": "", "shopAddress": "" },
+    "createdAt": { "$date": "2025-10-30T19:42:04.52Z" },
+    "email": "alexsimple8@gmail.com",
+    "gallery": [],
+    "identity": {
+      "firstName": "Alex",
+      "middleName": "MacPherson",
+      "lastName": "Simple",
+      "gender": "Male",
+      "dob": "1990-02-19",
+      "phone": "",
+      "whatsapp": "",
+      "email": "alexsimple8@gmail.com",
+      "state": "Abia",
+      "lga": "Aba South",
+      "photoUrl": "https://res.cloudinary.com/dupex2y3k/image/upload/v1761852233/kpocha/pro-apps/fol1exdtjx7ixn7vafpy.jpg",
+      "lat": 6.292965,
+      "lon": 5.61495
+    },
+    "lga": "ABA SOUTH",
+    "loc": { "type": "Point", "coordinates": [5.61495, 6.292965] },
+    "metrics": {
+      "totalReviews": 0,
+      "avgRating": 0,
+      "recentDeclines": 0,
+      "totalStrikes": 0,
+      "lastDecisionAt": null,
+      "views": 0,
+      "likes": 0,
+      "shares": 0,
+      "rankScore": 0,
+      "rewardPoints": 0
+    },
+    "name": "Alex Simple",
+    "phone": "09155281961",
+    "professional": {
+      "years": "",
+      "workPhotos": [""],
+      "hasCert": "no",
+      "certUrl": "",
+      "profileVisible": true,
+      "nationwide": true,
+      "services": [
+        "Dreadlocks Maintenance",
+        "Kids’ Cut",
+        "Haircut",
+        "Beard Trim / Line Up"
+      ]
+    },
+    "profileVisible": true,
+    "services": [
+      {
+        "name": "Dreadlocks Maintenance",
+        "price": 1000,
+        "visible": true,
+        "description": "",
+        "durationMins": 0,
+        "category": "Salon & Beauty"
+      },
+      {
+        "name": "Kids’ Cut",
+        "price": 1000,
+        "visible": true,
+        "description": "",
+        "durationMins": 0,
+        "category": "Salon & Beauty"
+      },
+      {
+        "name": "Haircut",
+        "price": 1000,
+        "visible": true,
+        "description": "",
+        "durationMins": 0,
+        "category": "Salon & Beauty"
+      },
+      {
+        "name": "Beard Trim / Line Up",
+        "price": 0,
+        "visible": true,
+        "description": "",
+        "durationMins": 0,
+        "category": "Salon & Beauty"
+      }
+    ],
+    "state": "ABIA",
+    "status": "approved",
+    "updatedAt": { "$date": "2025-12-01T04:04:23.132Z" },
+    "photoUrl": "https://res.cloudinary.com/dupex2y3k/image/upload/v1761852233/kpocha/pro-apps/fol1exdtjx7ixn7vafpy.jpg",
+    "servicesDetailed": [
+      {
+        "name": "Dreadlocks Maintenance",
+        "price": 1000,
+        "visible": true,
+        "description": "",
+        "durationMins": 0,
+        "category": "Salon & Beauty"
+      },
+      {
+        "name": "Kids’ Cut",
+        "price": 1000,
+        "visible": true,
+        "description": "",
+        "durationMins": 0,
+        "category": "Salon & Beauty"
+      },
+      {
+        "name": "Haircut",
+        "price": 1000,
+        "visible": true,
+        "description": "",
+        "durationMins": 0,
+        "category": "Salon & Beauty"
+      },
+      {
+        "name": "Beard Trim / Line Up",
+        "price": 0,
+        "visible": true,
+        "description": "",
+        "durationMins": 0,
+        "category": "Salon & Beauty"
+      }
+    ]
+  },
+  {
+    "_id": { "$oid": "69076895fa9303da361f3da6" },
+    "ownerUid": "g2sPTuIcXIODM9zIEJ9FTdzT6Xv2",
+    "__v": 0,
+    "availability": {
+      "days": {
+        "Mon": true,
+        "Tue": true,
+        "Wed": true,
+        "Thu": true,
+        "Fri": true,
+        "Sat": true,
+        "Sun": true
+      },
+      "start": "",
+      "end": "",
+      "emergency": "no",
+      "homeService": "yes",
+      "homeServicePrice": "1,000",
+      "statesCovered": ["Bayelsa"]
+    },
+    "badges": [],
+    "bank": {
+      "bankName": "The Apostate MFB",
+      "accountName": "The Apostate",
+      "accountNumber": "6663624100",
+      "bvn": "22277996865"
+    },
+    "contactPrivate": { "homeAddress": "", "altPhone": "" },
+    "contactPublic": { "phone": "", "shopName": "", "shopAddress": "" },
+    "createdAt": { "$date": "2025-11-02T14:20:05.194Z" },
+    "email": "theorderoftheapostate@gmail.com",
+    "gallery": [],
+    "identity": {
+      "firstName": "The",
+      "middleName": "",
+      "lastName": "Apostate",
+      "gender": "Male",
+      "dob": "1987-10-17",
+      "phone": "",
+      "whatsapp": "",
+      "email": "theorderoftheapostate@gmail.com",
+      "state": "Bayelsa",
+      "lga": "Nembe",
+      "photoUrl": "https://res.cloudinary.com/dupex2y3k/image/upload/v1761972198/kpocha/pro-apps/chjg5l5d5xzgxomboyex.jpg",
+      "lat": 6.292921,
+      "lon": 5.614923
+    },
+    "lga": "NEMBE",
+    "loc": { "type": "Point", "coordinates": [5.614923, 6.292921] },
+    "metrics": {
+      "totalReviews": 0,
+      "avgRating": 0,
+      "recentDeclines": 0,
+      "totalStrikes": 0,
+      "lastDecisionAt": null,
+      "views": 0,
+      "likes": 0,
+      "shares": 0,
+      "rankScore": 0,
+      "rewardPoints": 0
+    },
+    "name": "The Apostate",
+    "phone": "",
+    "professional": {
+      "years": "",
+      "workPhotos": [""],
+      "hasCert": "no",
+      "certUrl": "",
+      "profileVisible": true,
+      "nationwide": false,
+      "services": ["Haircut", "Kids’ Cut"]
+    },
+    "profileVisible": true,
+    "services": [
+      {
+        "name": "Haircut",
+        "price": 1000,
+        "visible": true,
+        "description": "",
+        "durationMins": 0,
+        "category": "Salon & Beauty"
+      },
+      {
+        "name": "Kids’ Cut",
+        "price": 1000,
+        "visible": true,
+        "description": "",
+        "durationMins": 0,
+        "category": "Salon & Beauty"
+      }
+    ],
+    "state": "",
+    "status": "approved",
+    "updatedAt": { "$date": "2025-11-02T14:20:05.194Z" },
+    "photoUrl": "",
+    "servicesDetailed": [
+      {
+        "name": "Haircut",
+        "price": 1000,
+        "visible": true,
+        "description": "",
+        "durationMins": 0,
+        "category": "Salon & Beauty"
+      },
+      {
+        "name": "Kids’ Cut",
+        "price": 1000,
+        "visible": true,
+        "description": "",
+        "durationMins": 0,
+        "category": "Salon & Beauty"
+      }
+    ]
+  },
+  {
+    "_id": { "$oid": "6909d767fa9303da361f40bd" },
+    "ownerUid": "DQL66JtBNmfUhJ1ZKdo09KAkwNN2",
+    "__v": 0,
+    "availability": {
+      "days": {
+        "Mon": true,
+        "Tue": true,
+        "Wed": true,
+        "Thu": true,
+        "Fri": true,
+        "Sat": true,
+        "Sun": true
+      },
+      "start": "09:00",
+      "end": "03:00",
+      "emergency": "no",
+      "homeService": "no",
+      "homeServicePrice": "1,200",
+      "statesCovered": []
+    },
+    "badges": [],
+    "bank": {
+      "bankName": "Zenith Bank",
+      "accountName": "Emmanuel Ebosetale Ibhadode",
+      "accountNumber": "2251700612",
+      "bvn": "22190114640"
+    },
+    "contactPrivate": { "homeAddress": "", "altPhone": "" },
+    "contactPublic": { "phone": "", "shopName": "", "shopAddress": "" },
+    "createdAt": { "$date": "2025-11-04T10:37:26.96Z" },
+    "email": "ibhadode4out@gmail.com",
+    "gallery": [],
+    "identity": {
+      "firstName": "Emmanuel",
+      "middleName": "Ebosetale",
+      "lastName": "Ibhadode",
+      "gender": "Male",
+      "dob": "1985-12-28",
+      "phone": "08130118690",
+      "whatsapp": "08130118690",
+      "email": "ibhadode4out@gmail.com",
+      "state": "EDO",
+      "lga": "OREDO",
+      "photoUrl": "https://res.cloudinary.com/dupex2y3k/image/upload/v1762251008/kpocha/clients/hos3pltzwl0akjpzvtzy.jpg",
+      "lat": 6.293025,
+      "lon": 5.614941,
+      "city": "EDO"
+    },
+    "lga": "EDO",
+    "loc": { "type": "Point", "coordinates": [5.614941, 6.293025] },
+    "metrics": {
+      "totalReviews": 0,
+      "avgRating": 0,
+      "recentDeclines": 0,
+      "totalStrikes": 0,
+      "lastDecisionAt": null,
+      "views": 0,
+      "likes": 0,
+      "shares": 0,
+      "rankScore": 0,
+      "rewardPoints": 0
+    },
+    "name": "Emmanuel Ebosetale Ibhadode",
+    "phone": "08130118690",
+    "professional": {
+      "years": "",
+      "workPhotos": [""],
+      "hasCert": "no",
+      "certUrl": "",
+      "profileVisible": true,
+      "nationwide": false,
+      "services": ["Haircut"]
+    },
+    "profileVisible": true,
+    "services": [
+      {
+        "name": "Haircut",
+        "price": 700,
+        "visible": true,
+        "description": "",
+        "durationMins": 0,
+        "category": "Salon & Beauty"
+      }
+    ],
+    "state": "",
+    "status": "approved",
+    "updatedAt": { "$date": "2025-11-27T12:48:46.988Z" },
+    "photoUrl": "https://res.cloudinary.com/dupex2y3k/image/upload/v1762251008/kpocha/clients/hos3pltzwl0akjpzvtzy.jpg",
+    "servicesDetailed": [
+      {
+        "name": "Haircut",
+        "price": 700,
+        "visible": true,
+        "description": "",
+        "durationMins": 0,
+        "category": "Salon & Beauty"
+      }
+    ]
+  },
+  {
+    "_id": { "$oid": "690c739cbebde9935eebe092" },
+    "ownerUid": "MzGyV7ga1Xb56lgocs0a5xVb6Xy2",
+    "__v": 0,
+    "availability": {
+      "days": {
+        "Mon": true,
+        "Tue": true,
+        "Wed": true,
+        "Thu": true,
+        "Fri": true,
+        "Sat": true,
+        "Sun": true
+      },
+      "start": "07:01",
+      "end": "22:02",
+      "emergency": "no",
+      "homeService": "yes",
+      "homeServicePrice": "10,000",
+      "statesCovered": [
+        "ABIA",
+        "ADAMAWA",
+        "AKWA IBOM",
+        "ANAMBRA",
+        "BAUCHI",
+        "BAYELSA",
+        "BENUE",
+        "BORNO",
+        "CROSS RIVER",
+        "DELTA",
+        "EBONYI",
+        "EDO",
+        "EKITI",
+        "ENUGU",
+        "FEDERAL CAPITAL TERRITORY",
+        "GOMBE",
+        "IMO",
+        "JIGAWA",
+        "KADUNA",
+        "KANO",
+        "KATSINA",
+        "KEBBI",
+        "KOGI",
+        "KWARA",
+        "LAGOS",
+        "NASARAWA",
+        "NIGER",
+        "OGUN",
+        "ONDO",
+        "OSUN",
+        "OYO",
+        "PLATEAU",
+        "RIVERS",
+        "SOKOTO",
+        "TARABA",
+        "YOBE",
+        "ZAMFARA"
+      ]
+    },
+    "badges": [],
+    "bank": {
+      "bankName": "Eco Bank",
+      "accountName": "Gianna Diego",
+      "accountNumber": "2251700890",
+      "bvn": "91736495027"
+    },
+    "contactPrivate": { "homeAddress": "", "altPhone": "" },
+    "contactPublic": { "phone": "", "shopName": "", "shopAddress": "" },
+    "createdAt": { "$date": "2025-11-06T10:08:28.548Z" },
+    "email": "giannadiego8@gmail.com",
+    "gallery": [],
+    "identity": {
+      "firstName": "Gianna",
+      "middleName": "",
+      "lastName": "Diego",
+      "gender": "Female",
+      "dob": "1993-10-19",
+      "phone": "0813088690",
+      "whatsapp": "",
+      "email": "giannadiego8@gmail.com",
+      "state": "LAGOS",
+      "lga": "IKEJA",
+      "photoUrl": "https://res.cloudinary.com/dupex2y3k/image/upload/v1762423840/kpocha/clients/nps3axccxjoer0wic1ah.jpg",
+      "lat": "",
+      "lon": "",
+      "city": "IKEJA"
+    },
+    "lga": "IKEJA",
+    "loc": { "type": "Point", "coordinates": [0, 0] },
+    "metrics": {
+      "totalReviews": 0,
+      "avgRating": 0,
+      "recentDeclines": 0,
+      "totalStrikes": 0,
+      "lastDecisionAt": null,
+      "views": 0,
+      "likes": 0,
+      "shares": 0,
+      "rankScore": 0,
+      "rewardPoints": 0
+    },
+    "name": "Gianna Diego",
+    "phone": "0813088690",
+    "professional": {
+      "years": "",
+      "workPhotos": [""],
+      "hasCert": "no",
+      "certUrl": "",
+      "profileVisible": true,
+      "nationwide": true,
+      "services": ["Frontal & Closure Installation (13x4, 4x4, 5x5)"]
+    },
+    "profileVisible": true,
+    "services": [
+      {
+        "name": "Frontal & Closure Installation (13x4, 4x4, 5x5)",
+        "price": 1200,
+        "visible": true,
+        "description": "",
+        "durationMins": 0,
+        "category": "Salon & Beauty"
+      }
+    ],
+    "state": "",
+    "status": "approved",
+    "updatedAt": { "$date": "2025-11-26T22:45:38.907Z" },
+    "photoUrl": "https://res.cloudinary.com/dupex2y3k/image/upload/v1762423840/kpocha/clients/nps3axccxjoer0wic1ah.jpg",
+    "servicesDetailed": [
+      {
+        "name": "Frontal & Closure Installation (13x4, 4x4, 5x5)",
+        "price": 1200,
+        "visible": true,
+        "description": "",
+        "durationMins": 0,
+        "category": "Salon & Beauty"
+      }
+    ]
+  },
+  {
+    "_id": { "$oid": "690cc354bebde9935eebe0d6" },
+    "ownerUid": "cjwycDhzq8X0ajAR9f5zpjIVXPI3",
+    "__v": 0,
+    "availability": {
+      "days": {
+        "Mon": true,
+        "Tue": true,
+        "Wed": true,
+        "Thu": true,
+        "Fri": true,
+        "Sat": true,
+        "Sun": true
+      },
+      "start": "11:45",
+      "end": "22:45",
+      "emergency": "no",
+      "homeService": "yes",
+      "homeServicePrice": "",
+      "statesCovered": [
+        "ABIA",
+        "ADAMAWA",
+        "AKWA IBOM",
+        "ANAMBRA",
+        "BAUCHI",
+        "BAYELSA",
+        "BENUE",
+        "BORNO",
+        "CROSS RIVER",
+        "DELTA",
+        "EBONYI",
+        "EDO",
+        "EKITI",
+        "ENUGU",
+        "FEDERAL CAPITAL TERRITORY",
+        "GOMBE",
+        "IMO",
+        "JIGAWA",
+        "KADUNA",
+        "KANO",
+        "KATSINA",
+        "KEBBI",
+        "KOGI",
+        "KWARA",
+        "LAGOS",
+        "NASARAWA",
+        "NIGER",
+        "OGUN",
+        "ONDO",
+        "OSUN",
+        "OYO",
+        "PLATEAU",
+        "RIVERS",
+        "SOKOTO",
+        "TARABA",
+        "YOBE",
+        "ZAMFARA"
+      ]
+    },
+    "badges": [],
+    "bank": {
+      "bankName": "Dream Bank",
+      "accountName": "0706846475",
+      "accountNumber": "7847475959",
+      "bvn": "78474759599"
+    },
+    "contactPrivate": { "homeAddress": "", "altPhone": "" },
+    "contactPublic": { "phone": "", "shopName": "", "shopAddress": "" },
+    "createdAt": { "$date": "2025-11-06T15:48:36.564Z" },
+    "email": "benbruceout@gmail.com",
+    "gallery": [],
+    "identity": {
+      "firstName": "Kathy",
+      "middleName": "",
+      "lastName": "Lambo",
+      "gender": "Female",
+      "dob": "1985-05-13",
+      "phone": "07055781933",
+      "whatsapp": "07055781933",
+      "email": "benbruceout@gmail.com",
+      "state": "CROSS RIVER",
+      "lga": "BAKASSI",
+      "photoUrl": "https://res.cloudinary.com/dupex2y3k/image/upload/v1762444199/kpocha/clients/rhad30ctbrkihl0idm21.jpg",
+      "lat": "",
+      "lon": "",
+      "city": "CROSS RIVER"
+    },
+    "lga": "CROSS RIVER",
+    "loc": { "type": "Point", "coordinates": [0, 0] },
+    "metrics": {
+      "totalReviews": 0,
+      "avgRating": 0,
+      "recentDeclines": 0,
+      "totalStrikes": 0,
+      "lastDecisionAt": null,
+      "views": 0,
+      "likes": 0,
+      "shares": 0,
+      "rankScore": 0,
+      "rewardPoints": 0
+    },
+    "name": "benbruceout@gmail.com",
+    "phone": "07055781933",
+    "professional": {
+      "years": "",
+      "workPhotos": [""],
+      "hasCert": "no",
+      "certUrl": "",
+      "profileVisible": true,
+      "nationwide": true,
+      "services": ["Gele only (as add-on)"]
+    },
+    "profileVisible": true,
+    "services": [
+      {
+        "name": "Gele only (as add-on)",
+        "price": 19000,
+        "visible": true,
+        "description": "",
+        "durationMins": 0,
+        "category": "Salon & Beauty"
+      }
+    ],
+    "state": "",
+    "status": "approved",
+    "updatedAt": { "$date": "2025-11-26T07:59:02.66Z" },
+    "photoUrl": "https://res.cloudinary.com/dupex2y3k/image/upload/v1762444199/kpocha/clients/rhad30ctbrkihl0idm21.jpg",
+    "servicesDetailed": [
+      {
+        "name": "Gele only (as add-on)",
+        "price": 19000,
+        "visible": true,
+        "description": "",
+        "durationMins": 0,
+        "category": "Salon & Beauty"
+      }
+    ]
+  },
+  {
+    "_id": { "$oid": "690cc35dbebde9935eebe0d8" },
+    "ownerUid": "aF9c8coAnoUw8SbL8A7tLvz1uT72",
+    "__v": 0,
+    "availability": {
+      "days": {
+        "Mon": true,
+        "Tue": true,
+        "Wed": true,
+        "Thu": true,
+        "Fri": true,
+        "Sat": true,
+        "Sun": true
+      },
+      "start": "07:18",
+      "end": "20:17",
+      "emergency": "no",
+      "homeService": "no",
+      "homeServicePrice": "",
+      "statesCovered": [
+        "ABIA",
+        "ADAMAWA",
+        "AKWA IBOM",
+        "ANAMBRA",
+        "BAUCHI",
+        "BAYELSA",
+        "BENUE",
+        "BORNO",
+        "CROSS RIVER",
+        "DELTA",
+        "EBONYI",
+        "EDO",
+        "EKITI",
+        "ENUGU",
+        "FEDERAL CAPITAL TERRITORY",
+        "GOMBE",
+        "IMO",
+        "JIGAWA",
+        "KADUNA",
+        "KANO",
+        "KATSINA",
+        "KEBBI",
+        "KOGI",
+        "KWARA",
+        "LAGOS",
+        "NASARAWA",
+        "NIGER",
+        "OGUN",
+        "ONDO",
+        "OSUN",
+        "OYO",
+        "PLATEAU",
+        "RIVERS",
+        "SOKOTO",
+        "TARABA",
+        "YOBE",
+        "ZAMFARA"
+      ]
+    },
+    "badges": [],
+    "bank": {
+      "bankName": "Zico Bank",
+      "accountName": "2251700617",
+      "accountNumber": "0813110986",
+      "bvn": "08131109864"
+    },
+    "contactPrivate": { "homeAddress": "", "altPhone": "" },
+    "contactPublic": { "phone": "", "shopName": "", "shopAddress": "" },
+    "createdAt": { "$date": "2025-11-06T15:48:45.776Z" },
+    "email": "hannahben665@gmail.com",
+    "gallery": [],
+    "identity": {
+      "firstName": "Hanna",
+      "middleName": "",
+      "lastName": "Ben",
+      "gender": "Female",
+      "dob": "1990-03-20",
+      "phone": "0803736495",
+      "whatsapp": "",
+      "email": "hannahben665@gmail.com",
+      "state": "FEDERAL CAPITAL TERRITORY",
+      "lga": "ABUJA MUNICIPAL AREA COUNCIL",
+      "photoUrl": "https://res.cloudinary.com/dupex2y3k/image/upload/v1762452184/kpocha/clients/stota5evxxllclp7znpg.jpg",
+      "lat": "",
+      "lon": "",
+      "city": "ABUJA MUNICIPAL AREA COUNCIL"
+    },
+    "lga": "ABUJA MUNICIPAL AREA COUNCIL",
+    "loc": { "type": "Point", "coordinates": [0, 0] },
+    "metrics": {
+      "totalReviews": 0,
+      "avgRating": 0,
+      "recentDeclines": 0,
+      "totalStrikes": 0,
+      "lastDecisionAt": null,
+      "views": 0,
+      "likes": 0,
+      "shares": 0,
+      "rankScore": 0,
+      "rewardPoints": 0
+    },
+    "name": "Hannah Benjamin",
+    "phone": "0803736495",
+    "professional": {
+      "years": "",
+      "workPhotos": [""],
+      "hasCert": "no",
+      "certUrl": "",
+      "profileVisible": true,
+      "nationwide": true,
+      "services": ["Massage (Relaxation)"]
+    },
+    "profileVisible": true,
+    "services": [
+      {
+        "name": "Silk press",
+        "price": 20000,
+        "visible": true,
+        "description": "",
+        "durationMins": 0,
+        "category": "Salon & Beauty"
+      }
+    ],
+    "state": "",
+    "status": "approved",
+    "updatedAt": { "$date": "2025-11-06T18:04:01.979Z" },
+    "photoUrl": "https://res.cloudinary.com/dupex2y3k/image/upload/v1762452184/kpocha/clients/stota5evxxllclp7znpg.jpg",
+    "servicesDetailed": [
+      {
+        "name": "Silk press",
+        "price": 20000,
+        "visible": true,
+        "description": "",
+        "durationMins": 0,
+        "category": "Salon & Beauty"
+      }
+    ]
+  }
+]

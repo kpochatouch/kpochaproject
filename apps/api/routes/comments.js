@@ -26,7 +26,6 @@ async function requireAuth(req, res, next) {
   }
 }
 
-
 // normalize a comment for client
 function shapeComment(c, profile = null) {
   const obj = typeof c.toObject === "function" ? c.toObject() : c;
@@ -49,7 +48,8 @@ function shapeComment(c, profile = null) {
 router.get("/posts/:postId/comments", async (req, res) => {
   try {
     const { postId } = req.params;
-    if (!isObjId(postId)) return res.status(400).json({ error: "invalid_post_id" });
+    if (!isObjId(postId))
+      return res.status(400).json({ error: "invalid_post_id" });
 
     const items = await Comment.find({ postId, parentId: null })
       .sort({ createdAt: -1 })
@@ -67,7 +67,7 @@ router.get("/posts/:postId/comments", async (req, res) => {
     const profileMap = new Map(profiles.map((p) => [p.ownerUid, p]));
 
     const shaped = items.map((c) =>
-      shapeComment(c, profileMap.get(c.ownerUid) || null)
+      shapeComment(c, profileMap.get(c.ownerUid) || null),
     );
 
     return res.json(shaped);
@@ -83,7 +83,8 @@ router.get("/posts/:postId/comments", async (req, res) => {
 router.post("/posts/:postId/comments", requireAuth, async (req, res) => {
   try {
     const { postId } = req.params;
-    if (!isObjId(postId)) return res.status(400).json({ error: "invalid_post_id" });
+    if (!isObjId(postId))
+      return res.status(400).json({ error: "invalid_post_id" });
 
     // 🔴 this is the piece you were missing
     // check post exists, not hidden/deleted, and comments aren’t disabled for others
@@ -117,13 +118,13 @@ router.post("/posts/:postId/comments", requireAuth, async (req, res) => {
         $inc: { commentsCount: 1 },
         $set: { lastEngagedAt: new Date() },
       },
-      { new: true, upsert: true }
+      { new: true, upsert: true },
     ).lean();
 
     const trendingScore = scoreFrom(stats);
     await PostStats.updateOne(
       { postId: new mongoose.Types.ObjectId(postId) },
-      { $set: { trendingScore } }
+      { $set: { trendingScore } },
     );
 
     // fetch profile for this user so UI can show avatar immediately
@@ -162,7 +163,8 @@ router.post("/posts/:postId/comments", requireAuth, async (req, res) => {
 router.delete("/comments/:id", requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
-    if (!isObjId(id)) return res.status(400).json({ error: "invalid_comment_id" });
+    if (!isObjId(id))
+      return res.status(400).json({ error: "invalid_comment_id" });
 
     const comment = await Comment.findById(id);
     if (!comment) return res.status(404).json({ error: "not_found" });
@@ -179,7 +181,7 @@ router.delete("/comments/:id", requireAuth, async (req, res) => {
         $inc: { commentsCount: -1 },
         $set: { lastEngagedAt: new Date() },
       },
-      { new: true }
+      { new: true },
     ).lean();
 
     const fixedComments = Math.max(0, Number(stats?.commentsCount || 0));
@@ -187,7 +189,7 @@ router.delete("/comments/:id", requireAuth, async (req, res) => {
 
     await PostStats.updateOne(
       { postId: comment.postId },
-      { $set: { commentsCount: fixedComments, trendingScore } }
+      { $set: { commentsCount: fixedComments, trendingScore } },
     );
 
     const io = getIO();

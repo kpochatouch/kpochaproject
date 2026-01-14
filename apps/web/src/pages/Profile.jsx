@@ -109,16 +109,14 @@ export default function Profile() {
   // optional username (for future link sharing) – this is SAFE to show
   const username = clientProfile?.username || me?.username || "";
 
-    const kyc = clientProfile?.kyc || {};
-  const hasKyc =
-    !!kyc.idType || !!kyc.idUrl || !!kyc.selfieWithIdUrl;
+  const kyc = clientProfile?.kyc || {};
+  const hasKyc = !!kyc.idType || !!kyc.idUrl || !!kyc.selfieWithIdUrl;
 
   const idVerifiedLabel = !clientProfile
     ? "—"
     : hasKyc
-    ? "Verified"
-    : "Not verified";
-
+      ? "Verified"
+      : "Not verified";
 
   const isPro = !!(me?.isPro || me?.pro);
 
@@ -160,9 +158,7 @@ export default function Profile() {
         </div>
       )}
 
-      {loading && !error && (
-        <div className="text-zinc-400 mb-4">Loading…</div>
-      )}
+      {loading && !error && <div className="text-zinc-400 mb-4">Loading…</div>}
 
       {!loading && !error && !me && (
         <div className="rounded-lg border border-zinc-800 px-4 py-6 text-zinc-400">
@@ -180,10 +176,7 @@ export default function Profile() {
               <ReadOnly label="Preferred State" value={state || "—"} />
               <ReadOnly label="Preferred LGA / City" value={lga || "—"} />
               {/* Username is OK to show; internal IDs stay hidden */}
-              <ReadOnly
-                label="Username"
-                value={username || "Not set"}
-              />
+              <ReadOnly label="Username" value={username || "Not set"} />
             </div>
 
             {/* Optional deactivation */}
@@ -222,15 +215,9 @@ export default function Profile() {
                 value={clientProfile?.address || "—"}
               />
 
-                <ReadOnly
-                  label="Means of ID"
-                  value={kyc?.idType || "—"}
-                />
+              <ReadOnly label="Means of ID" value={kyc?.idType || "—"} />
 
-                <ReadOnly
-                  label="ID Verified"
-                  value={idVerifiedLabel}
-                />
+              <ReadOnly label="ID Verified" value={idVerifiedLabel} />
             </div>
           </Section>
 

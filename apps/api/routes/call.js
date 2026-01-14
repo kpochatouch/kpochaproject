@@ -2,7 +2,11 @@
 import express from "express";
 import mongoose from "mongoose";
 import * as callService from "../services/callService.js";
-import { getCallById, listRecentCallsForUser, getActiveCallForUser } from "../services/callService.js";
+import {
+  getCallById,
+  listRecentCallsForUser,
+  getActiveCallForUser,
+} from "../services/callService.js";
 
 export default function callRoutes({ requireAuth }) {
   const router = express.Router();
@@ -30,17 +34,16 @@ export default function callRoutes({ requireAuth }) {
         callerUid,
         receiverUids: [receiverUid],
         callType,
-        meta
+        meta,
       });
 
-            return res.json({
+      return res.json({
         ok: true,
         id: String(call._id),
         callId: call.callId,
         room: call.room,
         callType: call.callType,
       });
-
     } catch (err) {
       console.error("[POST /api/call] error:", err?.message || err);
       return res.status(500).json({ error: "call_create_failed" });
@@ -64,7 +67,6 @@ export default function callRoutes({ requireAuth }) {
       }
 
       return res.json({ ok: true, item: rec });
-
     } catch (err) {
       console.error("[GET /api/call/:id] error:", err?.message || err);
       return res.status(500).json({ error: "call_fetch_failed" });
@@ -83,7 +85,6 @@ export default function callRoutes({ requireAuth }) {
       const list = await listRecentCallsForUser(uid, { limit });
 
       return res.json({ items: list });
-
     } catch (err) {
       console.error("[GET /api/calls] error:", err?.message || err);
       return res.status(500).json({ error: "calls_list_failed" });
@@ -118,11 +119,10 @@ export default function callRoutes({ requireAuth }) {
 
       const updated = await callService.updateCallStatus(callId, {
         status,
-        meta
+        meta,
       });
 
       return res.json({ ok: true });
-
     } catch (err) {
       console.error("[PUT /api/call/:id/status] error:", err?.message || err);
       return res.status(500).json({ error: "call_status_failed" });
@@ -148,7 +148,6 @@ export default function callRoutes({ requireAuth }) {
       await mongoose.model("CallRecord").deleteOne({ callId: rec.callId });
 
       return res.json({ ok: true });
-
     } catch (err) {
       console.error("[DELETE /api/call/:id] error:", err?.message || err);
       return res.status(500).json({ error: "call_delete_failed" });

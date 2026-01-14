@@ -106,7 +106,7 @@ export default function riskRoutes({ requireAuth, requireAdmin, Application }) {
                 "risk.liveness": { riskId, score, at: now, reason },
               },
             },
-            { new: false }
+            { new: false },
           );
         } catch (e) {
           console.warn("[risk] attach to Application failed:", e?.message || e);
@@ -144,19 +144,26 @@ export default function riskRoutes({ requireAuth, requireAdmin, Application }) {
    * Existing: GET /api/risk/liveness/:id
    * Keep this for backward compatibility.
    */
-  router.get("/risk/liveness/:id", requireAuth, requireAdmin, async (req, res) => {
-    try {
-      const { id } = req.params;
-      const { default: mongoose } = await import("mongoose");
-      const riskCol = await getRiskCollection(req);
-      const doc = await riskCol.findOne({ _id: new mongoose.Types.ObjectId(id) });
-      if (!doc) return res.status(404).json({ error: "not_found" });
-      return res.json(doc);
-    } catch (e) {
-      console.error("[risk] get liveness error:", e?.message || e);
-      return res.status(500).json({ error: "fetch_failed" });
-    }
-  });
+  router.get(
+    "/risk/liveness/:id",
+    requireAuth,
+    requireAdmin,
+    async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { default: mongoose } = await import("mongoose");
+        const riskCol = await getRiskCollection(req);
+        const doc = await riskCol.findOne({
+          _id: new mongoose.Types.ObjectId(id),
+        });
+        if (!doc) return res.status(404).json({ error: "not_found" });
+        return res.json(doc);
+      } catch (e) {
+        console.error("[risk] get liveness error:", e?.message || e);
+        return res.status(500).json({ error: "fetch_failed" });
+      }
+    },
+  );
 
   /**
    * NEW: GET /api/risk/:id
@@ -167,7 +174,9 @@ export default function riskRoutes({ requireAuth, requireAdmin, Application }) {
       const { id } = req.params;
       const { default: mongoose } = await import("mongoose");
       const riskCol = await getRiskCollection(req);
-      const doc = await riskCol.findOne({ _id: new mongoose.Types.ObjectId(id) });
+      const doc = await riskCol.findOne({
+        _id: new mongoose.Types.ObjectId(id),
+      });
       if (!doc) return res.status(404).json({ error: "not_found" });
       return res.json(doc);
     } catch (e) {

@@ -16,54 +16,75 @@ export default function paymentsRouter({ requireAuth }) {
   router.post("/payments/init", requireAuth, async (req, res) => {
     try {
       const { bookingId, email } = req.body || {};
-if (!bookingId) {
-  return res.status(400).json({ error: "bookingId required" });
-}
+      if (!bookingId) {
+        return res.status(400).json({ error: "bookingId required" });
+      }
 
-const booking = await Booking.findById(bookingId);
-if (!booking) return res.status(404).json({ error: "booking_not_found" });
+      const booking = await Booking.findById(bookingId);
+      if (!booking) return res.status(404).json({ error: "booking_not_found" });
 
-// 🔒 Only the booking owner can init payment
-if (String(booking.clientUid) !== String(req.user.uid)) {
-  return res.status(403).json({ error: "not_your_booking" });
-}
+      // 🔒 Only the booking owner can init payment
+      if (String(booking.clientUid) !== String(req.user.uid)) {
+        return res.status(403).json({ error: "not_your_booking" });
+      }
 
-// ✅ Always bill the real booking amount (never trust client body)
-const amountKobo = Math.floor(Number(booking.amountKobo || 0));
-if (!amountKobo || amountKobo <= 0) {
-  return res.status(400).json({ error: "invalid_booking_amount" });
-}
+      // 🔒 Guard: prevent mixing payment methods
+      const requested = String(
+        booking?.meta?.paymentMethodRequested || "",
+      ).toLowerCase();
+      if (requested === "wallet") {
+        return res.status(400).json({
+          error: "wallet_only_booking",
+          message:
+            "This booking was created for wallet payment. Please pay from wallet.",
+        });
+      }
 
-const reference = `BOOKING-${booking._id}-${Date.now()}`;
+      // ✅ Always bill the real booking amount (never trust client body)
+      const amountKobo = Math.floor(Number(booking.amountKobo || 0));
+      if (!amountKobo || amountKobo <= 0) {
+        return res.status(400).json({ error: "invalid_booking_amount" });
+      }
 
-if (!process.env.PAYSTACK_SECRET_KEY) {
-  return res.status(500).json({ error: "paystack_secret_missing" });
-}
+      const reference = `BOOKING-${booking._id}-${Date.now()}`;
 
-const initResp = await fetch("https://api.paystack.co/transaction/initialize", {
+      if (!process.env.PAYSTACK_SECRET_KEY) {
+        return res.status(500).json({ error: "paystack_secret_missing" });
+      }
 
-  method: "POST",
-  headers: {
-    Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify({
-    email: email || req.user.email || "customer@example.com",
-    amount: amountKobo,
-    reference,
-    metadata: {
-      bookingId: String(booking._id),
-      clientUid: String(booking.clientUid || ""),
-      custom_fields: [
-        { display_name: "Booking", variable_name: "bookingId", value: String(booking._id) },
-      ],
-    },
-  }),
-});
-
+      const initResp = await fetch(
+        "https://api.paystack.co/transaction/initialize",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            email: email || req.user.email || "customer@example.com",
+            amount: amountKobo,
+            reference,
+            metadata: {
+              bookingId: String(booking._id),
+              clientUid: String(booking.clientUid || ""),
+              custom_fields: [
+                {
+                  display_name: "Booking",
+                  variable_name: "bookingId",
+                  value: String(booking._id),
+                },
+              ],
+            },
+          }),
+        },
+      );
 
       const initJson = await initResp.json();
-      if (!initResp.ok || !initJson?.status || !initJson?.data?.authorization_url) {
+      if (
+        !initResp.ok ||
+        !initJson?.status ||
+        !initJson?.data?.authorization_url
+      ) {
         return res.status(400).json({
           error: "init_failed",
           details: initJson?.message || "unknown_error",
@@ -73,22 +94,22 @@ const initResp = await fetch("https://api.paystack.co/transaction/initialize", {
       booking.paystackReference = initJson?.data?.reference || reference;
       if (booking.paymentStatus !== "paid") {
         booking.paymentStatus = "pending";
-        booking.status = booking.status === "scheduled" ? booking.status : "pending_payment";
+        booking.status =
+          booking.status === "scheduled" ? booking.status : "pending_payment";
       }
       await booking.save();
 
       return res.json({
-      authorization_url: initJson.data.authorization_url,
-      reference: booking.paystackReference, // always defined now
-    });
-
+        authorization_url: initJson.data.authorization_url,
+        reference: booking.paystackReference, // always defined now
+      });
     } catch (e) {
       console.error("[payments/init] error:", e);
       res.status(500).json({ error: "init_error" });
     }
   });
 
-    /** Verify (used by inline & post-redirect confirmation) — authenticated */
+  /** Verify (used by inline & post-redirect confirmation) — authenticated */
   router.post("/payments/verify", requireAuth, async (req, res) => {
     try {
       const { bookingId, reference } = req.body || {};
@@ -103,14 +124,14 @@ const initResp = await fetch("https://api.paystack.co/transaction/initialize", {
 
       const r = await fetch(
         `https://api.paystack.co/transaction/verify/${encodeURIComponent(
-          reference
+          reference,
         )}`,
         {
           headers: {
             Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
             "Content-Type": "application/json",
           },
-        }
+        },
       );
 
       const verify = await r.json();
@@ -126,27 +147,43 @@ const initResp = await fetch("https://api.paystack.co/transaction/initialize", {
         return res.status(404).json({ error: "booking_not_found" });
       }
 
-
       // ✅ Guard: don’t allow paying for cancelled/refunded bookings
-      if (booking.status === "cancelled" || booking.paymentStatus === "refunded") {
+      if (
+        booking.status === "cancelled" ||
+        booking.paymentStatus === "refunded"
+      ) {
         return res.status(400).json({ error: "booking_not_payable" });
       }
 
-       // 🔒 Only the booking owner can verify
+      // 🔒 Only the booking owner can verify
       if (String(booking.clientUid) !== String(req.user.uid)) {
         return res.status(403).json({ error: "not_your_booking" });
       }
 
+      // 🔒 Guard: prevent mixing payment methods
+      const requested = String(
+        booking?.meta?.paymentMethodRequested || "",
+      ).toLowerCase();
+      if (requested === "wallet") {
+        return res.status(400).json({
+          error: "wallet_only_booking",
+          message:
+            "This booking was created for wallet payment. Please pay from wallet.",
+        });
+      }
+
       // ✅ Use server-stored reference as canonical (prevents client sending a random reference)
-      if (booking.paystackReference && booking.paystackReference !== reference) {
+      if (
+        booking.paystackReference &&
+        booking.paystackReference !== reference
+      ) {
         return res.status(400).json({
           error: "reference_mismatch",
           expected: booking.paystackReference,
         });
       }
 
-
-        if (
+      if (
         booking.paymentStatus === "paid" &&
         booking.paystackReference === reference
       ) {
@@ -157,7 +194,10 @@ const initResp = await fetch("https://api.paystack.co/transaction/initialize", {
         return res.json({ ok: true, status: "success", alreadyPaid: true });
       }
 
-
+      booking.meta = booking.meta || {};
+      booking.meta.paymentMethodUsed = "card";
+      booking.meta.paymentMethodRequested =
+        booking.meta.paymentMethodRequested || "card";
 
       const expected = Math.floor(Number(booking.amountKobo || 0));
       const paid = Math.floor(Number(amount || 0));
@@ -174,7 +214,6 @@ const initResp = await fetch("https://api.paystack.co/transaction/initialize", {
         });
       }
 
-
       booking.paymentStatus = "paid";
       if (booking.status === "pending_payment") booking.status = "scheduled";
       booking.paystackReference = reference;
@@ -184,19 +223,20 @@ const initResp = await fetch("https://api.paystack.co/transaction/initialize", {
 
       await booking.save();
 
-
       // ✅ Fund platform escrow ledger for CARD payments (idempotent)
-try {
-  await fundEscrowFromPaystackForBooking(booking, { reference });
-} catch (e) {
-  console.error("[payments/verify] fundEscrowFromPaystackForBooking failed:", e?.message || e);
-  // Decide your policy:
-  // - If you want to be strict: return 500 and treat payment as not finalized
-  // - If you want to be fail-soft: continue (booking is paid, but escrow ledger missing)
-  //
-  // I recommend FAIL-SOFT for now so users don't get stuck after Paystack success.
-}
-
+      try {
+        await fundEscrowFromPaystackForBooking(booking, { reference });
+      } catch (e) {
+        console.error(
+          "[payments/verify] fundEscrowFromPaystackForBooking failed:",
+          e?.message || e,
+        );
+        // Decide your policy:
+        // - If you want to be strict: return 500 and treat payment as not finalized
+        // - If you want to be fail-soft: continue (booking is paid, but escrow ledger missing)
+        //
+        // I recommend FAIL-SOFT for now so users don't get stuck after Paystack success.
+      }
 
       // 🔔 Notify both pro + client in real-time that payment is confirmed
       try {
@@ -218,11 +258,14 @@ try {
           io.to(`user:${booking.clientUid}`).emit("booking:paid", payload);
         }
 
-        io.to(`booking:${booking._id.toString()}`).emit("booking:paid", payload);
+        io.to(`booking:${booking._id.toString()}`).emit(
+          "booking:paid",
+          payload,
+        );
       } catch (err) {
         console.warn(
           "[payments/verify] socket emit booking:paid failed:",
-          err?.message || err
+          err?.message || err,
         );
       }
 

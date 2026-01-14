@@ -29,7 +29,11 @@ export default function useNotifications() {
     (async () => {
       try {
         const list = await listNotifications({ limit: 50 });
-        const arr = Array.isArray(list?.items) ? list.items : Array.isArray(list) ? list : [];
+        const arr = Array.isArray(list?.items)
+          ? list.items
+          : Array.isArray(list)
+            ? list
+            : [];
         if (mounted.current) setItems(arr);
         await refreshCounts();
       } catch {}
@@ -78,8 +82,8 @@ export default function useNotifications() {
         s.map((it) =>
           String(it.id || it._id) === String(id)
             ? { ...it, read: true, seen: true }
-            : it
-        )
+            : it,
+        ),
       );
       refreshCounts();
     } catch {}

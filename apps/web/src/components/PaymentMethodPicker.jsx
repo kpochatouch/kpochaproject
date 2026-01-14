@@ -13,7 +13,9 @@ export default function PaymentMethodPicker({
       // The parent handles Paystack popup; this component only signals readiness.
       // If you want this component to run Paystack inline, move that logic here.
       const reference = "CARD-" + Date.now();
-      document.dispatchEvent(new CustomEvent("paymentpicker:success", { detail: { reference } }));
+      document.dispatchEvent(
+        new CustomEvent("paymentpicker:success", { detail: { reference } }),
+      );
     }
     document.addEventListener("paymentpicker:charge", onCharge);
     return () => document.removeEventListener("paymentpicker:charge", onCharge);
@@ -47,7 +49,9 @@ export default function PaymentMethodPicker({
           </label>
         )}
       </div>
-      <p className="text-xs text-zinc-500">Total: ₦{Number(amount || 0).toLocaleString()}</p>
+      <p className="text-xs text-zinc-500">
+        Total: ₦{Number(amount || 0).toLocaleString()}
+      </p>
     </div>
   );
 }

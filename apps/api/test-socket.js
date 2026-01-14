@@ -17,7 +17,11 @@ console.log("[verbose] checking HTTP reachability ->", SERVER_ROOT);
 async function httpCheck() {
   try {
     const res = await axios.get(`${SERVER_ROOT}/api/health`, { timeout: 4000 });
-    console.log("[verbose] HTTP reachable:", res.status, res.data ? res.data : "");
+    console.log(
+      "[verbose] HTTP reachable:",
+      res.status,
+      res.data ? res.data : "",
+    );
   } catch (e) {
     console.warn("[verbose] HTTP check failed:", e?.message || e);
   }
@@ -36,10 +40,16 @@ if (RAW_ARG) {
     console.log("[verbose] will use query.uid hint:", query.uid);
   } else if (RAW_ARG.toLowerCase().startsWith("bearer ")) {
     auth.Authorization = RAW_ARG;
-    console.log("[verbose] will send auth.Authorization (Bearer) len:", RAW_ARG.length);
+    console.log(
+      "[verbose] will send auth.Authorization (Bearer) len:",
+      RAW_ARG.length,
+    );
   } else if (looksLikeJwt(RAW_ARG)) {
     auth.token = RAW_ARG;
-    console.log("[verbose] will send auth.token (JWT-like) len:", RAW_ARG.length);
+    console.log(
+      "[verbose] will send auth.token (JWT-like) len:",
+      RAW_ARG.length,
+    );
   } else {
     auth.token = RAW_ARG;
     console.log("[verbose] will send auth.token (raw) len:", RAW_ARG.length);
@@ -67,9 +77,13 @@ socket.on("connect", () => {
   console.log("[verbose] socket connected, id:", socket.id);
   socket.emit("room:join", { room: ROOM }, (r) => {
     console.log("[verbose] room:join response:", r);
-    socket.emit("chat:message", { room: ROOM, text: TEXT, meta: { verbose: true } }, (ack) => {
-      console.log("[verbose] chat:message ack:", ack);
-    });
+    socket.emit(
+      "chat:message",
+      { room: ROOM, text: TEXT, meta: { verbose: true } },
+      (ack) => {
+        console.log("[verbose] chat:message ack:", ack);
+      },
+    );
   });
 });
 
@@ -81,10 +95,16 @@ socket.on("connect_error", (err) => {
 });
 
 socket.on("error", (e) => console.warn("[verbose] socket error:", e));
-socket.on("reconnect_attempt", (n) => console.log("[verbose] reconnect_attempt:", n));
+socket.on("reconnect_attempt", (n) =>
+  console.log("[verbose] reconnect_attempt:", n),
+);
 socket.on("reconnect_failed", () => console.warn("[verbose] reconnect_failed"));
-socket.on("reconnect", (n) => console.log("[verbose] reconnected after attempts:", n));
-socket.on("disconnect", (reason) => console.log("[verbose] disconnected:", reason));
+socket.on("reconnect", (n) =>
+  console.log("[verbose] reconnected after attempts:", n),
+);
+socket.on("disconnect", (reason) =>
+  console.log("[verbose] disconnected:", reason),
+);
 socket.on("close", () => console.log("[verbose] socket close"));
 socket.on("chat:message", (m) => console.log("[verbose] incoming chat:", m));
 socket.on("dm:incoming", (d) => console.log("[verbose] dm incoming:", d));
@@ -97,6 +117,8 @@ socket.connect();
 // Give it time and then exit
 setTimeout(() => {
   console.log("[verbose] timeout reached; disconnecting and exiting");
-  try { socket.disconnect(); } catch {}
+  try {
+    socket.disconnect();
+  } catch {}
   setTimeout(() => process.exit(0), 300);
 }, 45000);

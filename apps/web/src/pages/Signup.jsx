@@ -46,7 +46,8 @@ export default function Signup() {
     setOk("");
 
     if (!email.trim()) return setErr("Email is required.");
-    if (password.length < 6) return setErr("Password must be at least 6 characters.");
+    if (password.length < 6)
+      return setErr("Password must be at least 6 characters.");
     if (password !== confirm) return setErr("Passwords do not match.");
 
     setBusy(true);
@@ -54,7 +55,7 @@ export default function Signup() {
       const cred = await createUserWithEmailAndPassword(
         auth,
         email.trim(),
-        password
+        password,
       );
 
       if (name.trim()) {
@@ -68,7 +69,9 @@ export default function Signup() {
         handleCodeInApp: true,
       });
 
-      setOk("Verification email sent! Click the link in your inbox/spam folder to continue.");
+      setOk(
+        "Verification email sent! Click the link in your inbox/spam folder to continue.",
+      );
       cacheDraft({});
       // ❌ don't sign out here – so when they click the link, they're still logged in
       // await auth.signOut();

@@ -74,7 +74,9 @@ export async function createCall({
     ? participants
     : [
         { uid: callerUid, role: "caller" },
-        ...Array.from(new Set(Array.isArray(receiverUids) ? receiverUids : [])).map((u) => ({
+        ...Array.from(
+          new Set(Array.isArray(receiverUids) ? receiverUids : []),
+        ).map((u) => ({
           uid: u,
           role: "receiver",
         })),
@@ -143,7 +145,10 @@ export async function createCall({
           meta: { source: "callService" },
         });
       } catch (e) {
-        console.warn("[callService] createNotification(call_incoming) failed:", e?.message || e);
+        console.warn(
+          "[callService] createNotification(call_incoming) failed:",
+          e?.message || e,
+        );
       }
     }
   } catch (err) {
@@ -164,14 +169,25 @@ export async function createCall({
  */
 export async function updateCallStatus(callId, updates = {}) {
   if (!callId) throw new Error("callId required");
-  const allowed = ["status", "connectedAt", "endedAt", "meta", "recordingUrl", "archived"];
+  const allowed = [
+    "status",
+    "connectedAt",
+    "endedAt",
+    "meta",
+    "recordingUrl",
+    "archived",
+  ];
   const set = {};
   for (const k of Object.keys(updates || {})) {
     if (allowed.includes(k)) set[k] = updates[k];
   }
 
   // If endedAt provided, compute duration after update
-  const doc = await CallRecord.findOneAndUpdate({ callId }, { $set: set }, { new: true });
+  const doc = await CallRecord.findOneAndUpdate(
+    { callId },
+    { $set: set },
+    { new: true },
+  );
   if (!doc) throw new Error("call_not_found");
 
   if (doc.endedAt && doc.connectedAt) {
@@ -238,7 +254,9 @@ export async function acceptCall(callId, accepterUid) {
 
   // emit updates
   emitToRoom(call.room, "call:accepted", payload);
-  (call.participants || []).forEach((p) => emitToUser(p.uid, "call:accepted", payload));
+  (call.participants || []).forEach((p) =>
+    emitToUser(p.uid, "call:accepted", payload),
+  );
 
   return call;
 }
@@ -260,14 +278,19 @@ export async function declineCall(callId, declinerUid, reason = "declined") {
 
   // Mark status for this actor (we keep status at call-level; callers may track per-user signals in meta)
   call.meta = call.meta || {};
-  call.meta.declines = Array.isArray(call.meta.declines) ? call.meta.declines : [];
-  if (!call.meta.declines.includes(declinerUid)) call.meta.declines.push(declinerUid);
+  call.meta.declines = Array.isArray(call.meta.declines)
+    ? call.meta.declines
+    : [];
+  if (!call.meta.declines.includes(declinerUid))
+    call.meta.declines.push(declinerUid);
 
   // If all receivers have declined, mark as "declined" -> endedAt
   const receiverUids = (call.participants || [])
     .filter((p) => p.uid !== call.callerUid)
     .map((p) => p.uid);
-  const allDeclined = receiverUids.length > 0 && receiverUids.every((u) => call.meta.declines.includes(u));
+  const allDeclined =
+    receiverUids.length > 0 &&
+    receiverUids.every((u) => call.meta.declines.includes(u));
 
   if (allDeclined) {
     call.status = "declined";
@@ -287,7 +310,9 @@ export async function declineCall(callId, declinerUid, reason = "declined") {
   };
 
   emitToRoom(call.room, "call:declined", payload);
-  (call.participants || []).forEach((p) => emitToUser(p.uid, "call:declined", payload));
+  (call.participants || []).forEach((p) =>
+    emitToUser(p.uid, "call:declined", payload),
+  );
 
   return call;
 }
@@ -309,7 +334,12 @@ export async function cancelCall(callId, cancelledByUid = null) {
   call.endedAt = new Date();
   call.computeDuration();
 
-  if (cancelledByUid) call.meta = { ...call.meta, cancelledBy: cancelledByUid, cancelledAt: new Date() };
+  if (cancelledByUid)
+    call.meta = {
+      ...call.meta,
+      cancelledBy: cancelledByUid,
+      cancelledAt: new Date(),
+    };
 
   await call.save();
 
@@ -322,7 +352,9 @@ export async function cancelCall(callId, cancelledByUid = null) {
   };
 
   emitToRoom(call.room, "call:cancelled", payload);
-  (call.participants || []).forEach((p) => emitToUser(p.uid, "call:cancelled", payload));
+  (call.participants || []).forEach((p) =>
+    emitToUser(p.uid, "call:cancelled", payload),
+  );
 
   return call;
 }
@@ -333,7 +365,11 @@ export async function cancelCall(callId, cancelledByUid = null) {
  * Ends an active call (hangup) and computes duration.
  * endedStatus defaults to "ended" but may be "missed" / "busy" / "failed"
  */
-export async function endCall(callId, endedStatus = "ended", endedByUid = null) {
+export async function endCall(
+  callId,
+  endedStatus = "ended",
+  endedByUid = null,
+) {
   if (!callId) throw new Error("callId required");
 
   const call = await CallRecord.findOne({ callId });
@@ -359,22 +395,37 @@ export async function endCall(callId, endedStatus = "ended", endedByUid = null) 
   };
 
   emitToRoom(call.room, "call:ended", payload);
-  (call.participants || []).forEach((p) => emitToUser(p.uid, "call:ended", payload));
+  (call.participants || []).forEach((p) =>
+    emitToUser(p.uid, "call:ended", payload),
+  );
 
   // If endedStatus indicates missed and no one answered, create missed notifications
-  if (endedStatus === "missed" || (endedStatus === "ended" && (!call.connectedAt || call.duration === 0))) {
-    const receivers = (call.participants || []).map((p) => p.uid).filter((u) => u && u !== call.callerUid);
+  if (
+    endedStatus === "missed" ||
+    (endedStatus === "ended" && (!call.connectedAt || call.duration === 0))
+  ) {
+    const receivers = (call.participants || [])
+      .map((p) => p.uid)
+      .filter((u) => u && u !== call.callerUid);
     for (const r of receivers) {
       try {
         await createNotification({
           toUid: r,
           fromUid: call.callerUid,
           type: "call_missed",
-          data: { callId: call.callId, room: call.room, callType: call.callType, duration: call.duration },
+          data: {
+            callId: call.callId,
+            room: call.room,
+            callType: call.callType,
+            duration: call.duration,
+          },
           meta: { source: "callService" },
         });
       } catch (e) {
-        console.warn("[callService] createNotification(call_missed) failed:", e?.message || e);
+        console.warn(
+          "[callService] createNotification(call_missed) failed:",
+          e?.message || e,
+        );
       }
     }
   }
@@ -401,7 +452,6 @@ export async function getCallById(idOrCallId) {
   return CallRecord.findOne({ callId: v }).lean();
 }
 
-
 /**
  * listRecentCallsForUser(uid, { limit = 50 })
  */
@@ -409,7 +459,10 @@ export async function listRecentCallsForUser(uid, { limit = 50 } = {}) {
   if (!uid) throw new Error("uid required");
   const take = Math.max(1, Math.min(200, Number(limit || 50)));
   // Use index participants.uid + createdAt
-  const rows = await CallRecord.find({ "participants.uid": uid, archived: { $ne: true } })
+  const rows = await CallRecord.find({
+    "participants.uid": uid,
+    archived: { $ne: true },
+  })
     .sort({ createdAt: -1 })
     .limit(take)
     .lean();

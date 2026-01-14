@@ -57,7 +57,7 @@ createRoot(document.getElementById("root")).render(
         <App />
       </MeProvider>
     </AuthProvider>
-  </BrowserRouter>
+  </BrowserRouter>,
 );
 
 // ✅ PWA: register Service Worker (prod only)

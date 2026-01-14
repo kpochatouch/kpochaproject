@@ -26,18 +26,16 @@ export default function BookingChat() {
   // ?call=audio | ?call=video | null
   const startCallType = useMemo(
     () => new URLSearchParams(location.search).get("call"),
-    [location.search]
+    [location.search],
   );
 
   const { me } = useMe();
-
 
   // 🔐 who am I?
   const myUid =
     me?.uid || me?.ownerUid || me?._id || me?.id || me?.userId || null;
 
-  const myLabel =
-    me?.displayName || me?.fullName || me?.email || myUid || "me";
+  const myLabel = me?.displayName || me?.fullName || me?.email || myUid || "me";
 
   // 🔔 call state for this page (caller only)
   const [callState, setCallState] = useState({
@@ -54,7 +52,7 @@ export default function BookingChat() {
   // booking chat room id (for messages)
   const room = useMemo(
     () => (bookingId ? `booking:${bookingId}` : null),
-    [bookingId]
+    [bookingId],
   );
 
   // ---- Load booking meta (for badge + figuring out peerUid) ----
@@ -68,7 +66,7 @@ export default function BookingChat() {
       try {
         setLoadingBooking(true);
         const { data } = await api.get(
-          `/api/bookings/${encodeURIComponent(bookingId)}`
+          `/api/bookings/${encodeURIComponent(bookingId)}`,
         );
         if (!alive) return;
         setBooking(data || null);
@@ -88,7 +86,7 @@ export default function BookingChat() {
       booking?.service?.serviceName ||
       booking?.serviceName ||
       "Selected service",
-    [booking]
+    [booking],
   );
 
   const priceText = useMemo(() => {
@@ -101,7 +99,7 @@ export default function BookingChat() {
 
   const areaText = useMemo(
     () => booking?.lga || booking?.state || "",
-    [booking]
+    [booking],
   );
 
   // 🔎 figure out who the *other* person is for this booking
@@ -190,7 +188,7 @@ export default function BookingChat() {
 
         if (
           ["ended", "cancelled", "declined", "missed", "failed"].includes(
-            status
+            status,
           )
         ) {
           return { ...prev, open: false };
@@ -205,7 +203,7 @@ export default function BookingChat() {
     } catch (e) {
       console.warn(
         "[BookingChat] attach call status listener failed:",
-        e?.message || e
+        e?.message || e,
       );
     }
 
@@ -216,12 +214,12 @@ export default function BookingChat() {
     };
   }, [socket]);
 
-    // 🔥 Auto-start call when URL has ?call=audio or ?call=video
+  // 🔥 Auto-start call when URL has ?call=audio or ?call=video
   useEffect(() => {
     if (!startCallType) return; // no call param → do nothing
-    if (!peerUid) return;       // no peer to call yet
-    if (!room) return;          // booking chat room not ready yet
-    if (!myUid || !me) return;  // user not ready
+    if (!peerUid) return; // no peer to call yet
+    if (!room) return; // booking chat room not ready yet
+    if (!myUid || !me) return; // user not ready
 
     const id = setTimeout(() => {
       handleStartCall(startCallType);
@@ -243,8 +241,7 @@ export default function BookingChat() {
     }
 
     // build meta so receiver sees real caller + booking info
-    const fromAvatar =
-      me?.avatarUrl || me?.photoUrl || me?.photoURL || "";
+    const fromAvatar = me?.avatarUrl || me?.photoUrl || me?.photoURL || "";
 
     const meta = {
       fromUid: myUid,

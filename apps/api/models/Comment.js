@@ -27,7 +27,7 @@ const CommentSchema = new mongoose.Schema(
       index: true,
     },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 CommentSchema.index({ postId: 1, createdAt: -1 });

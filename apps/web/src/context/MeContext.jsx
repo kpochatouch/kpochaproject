@@ -68,11 +68,7 @@ export function MeProvider({ children }) {
     };
   }, [state]);
 
-  return (
-    <MeContext.Provider value={value}>
-      {children}
-    </MeContext.Provider>
-  );
+  return <MeContext.Provider value={value}>{children}</MeContext.Provider>;
 }
 
 export function useMe() {

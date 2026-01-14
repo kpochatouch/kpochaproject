@@ -14,7 +14,7 @@ const ChatAttachmentSchema = new Schema(
     size: { type: Number, default: 0 }, // bytes
     mime: { type: String, default: "" },
   },
-  { _id: false }
+  { _id: false },
 );
 
 /**
@@ -76,7 +76,7 @@ const ChatMessageSchema = new Schema(
   {
     timestamps: true, // createdAt, updatedAt
     minimize: false, // preserve empty objects like meta
-  }
+  },
 );
 
 /**
@@ -89,21 +89,30 @@ const ChatMessageSchema = new Schema(
  */
 ChatMessageSchema.index(
   { room: 1, createdAt: -1 },
-  { name: "room_createdAt_idx", partialFilterExpression: { deleted: { $ne: true } } }
+  {
+    name: "room_createdAt_idx",
+    partialFilterExpression: { deleted: { $ne: true } },
+  },
 );
 
 ChatMessageSchema.index(
   { toUid: 1, room: 1, createdAt: -1 },
-  { name: "to_room_createdAt_idx", partialFilterExpression: { deleted: { $ne: true } } }
+  {
+    name: "to_room_createdAt_idx",
+    partialFilterExpression: { deleted: { $ne: true } },
+  },
 );
 
 ChatMessageSchema.index(
   { room: 1, fromUid: 1, clientId: 1 },
-  { name: "client_dedupe_idx", sparse: true }
+  { name: "client_dedupe_idx", sparse: true },
 );
 
 // Optional index for quick lookups by sender + recent messages
-ChatMessageSchema.index({ fromUid: 1, createdAt: -1 }, { name: "from_createdAt_idx" });
+ChatMessageSchema.index(
+  { fromUid: 1, createdAt: -1 },
+  { name: "from_createdAt_idx" },
+);
 
 /**
  * Instance helpers
@@ -174,6 +183,7 @@ ChatMessageSchema.pre("save", function (next) {
  * - For very high scale, consider sharding by hashed(room).
  */
 const ChatMessage =
-  mongoose.models.ChatMessage || mongoose.model("ChatMessage", ChatMessageSchema);
+  mongoose.models.ChatMessage ||
+  mongoose.model("ChatMessage", ChatMessageSchema);
 
 export default ChatMessage;

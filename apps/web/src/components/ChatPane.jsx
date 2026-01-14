@@ -90,8 +90,7 @@ export default function ChatPane({
   const textareaRef = useRef(null);
   const [composerFocused, setComposerFocused] = useState(false);
 
-const hideSideButtonsOnMobile = isMobileDevice && composerFocused;
-
+  const hideSideButtonsOnMobile = isMobileDevice && composerFocused;
 
   // menu / actions state
   const [menu, setMenu] = useState(null); // { x, y, msg }
@@ -108,9 +107,7 @@ const hideSideButtonsOnMobile = isMobileDevice && composerFocused;
       if (!status) {
         if (m.isMe) {
           const seen =
-            Array.isArray(m.seenBy) &&
-            peerUid &&
-            m.seenBy.includes(peerUid);
+            Array.isArray(m.seenBy) && peerUid && m.seenBy.includes(peerUid);
           status = seen ? "seen" : "delivered";
         } else {
           status = "received";
@@ -178,7 +175,7 @@ const hideSideButtonsOnMobile = isMobileDevice && composerFocused;
         // reconcile optimistic message by clientId
         if (n.clientId) {
           const idx = prev.findIndex(
-            (x) => x.clientId && x.clientId === n.clientId
+            (x) => x.clientId && x.clientId === n.clientId,
           );
           if (idx !== -1) {
             const copy = [...prev];
@@ -208,7 +205,7 @@ const hideSideButtonsOnMobile = isMobileDevice && composerFocused;
         // avoid dupes
         if (
           prev.some(
-            (x) => x.id === n.id || (n.clientId && x.clientId === n.clientId)
+            (x) => x.id === n.id || (n.clientId && x.clientId === n.clientId),
           )
         ) {
           return prev;
@@ -219,47 +216,46 @@ const hideSideButtonsOnMobile = isMobileDevice && composerFocused;
     }
 
     // live "seen" listener
-  function onSeen(evt) {
-  console.log("[ChatPane] chat:seen RECEIVED ←", evt);
+    function onSeen(evt) {
+      console.log("[ChatPane] chat:seen RECEIVED ←", evt);
 
-  if (!evt || !evt.room || !evt.seenBy) {
-    console.warn("[ChatPane] chat:seen ignored (missing fields)");
-    return;
-  }
+      if (!evt || !evt.room || !evt.seenBy) {
+        console.warn("[ChatPane] chat:seen ignored (missing fields)");
+        return;
+      }
 
-  if (evt.room !== room) {
-    console.warn("[ChatPane] chat:seen ignored (room mismatch)", {
-      expected: room,
-      got: evt.room,
-    });
-    return;
-  }
+      if (evt.room !== room) {
+        console.warn("[ChatPane] chat:seen ignored (room mismatch)", {
+          expected: room,
+          got: evt.room,
+        });
+        return;
+      }
 
-  const viewerUid = evt.seenBy;
+      const viewerUid = evt.seenBy;
 
-  setMsgs((prev) => {
-    if (!peerUid || viewerUid !== peerUid) return prev;
+      setMsgs((prev) => {
+        if (!peerUid || viewerUid !== peerUid) return prev;
 
-    const order = ["pending", "sent", "delivered", "seen"];
-    const seenRank = order.indexOf("seen");
+        const order = ["pending", "sent", "delivered", "seen"];
+        const seenRank = order.indexOf("seen");
 
-    return prev.map((m) => {
-      if (!m.isMe) return m;
+        return prev.map((m) => {
+          if (!m.isMe) return m;
 
-      const currentRank = order.indexOf(m.status || "pending");
-      if (currentRank >= seenRank) return m;
+          const currentRank = order.indexOf(m.status || "pending");
+          if (currentRank >= seenRank) return m;
 
-      return {
-        ...m,
-        status: "seen",
-        seenBy: Array.isArray(m.seenBy)
-          ? Array.from(new Set([...m.seenBy, viewerUid]))
-          : [viewerUid],
-      };
-    });
-  });
-}
-
+          return {
+            ...m,
+            status: "seen",
+            seenBy: Array.isArray(m.seenBy)
+              ? Array.from(new Set([...m.seenBy, viewerUid]))
+              : [viewerUid],
+          };
+        });
+      });
+    }
 
     socket.on("chat:message", onMsg);
     socket.on("chat:update", onMsg);
@@ -310,7 +306,7 @@ const hideSideButtonsOnMobile = isMobileDevice && composerFocused;
       {
         method: "POST",
         body: form,
-      }
+      },
     );
 
     if (!res.ok) throw new Error("cloudinary_upload_failed");
@@ -326,233 +322,232 @@ const hideSideButtonsOnMobile = isMobileDevice && composerFocused;
   }
 
   async function handleFileChange(e) {
-  const file = e.target.files?.[0];
-  // ⛔ stop using socket as a gate
-  if (!file || !room) return;
+    const file = e.target.files?.[0];
+    // ⛔ stop using socket as a gate
+    if (!file || !room) return;
 
-  try {
-    setUploading(true);
-    const url = await uploadFileToCloudinary(file);
-    const now = Date.now();
-    const attachment = {
-      url,
-      type: file.type.startsWith("image/")
-        ? "image"
-        : file.type.startsWith("video/")
-        ? "video"
-        : "file",
-      name: file.name,
-      size: file.size,
-    };
-
-    const clientId = generateClientId();
-
-    // optimistic bubble
-    setMsgs((prev) => [
-      ...prev,
-      {
-        id: `local:${clientId}`,
-        clientId,
-        room,
-        body: "",
-        fromUid: meUid || null,
-        sender: { displayName: myLabel || "You" },
-        at: now,
-        meta: { attachments: [attachment] },
-        isMe: true,
-        _optimistic: true,
-        status: "pending",
-        seenBy: meUid ? [meUid] : [],
-      },
-    ]);
-
-    // ✅ reliable send (socket first, REST fallback)
-    let ok = false;
     try {
-      const res = await sendChatMessage({
-        room,
-        text: "",
-        meta: { attachments: [attachment] },
-        clientId,
-      });
-      ok = !res || res.ok !== false;
+      setUploading(true);
+      const url = await uploadFileToCloudinary(file);
+      const now = Date.now();
+      const attachment = {
+        url,
+        type: file.type.startsWith("image/")
+          ? "image"
+          : file.type.startsWith("video/")
+            ? "video"
+            : "file",
+        name: file.name,
+        size: file.size,
+      };
+
+      const clientId = generateClientId();
+
+      // optimistic bubble
+      setMsgs((prev) => [
+        ...prev,
+        {
+          id: `local:${clientId}`,
+          clientId,
+          room,
+          body: "",
+          fromUid: meUid || null,
+          sender: { displayName: myLabel || "You" },
+          at: now,
+          meta: { attachments: [attachment] },
+          isMe: true,
+          _optimistic: true,
+          status: "pending",
+          seenBy: meUid ? [meUid] : [],
+        },
+      ]);
+
+      // ✅ reliable send (socket first, REST fallback)
+      let ok = false;
+      try {
+        const res = await sendChatMessage({
+          room,
+          text: "",
+          meta: { attachments: [attachment] },
+          clientId,
+        });
+        ok = !res || res.ok !== false;
+      } catch (err) {
+        console.error("send attachment failed:", err);
+        ok = false;
+      }
+
+      const order = ["pending", "sent", "delivered", "seen"];
+      const sentRank = order.indexOf("sent");
+
+      setMsgs((prev) =>
+        prev.map((m) => {
+          if (m.clientId !== clientId || !m.isMe) return m;
+          if (!ok) return { ...m, status: "failed" };
+
+          const currentRank = order.indexOf(m.status || "pending");
+          if (currentRank >= sentRank) return m;
+          return { ...m, status: "sent" };
+        }),
+      );
     } catch (err) {
-      console.error("send attachment failed:", err);
-      ok = false;
+      console.error("upload failed", err);
+      alert("Upload failed");
+    } finally {
+      setUploading(false);
+      e.target.value = "";
     }
-
-    const order = ["pending", "sent", "delivered", "seen"];
-    const sentRank = order.indexOf("sent");
-
-    setMsgs((prev) =>
-      prev.map((m) => {
-        if (m.clientId !== clientId || !m.isMe) return m;
-        if (!ok) return { ...m, status: "failed" };
-
-        const currentRank = order.indexOf(m.status || "pending");
-        if (currentRank >= sentRank) return m;
-        return { ...m, status: "sent" };
-      })
-    );
-  } catch (err) {
-    console.error("upload failed", err);
-    alert("Upload failed");
-  } finally {
-    setUploading(false);
-    e.target.value = "";
   }
-}
 
   async function handleVoiceMessage(blob) {
-  if (!blob || !room) return;
+    if (!blob || !room) return;
 
-  const now = Date.now();
-  const clientId = generateClientId();
+    const now = Date.now();
+    const clientId = generateClientId();
 
-  try {
-    setUploading(true);
-
-    const url = await uploadAudioBlob(blob);
-
-    const attachment = {
-      url,
-      type: "audio",
-      name: `Voice message ${new Date(now).toLocaleString()}`,
-      size: blob.size || 0,
-    };
-
-    // optimistic bubble
-    setMsgs((prev) => [
-      ...prev,
-      {
-        id: `local:${clientId}`,
-        clientId,
-        room,
-        body: "",
-        fromUid: meUid || null,
-        sender: { displayName: myLabel || "You" },
-        at: now,
-        meta: { attachments: [attachment] },
-        isMe: true,
-        _optimistic: true,
-        status: "pending",
-        seenBy: meUid ? [meUid] : [],
-      },
-    ]);
-
-    // ✅ reliable send
-    let ok = false;
     try {
-      const res = await sendChatMessage({
-        room,
-        text: "",
-        meta: { attachments: [attachment] },
-        clientId,
-      });
-      ok = !res || res.ok !== false;
+      setUploading(true);
+
+      const url = await uploadAudioBlob(blob);
+
+      const attachment = {
+        url,
+        type: "audio",
+        name: `Voice message ${new Date(now).toLocaleString()}`,
+        size: blob.size || 0,
+      };
+
+      // optimistic bubble
+      setMsgs((prev) => [
+        ...prev,
+        {
+          id: `local:${clientId}`,
+          clientId,
+          room,
+          body: "",
+          fromUid: meUid || null,
+          sender: { displayName: myLabel || "You" },
+          at: now,
+          meta: { attachments: [attachment] },
+          isMe: true,
+          _optimistic: true,
+          status: "pending",
+          seenBy: meUid ? [meUid] : [],
+        },
+      ]);
+
+      // ✅ reliable send
+      let ok = false;
+      try {
+        const res = await sendChatMessage({
+          room,
+          text: "",
+          meta: { attachments: [attachment] },
+          clientId,
+        });
+        ok = !res || res.ok !== false;
+      } catch (e) {
+        console.error("voice message send failed", e);
+        ok = false;
+      }
+
+      const order = ["pending", "sent", "delivered", "seen"];
+      const sentRank = order.indexOf("sent");
+
+      setMsgs((prev) =>
+        prev.map((m) => {
+          if (m.clientId !== clientId || !m.isMe) return m;
+          if (!ok) return { ...m, status: "failed" };
+
+          const currentRank = order.indexOf(m.status || "pending");
+          if (currentRank >= sentRank) return m;
+          return { ...m, status: "sent" };
+        }),
+      );
     } catch (e) {
-      console.error("voice message send failed", e);
-      ok = false;
+      console.error("voice message upload failed", e);
+      alert("Voice upload failed");
+      setMsgs((prev) =>
+        prev.map((m) =>
+          m.clientId === clientId ? { ...m, status: "failed" } : m,
+        ),
+      );
+    } finally {
+      setUploading(false);
     }
-
-    const order = ["pending", "sent", "delivered", "seen"];
-    const sentRank = order.indexOf("sent");
-
-    setMsgs((prev) =>
-      prev.map((m) => {
-        if (m.clientId !== clientId || !m.isMe) return m;
-        if (!ok) return { ...m, status: "failed" };
-
-        const currentRank = order.indexOf(m.status || "pending");
-        if (currentRank >= sentRank) return m;
-        return { ...m, status: "sent" };
-      })
-    );
-  } catch (e) {
-    console.error("voice message upload failed", e);
-    alert("Voice upload failed");
-    setMsgs((prev) =>
-      prev.map((m) =>
-        m.clientId === clientId ? { ...m, status: "failed" } : m
-      )
-    );
-  } finally {
-    setUploading(false);
   }
-}
-
 
   // ---------- text send ----------
   async function send() {
-  const body = String(text || "").trim();
-  if (!body || !room) return;
+    const body = String(text || "").trim();
+    if (!body || !room) return;
 
-  const now = Date.now();
-  const clientId = generateClientId();
+    const now = Date.now();
+    const clientId = generateClientId();
 
-  const meta =
-    replyTo && replyTo.id
-      ? {
-          replyTo: {
-            id: replyTo.id,
-            fromUid: replyTo.fromUid,
-            body: replyTo.body?.slice(0, 200) || "",
-          },
-        }
-      : {};
+    const meta =
+      replyTo && replyTo.id
+        ? {
+            replyTo: {
+              id: replyTo.id,
+              fromUid: replyTo.fromUid,
+              body: replyTo.body?.slice(0, 200) || "",
+            },
+          }
+        : {};
 
-  // optimistic bubble
-  setMsgs((prev) => [
-    ...prev,
-    {
-      id: `local:${clientId}`,
-      clientId,
-      room,
-      body,
-      fromUid: meUid || null,
-      sender: { displayName: myLabel || "You" },
-      at: now,
-      meta,
-      isMe: true,
-      _optimistic: true,
-      status: "pending",
-      seenBy: meUid ? [meUid] : [],
-    },
-  ]);
+    // optimistic bubble
+    setMsgs((prev) => [
+      ...prev,
+      {
+        id: `local:${clientId}`,
+        clientId,
+        room,
+        body,
+        fromUid: meUid || null,
+        sender: { displayName: myLabel || "You" },
+        at: now,
+        meta,
+        isMe: true,
+        _optimistic: true,
+        status: "pending",
+        seenBy: meUid ? [meUid] : [],
+      },
+    ]);
 
-  let ok = false;
+    let ok = false;
 
-  try {
-    const res = await sendChatMessage({
-      room,
-      text: body,
-      meta,
-      clientId,
-    });
-    console.log("chat:message result =", res);
-    ok = !res || res.ok !== false;
-  } catch (err) {
-    console.error("chat:message send failed:", err);
-    ok = false;
+    try {
+      const res = await sendChatMessage({
+        room,
+        text: body,
+        meta,
+        clientId,
+      });
+      console.log("chat:message result =", res);
+      ok = !res || res.ok !== false;
+    } catch (err) {
+      console.error("chat:message send failed:", err);
+      ok = false;
+    }
+
+    const order = ["pending", "sent", "delivered", "seen"];
+    const sentRank = order.indexOf("sent");
+
+    setMsgs((prev) =>
+      prev.map((m) => {
+        if (m.clientId !== clientId || !m.isMe) return m;
+        if (!ok) return { ...m, status: "failed" };
+
+        const currentRank = order.indexOf(m.status || "pending");
+        if (currentRank >= sentRank) return m;
+        return { ...m, status: "sent" };
+      }),
+    );
+
+    setText("");
+    setReplyTo(null);
   }
-
-  const order = ["pending", "sent", "delivered", "seen"];
-  const sentRank = order.indexOf("sent");
-
-  setMsgs((prev) =>
-    prev.map((m) => {
-      if (m.clientId !== clientId || !m.isMe) return m;
-      if (!ok) return { ...m, status: "failed" };
-
-      const currentRank = order.indexOf(m.status || "pending");
-      if (currentRank >= sentRank) return m;
-      return { ...m, status: "sent" };
-    })
-  );
-
-  setText("");
-  setReplyTo(null);
-}
 
   // ---------- keyboard: Enter vs newline ----------
   // Mobile: Enter = newline (use button to send)
@@ -641,7 +636,7 @@ const hideSideButtonsOnMobile = isMobileDevice && composerFocused;
       const updated = data?.message || data;
       if (updated) {
         setMsgs((prev) =>
-          prev.map((m) => (m.id === id ? { ...m, ...updated } : m))
+          prev.map((m) => (m.id === id ? { ...m, ...updated } : m)),
         );
       }
     } catch (e) {
@@ -658,7 +653,7 @@ const hideSideButtonsOnMobile = isMobileDevice && composerFocused;
       const updated = data?.message || data;
       if (updated) {
         setMsgs((prev) =>
-          prev.map((m) => (m.id === id ? { ...m, ...updated } : m))
+          prev.map((m) => (m.id === id ? { ...m, ...updated } : m)),
         );
       }
     } catch (e) {
@@ -683,7 +678,7 @@ const hideSideButtonsOnMobile = isMobileDevice && composerFocused;
     const id = menu.msg.id;
     setSelectMode(true);
     setSelectedIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
     );
     closeMenu();
   }
@@ -714,7 +709,7 @@ const hideSideButtonsOnMobile = isMobileDevice && composerFocused;
       const updated = data?.message || data;
       if (updated) {
         setMsgs((prev) =>
-          prev.map((m) => (m.id === id ? { ...m, ...updated } : m))
+          prev.map((m) => (m.id === id ? { ...m, ...updated } : m)),
         );
       }
     } catch (e) {
@@ -725,7 +720,7 @@ const hideSideButtonsOnMobile = isMobileDevice && composerFocused;
   function toggleSelectedForClick(id) {
     if (!selectMode) return;
     setSelectedIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
     );
   }
 
@@ -785,9 +780,7 @@ const hideSideButtonsOnMobile = isMobileDevice && composerFocused;
                 <span className="text-red-500 text-[10px]">⟳ failed</span>
               );
             } else if (m.status === "sent") {
-              statusNode = (
-                <span className="text-zinc-400 text-[11px]">✓</span>
-              );
+              statusNode = <span className="text-zinc-400 text-[11px]">✓</span>;
             } else if (m.status === "delivered") {
               statusNode = (
                 <span className="text-zinc-100 text-[11px]">✓✓</span>
@@ -799,52 +792,50 @@ const hideSideButtonsOnMobile = isMobileDevice && composerFocused;
             }
           }
 
-                  const callInfo = m.meta?.call || null;
+          const callInfo = m.meta?.call || null;
 
-function formatCallDuration(sec) {
-  if (!sec || sec <= 0) return "";
-  const minutes = Math.floor(sec / 60);
-  const seconds = sec % 60;
-  if (minutes <= 0) return `${seconds}s`;
-  return `${minutes}m ${seconds.toString().padStart(2, "0")}s`;
-}
+          function formatCallDuration(sec) {
+            if (!sec || sec <= 0) return "";
+            const minutes = Math.floor(sec / 60);
+            const seconds = sec % 60;
+            if (minutes <= 0) return `${seconds}s`;
+            return `${minutes}m ${seconds.toString().padStart(2, "0")}s`;
+          }
 
-function formatCallLabel(call) {
-  if (!call) return "";
-  const status = call.status || "";
-  const dur = formatCallDuration(call.durationSec);
+          function formatCallLabel(call) {
+            if (!call) return "";
+            const status = call.status || "";
+            const dur = formatCallDuration(call.durationSec);
 
-  // 1) Ended connected call → "Call ended • 2m 15s" (both sides)
-  if (status === "ended" && call.hasConnected) {
-    return dur ? `Call ended • ${dur}` : "Call ended";
-  }
+            // 1) Ended connected call → "Call ended • 2m 15s" (both sides)
+            if (status === "ended" && call.hasConnected) {
+              return dur ? `Call ended • ${dur}` : "Call ended";
+            }
 
-  // 2) Cancelled before connect
-  //    - Caller (isMe) → "Cancelled"
-  //    - Receiver (!isMe) → "Missed Call"
-// 2) No answer / missed
-if (status === "missed") {
-  return isMe ? "No answer" : "Missed Call";
-}
+            // 2) Cancelled before connect
+            //    - Caller (isMe) → "Cancelled"
+            //    - Receiver (!isMe) → "Missed Call"
+            // 2) No answer / missed
+            if (status === "missed") {
+              return isMe ? "No answer" : "Missed Call";
+            }
 
-// 3) Caller cancelled before answer
-if (status === "cancelled") {
-  return isMe ? "Cancelled" : "Missed Call";
-}
+            // 3) Caller cancelled before answer
+            if (status === "cancelled") {
+              return isMe ? "Cancelled" : "Missed Call";
+            }
 
+            // 3) Declined as receiver → "Declined" (both sides)
+            if (status === "declined") {
+              return "Declined";
+            }
 
-  // 3) Declined as receiver → "Declined" (both sides)
-  if (status === "declined") {
-    return "Declined";
-  }
+            // Fallback if some strange status appears
+            return "Call";
+          }
 
-  // Fallback if some strange status appears
-  return "Call";
-}
-
-const isCallMessage = Boolean(callInfo);
-const callLabel = isCallMessage ? formatCallLabel(callInfo) : "";
-
+          const isCallMessage = Boolean(callInfo);
+          const callLabel = isCallMessage ? formatCallLabel(callInfo) : "";
 
           return (
             <div key={m.id || i}>
@@ -898,22 +889,20 @@ const callLabel = isCallMessage ? formatCallLabel(callInfo) : "";
                     </div>
                   )}
 
-            {isCallMessage ? (
-      <div className="w-full flex justify-center my-2">
-        <div className="px-4 py-1.5 rounded-full bg-zinc-800 text-zinc-200 text-xs flex items-center gap-2 border border-zinc-700">
-          <span>{callInfo.type === "video" ? "📹" : "📞"}</span>
-          <span>{callLabel}</span>
-        </div>
-      </div>
-    ) : (
-      m.body && (
-        <div className="text-sm whitespace-pre-wrap break-words">
-          {m.body}
-        </div>
-      )
-    )}
-
-
+                  {isCallMessage ? (
+                    <div className="w-full flex justify-center my-2">
+                      <div className="px-4 py-1.5 rounded-full bg-zinc-800 text-zinc-200 text-xs flex items-center gap-2 border border-zinc-700">
+                        <span>{callInfo.type === "video" ? "📹" : "📞"}</span>
+                        <span>{callLabel}</span>
+                      </div>
+                    </div>
+                  ) : (
+                    m.body && (
+                      <div className="text-sm whitespace-pre-wrap break-words">
+                        {m.body}
+                      </div>
+                    )
+                  )}
 
                   {attachments.length > 0 && (
                     <div className="mt-2 space-y-1">
@@ -979,9 +968,7 @@ const callLabel = isCallMessage ? formatCallLabel(callInfo) : "";
                     </div>
                   )}
 
-                  {reaction && (
-                    <div className="mt-1 text-xs">{reaction}</div>
-                  )}
+                  {reaction && <div className="mt-1 text-xs">{reaction}</div>}
 
                   <div className="mt-1 flex items-center justify-end gap-2 text-[10px] text-zinc-400">
                     {timeLabel && <span>{timeLabel}</span>}
@@ -1085,62 +1072,62 @@ const callLabel = isCallMessage ? formatCallLabel(callInfo) : "";
       )}
 
       <div className="mt-2 flex gap-2 items-center">
-      {/* Attach button – hidden on mobile when typing */}
-      {!hideSideButtonsOnMobile && (
-        <label
-          className="flex items-center justify-center w-9 h-9 md:w-10 md:h-10 rounded-full border border-zinc-800 cursor-pointer text-lg"
-          title="Attach image, video, or file"
+        {/* Attach button – hidden on mobile when typing */}
+        {!hideSideButtonsOnMobile && (
+          <label
+            className="flex items-center justify-center w-9 h-9 md:w-10 md:h-10 rounded-full border border-zinc-800 cursor-pointer text-lg"
+            title="Attach image, video, or file"
+          >
+            {uploading ? "…" : "+"}
+            <input
+              type="file"
+              className="hidden"
+              onChange={handleFileChange}
+              disabled={uploading}
+            />
+          </label>
+        )}
+
+        <textarea
+          ref={textareaRef}
+          className="flex-1 bg-black border border-zinc-800 rounded-lg px-3 py-2.5 text-sm resize-none leading-snug"
+          rows={1}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={handleKeyDown}
+          onFocus={() => setComposerFocused(true)}
+          onBlur={() => setComposerFocused(false)}
+          placeholder="Type a message…"
+        />
+
+        {/* Voice typing & voice note – hidden on mobile when typing */}
+        {!hideSideButtonsOnMobile && (
+          <>
+            <div title="Voice typing (convert speech to text)">
+              <VoiceInputButton
+                onResult={handleVoiceResult}
+                disabled={!room || !socket}
+              />
+            </div>
+
+            <div title="Send voice note">
+              <VoiceMessageButton
+                onRecorded={handleVoiceMessage}
+                disabled={!room || !socket || uploading}
+              />
+            </div>
+          </>
+        )}
+
+        <button
+          className="flex items-center justify-center w-9 h-9 md:w-10 md:h-10 rounded-full bg-gold text-black text-lg font-bold"
+          onClick={send}
+          type="button"
+          disabled={!text.trim() || !room || uploading}
+          title="Send message"
         >
-          {uploading ? "…" : "+"}
-          <input
-            type="file"
-            className="hidden"
-            onChange={handleFileChange}
-            disabled={uploading}
-          />
-        </label>
-      )}
-
-      <textarea
-        ref={textareaRef}
-        className="flex-1 bg-black border border-zinc-800 rounded-lg px-3 py-2.5 text-sm resize-none leading-snug"
-        rows={1}
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={handleKeyDown}
-        onFocus={() => setComposerFocused(true)}
-        onBlur={() => setComposerFocused(false)}
-        placeholder="Type a message…"
-      />
-
-      {/* Voice typing & voice note – hidden on mobile when typing */}
-      {!hideSideButtonsOnMobile && (
-        <>
-          <div title="Voice typing (convert speech to text)">
-            <VoiceInputButton
-              onResult={handleVoiceResult}
-              disabled={!room || !socket}
-            />
-          </div>
-
-          <div title="Send voice note">
-            <VoiceMessageButton
-              onRecorded={handleVoiceMessage}
-              disabled={!room || !socket || uploading}
-            />
-          </div>
-        </>
-      )}
-
-      <button
-        className="flex items-center justify-center w-9 h-9 md:w-10 md:h-10 rounded-full bg-gold text-black text-lg font-bold"
-        onClick={send}
-        type="button"
-        disabled={!text.trim() || !room || uploading}
-        title="Send message"
-      >
-        ↑
-      </button>
+          ↑
+        </button>
       </div>
     </div>
   );

@@ -12,21 +12,21 @@ import {
   // Option A escrow: for pay-booking we must NOT credit pro pending here anymore
 } from "../services/walletService.js";
 
-
 /* ----------------------------- helpers ----------------------------- */
 const isPosInt = (n) => Number.isInteger(n) && n > 0;
 const koboInt = (v) => Math.round(Number(v || 0)) || 0;
-
 
 async function ensureWallet(uid) {
   return getOrCreateWallet(uid);
 }
 
-
 async function verifyPinForUid(uid, pin) {
   const appDoc = await Application.findOne({ uid }).lean();
   if (!appDoc?.withdrawPinHash) return { ok: false, code: "no_pin" };
-  const ok = await bcrypt.compare(String(pin || ""), String(appDoc.withdrawPinHash || ""));
+  const ok = await bcrypt.compare(
+    String(pin || ""),
+    String(appDoc.withdrawPinHash || ""),
+  );
   return { ok, code: ok ? "ok" : "invalid_pin" };
 }
 
@@ -58,21 +58,21 @@ export function withAuth(requireAuth, requireAdmin) {
       const w = await ensureWallet(req.user.uid);
       // Return last 50, newest first (consistent with your ClientWallet page)
       const tx = await WalletTx.find({ ownerUid: req.user.uid })
-      .sort({ createdAt: -1 })
-      .limit(50)
-      .lean();
+        .sort({ createdAt: -1 })
+        .limit(50)
+        .lean();
 
-    res.json({
-      creditsKobo: Number(w.availableKobo || 0),
-      transactions: tx.map((t) => ({
-        id: String(t._id),
-        type: t.type,
-        direction: t.direction,     // "credit" | "debit"
-        amountKobo: t.amountKobo,
-        ts: t.createdAt,
-        meta: t.meta || {},
-      })),
-    });
+      res.json({
+        creditsKobo: Number(w.availableKobo || 0),
+        transactions: tx.map((t) => ({
+          id: String(t._id),
+          type: t.type,
+          direction: t.direction, // "credit" | "debit"
+          amountKobo: t.amountKobo,
+          ts: t.createdAt,
+          meta: t.meta || {},
+        })),
+      });
     } catch (e) {
       console.error("[wallet/client/me] error:", e);
       res.status(500).json({ error: "wallet_load_failed" });
@@ -90,7 +90,8 @@ export function withAuth(requireAuth, requireAdmin) {
     try {
       const amt = koboInt(req.query.amountKobo);
       const callbackUrl = req.query.callbackUrl;
-      if (!isPosInt(amt)) return res.status(400).json({ error: "amount_invalid" });
+      if (!isPosInt(amt))
+        return res.status(400).json({ error: "amount_invalid" });
 
       const PAYSTACK_SECRET_KEY = requirePaystackKey(res);
       if (!PAYSTACK_SECRET_KEY) return;
@@ -99,38 +100,43 @@ export function withAuth(requireAuth, requireAdmin) {
       const reference = makeTopupReference(req.user.uid);
 
       await WalletTx.create({
-      ownerUid: req.user.uid,
-      type: "topup_init",
-      direction: "neutral",
-      amountKobo: 0,
-      balancePendingKobo: Number(w.pendingKobo || 0),
-      balanceAvailableKobo: Number(w.availableKobo || 0),
-      meta: {
-        reference,
-        status: "init",
-        amountKobo: amt, // intended amount (real topup)
-      },
-    });
-
+        ownerUid: req.user.uid,
+        type: "topup_init",
+        direction: "neutral",
+        amountKobo: 0,
+        balancePendingKobo: Number(w.pendingKobo || 0),
+        balanceAvailableKobo: Number(w.availableKobo || 0),
+        meta: {
+          reference,
+          status: "init",
+          amountKobo: amt, // intended amount (real topup)
+        },
+      });
 
       // Init Paystack
-      const psResp = await fetch("https://api.paystack.co/transaction/initialize", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${PAYSTACK_SECRET_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          email: req.user.email || "customer@example.com",
-          amount: amt,
-          reference,
-          callback_url: callbackUrl || process.env.PAYSTACK_WALLET_CALLBACK_URL || undefined,
-          metadata: {
-            type: "wallet_topup",
-            ownerUid: req.user.uid,
+      const psResp = await fetch(
+        "https://api.paystack.co/transaction/initialize",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${PAYSTACK_SECRET_KEY}`,
+            "Content-Type": "application/json",
           },
-        }),
-      });
+          body: JSON.stringify({
+            email: req.user.email || "customer@example.com",
+            amount: amt,
+            reference,
+            callback_url:
+              callbackUrl ||
+              process.env.PAYSTACK_WALLET_CALLBACK_URL ||
+              undefined,
+            metadata: {
+              type: "wallet_topup",
+              ownerUid: req.user.uid,
+            },
+          }),
+        },
+      );
       const data = await psResp.json();
       if (!psResp.ok || !data?.status || !data?.data?.authorization_url) {
         console.error("[wallet/topup/init] paystack init failed:", data);
@@ -138,14 +144,22 @@ export function withAuth(requireAuth, requireAdmin) {
         // 🔧 mark the init tx as failed (best-effort)
         try {
           await WalletTx.updateOne(
-            { ownerUid: req.user.uid, type: "topup_init", "meta.reference": reference },
-            { $set: { "meta.status": "failed", "meta.error": data?.message || "init_failed" } }
+            {
+              ownerUid: req.user.uid,
+              type: "topup_init",
+              "meta.reference": reference,
+            },
+            {
+              $set: {
+                "meta.status": "failed",
+                "meta.error": data?.message || "init_failed",
+              },
+            },
           );
         } catch {}
 
         return res.status(502).json({ error: "paystack_init_failed" });
       }
-
 
       res.json({
         authorization_url: data.data.authorization_url,
@@ -166,7 +180,8 @@ export function withAuth(requireAuth, requireAdmin) {
   router.get("/wallet/topup/verify", requireAuth, async (req, res) => {
     try {
       const reference = req.query.reference;
-      if (!reference) return res.status(400).json({ error: "reference_required" });
+      if (!reference)
+        return res.status(400).json({ error: "reference_required" });
 
       const PAYSTACK_SECRET_KEY = requirePaystackKey(res);
       if (!PAYSTACK_SECRET_KEY) return;
@@ -174,7 +189,7 @@ export function withAuth(requireAuth, requireAdmin) {
       // Verify on Paystack
       const vResp = await fetch(
         `https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`,
-        { headers: { Authorization: `Bearer ${PAYSTACK_SECRET_KEY}` } }
+        { headers: { Authorization: `Bearer ${PAYSTACK_SECRET_KEY}` } },
       );
       const verify = await vResp.json();
       if (!vResp.ok || !verify?.status) {
@@ -184,7 +199,9 @@ export function withAuth(requireAuth, requireAdmin) {
 
       const ps = verify.data || {};
       if (ps.status !== "success") {
-        return res.status(400).json({ error: "payment_not_successful", status: ps.status });
+        return res
+          .status(400)
+          .json({ error: "payment_not_successful", status: ps.status });
       }
 
       // Amount is in kobo
@@ -193,7 +210,7 @@ export function withAuth(requireAuth, requireAdmin) {
         return res.status(400).json({ error: "amount_invalid" });
       }
 
-     // Idempotency: only credit once per (ownerUid, reference)
+      // Idempotency: only credit once per (ownerUid, reference)
       const w = await ensureWallet(req.user.uid);
 
       const alreadyCredited = await WalletTx.findOne({
@@ -201,7 +218,6 @@ export function withAuth(requireAuth, requireAdmin) {
         type: "topup_credit",
         reference,
       }).lean();
-
 
       let credited = false;
 
@@ -211,7 +227,7 @@ export function withAuth(requireAuth, requireAdmin) {
           const after = await Wallet.findOneAndUpdate(
             { ownerUid: req.user.uid },
             { $inc: { availableKobo: paidKobo } },
-            { new: true, upsert: true, setDefaultsOnInsert: true }
+            { new: true, upsert: true, setDefaultsOnInsert: true },
           );
 
           // 2) Write the ledger tx (protected by unique index)
@@ -240,7 +256,10 @@ export function withAuth(requireAuth, requireAdmin) {
           w.pendingKobo = after.pendingKobo;
         } catch (err) {
           // If duplicate key error => another request already credited this reference.
-          if (err && (err.code === 11000 || String(err.message || "").includes("E11000"))) {
+          if (
+            err &&
+            (err.code === 11000 || String(err.message || "").includes("E11000"))
+          ) {
             credited = false;
           } else {
             throw err;
@@ -249,17 +268,15 @@ export function withAuth(requireAuth, requireAdmin) {
       }
 
       return res.json({
-      ok: true,
-      credited,
-      creditsKobo: Number(w.availableKobo || 0),
-    });
-
-     } catch (e) {
-     console.error("[wallet/topup/verify] error:", e);
-    return res.status(500).json({ error: "topup_verify_failed" });
-     }
-    });
-
+        ok: true,
+        credited,
+        creditsKobo: Number(w.availableKobo || 0),
+      });
+    } catch (e) {
+      console.error("[wallet/topup/verify] error:", e);
+      return res.status(500).json({ error: "topup_verify_failed" });
+    }
+  });
 
   /* ======================= EXISTING PRO WALLET ENDPOINTS ======================= */
 
@@ -283,14 +300,13 @@ export function withAuth(requireAuth, requireAdmin) {
         },
         transactions: tx,
       });
-
     } catch (e) {
       console.error("[wallet/me] error:", e);
       res.status(500).json({ error: "wallet_load_failed" });
     }
   });
 
-    /**
+  /**
    * GET /api/wallet/escrow
    * Admin-only: view the platform escrow wallet (__ESCROW__) and recent ledger tx
    */
@@ -319,184 +335,203 @@ export function withAuth(requireAuth, requireAdmin) {
     }
   });
 
-    /**
+  /**
    * GET /api/wallet/platform
    * Admin-only: view platform commission wallet (__PLATFORM__) and recent ledger tx
    */
-  router.get("/wallet/platform", requireAuth, requireAdmin, async (_req, res) => {
+  router.get(
+    "/wallet/platform",
+    requireAuth,
+    requireAdmin,
+    async (_req, res) => {
+      try {
+        const PLATFORM_UID = "__PLATFORM__";
+
+        const w = await ensureWallet(PLATFORM_UID);
+        const tx = await WalletTx.find({ ownerUid: PLATFORM_UID })
+          .sort({ createdAt: -1 })
+          .limit(50)
+          .lean();
+
+        return res.json({
+          wallet: {
+            pendingKobo: Number(w.pendingKobo || 0),
+            availableKobo: Number(w.availableKobo || 0),
+            withdrawnKobo: Number(w.withdrawnKobo || 0),
+            earnedKobo: Number(w.earnedKobo || 0),
+          },
+          transactions: tx,
+        });
+      } catch (e) {
+        console.error("[wallet/platform] error:", e?.message || e);
+        return res.status(500).json({ error: "platform_wallet_failed" });
+      }
+    },
+  );
+
+  async function getPlatformRecipientCode() {
     try {
-      const PLATFORM_UID = "__PLATFORM__";
-
-      const w = await ensureWallet(PLATFORM_UID);
-      const tx = await WalletTx.find({ ownerUid: PLATFORM_UID })
-        .sort({ createdAt: -1 })
-        .limit(50)
-        .lean();
-
-      return res.json({
-        wallet: {
-          pendingKobo: Number(w.pendingKobo || 0),
-          availableKobo: Number(w.availableKobo || 0),
-          withdrawnKobo: Number(w.withdrawnKobo || 0),
-          earnedKobo: Number(w.earnedKobo || 0),
-        },
-        transactions: tx,
-      });
-    } catch (e) {
-      console.error("[wallet/platform] error:", e?.message || e);
-      return res.status(500).json({ error: "platform_wallet_failed" });
+      const SettingsModel = mongoose.models.Settings;
+      if (!SettingsModel) return null;
+      const s = await SettingsModel.findOne().lean();
+      return String(s?.payouts?.platformRecipientCode || "").trim() || null;
+    } catch {
+      return null;
     }
-  });
-
-async function getPlatformRecipientCode() {
-  try {
-    const SettingsModel = mongoose.models.Settings;
-    if (!SettingsModel) return null;
-    const s = await SettingsModel.findOne().lean();
-    return String(s?.payouts?.platformRecipientCode || "").trim() || null;
-  } catch {
-    return null;
   }
-}
 
   /**
    * POST /api/wallet/platform/recipient
    * Admin-only: save Paystack recipient_code for platform payouts in Mongo Settings
    * Body: { recipientCode }
    */
-  router.post("/wallet/platform/recipient", requireAuth, requireAdmin, async (req, res) => {
-    try {
-      const recipientCode = String(req.body?.recipientCode || "").trim();
-      if (!recipientCode) return res.status(400).json({ error: "recipient_required" });
+  router.post(
+    "/wallet/platform/recipient",
+    requireAuth,
+    requireAdmin,
+    async (req, res) => {
+      try {
+        const recipientCode = String(req.body?.recipientCode || "").trim();
+        if (!recipientCode)
+          return res.status(400).json({ error: "recipient_required" });
 
-      const SettingsModel = mongoose.models.Settings;
-      if (!SettingsModel) return res.status(500).json({ error: "settings_model_missing" });
+        const SettingsModel = mongoose.models.Settings;
+        if (!SettingsModel)
+          return res.status(500).json({ error: "settings_model_missing" });
 
-      await SettingsModel.updateOne(
-        {},
-        { $set: { "payouts.platformRecipientCode": recipientCode } },
-        { upsert: true }
-      );
+        await SettingsModel.updateOne(
+          {},
+          { $set: { "payouts.platformRecipientCode": recipientCode } },
+          { upsert: true },
+        );
 
-      return res.json({ ok: true, recipientCode });
-    } catch (e) {
-      console.error("[wallet/platform/recipient] error:", e?.message || e);
-      return res.status(500).json({ error: "set_platform_recipient_failed" });
-    }
-  });
+        return res.json({ ok: true, recipientCode });
+      } catch (e) {
+        console.error("[wallet/platform/recipient] error:", e?.message || e);
+        return res.status(500).json({ error: "set_platform_recipient_failed" });
+      }
+    },
+  );
 
-    /**
+  /**
    * POST /api/wallet/platform/withdraw
    * Admin-only: withdraw from __PLATFORM__ wallet to platform bank via Paystack transfer
    * Body: { amountKobo }
    */
-  router.post("/wallet/platform/withdraw", requireAuth, requireAdmin, async (req, res) => {
-    try {
-      const PLATFORM_UID = "__PLATFORM__";
-      const amt = Math.floor(Number(req.body?.amountKobo));
+  router.post(
+    "/wallet/platform/withdraw",
+    requireAuth,
+    requireAdmin,
+    async (req, res) => {
+      try {
+        const PLATFORM_UID = "__PLATFORM__";
+        const amt = Math.floor(Number(req.body?.amountKobo));
 
-      if (!Number.isInteger(amt) || amt <= 0) {
-        return res.status(400).json({ error: "amount_required" });
-      }
+        if (!Number.isInteger(amt) || amt <= 0) {
+          return res.status(400).json({ error: "amount_required" });
+        }
 
-      const PAYSTACK_SECRET_KEY = requirePaystackKey(res);
-      if (!PAYSTACK_SECRET_KEY) return;
+        const PAYSTACK_SECRET_KEY = requirePaystackKey(res);
+        if (!PAYSTACK_SECRET_KEY) return;
 
-      const recipientCode = await getPlatformRecipientCode();
-      if (!recipientCode) {
-        return res.status(400).json({
-          error: "platform_recipient_not_set",
-          message: "Set it first via POST /api/wallet/platform/recipient",
-        });
-      }
+        const recipientCode = await getPlatformRecipientCode();
+        if (!recipientCode) {
+          return res.status(400).json({
+            error: "platform_recipient_not_set",
+            message: "Set it first via POST /api/wallet/platform/recipient",
+          });
+        }
 
-      // 1) Reserve funds from platform wallet
-      const w = await Wallet.findOneAndUpdate(
-        { ownerUid: PLATFORM_UID, availableKobo: { $gte: amt } },
-        { $inc: { availableKobo: -amt } },
-        { new: true, upsert: true, setDefaultsOnInsert: true }
-      );
-      if (!w) return res.status(400).json({ error: "insufficient_platform_balance" });
-
-      await WalletTx.create({
-        ownerUid: PLATFORM_UID,
-        type: "platform_withdraw_reserve",
-        direction: "debit",
-        amountKobo: amt,
-        balancePendingKobo: Number(w.pendingKobo || 0),
-        balanceAvailableKobo: Number(w.availableKobo || 0),
-        meta: { stage: "reserved" },
-      });
-
-      // 2) Paystack transfer (from Paystack balance -> your bank)
-      const payReq = await fetch("https://api.paystack.co/transfer", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${PAYSTACK_SECRET_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          source: "balance",
-          amount: amt,
-          recipient: recipientCode,
-          reason: "Platform commission withdrawal",
-        }),
-      });
-
-      const payData = await payReq.json();
-
-      if (!payData?.status) {
-        // refund reserved funds
-        const afterRefund = await Wallet.findOneAndUpdate(
-          { ownerUid: PLATFORM_UID },
-          { $inc: { availableKobo: amt } },
-          { new: true }
+        // 1) Reserve funds from platform wallet
+        const w = await Wallet.findOneAndUpdate(
+          { ownerUid: PLATFORM_UID, availableKobo: { $gte: amt } },
+          { $inc: { availableKobo: -amt } },
+          { new: true, upsert: true, setDefaultsOnInsert: true },
         );
+        if (!w)
+          return res
+            .status(400)
+            .json({ error: "insufficient_platform_balance" });
 
         await WalletTx.create({
           ownerUid: PLATFORM_UID,
-          type: "platform_withdraw_refund",
-          direction: "credit",
+          type: "platform_withdraw_reserve",
+          direction: "debit",
           amountKobo: amt,
-          balancePendingKobo: Number(afterRefund?.pendingKobo || 0),
-          balanceAvailableKobo: Number(afterRefund?.availableKobo || 0),
-          meta: { stage: "transfer_failed", paystack: payData },
+          balancePendingKobo: Number(w.pendingKobo || 0),
+          balanceAvailableKobo: Number(w.availableKobo || 0),
+          meta: { stage: "reserved" },
         });
 
-        return res.status(400).json({
-          error: "platform_transfer_failed",
-          details: payData?.message || "transfer_failed",
+        // 2) Paystack transfer (from Paystack balance -> your bank)
+        const payReq = await fetch("https://api.paystack.co/transfer", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${PAYSTACK_SECRET_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            source: "balance",
+            amount: amt,
+            recipient: recipientCode,
+            reason: "Platform commission withdrawal",
+          }),
         });
+
+        const payData = await payReq.json();
+
+        if (!payData?.status) {
+          // refund reserved funds
+          const afterRefund = await Wallet.findOneAndUpdate(
+            { ownerUid: PLATFORM_UID },
+            { $inc: { availableKobo: amt } },
+            { new: true },
+          );
+
+          await WalletTx.create({
+            ownerUid: PLATFORM_UID,
+            type: "platform_withdraw_refund",
+            direction: "credit",
+            amountKobo: amt,
+            balancePendingKobo: Number(afterRefund?.pendingKobo || 0),
+            balanceAvailableKobo: Number(afterRefund?.availableKobo || 0),
+            meta: { stage: "transfer_failed", paystack: payData },
+          });
+
+          return res.status(400).json({
+            error: "platform_transfer_failed",
+            details: payData?.message || "transfer_failed",
+          });
+        }
+
+        // mark withdrawn
+        w.withdrawnKobo = Math.max(0, Number(w.withdrawnKobo || 0) + amt);
+        await w.save();
+
+        await WalletTx.create({
+          ownerUid: PLATFORM_UID,
+          type: "platform_withdraw_transfer",
+          direction: "debit",
+          amountKobo: amt,
+          balancePendingKobo: Number(w.pendingKobo || 0),
+          balanceAvailableKobo: Number(w.availableKobo || 0),
+          meta: { recipientCode, paystack: payData?.data || payData },
+        });
+
+        return res.json({
+          ok: true,
+          platformWallet: {
+            availableKobo: Number(w.availableKobo || 0),
+            withdrawnKobo: Number(w.withdrawnKobo || 0),
+          },
+          transfer: payData?.data || null,
+        });
+      } catch (e) {
+        console.error("[wallet/platform/withdraw] error:", e?.message || e);
+        return res.status(500).json({ error: "platform_withdraw_failed" });
       }
-
-      // mark withdrawn
-      w.withdrawnKobo = Math.max(0, Number(w.withdrawnKobo || 0) + amt);
-      await w.save();
-
-      await WalletTx.create({
-        ownerUid: PLATFORM_UID,
-        type: "platform_withdraw_transfer",
-        direction: "debit",
-        amountKobo: amt,
-        balancePendingKobo: Number(w.pendingKobo || 0),
-        balanceAvailableKobo: Number(w.availableKobo || 0),
-        meta: { recipientCode, paystack: payData?.data || payData },
-      });
-
-      return res.json({
-        ok: true,
-        platformWallet: {
-          availableKobo: Number(w.availableKobo || 0),
-          withdrawnKobo: Number(w.withdrawnKobo || 0),
-        },
-        transfer: payData?.data || null,
-      });
-    } catch (e) {
-      console.error("[wallet/platform/withdraw] error:", e?.message || e);
-      return res.status(500).json({ error: "platform_withdraw_failed" });
-    }
-  });
-
+    },
+  );
 
   /** POST /api/wallet/withdraw
    *  - Initiates a Paystack transfer (pro cashout) from available balance.
@@ -505,61 +540,63 @@ async function getPlatformRecipientCode() {
     try {
       const { amountKobo, pin } = req.body || {};
       const amt = Math.floor(Number(amountKobo));
-      if (!isPosInt(amt)) return res.status(400).json({ error: "amount_required" });
+      if (!isPosInt(amt))
+        return res.status(400).json({ error: "amount_required" });
 
       const pinRes = await verifyPinForUid(req.user.uid, pin);
       if (!pinRes.ok) return res.status(400).json({ error: pinRes.code });
 
-          const PAYSTACK_SECRET_KEY = requirePaystackKey(res);
-        if (!PAYSTACK_SECRET_KEY) return;
+      const PAYSTACK_SECRET_KEY = requirePaystackKey(res);
+      if (!PAYSTACK_SECRET_KEY) return;
 
-        // Get user's payout account (MUST be checked before reserving funds)
-        const appDoc = await Application.findOne({ uid: req.user.uid }).lean();
-        const bank = appDoc?.payoutBank || {};
-        if (!bank.accountNumber || !bank.code) {
-          return res.status(400).json({ error: "no_payout_account" });
-        }
+      // Get user's payout account (MUST be checked before reserving funds)
+      const appDoc = await Application.findOne({ uid: req.user.uid }).lean();
+      const bank = appDoc?.payoutBank || {};
+      if (!bank.accountNumber || !bank.code) {
+        return res.status(400).json({ error: "no_payout_account" });
+      }
 
-        // ✅ Reserve funds AFTER prerequisites to prevent "stuck" deductions
-        const w = await Wallet.findOneAndUpdate(
+      // ✅ Reserve funds AFTER prerequisites to prevent "stuck" deductions
+      const w = await Wallet.findOneAndUpdate(
         { ownerUid: req.user.uid, availableKobo: { $gte: amt } },
         { $inc: { availableKobo: -amt } },
-        { new: true, upsert: true, setDefaultsOnInsert: true }
+        { new: true, upsert: true, setDefaultsOnInsert: true },
       );
       if (!w) return res.status(400).json({ error: "insufficient_available" });
 
-
-        // (optional but useful) record that we reserved funds
-        try {
-          await WalletTx.create({
-            ownerUid: req.user.uid,
-            type: "cashout_reserve",
-            direction: "debit",
-            amountKobo: amt,
-            balancePendingKobo: Number(w.pendingKobo || 0),
-            balanceAvailableKobo: Number(w.availableKobo || 0),
-            meta: { stage: "reserved" },
-          });
-        } catch {}
-
+      // (optional but useful) record that we reserved funds
+      try {
+        await WalletTx.create({
+          ownerUid: req.user.uid,
+          type: "cashout_reserve",
+          direction: "debit",
+          amountKobo: amt,
+          balancePendingKobo: Number(w.pendingKobo || 0),
+          balanceAvailableKobo: Number(w.availableKobo || 0),
+          meta: { stage: "reserved" },
+        });
+      } catch {}
 
       // Create recipient
-      const createRecipient = await fetch("https://api.paystack.co/transferrecipient", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${PAYSTACK_SECRET_KEY}`,
-          "Content-Type": "application/json",
+      const createRecipient = await fetch(
+        "https://api.paystack.co/transferrecipient",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${PAYSTACK_SECRET_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            type: "nuban",
+            name: bank.accountName || "Recipient",
+            account_number: bank.accountNumber,
+            bank_code: bank.code,
+            currency: "NGN",
+          }),
         },
-        body: JSON.stringify({
-          type: "nuban",
-          name: bank.accountName || "Recipient",
-          account_number: bank.accountNumber,
-          bank_code: bank.code,
-          currency: "NGN",
-        }),
-      });
+      );
       const recData = await createRecipient.json();
-            if (!recData.status) {
+      if (!recData.status) {
         console.error("[paystack recipient failed]", recData);
 
         // refund reserved funds
@@ -567,7 +604,7 @@ async function getPlatformRecipientCode() {
           const afterRefund = await Wallet.findOneAndUpdate(
             { ownerUid: req.user.uid },
             { $inc: { availableKobo: amt } },
-            { new: true }
+            { new: true },
           );
           await WalletTx.create({
             ownerUid: req.user.uid,
@@ -580,9 +617,10 @@ async function getPlatformRecipientCode() {
           });
         } catch {}
 
-        return res.status(400).json({ error: "recipient_create_failed", details: recData.message });
+        return res
+          .status(400)
+          .json({ error: "recipient_create_failed", details: recData.message });
       }
-
 
       // Initiate transfer
       const payReq = await fetch("https://api.paystack.co/transfer", {
@@ -599,7 +637,7 @@ async function getPlatformRecipientCode() {
         }),
       });
       const payData = await payReq.json();
-            if (!payData.status) {
+      if (!payData.status) {
         console.error("[paystack transfer failed]", payData);
 
         // refund reserved funds
@@ -607,7 +645,7 @@ async function getPlatformRecipientCode() {
           const afterRefund = await Wallet.findOneAndUpdate(
             { ownerUid: req.user.uid },
             { $inc: { availableKobo: amt } },
-            { new: true }
+            { new: true },
           );
           await WalletTx.create({
             ownerUid: req.user.uid,
@@ -620,27 +658,26 @@ async function getPlatformRecipientCode() {
           });
         } catch {}
 
-        return res.status(400).json({ error: "transfer_failed", details: payData.message });
+        return res
+          .status(400)
+          .json({ error: "transfer_failed", details: payData.message });
       }
 
-
-            // ✅ Paystack succeeded: finalize by moving reserved amount into withdrawnKobo
-            w.withdrawnKobo = Math.max(0, Number(w.withdrawnKobo || 0) + amt);
-            await w.save();
-
+      // ✅ Paystack succeeded: finalize by moving reserved amount into withdrawnKobo
+      w.withdrawnKobo = Math.max(0, Number(w.withdrawnKobo || 0) + amt);
+      await w.save();
 
       await WalletTx.create({
-      ownerUid: req.user.uid,
-      type: "cashout_transfer",
-      direction: "neutral",     // ✅ finalization only; reserve already debited
-      amountKobo: 0,            // ✅ prevents “double debit” confusion
-      balancePendingKobo: Number(w.pendingKobo || 0),
-      balanceAvailableKobo: Number(w.availableKobo || 0),
-      meta: { paystack: payData.data, reservedAmountKobo: amt },
-    });
+        ownerUid: req.user.uid,
+        type: "cashout_transfer",
+        direction: "neutral", // ✅ finalization only; reserve already debited
+        amountKobo: 0, // ✅ prevents “double debit” confusion
+        balancePendingKobo: Number(w.pendingKobo || 0),
+        balanceAvailableKobo: Number(w.availableKobo || 0),
+        meta: { paystack: payData.data, reservedAmountKobo: amt },
+      });
 
       res.json({ ok: true, transfer: payData.data });
-
     } catch (e) {
       console.error("[wallet/withdraw] error:", e);
       res.status(500).json({ error: "withdraw_failed" });
@@ -650,109 +687,125 @@ async function getPlatformRecipientCode() {
   /** POST /api/wallet/release (admin only)
    *  - Moves ALL pending → available (admin action).
    */
-  router.post("/wallet/release", requireAuth, requireAdmin, async (req, res) => {
-    try {
-      const { uid = req.user.uid } = req.body || {};
-      // ✅ Atomic release: move ALL pending -> available in one DB operation
-const before = await ensureWallet(uid); // ensures wallet exists; gives us the pending amount for logging
-const amt = Number(before.pendingKobo || 0);
-if (!amt) return res.json({ ok: true, releasedKobo: 0 });
+  router.post(
+    "/wallet/release",
+    requireAuth,
+    requireAdmin,
+    async (req, res) => {
+      try {
+        const { uid = req.user.uid } = req.body || {};
+        // ✅ Atomic release: move ALL pending -> available in one DB operation
+        const before = await ensureWallet(uid); // ensures wallet exists; gives us the pending amount for logging
+        const amt = Number(before.pendingKobo || 0);
+        if (!amt) return res.json({ ok: true, releasedKobo: 0 });
 
-const after = await Wallet.findOneAndUpdate(
-  { ownerUid: uid, pendingKobo: { $gte: amt } },
-  { $inc: { pendingKobo: -amt, availableKobo: amt } },
-  { new: true }
-);
+        const after = await Wallet.findOneAndUpdate(
+          { ownerUid: uid, pendingKobo: { $gte: amt } },
+          { $inc: { pendingKobo: -amt, availableKobo: amt } },
+          { new: true },
+        );
 
-if (!after) return res.json({ ok: true, releasedKobo: 0 });
+        if (!after) return res.json({ ok: true, releasedKobo: 0 });
 
-await WalletTx.create({
-  ownerUid: uid,
-  type: "admin_release",
-  direction: "credit",
-  amountKobo: amt,
-  balancePendingKobo: Number(after.pendingKobo || 0),
-  balanceAvailableKobo: Number(after.availableKobo || 0),
-  meta: { source: "admin_release" },
-});
+        await WalletTx.create({
+          ownerUid: uid,
+          type: "admin_release",
+          direction: "credit",
+          amountKobo: amt,
+          balancePendingKobo: Number(after.pendingKobo || 0),
+          balanceAvailableKobo: Number(after.availableKobo || 0),
+          meta: { source: "admin_release" },
+        });
 
-return res.json({ ok: true, releasedKobo: amt });
-
-
-    } catch (e) {
-      console.error("[wallet/release] error:", e);
-      res.status(500).json({ error: "release_failed" });
-    }
-  });
+        return res.json({ ok: true, releasedKobo: amt });
+      } catch (e) {
+        console.error("[wallet/release] error:", e);
+        res.status(500).json({ error: "release_failed" });
+      }
+    },
+  );
 
   /**
- * POST /api/wallet/pay-booking
- * Body: { bookingId }
- * - Debits client wallet (available)
- * - Holds funds in platform escrow (__ESCROW__)
- * - Marks booking as paid (scheduled)
- * - Does NOT credit pro pending here
- * - Pro pending is credited ONLY after booking is marked COMPLETED
- *   (in bookings.js via creditProPendingForBooking)
- */
+   * POST /api/wallet/pay-booking
+   * Body: { bookingId }
+   * - Debits client wallet (available)
+   * - Holds funds in platform escrow (__ESCROW__)
+   * - Marks booking as paid (scheduled)
+   * - Does NOT credit pro pending here
+   * - Pro pending is credited ONLY after booking is marked COMPLETED
+   *   (in bookings.js via creditProPendingForBooking)
+   */
 
-router.post("/wallet/pay-booking", requireAuth, async (req, res) => {
-  try {
-    const { bookingId } = req.body || {};
-    if (!bookingId) {
-      return res.status(400).json({ error: "bookingId_required" });
+  router.post("/wallet/pay-booking", requireAuth, async (req, res) => {
+    try {
+      const { bookingId } = req.body || {};
+      if (!bookingId) {
+        return res.status(400).json({ error: "bookingId_required" });
+      }
+
+      // 1. Load booking
+      const booking = await Booking.findById(bookingId);
+      if (!booking) return res.status(404).json({ error: "booking_not_found" });
+
+      // Only the client who owns the booking can pay
+      if (String(booking.clientUid) !== String(req.user.uid)) {
+        return res.status(403).json({ error: "not_your_booking" });
+      }
+
+      // 🔒 Guard: prevent mixing payment methods
+      const requested = String(
+        booking?.meta?.paymentMethodRequested || "",
+      ).toLowerCase();
+      if (requested === "card") {
+        return res.status(400).json({
+          error: "card_only_booking",
+          message:
+            "This booking was created for card payment. Please pay with card.",
+        });
+      }
+
+      // Already paid?
+      if (booking.paymentStatus === "paid") {
+        return res.json({ ok: true, alreadyPaid: true });
+      }
+
+      const amountKobo = Math.floor(Number(booking.amountKobo || 0));
+      if (!amountKobo || amountKobo <= 0) {
+        return res.status(400).json({ error: "invalid_amount" });
+      }
+
+      // 2) Hold funds in PLATFORM ESCROW (client.available -> __ESCROW__.available)
+      // This is the real "platform escrow" balance.
+      await holdFundsInEscrowForBooking(booking);
+
+      // 3. Mark booking paid
+      booking.paymentStatus = "paid";
+      booking.status =
+        booking.status === "pending_payment" ? "scheduled" : booking.status;
+      booking.paystackReference = `WALLET-${Date.now()}`;
+
+      // Record which method actually paid
+      booking.meta = booking.meta || {};
+      booking.meta.paymentMethodUsed = "wallet";
+      booking.meta.paymentMethodRequested =
+        booking.meta.paymentMethodRequested || "wallet";
+
+      // ✅ START connection window immediately (same as Paystack flow)
+      if (!booking.ringingStartedAt) {
+        booking.ringingStartedAt = new Date();
+      }
+
+      await booking.save();
+
+      // Option A escrow: do NOT credit pro pending on payment.
+      // Pro pending is credited only when booking is marked COMPLETED (in bookings.js).
+
+      res.json({ ok: true, booking });
+    } catch (err) {
+      console.error("[wallet/pay-booking] error:", err);
+      res.status(500).json({ error: "wallet_booking_failed" });
     }
-
-    // 1. Load booking
-    const booking = await Booking.findById(bookingId);
-    if (!booking) return res.status(404).json({ error: "booking_not_found" });
-
-    // Only the client who owns the booking can pay
-    if (String(booking.clientUid) !== String(req.user.uid)) {
-      return res.status(403).json({ error: "not_your_booking" });
-    }
-
-    // Already paid?
-    if (booking.paymentStatus === "paid") {
-      return res.json({ ok: true, alreadyPaid: true });
-    }
-
-    const amountKobo = Math.floor(Number(booking.amountKobo || 0));
-    if (!amountKobo || amountKobo <= 0) {
-      return res.status(400).json({ error: "invalid_amount" });
-    }
-
-    // 2) Hold funds in PLATFORM ESCROW (client.available -> __ESCROW__.available)
-    // This is the real "platform escrow" balance.
-    await holdFundsInEscrowForBooking(booking);
-
-
-
-    // 3. Mark booking paid
-    booking.paymentStatus = "paid";
-    booking.status =
-      booking.status === "pending_payment" ? "scheduled" : booking.status;
-    booking.paystackReference = `WALLET-${Date.now()}`;
-
-    // ✅ START connection window immediately (same as Paystack flow)
-    if (!booking.ringingStartedAt) {
-      booking.ringingStartedAt = new Date();
-    }
-
-    await booking.save();
-
-
-    // Option A escrow: do NOT credit pro pending on payment.
-    // Pro pending is credited only when booking is marked COMPLETED (in bookings.js).
-
-
-    res.json({ ok: true, booking });
-  } catch (err) {
-    console.error("[wallet/pay-booking] error:", err);
-    res.status(500).json({ error: "wallet_booking_failed" });
-  }
-});
-
+  });
 
   return router;
 }

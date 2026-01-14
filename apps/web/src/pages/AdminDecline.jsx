@@ -36,7 +36,7 @@ export default function AdminDecline() {
           className="w-full h-40 bg-black border border-zinc-800 rounded-lg px-3 py-2"
           placeholder="Give a clear reason visible to the applicant…"
           value={reason}
-          onChange={(e)=>setReason(e.target.value)}
+          onChange={(e) => setReason(e.target.value)}
         />
         <div className="flex gap-3">
           <button
@@ -48,7 +48,7 @@ export default function AdminDecline() {
           <button
             type="button"
             className="px-4 py-2 rounded-lg border border-zinc-700"
-            onClick={()=>nav("/admin")}
+            onClick={() => nav("/admin")}
           >
             Cancel
           </button>

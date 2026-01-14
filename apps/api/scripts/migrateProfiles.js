@@ -25,7 +25,7 @@ while (await cursor.hasNext()) {
       // just add uid
       $set: { uid: doc.ownerUid },
       // ❌ do NOT $unset ownerUid here because of the unique index
-    }
+    },
   );
   migrated++;
 }

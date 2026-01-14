@@ -56,8 +56,8 @@ export default function ClientDashboard() {
       const list = Array.isArray(data)
         ? data
         : Array.isArray(data?.items)
-        ? data.items
-        : [];
+          ? data.items
+          : [];
       setItems(list);
     } catch (e) {
       console.error(e);
@@ -99,13 +99,11 @@ export default function ClientDashboard() {
   const filteredItems = useMemo(() => {
     const term = search.trim().toLowerCase();
 
-    const sorted = items
-      .slice()
-      .sort((a, b) => {
-        const ta = toDate(a.createdAt)?.getTime() ?? 0;
-        const tb = toDate(b.createdAt)?.getTime() ?? 0;
-        return tb - ta;
-      });
+    const sorted = items.slice().sort((a, b) => {
+      const ta = toDate(a.createdAt)?.getTime() ?? 0;
+      const tb = toDate(b.createdAt)?.getTime() ?? 0;
+      return tb - ta;
+    });
 
     return sorted.filter((b) => {
       if (activeSection !== "all" && b.status !== activeSection) {
@@ -119,11 +117,7 @@ export default function ClientDashboard() {
         b?.serviceName ||
         ""
       ).toLowerCase();
-      const proName = (
-        b?.proName ||
-        b?.pro?.name ||
-        ""
-      ).toLowerCase();
+      const proName = (b?.proName || b?.pro?.name || "").toLowerCase();
       const lga = String(b?.lga || "").toLowerCase();
       const addr = String(b?.addressText || "").toLowerCase();
 
@@ -246,16 +240,11 @@ export default function ClientDashboard() {
         <div className="space-y-4">
           {filteredItems.map((b) => {
             const svcName =
-              b?.service?.serviceName ||
-              b?.serviceName ||
-              "Service";
-            const priceKobo = Number.isFinite(
-              Number(b?.amountKobo)
-            )
+              b?.service?.serviceName || b?.serviceName || "Service";
+            const priceKobo = Number.isFinite(Number(b?.amountKobo))
               ? Number(b.amountKobo)
               : Number(b?.service?.priceKobo) || 0;
-            const proName =
-              b?.proName || b?.pro?.name || "Your professional";
+            const proName = b?.proName || b?.pro?.name || "Your professional";
 
             return (
               <div
@@ -273,9 +262,7 @@ export default function ClientDashboard() {
                     </div>
                     <div className="text-xs text-zinc-500 mt-1">
                       {b.scheduledFor
-                        ? `Scheduled: ${formatWhen(
-                            b.scheduledFor
-                          )}`
+                        ? `Scheduled: ${formatWhen(b.scheduledFor)}`
                         : "No time set"}
                     </div>
                   </div>
@@ -292,24 +279,24 @@ export default function ClientDashboard() {
                 ) : null}
 
                 {/* open full booking details (pay / complete / chat / review) */}
-<div className="mt-3 flex flex-wrap gap-2 text-xs">
-  <Link
-    to={`/bookings/${b._id}`}
-    className="inline-flex items-center px-3 py-1 rounded-lg border border-zinc-700 hover:bg-zinc-900"
-  >
-    View / Manage
-  </Link>
-
-                {/* Show Leave Review for completed bookings */}
-                {b.status === "completed" && (b.proId || b.pro?._id) && (
+                <div className="mt-3 flex flex-wrap gap-2 text-xs">
                   <Link
-                    to={`/review/${b.proId || b.pro?._id}?bookingId=${b._id}`}
-                    className="inline-flex items-center px-3 py-1 rounded-lg border border-sky-700 text-sky-300 hover:bg-sky-950/40"
+                    to={`/bookings/${b._id}`}
+                    className="inline-flex items-center px-3 py-1 rounded-lg border border-zinc-700 hover:bg-zinc-900"
                   >
-                    Leave Review
+                    View / Manage
                   </Link>
-                )}
-              </div>
+
+                  {/* Show Leave Review for completed bookings */}
+                  {b.status === "completed" && (b.proId || b.pro?._id) && (
+                    <Link
+                      to={`/review/${b.proId || b.pro?._id}?bookingId=${b._id}`}
+                      className="inline-flex items-center px-3 py-1 rounded-lg border border-sky-700 text-sky-300 hover:bg-sky-950/40"
+                    >
+                      Leave Review
+                    </Link>
+                  )}
+                </div>
               </div>
             );
           })}
@@ -321,19 +308,12 @@ export default function ClientDashboard() {
 
 /* ---- UI helpers ---- */
 
-function NavBadge({
-  children,
-  tone = "zinc",
-  active = false,
-  onClick,
-}) {
+function NavBadge({ children, tone = "zinc", active = false, onClick }) {
   const map = {
     zinc: "bg-zinc-900/40 border-zinc-800 text-zinc-200",
-    emerald:
-      "bg-emerald-900/30 border-emerald-800 text-emerald-200",
+    emerald: "bg-emerald-900/30 border-emerald-800 text-emerald-200",
     sky: "bg-sky-900/30 border-sky-800 text-sky-200",
-    amber:
-      "bg-amber-900/30 border-amber-800 text-amber-200",
+    amber: "bg-amber-900/30 border-amber-800 text-amber-200",
     red: "bg-red-900/30 border-red-800 text-red-200",
   };
 
@@ -356,16 +336,11 @@ function NavBadge({
 
 function StatusPill({ status }) {
   const map = {
-    accepted:
-      "bg-emerald-900/30 border-emerald-700 text-emerald-200",
-    completed:
-      "bg-sky-900/30 border-sky-700 text-sky-200",
-    cancelled:
-      "bg-red-900/30 border-red-700 text-red-200",
-    pending_payment:
-      "bg-amber-900/30 border-amber-700 text-amber-200",
-    scheduled:
-      "bg-zinc-900/30 border-zinc-700 text-zinc-200",
+    accepted: "bg-emerald-900/30 border-emerald-700 text-emerald-200",
+    completed: "bg-sky-900/30 border-sky-700 text-sky-200",
+    cancelled: "bg-red-900/30 border-red-700 text-red-200",
+    pending_payment: "bg-amber-900/30 border-amber-700 text-amber-200",
+    scheduled: "bg-zinc-900/30 border-zinc-700 text-zinc-200",
   };
   return (
     <span

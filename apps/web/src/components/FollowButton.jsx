@@ -9,7 +9,12 @@ import { api } from "../lib/api";
  * - disabled:  boolean         (optional hard disable)
  * - className: string          (optional extra classes)
  */
-export default function FollowButton({ targetUid, proId, disabled = false, className = "" }) {
+export default function FollowButton({
+  targetUid,
+  proId,
+  disabled = false,
+  className = "",
+}) {
   const [following, setFollowing] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -19,16 +24,19 @@ export default function FollowButton({ targetUid, proId, disabled = false, class
     (async () => {
       if (!targetUid && !proId) return;
       try {
-        let res =
-          targetUid
-            ? await api.get(`/api/follow/${targetUid}/status`).catch(() => null)
-            : null;
+        let res = targetUid
+          ? await api.get(`/api/follow/${targetUid}/status`).catch(() => null)
+          : null;
 
         if (!res && targetUid) {
-          res = await api.get(`/api/follow/status`, { params: { uid: targetUid } }).catch(() => null);
+          res = await api
+            .get(`/api/follow/status`, { params: { uid: targetUid } })
+            .catch(() => null);
         }
         if (!res && proId) {
-          res = await api.get(`/api/pros/${proId}/follow/status`).catch(() => null);
+          res = await api
+            .get(`/api/pros/${proId}/follow/status`)
+            .catch(() => null);
         }
 
         const data = res?.data;
@@ -39,7 +47,9 @@ export default function FollowButton({ targetUid, proId, disabled = false, class
         // ignore
       }
     })();
-    return () => { stop = true; };
+    return () => {
+      stop = true;
+    };
   }, [targetUid, proId]);
 
   async function toggle() {
@@ -73,7 +83,7 @@ export default function FollowButton({ targetUid, proId, disabled = false, class
       className={[
         "flex-1 py-2 text-sm flex items-center justify-center gap-1 rounded-none",
         following ? "text-[#F5C542]" : "text-gray-200",
-        (busy || disabled) ? "opacity-60 cursor-not-allowed" : "hover:text-white",
+        busy || disabled ? "opacity-60 cursor-not-allowed" : "hover:text-white",
         className,
       ].join(" ")}
       aria-pressed={following}

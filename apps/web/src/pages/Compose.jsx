@@ -49,7 +49,7 @@ export default function Compose() {
 
       const uploadRes = await fetch(
         `https://api.cloudinary.com/v1_1/${cloudName}/auto/upload`,
-        { method: "POST", body: form }
+        { method: "POST", body: form },
       );
       if (!uploadRes.ok) throw new Error("Cloudinary upload failed");
       const uploaded = await uploadRes.json();

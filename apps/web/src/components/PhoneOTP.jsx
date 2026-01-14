@@ -1,6 +1,7 @@
 // apps/web/src/components/PhoneOTP.jsx
 // Global OTP feature flag (env-driven). When false, this component is inert.
-const ENABLE_OTP = (import.meta.env.VITE_ENABLE_PHONE_OTP ?? "false") !== "false";
+const ENABLE_OTP =
+  (import.meta.env.VITE_ENABLE_PHONE_OTP ?? "false") !== "false";
 
 export default function PhoneOTP(props) {
   if (!ENABLE_OTP) return null;
@@ -18,7 +19,9 @@ import { app } from "../lib/firebase";
 
 function PhoneOTPImpl({ phone, onVerified, disabled = false }) {
   const auth = getAuth(app);
-  const recaptchaDivId = useRef(`recaptcha-${Math.random().toString(36).slice(2)}`);
+  const recaptchaDivId = useRef(
+    `recaptcha-${Math.random().toString(36).slice(2)}`,
+  );
   const [sending, setSending] = useState(false);
   const [confirm, setConfirm] = useState(null);
   const [code, setCode] = useState("");
@@ -28,14 +31,21 @@ function PhoneOTPImpl({ phone, onVerified, disabled = false }) {
     if (!auth || !recaptchaDivId.current) return;
     if (window.__otpRecaptchaSetup) return;
     try {
-      window.__otpRecaptchaSetup = new RecaptchaVerifier(auth, recaptchaDivId.current, { size: "invisible" });
+      window.__otpRecaptchaSetup = new RecaptchaVerifier(
+        auth,
+        recaptchaDivId.current,
+        { size: "invisible" },
+      );
     } catch {}
   }, [auth]);
 
   async function sendCode() {
     try {
       setMsg("");
-      if (!phone) { setMsg("Enter phone number first."); return; }
+      if (!phone) {
+        setMsg("Enter phone number first.");
+        return;
+      }
       setSending(true);
       const verifier = window.__otpRecaptchaSetup;
       const result = await signInWithPhoneNumber(auth, phone, verifier);

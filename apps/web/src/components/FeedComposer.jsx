@@ -43,7 +43,7 @@ export default function FeedComposer({
 
   const canSubmit = useMemo(
     () => !posting && !uploading && (text.trim().length > 0 || !!mediaUrl),
-    [posting, uploading, text, mediaUrl]
+    [posting, uploading, text, mediaUrl],
   );
 
   function close() {
@@ -73,7 +73,8 @@ export default function FeedComposer({
         overwrite: true,
       });
 
-      const { cloudName, apiKey, timestamp, signature, folder } = sign.data || {};
+      const { cloudName, apiKey, timestamp, signature, folder } =
+        sign.data || {};
       if (!cloudName || !apiKey || !timestamp || !signature) {
         throw new Error("Upload signing failed");
       }
@@ -89,7 +90,7 @@ export default function FeedComposer({
         const xhr = new XMLHttpRequest();
         xhr.open(
           "POST",
-          `https://api.cloudinary.com/v1_1/${cloudName}/auto/upload`
+          `https://api.cloudinary.com/v1_1/${cloudName}/auto/upload`,
         );
 
         xhr.upload.onprogress = (e) => {
@@ -190,7 +191,9 @@ export default function FeedComposer({
       <div className="mb-4 p-3 rounded-xl border border-zinc-800 bg-black/30 w-full max-w-2xl mx-auto">
         <div className="flex items-center justify-between gap-2 mb-2">
           <h3 className="font-semibold text-white text-sm">Share an update</h3>
-          {msg ? <span className="text-[10px] text-zinc-400">{msg}</span> : null}
+          {msg ? (
+            <span className="text-[10px] text-zinc-400">{msg}</span>
+          ) : null}
         </div>
 
         <textarea

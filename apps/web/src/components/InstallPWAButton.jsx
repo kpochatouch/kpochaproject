@@ -10,8 +10,9 @@ export default function InstallPWAButton() {
   const [showIOSGuide, setShowIOSGuide] = useState(false);
 
   const isStandalone = useMemo(() => {
-    const standaloneMatchMedia =
-      window.matchMedia?.("(display-mode: standalone)")?.matches;
+    const standaloneMatchMedia = window.matchMedia?.(
+      "(display-mode: standalone)",
+    )?.matches;
     const iosStandalone = window.navigator.standalone === true;
     return !!(standaloneMatchMedia || iosStandalone);
   }, []);
@@ -107,7 +108,8 @@ export default function InstallPWAButton() {
         </div>
 
         <div style={{ opacity: 0.9, fontSize: 14, lineHeight: 1.45 }}>
-          Install Kpocha Touch for easy access, faster opening, and a clean full-screen experience.
+          Install Kpocha Touch for easy access, faster opening, and a clean
+          full-screen experience.
         </div>
 
         <div style={{ marginTop: 12, fontSize: 14, lineHeight: 1.55 }}>
@@ -117,17 +119,29 @@ export default function InstallPWAButton() {
                 Install on iPhone
               </div>
               <ol style={{ paddingLeft: 18 }}>
-                <li>Tap the <b>Share</b> icon in Safari</li>
-                <li>Select <b>Add to Home Screen</b></li>
-                <li>Tap <b>Add</b> to finish</li>
+                <li>
+                  Tap the <b>Share</b> icon in Safari
+                </li>
+                <li>
+                  Select <b>Add to Home Screen</b>
+                </li>
+                <li>
+                  Tap <b>Add</b> to finish
+                </li>
               </ol>
             </>
           ) : isIOS ? (
-            <>Tap <b>Install</b> to add Kpocha Touch to your Home Screen.</>
+            <>
+              Tap <b>Install</b> to add Kpocha Touch to your Home Screen.
+            </>
           ) : deferredPrompt ? (
-            <>Tap <b>Install</b> to install the app.</>
+            <>
+              Tap <b>Install</b> to install the app.
+            </>
           ) : (
-            <>Open your browser menu (⋮) and tap <b>Install app</b>.</>
+            <>
+              Open your browser menu (⋮) and tap <b>Install app</b>.
+            </>
           )}
         </div>
 

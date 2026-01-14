@@ -12,8 +12,7 @@ const NOTIFICATION_ROUTES = {
   call_incoming: () => "/inbox",
   call_missed: () => "/inbox",
 
-  post_like: (n) =>
-    n?.data?.postId ? `/post/${n.data.postId}` : null,
+  post_like: (n) => (n?.data?.postId ? `/post/${n.data.postId}` : null),
 
   booking_update: () => "/my-bookings",
 
@@ -25,7 +24,6 @@ const NOTIFICATION_ROUTES = {
 
   generic: () => null,
 };
-
 
 /* ---------------------------
    Helpers
@@ -57,43 +55,81 @@ function presentNotification(n) {
   const target = resolver ? resolver(n) : null;
 
   if (type === "chat_message") {
-    return { icon: "💬", title: "New message", body: data.bodyPreview || "New message", target };
+    return {
+      icon: "💬",
+      title: "New message",
+      body: data.bodyPreview || "New message",
+      target,
+    };
   }
 
   if (type === "call_incoming") {
-    return { icon: "📞", title: "Incoming call", body: "Tap to respond", target };
+    return {
+      icon: "📞",
+      title: "Incoming call",
+      body: "Tap to respond",
+      target,
+    };
   }
 
   if (type === "call_missed") {
-    return { icon: "📞", title: "Missed call", body: "You missed a call", target };
+    return {
+      icon: "📞",
+      title: "Missed call",
+      body: "You missed a call",
+      target,
+    };
   }
 
   if (type === "post_like") {
-    return { icon: "❤️", title: "New like", body: "Someone liked your post", target };
+    return {
+      icon: "❤️",
+      title: "New like",
+      body: "Someone liked your post",
+      target,
+    };
   }
 
   if (type === "booking_update") {
-    return { icon: "📅", title: "Booking update", body: "Your booking was updated", target };
+    return {
+      icon: "📅",
+      title: "Booking update",
+      body: "Your booking was updated",
+      target,
+    };
   }
 
-  if (["withdraw","withdraw_pending","booking_fund","booking_fund_refund","release"].includes(type)) {
-    return { icon: "💰", title: "Wallet update", body: "Wallet balance changed", target };
+  if (
+    [
+      "withdraw",
+      "withdraw_pending",
+      "booking_fund",
+      "booking_fund_refund",
+      "release",
+    ].includes(type)
+  ) {
+    return {
+      icon: "💰",
+      title: "Wallet update",
+      body: "Wallet balance changed",
+      target,
+    };
   }
 
-  return { icon: "🔔", title: "Notification", body: data.message || "", target: null };
+  return {
+    icon: "🔔",
+    title: "Notification",
+    body: data.message || "",
+    target: null,
+  };
 }
-
 
 /**
  * ✅ Safe avatar rule
  * No fetch, no crash, graceful fallback
  */
 function getAvatar(n) {
-  return (
-    n?.meta?.actorAvatar ||
-    n?.data?.actorAvatar ||
-    null
-  );
+  return n?.meta?.actorAvatar || n?.data?.actorAvatar || null;
 }
 
 /* ---------------------------
@@ -134,7 +170,7 @@ export default function NotificationBell() {
           raw: n,
         };
       }),
-    [items]
+    [items],
   );
 
   async function handleClick(entry) {
@@ -174,7 +210,7 @@ export default function NotificationBell() {
       {/* Dropdown */}
       {open && (
         <div
-        className="
+          className="
           absolute mt-2
           left-1/2 -translate-x-1/2
           w-[92vw] max-w-sm
@@ -182,28 +218,26 @@ export default function NotificationBell() {
           bg-black border border-zinc-800 rounded-xl
           shadow-xl z-40
         "
-      >
+        >
+          <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
+            <span className="text-xs font-semibold text-zinc-300">
+              Notifications
+            </span>
 
-        <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
-          <span className="text-xs font-semibold text-zinc-300">
-            Notifications
-          </span>
-
-          {enhanced.length > 0 && (
-          <button
-            type="button"
-            onClick={async () => {
-              try {
-                await markAll();
-              } catch {}
-            }}
-            className="text-xs text-gold hover:underline"
-          >
-            Mark all read
-          </button>
-        )}
-        </div>
-
+            {enhanced.length > 0 && (
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await markAll();
+                  } catch {}
+                }}
+                className="text-xs text-gold hover:underline"
+              >
+                Mark all read
+              </button>
+            )}
+          </div>
 
           {enhanced.length === 0 ? (
             <div className="p-4 text-xs text-zinc-500 text-center">

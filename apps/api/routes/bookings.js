@@ -13,7 +13,6 @@ import { cancelBookingAndRefund } from "../services/walletService.js";
 import { createNotification } from "../services/notificationService.js";
 import { creditProPendingForBooking } from "../services/walletService.js";
 
-
 const router = express.Router();
 
 /* --------------------------- Auth middleware --------------------------- */
@@ -54,7 +53,6 @@ async function getCompletionProFallbackHours() {
   }
 }
 
-
 /**
  * Hide private contact depending on viewer:
  *
@@ -67,7 +65,8 @@ async function getCompletionProFallbackHours() {
  */
 function sanitizeBookingFor(req, b) {
   const isAdmin = isAdminReq(req);
-  const isClient = req?.user?.uid && b?.clientUid && req.user.uid === b.clientUid;
+  const isClient =
+    req?.user?.uid && b?.clientUid && req.user.uid === b.clientUid;
   const isProOwner =
     req?.user?.uid && b?.proOwnerUid && req.user.uid === b.proOwnerUid;
 
@@ -97,9 +96,7 @@ function sanitizeBookingFor(req, b) {
 
     obj.clientContactPrivate = {
       phone: "", // always hidden from pro
-      address: canSeeAddress
-        ? original.address || obj.addressText || ""
-        : "",
+      address: canSeeAddress ? original.address || obj.addressText || "" : "",
     };
     return obj;
   }
@@ -168,7 +165,6 @@ async function resolveClientName(uid, fallbackName = "") {
   }
 }
 
-
 /* ============================== ROUTES ============================== */
 
 /**
@@ -235,7 +231,7 @@ router.post("/bookings", requireAuth, async (req, res) => {
       status: "pending_payment",
     });
 
-        // 🔔 Notify pro owner about new scheduled booking (pending payment)
+    // 🔔 Notify pro owner about new scheduled booking (pending payment)
     try {
       if (proOwnerUid) {
         await createNotification({
@@ -257,34 +253,37 @@ router.post("/bookings", requireAuth, async (req, res) => {
     } catch (notifyErr) {
       console.warn(
         "[bookings:create] notify pro failed:",
-        notifyErr?.message || notifyErr
+        notifyErr?.message || notifyErr,
       );
     }
 
     // create booking thread + snapshot (best-effort)
-try {
-  const room = `booking:${b._id.toString()}`;
+    try {
+      const room = `booking:${b._id.toString()}`;
 
-  // touchLastMessage will create a minimal thread if missing.
-  await Thread.touchLastMessage(room, {
-    lastMessageId: null,
-    lastMessageAt: b.createdAt || new Date(),
-    lastMessagePreview: "Booking created",
-    lastMessageFrom: req.user?.uid || null,
-    incrementFor: b.proOwnerUid ? [String(b.proOwnerUid)] : null,
-  }).catch(() => null);
+      // touchLastMessage will create a minimal thread if missing.
+      await Thread.touchLastMessage(room, {
+        lastMessageId: null,
+        lastMessageAt: b.createdAt || new Date(),
+        lastMessagePreview: "Booking created",
+        lastMessageFrom: req.user?.uid || null,
+        incrementFor: b.proOwnerUid ? [String(b.proOwnerUid)] : null,
+      }).catch(() => null);
 
-  // get mongoose doc so we can add participants (instance helper)
-  const t = await Thread.findOne({ room }).catch(() => null);
-  if (t) {
-    if (b.proOwnerUid) await t.addParticipant(String(b.proOwnerUid)).catch(() => null);
-    if (b.clientUid) await t.addParticipant(String(b.clientUid)).catch(() => null);
-  }
-} catch (e) {
-  console.warn("[bookings:create] ensure booking thread failed:", e?.message || e);
-}
-
-
+      // get mongoose doc so we can add participants (instance helper)
+      const t = await Thread.findOne({ room }).catch(() => null);
+      if (t) {
+        if (b.proOwnerUid)
+          await t.addParticipant(String(b.proOwnerUid)).catch(() => null);
+        if (b.clientUid)
+          await t.addParticipant(String(b.clientUid)).catch(() => null);
+      }
+    } catch (e) {
+      console.warn(
+        "[bookings:create] ensure booking thread failed:",
+        e?.message || e,
+      );
+    }
 
     res.json({ ok: true, booking: sanitizeBookingFor(req, b) });
   } catch (err) {
@@ -419,9 +418,10 @@ router.post("/bookings/instant", requireAuth, async (req, res) => {
             typeof coords.lng !== "undefined"
               ? Number(coords.lng)
               : typeof coords.lon !== "undefined"
-              ? Number(coords.lon)
-              : NaN;
-          if (!Number.isFinite(latNum) || !Number.isFinite(lngNum)) return undefined;
+                ? Number(coords.lon)
+                : NaN;
+          if (!Number.isFinite(latNum) || !Number.isFinite(lngNum))
+            return undefined;
           return { lat: latNum, lng: lngNum };
         } catch {
           return undefined;
@@ -437,7 +437,7 @@ router.post("/bookings/instant", requireAuth, async (req, res) => {
       },
     });
 
-        // 🔔 Notify pro owner about new instant booking (pending payment)
+    // 🔔 Notify pro owner about new instant booking (pending payment)
     try {
       if (proOwnerUid) {
         await createNotification({
@@ -459,50 +459,54 @@ router.post("/bookings/instant", requireAuth, async (req, res) => {
     } catch (notifyErr) {
       console.warn(
         "[bookings:instant] notify pro failed:",
-        notifyErr?.message || notifyErr
+        notifyErr?.message || notifyErr,
       );
     }
 
     // create booking thread + snapshot (best-effort)
-try {
-  const room = `booking:${b._id.toString()}`;
+    try {
+      const room = `booking:${b._id.toString()}`;
 
-  await Thread.touchLastMessage(room, {
-    lastMessageId: null,
-    lastMessageAt: b.createdAt || new Date(),
-    lastMessagePreview: "Instant booking requested",
-    lastMessageFrom: req.user?.uid || null,
-    incrementFor: b.proOwnerUid ? [String(b.proOwnerUid)] : null,
-  }).catch(() => null);
+      await Thread.touchLastMessage(room, {
+        lastMessageId: null,
+        lastMessageAt: b.createdAt || new Date(),
+        lastMessagePreview: "Instant booking requested",
+        lastMessageFrom: req.user?.uid || null,
+        incrementFor: b.proOwnerUid ? [String(b.proOwnerUid)] : null,
+      }).catch(() => null);
 
-  const t = await Thread.findOne({ room }).catch(() => null);
-  if (t) {
-    if (b.proOwnerUid) await t.addParticipant(String(b.proOwnerUid)).catch(() => null);
-    if (b.clientUid) await t.addParticipant(String(b.clientUid)).catch(() => null);
-  }
-} catch (e) {
-  console.warn("[bookings:instant] ensure booking thread failed:", e?.message || e);
-}
+      const t = await Thread.findOne({ room }).catch(() => null);
+      if (t) {
+        if (b.proOwnerUid)
+          await t.addParticipant(String(b.proOwnerUid)).catch(() => null);
+        if (b.clientUid)
+          await t.addParticipant(String(b.clientUid)).catch(() => null);
+      }
+    } catch (e) {
+      console.warn(
+        "[bookings:instant] ensure booking thread failed:",
+        e?.message || e,
+      );
+    }
 
     // Card flow → FE opens Paystack, then POST /api/payments/verify
-if (paymentMethod === "card") {
-  return res.json({
-    ok: true,
-    booking: sanitizeBookingFor(req, b),
-    amountKobo: b.amountKobo,
-  });
-}
+    if (paymentMethod === "card") {
+      return res.json({
+        ok: true,
+        booking: sanitizeBookingFor(req, b),
+        amountKobo: b.amountKobo,
+      });
+    }
 
-// ✅ Wallet flow → FE will call POST /api/wallet/pay-booking
-if (paymentMethod === "wallet") {
-  return res.json({
-    ok: true,
-    booking: sanitizeBookingFor(req, b),
-    amountKobo: b.amountKobo,
-    walletPayable: true, // FE signal
-  });
-}
-
+    // ✅ Wallet flow → FE will call POST /api/wallet/pay-booking
+    if (paymentMethod === "wallet") {
+      return res.json({
+        ok: true,
+        booking: sanitizeBookingFor(req, b),
+        amountKobo: b.amountKobo,
+        walletPayable: true, // FE signal
+      });
+    }
   } catch (err) {
     console.error("[bookings:instant] error:", err);
     res.status(500).json({ error: "Failed to create instant booking" });
@@ -621,44 +625,44 @@ router.put("/bookings/:id/cancel", requireAuth, async (req, res) => {
     try {
       if (b.proOwnerUid) {
         const feeAppliedKobo = Number(refundInfo?.cancelFeeKobo || 0);
-const platformFeeKobo = Math.floor(feeAppliedKobo / 2);
-const proCompKobo = Math.max(0, feeAppliedKobo - platformFeeKobo);
+        const platformFeeKobo = Math.floor(feeAppliedKobo / 2);
+        const proCompKobo = Math.max(0, feeAppliedKobo - platformFeeKobo);
 
-const base = "The client cancelled a booking for " + (b?.service?.serviceName || "a service");
-const reasonTxt = reason ? ` (reason: ${reason})` : "";
+        const base =
+          "The client cancelled a booking for " +
+          (b?.service?.serviceName || "a service");
+        const reasonTxt = reason ? ` (reason: ${reason})` : "";
 
-const body =
-  feeAppliedKobo > 0
-    ? `${base}. Cancel fee applied: ₦${(feeAppliedKobo / 100).toFixed(2)}. ` +
-      (b.proOwnerUid
-        ? `You received compensation: ₦${(proCompKobo / 100).toFixed(2)} (added to pending).`
-        : `Compensation could not be credited (missing proOwnerUid).`) +
-      reasonTxt
-    : `${base}. No cancellation fee applied.` + reasonTxt;
+        const body =
+          feeAppliedKobo > 0
+            ? `${base}. Cancel fee applied: ₦${(feeAppliedKobo / 100).toFixed(2)}. ` +
+              (b.proOwnerUid
+                ? `You received compensation: ₦${(proCompKobo / 100).toFixed(2)} (added to pending).`
+                : `Compensation could not be credited (missing proOwnerUid).`) +
+              reasonTxt
+            : `${base}. No cancellation fee applied.` + reasonTxt;
 
-
-    await createNotification({
-      toUid: b.proOwnerUid,
-      fromUid: req.user.uid,
-      type: "booking_cancelled",
-      title: "Booking cancelled",
-      body,
-      data: {
-        bookingId: b._id.toString(),
-        status: b.status,
-        paymentStatus: b.paymentStatus,
-        cancelFeeKobo: feeAppliedKobo,
-        proCompKobo,
-        platformFeeKobo,
-        refundedAmountKobo: Number(refundInfo?.refundAmountKobo || 0),
-      },
-    });
-
+        await createNotification({
+          toUid: b.proOwnerUid,
+          fromUid: req.user.uid,
+          type: "booking_cancelled",
+          title: "Booking cancelled",
+          body,
+          data: {
+            bookingId: b._id.toString(),
+            status: b.status,
+            paymentStatus: b.paymentStatus,
+            cancelFeeKobo: feeAppliedKobo,
+            proCompKobo,
+            platformFeeKobo,
+            refundedAmountKobo: Number(refundInfo?.refundAmountKobo || 0),
+          },
+        });
       }
     } catch (notifyErr) {
       console.warn(
         "[bookings:cancel] notify pro failed:",
-        notifyErr?.message || notifyErr
+        notifyErr?.message || notifyErr,
       );
     }
 
@@ -689,7 +693,9 @@ router.put("/bookings/:id/cancel-by-pro", requireAuth, async (req, res) => {
 
     // only allow in these states
     if (!["scheduled", "accepted"].includes(b.status)) {
-      return res.status(400).json({ error: `Cannot cancel when status is ${b.status}` });
+      return res
+        .status(400)
+        .json({ error: `Cannot cancel when status is ${b.status}` });
     }
 
     // ✅ this triggers FULL refund (no fee) because cancelledBy !== "client"
@@ -720,13 +726,16 @@ router.put("/bookings/:id/cancel-by-pro", requireAuth, async (req, res) => {
       }
     } catch {}
 
-    return res.json({ ok: true, booking: sanitizeBookingFor(req, b), refund: refundInfo });
+    return res.json({
+      ok: true,
+      booking: sanitizeBookingFor(req, b),
+      refund: refundInfo,
+    });
   } catch (err) {
     console.error("[bookings:cancel-by-pro] error:", err);
     return res.status(500).json({ error: "Failed to cancel booking" });
   }
 });
-
 
 /** Pro: accept booking */
 router.put("/bookings/:id/accept", requireAuth, async (req, res) => {
@@ -748,7 +757,6 @@ router.put("/bookings/:id/accept", requireAuth, async (req, res) => {
     b.status = "accepted";
     b.acceptedAt = new Date(); // for ring-timeout / analytics
     await b.save();
-
 
     // --- Socket: notify both client and pro so chat can open ---
     try {
@@ -772,32 +780,36 @@ router.put("/bookings/:id/accept", requireAuth, async (req, res) => {
     } catch (err) {
       console.warn(
         "[bookings:accept] socket emit failed:",
-        err?.message || err
+        err?.message || err,
       );
     }
     // --- end socket block ---
 
     // ensure booking thread exists and add participants (best-effort)
-try {
-  const room = `booking:${b._id.toString()}`;
+    try {
+      const room = `booking:${b._id.toString()}`;
 
-  await Thread.touchLastMessage(room, {
-    lastMessageId: null,
-    lastMessageAt: b.acceptedAt || new Date(),
-    lastMessagePreview: "Booking accepted",
-    lastMessageFrom: req.user?.uid || null,
-    incrementFor: b.clientUid ? [String(b.clientUid)] : null,
-  }).catch(() => null);
+      await Thread.touchLastMessage(room, {
+        lastMessageId: null,
+        lastMessageAt: b.acceptedAt || new Date(),
+        lastMessagePreview: "Booking accepted",
+        lastMessageFrom: req.user?.uid || null,
+        incrementFor: b.clientUid ? [String(b.clientUid)] : null,
+      }).catch(() => null);
 
-  const t = await Thread.findOne({ room }).catch(() => null);
-  if (t) {
-    if (b.clientUid) await t.addParticipant(String(b.clientUid)).catch(() => null);
-    if (b.proOwnerUid) await t.addParticipant(String(b.proOwnerUid)).catch(() => null);
-  }
-} catch (e) {
-  console.warn("[bookings:accept] ensure booking thread failed:", e?.message || e);
-}
-
+      const t = await Thread.findOne({ room }).catch(() => null);
+      if (t) {
+        if (b.clientUid)
+          await t.addParticipant(String(b.clientUid)).catch(() => null);
+        if (b.proOwnerUid)
+          await t.addParticipant(String(b.proOwnerUid)).catch(() => null);
+      }
+    } catch (e) {
+      console.warn(
+        "[bookings:accept] ensure booking thread failed:",
+        e?.message || e,
+      );
+    }
 
     // 🔔 Notify client that pro accepted
     try {
@@ -821,7 +833,7 @@ try {
     } catch (notifyErr) {
       console.warn(
         "[bookings:accept] notify client failed:",
-        notifyErr?.message || notifyErr
+        notifyErr?.message || notifyErr,
       );
     }
 
@@ -865,7 +877,8 @@ router.put("/bookings/:id/complete", requireAuth, async (req, res) => {
       if (!acceptedAt) {
         return res.status(403).json({
           error: "client_must_complete_first",
-          message: "Client must mark completed. Pro fallback is not available yet.",
+          message:
+            "Client must mark completed. Pro fallback is not available yet.",
         });
       }
 
@@ -882,7 +895,6 @@ router.put("/bookings/:id/complete", requireAuth, async (req, res) => {
       }
     }
 
-
     // Only allow completion from ACCEPTED state
     if (b.status !== "accepted") {
       return res
@@ -891,7 +903,7 @@ router.put("/bookings/:id/complete", requireAuth, async (req, res) => {
     }
 
     if (b.paymentStatus !== "paid") {
-    return res.status(400).json({ error: "Cannot complete before payment" });
+      return res.status(400).json({ error: "Cannot complete before payment" });
     }
 
     b.status = "completed";
@@ -905,7 +917,8 @@ router.put("/bookings/:id/complete", requireAuth, async (req, res) => {
     if (finalNote) {
       meta.completionNote = finalNote;
     } else if (actingAsProFallback) {
-      meta.completionNote = "Pro completed after fallback window (client did not confirm).";
+      meta.completionNote =
+        "Pro completed after fallback window (client did not confirm).";
     }
 
     b.meta = meta;
@@ -916,16 +929,18 @@ router.put("/bookings/:id/complete", requireAuth, async (req, res) => {
     try {
       await creditProPendingForBooking(b, { reason: "completed" });
     } catch (e) {
-      console.error("[bookings:complete] creditProPendingForBooking failed:", e?.message || e);
+      console.error(
+        "[bookings:complete] creditProPendingForBooking failed:",
+        e?.message || e,
+      );
     }
-
 
     // --- update Pro jobsCompleted metric, invalidate cache and emit socket update ---
     try {
       const updatedPro = await Pro.findOneAndUpdate(
         { ownerUid: b.proOwnerUid },
         { $inc: { "metrics.jobsCompleted": 1 } },
-        { new: true }
+        { new: true },
       )
         .lean()
         .catch(() => null);
@@ -951,13 +966,13 @@ router.put("/bookings/:id/complete", requireAuth, async (req, res) => {
           .catch(() => null);
         if (redisClient && prof?.username) {
           await redisClient.del(
-            `public:profile:${String(prof.username).toLowerCase()}`
+            `public:profile:${String(prof.username).toLowerCase()}`,
           );
         }
       } catch (err) {
         console.warn(
           "[public/profile] invalidate after booking completion failed:",
-          err?.message || err
+          err?.message || err,
         );
       }
 
@@ -971,14 +986,14 @@ router.put("/bookings/:id/complete", requireAuth, async (req, res) => {
       } catch (err) {
         console.warn(
           "[public/profile] socket emit after booking complete failed:",
-          err?.message || err
+          err?.message || err,
         );
       }
     } catch (err) {
       // non-fatal: log and continue returning booking to client
       console.warn(
         "[bookings:complete] post-complete update failed:",
-        err?.message || err
+        err?.message || err,
       );
     }
 
@@ -999,9 +1014,7 @@ router.put("/bookings/:id/complete", requireAuth, async (req, res) => {
           fromUid: b.clientUid || null,
           type: "booking_completed",
           title: "Job completed by client",
-          body:
-            baseBody +
-            " You can now leave a review for this client.",
+          body: baseBody + " You can now leave a review for this client.",
           data: {
             bookingId: b._id.toString(),
             completedBy,
@@ -1070,7 +1083,7 @@ router.put("/bookings/:id/complete", requireAuth, async (req, res) => {
     } catch (notifyErr) {
       console.warn(
         "[bookings:complete] notify failed:",
-        notifyErr?.message || notifyErr
+        notifyErr?.message || notifyErr,
       );
     }
 
@@ -1080,6 +1093,5 @@ router.put("/bookings/:id/complete", requireAuth, async (req, res) => {
     res.status(500).json({ error: "Failed to complete booking" });
   }
 });
-
 
 export default router;

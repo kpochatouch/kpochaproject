@@ -36,7 +36,7 @@ export default function RiskLogs() {
           // backend not ready yet
           setItems([]);
           setErr(
-            "Risk endpoint is not exposed for list yet. Add GET /api/risk on the API."
+            "Risk endpoint is not exposed for list yet. Add GET /api/risk on the API.",
           );
         }
       } catch (e) {
@@ -89,8 +89,9 @@ export default function RiskLogs() {
         <div>
           <h1 className="text-2xl font-semibold">Risk Logs</h1>
           <p className="text-zinc-500 text-sm">
-            Liveness / verification events stored in <code className="bg-zinc-900 px-1 rounded">risk_events</code>.
-            This UI will auto-fill once the API exposes a list endpoint.
+            Liveness / verification events stored in{" "}
+            <code className="bg-zinc-900 px-1 rounded">risk_events</code>. This
+            UI will auto-fill once the API exposes a list endpoint.
           </p>
         </div>
 
@@ -165,15 +166,19 @@ export default function RiskLogs() {
             <div className="p-4 text-sm text-zinc-500">
               No risk events to display yet.
               <br />
-              Make sure the API exposes <code className="bg-zinc-900 px-1 rounded">GET /api/risk</code> that returns an array.
+              Make sure the API exposes{" "}
+              <code className="bg-zinc-900 px-1 rounded">
+                GET /api/risk
+              </code>{" "}
+              that returns an array.
             </div>
           ) : (
             <ul className="divide-y divide-zinc-800">
               {filtered.map((item) => (
                 <li
-                    key={item._id || item.id}
-                    className="px-4 py-3 hover:bg-zinc-900/40 cursor-pointer"
-                    onClick={() => setSelected(item)}
+                  key={item._id || item.id}
+                  className="px-4 py-3 hover:bg-zinc-900/40 cursor-pointer"
+                  onClick={() => setSelected(item)}
                 >
                   <div className="flex items-center justify-between gap-3">
                     <div>
@@ -195,7 +200,10 @@ export default function RiskLogs() {
                             : "bg-emerald-900/40 text-emerald-100"
                         }`}
                       >
-                        score {typeof item.score === "number" ? item.score.toFixed(2) : "—"}
+                        score{" "}
+                        {typeof item.score === "number"
+                          ? item.score.toFixed(2)
+                          : "—"}
                       </span>
                     </div>
                   </div>
@@ -218,7 +226,11 @@ export default function RiskLogs() {
           {!selected ? (
             <p className="text-sm text-zinc-500">
               Select an item on the left or paste an id and click <b>Open</b>.
-              This uses the existing API route <code className="bg-zinc-900 px-1 rounded">GET /api/risk/liveness/:id</code>.
+              This uses the existing API route{" "}
+              <code className="bg-zinc-900 px-1 rounded">
+                GET /api/risk/liveness/:id
+              </code>
+              .
             </p>
           ) : (
             <div className="space-y-3 text-sm">
@@ -284,7 +296,9 @@ export default function RiskLogs() {
 
               {/* context/metrics raw */}
               <div>
-                <div className="text-zinc-500 text-xs mb-1">Context / Metrics</div>
+                <div className="text-zinc-500 text-xs mb-1">
+                  Context / Metrics
+                </div>
                 <pre className="bg-black/40 border border-zinc-800 rounded-lg p-2 text-xs overflow-auto max-h-40">
                   {JSON.stringify(
                     {
@@ -294,7 +308,7 @@ export default function RiskLogs() {
                       userAgent: selected.userAgent || "",
                     },
                     null,
-                    2
+                    2,
                   )}
                 </pre>
               </div>

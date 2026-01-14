@@ -18,14 +18,19 @@ let GEO = null;
 let STATE_INDEX = null;
 
 function normalizeStateName(s) {
-  const v = String(s || "").trim().toUpperCase();
+  const v = String(s || "")
+    .trim()
+    .toUpperCase();
   if (!v) return "";
-  if (v === "FCT" || v === "F.C.T" || v === "ABUJA") return "FEDERAL CAPITAL TERRITORY";
+  if (v === "FCT" || v === "F.C.T" || v === "ABUJA")
+    return "FEDERAL CAPITAL TERRITORY";
   return v;
 }
 
 function normalizeLgaName(l) {
-  return String(l || "").trim().toUpperCase();
+  return String(l || "")
+    .trim()
+    .toUpperCase();
 }
 
 function buildIndexFrom(geo) {
@@ -65,7 +70,9 @@ router.get("/geo/ng", (_req, res) => {
     loadGeo();
 
     // states in UPPERCASE
-    const states = Array.from(STATE_INDEX.keys()).sort((a, b) => a.localeCompare(b));
+    const states = Array.from(STATE_INDEX.keys()).sort((a, b) =>
+      a.localeCompare(b),
+    );
 
     // lgas object also in UPPERCASE
     const lgas = {};
@@ -91,7 +98,9 @@ router.get("/geo/ng", (_req, res) => {
 router.get("/geo/states", (_req, res) => {
   try {
     loadGeo();
-    const states = Array.from(STATE_INDEX.keys()).sort((a, b) => a.localeCompare(b));
+    const states = Array.from(STATE_INDEX.keys()).sort((a, b) =>
+      a.localeCompare(b),
+    );
     res.json(states);
   } catch (e) {
     console.error("[geo/states] error:", e);
@@ -110,7 +119,8 @@ router.get("/geo/lgas", (req, res) => {
     if (!q) return res.status(400).json({ error: "state_required" });
 
     const lgas = STATE_INDEX.get(q) || [];
-    if (!lgas.length) return res.status(404).json({ error: "state_not_found_or_no_lgas" });
+    if (!lgas.length)
+      return res.status(404).json({ error: "state_not_found_or_no_lgas" });
 
     res.json(lgas.slice().sort((a, b) => a.localeCompare(b)));
   } catch (e) {

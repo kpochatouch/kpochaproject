@@ -1,1 +1,1 @@
-export const formatDate = (iso) => new Date(iso).toLocaleString()
+export const formatDate = (iso) => new Date(iso).toLocaleString();

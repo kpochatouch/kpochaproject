@@ -12,8 +12,10 @@ export default function GeoConfirm({
   const address = value?.address || "";
 
   function applyCoords() {
-    const nlat = Number(lat), nlng = Number(lng);
-    if (Number.isFinite(nlat) && Number.isFinite(nlng)) onChangeCoords({ lat: nlat, lng: nlng });
+    const nlat = Number(lat),
+      nlng = Number(lng);
+    if (Number.isFinite(nlat) && Number.isFinite(nlng))
+      onChangeCoords({ lat: nlat, lng: nlng });
   }
 
   return (

@@ -6,7 +6,10 @@ import { api } from "./api";
  * - unreadOnly: if true, only unread ones (backend should respect this flag if implemented)
  * - limit: max number to return
  */
-export async function fetchNotifications({ unreadOnly = false, limit = 30 } = {}) {
+export async function fetchNotifications({
+  unreadOnly = false,
+  limit = 30,
+} = {}) {
   const params = {};
   if (limit) params.limit = limit;
   if (unreadOnly) params.unreadOnly = true;
@@ -26,7 +29,7 @@ export async function fetchNotifications({ unreadOnly = false, limit = 30 } = {}
 export async function markNotificationSeen(id) {
   if (!id) throw new Error("notification id required");
   const { data } = await api.put(
-    `/api/notifications/${encodeURIComponent(id)}/read`
+    `/api/notifications/${encodeURIComponent(id)}/read`,
   );
   return data;
 }

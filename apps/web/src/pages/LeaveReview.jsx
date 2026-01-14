@@ -1,6 +1,11 @@
 //apps/web/src/pages/LeaveReview.jsx
 import { useEffect, useState } from "react";
-import { useParams, useSearchParams, useNavigate, Link } from "react-router-dom";
+import {
+  useParams,
+  useSearchParams,
+  useNavigate,
+  Link,
+} from "react-router-dom";
 import { api } from "../lib/api";
 
 function clampRating(n) {
@@ -36,7 +41,7 @@ export default function LeaveReview() {
 
         // Check if user already has a review for this pro
         const { data } = await api.get(
-          `/api/reviews/pro/${encodeURIComponent(proId)}/me`
+          `/api/reviews/pro/${encodeURIComponent(proId)}/me`,
         );
 
         if (!alive) return;
@@ -100,15 +105,13 @@ export default function LeaveReview() {
           }
         }, 1200);
       } else {
-        setError(
-          data?.error || "Could not submit review. Please try again."
-        );
+        setError(data?.error || "Could not submit review. Please try again.");
       }
     } catch (e) {
       console.error("[LeaveReview] submit error:", e?.response?.data || e);
       setError(
         e?.response?.data?.error ||
-          "Could not submit review. Please try again."
+          "Could not submit review. Please try again.",
       );
     } finally {
       setSubmitting(false);
@@ -132,9 +135,9 @@ export default function LeaveReview() {
         <>
           {existing && (
             <div className="mb-4 rounded border border-emerald-800 bg-emerald-900/20 text-emerald-100 px-3 py-2 text-sm">
-              You already left a review for this professional. You can
-              adjust the rating or text below, but only one review is
-              stored per user for now.
+              You already left a review for this professional. You can adjust
+              the rating or text below, but only one review is stored per user
+              for now.
             </div>
           )}
 
@@ -169,9 +172,7 @@ export default function LeaveReview() {
             </div>
 
             <div>
-              <label className="block text-sm mb-1">
-                Short title
-              </label>
+              <label className="block text-sm mb-1">Short title</label>
               <input
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
@@ -211,10 +212,7 @@ export default function LeaveReview() {
                   Back to booking
                 </Link>
               ) : (
-                <Link
-                  to="/browse"
-                  className="text-xs text-zinc-400 underline"
-                >
+                <Link to="/browse" className="text-xs text-zinc-400 underline">
                   Back to browse
                 </Link>
               )}

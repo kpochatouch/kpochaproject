@@ -1,7 +1,12 @@
 // apps/web/src/pages/ClientRegister.jsx
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import { api, getClientProfile, updateClientProfile, ensureClientProfile } from "../lib/api";
+import {
+  api,
+  getClientProfile,
+  updateClientProfile,
+  ensureClientProfile,
+} from "../lib/api";
 import NgGeoPicker from "../components/NgGeoPicker.jsx";
 
 // same env as BecomePro
@@ -55,7 +60,7 @@ function useCloudinaryWidget() {
           if (!err && res && res.event === "success") {
             onSuccess(res.info.secure_url);
           }
-        }
+        },
       );
     } catch {
       return null;
@@ -171,13 +176,7 @@ export default function ClientRegister() {
     const base = !!fullName && !!phone && (!!stateVal || !!lga) && !!address;
     const agreed = agreements.terms && agreements.privacy;
     if (!verifyNow) return base && agreed;
-    return (
-      base &&
-      agreed &&
-      !!idType &&
-      !!idUrl &&
-      !!selfieWithIdUrl
-    );
+    return base && agreed && !!idType && !!idUrl && !!selfieWithIdUrl;
   }, [
     fullName,
     phone,
@@ -197,10 +196,8 @@ export default function ClientRegister() {
       setErr("");
 
       // sanitize lat/lon — don't send empty strings
-      const latClean =
-        lat === "" || lat === null ? null : Number(lat);
-      const lonClean =
-        lon === "" || lon === null ? null : Number(lon);
+      const latClean = lat === "" || lat === null ? null : Number(lat);
+      const lonClean = lon === "" || lon === null ? null : Number(lon);
 
       // we send uppercase to the backend to match Pro/Profile/Browse
       const stateUP = (stateVal || "").toString().toUpperCase().trim();
@@ -263,7 +260,7 @@ export default function ClientRegister() {
         navigator.geolocation.getCurrentPosition(resolve, reject, {
           enableHighAccuracy: true,
           timeout: 10000,
-        })
+        }),
       );
       const { latitude: theLat, longitude: theLon } = pos.coords;
 
@@ -276,13 +273,7 @@ export default function ClientRegister() {
       const detectedState = (p.state || p.region || "")
         .toString()
         .toUpperCase();
-      const detectedLga = (
-        p.county ||
-        p.city ||
-        p.district ||
-        p.suburb ||
-        ""
-      )
+      const detectedLga = (p.county || p.city || p.district || p.suburb || "")
         .toString()
         .toUpperCase();
       const detectedAddress = [p.address_line1, p.address_line2]
@@ -301,7 +292,7 @@ export default function ClientRegister() {
       alert(
         e?.message?.includes("Only secure origins")
           ? "Location requires HTTPS. Use your ngrok URL on phone, or localhost on laptop."
-          : "Could not get your location. Please allow location."
+          : "Could not get your location. Please allow location.",
       );
     } finally {
       setLocLoading(false);
@@ -312,7 +303,7 @@ export default function ClientRegister() {
   async function loadNearby() {
     if (lat == null || lon == null) {
       alert(
-        "Click ‘Use my location’ first so we can find professionals near you."
+        "Click ‘Use my location’ first so we can find professionals near you.",
       );
       return;
     }
@@ -322,8 +313,7 @@ export default function ClientRegister() {
         params: { lat, lon, radiusKm: 25 },
       });
       setNearby(data?.items || []);
-      if (!data?.items?.length)
-        flashOK("No professionals within 25km (yet).");
+      if (!data?.items?.length) flashOK("No professionals within 25km (yet).");
     } catch {
       setErr("Could not search nearby professionals.");
     } finally {
@@ -395,9 +385,7 @@ export default function ClientRegister() {
 
               <button
                 type="button"
-                onClick={() =>
-                  nav("/aws-liveness?back=/client/register")
-                }
+                onClick={() => nav("/aws-liveness?back=/client/register")}
                 className="px-3 py-1.5 rounded-lg border border-yellow-500/80 text-yellow-200 text-sm hover:bg-yellow-500/10"
               >
                 Start Face Verification

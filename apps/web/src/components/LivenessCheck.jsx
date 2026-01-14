@@ -34,7 +34,7 @@ async function uploadImageOrReturn(dataUrl, folder) {
   if (folder) form.append("folder", folder);
   const r = await fetch(
     `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`,
-    { method: "POST", body: form }
+    { method: "POST", body: form },
   );
   if (!r.ok) throw new Error("Image upload failed");
   const j = await r.json();
@@ -53,7 +53,7 @@ async function uploadVideoOrReturn(blob, folder) {
   if (folder) form.append("folder", folder);
   const r = await fetch(
     `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/video/upload`,
-    { method: "POST", body: form }
+    { method: "POST", body: form },
   );
   if (!r.ok) throw new Error("Video upload failed");
   const j = await r.json();
@@ -156,11 +156,11 @@ export default function LivenessCheck({
       try {
         await loadScriptOnce(
           "https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.min.js",
-          "mp-face-mesh"
+          "mp-face-mesh",
         );
         await loadScriptOnce(
           "https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js",
-          "mp-cam-utils"
+          "mp-cam-utils",
         );
 
         const v = videoRef.current;
@@ -223,7 +223,7 @@ export default function LivenessCheck({
       } catch (e) {
         console.error(e);
         setError(
-          "Camera permission or model loading failed. Please allow camera access or try again."
+          "Camera permission or model loading failed. Please allow camera access or try again.",
         );
       }
     })();
@@ -275,7 +275,7 @@ export default function LivenessCheck({
     // ===== overlay with STANDING OVAL =====
     const cx = canvas.width / 2;
     const cy = canvas.height / 2;
-    const rx = canvas.width * 0.18;  // narrow → not sleeping
+    const rx = canvas.width * 0.18; // narrow → not sleeping
     const ry = canvas.height * 0.34; // tall → standing egg
 
     ctx.save();
@@ -313,7 +313,7 @@ export default function LivenessCheck({
         canvas.width - Math.floor(pct * canvas.width),
         canvas.height - 6,
         Math.floor(pct * canvas.width),
-        6
+        6,
       );
     }
   }
@@ -415,8 +415,8 @@ export default function LivenessCheck({
               {busy
                 ? "Processing…"
                 : Object.keys(okMap).length < steps.length
-                ? "Complete steps to continue"
-                : "Finish"}
+                  ? "Complete steps to continue"
+                  : "Finish"}
             </button>
           </div>
         </div>
@@ -457,7 +457,7 @@ export function openLiveness(opts = {}) {
         onClose={handleClose}
         onPass={handlePass}
         {...opts}
-      />
+      />,
     );
   });
 }

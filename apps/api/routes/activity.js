@@ -105,7 +105,7 @@ router.get("/activity/:uid", tryAuth, async (req, res) => {
           media: p.media,
           proOwnerUid: p.proOwnerUid,
         },
-      })
+      }),
     );
 
     comments.forEach((c) =>
@@ -113,7 +113,7 @@ router.get("/activity/:uid", tryAuth, async (req, res) => {
         kind: "comment",
         createdAt: c.createdAt,
         payload: c,
-      })
+      }),
     );
 
     follows.forEach((f) =>
@@ -121,7 +121,7 @@ router.get("/activity/:uid", tryAuth, async (req, res) => {
         kind: "follow",
         createdAt: f.createdAt,
         payload: f,
-      })
+      }),
     );
 
     bookings.forEach((b) =>
@@ -129,7 +129,7 @@ router.get("/activity/:uid", tryAuth, async (req, res) => {
         kind: "booking",
         createdAt: b.createdAt,
         payload: b,
-      })
+      }),
     );
 
     notifications.forEach((n) =>
@@ -137,12 +137,10 @@ router.get("/activity/:uid", tryAuth, async (req, res) => {
         kind: "notification",
         createdAt: n.createdAt,
         payload: n,
-      })
+      }),
     );
 
-    normalized.sort(
-      (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
-    );
+    normalized.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
     return res.json({ items: normalized.slice(0, limit) });
   } catch (e) {
@@ -174,6 +172,5 @@ router.get("/activity/profile-stats/:uid", tryAuth, async (req, res) => {
     return res.status(500).json({ error: "stats_failed" });
   }
 });
-
 
 export default router;

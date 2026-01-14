@@ -33,7 +33,7 @@ export default function payoutRoutes({ requireAuth, Application }) {
             "payoutBank.accountName": accountName,
           },
         },
-        { new: true, upsert: true, setDefaultsOnInsert: true }
+        { new: true, upsert: true, setDefaultsOnInsert: true },
       );
 
       return res.json({ ok: true, payoutBank: doc?.payoutBank || null });
@@ -49,104 +49,123 @@ export default function payoutRoutes({ requireAuth, Application }) {
   //    - Hold: 3 days after completion (configurable)
   //    - Fee: 3% (already in Settings as payouts.instantCashoutFeePercent)
   // ----------------------------
-    router.post("/payouts/instant-cashout/:bookingId", requireAuth, async (req, res) => {
-    try {
-      const bookingId = String(req.params.bookingId || "").trim();
-      if (!/^[0-9a-fA-F]{24}$/.test(bookingId)) {
-        return res.status(400).json({ error: "invalid_booking_id" });
-      }
+  router.post(
+    "/payouts/instant-cashout/:bookingId",
+    requireAuth,
+    async (req, res) => {
+      try {
+        const bookingId = String(req.params.bookingId || "").trim();
+        if (!/^[0-9a-fA-F]{24}$/.test(bookingId)) {
+          return res.status(400).json({ error: "invalid_booking_id" });
+        }
 
-      const booking = await Booking.findById(bookingId).lean();
-      if (!booking) return res.status(404).json({ error: "booking_not_found" });
+        const booking = await Booking.findById(bookingId).lean();
+        if (!booking)
+          return res.status(404).json({ error: "booking_not_found" });
 
-      // pro-only: must own this booking
-      if (String(booking.proOwnerUid || "") !== String(req.user.uid)) {
-        return res.status(403).json({ error: "not_your_booking" });
-      }
+        // pro-only: must own this booking
+        if (String(booking.proOwnerUid || "") !== String(req.user.uid)) {
+          return res.status(403).json({ error: "not_your_booking" });
+        }
 
-      // must be paid + completed
-      if (booking.paymentStatus !== "paid") return res.status(400).json({ error: "not_paid" });
-      if (booking.status !== "completed") return res.status(400).json({ error: "not_completed" });
+        // must be paid + completed
+        if (booking.paymentStatus !== "paid")
+          return res.status(400).json({ error: "not_paid" });
+        if (booking.status !== "completed")
+          return res.status(400).json({ error: "not_completed" });
 
-      // idempotency: already cashed out?
-      if (booking?.meta?.instantCashout === true) {
-        return res.json({ ok: true, alreadyCashedOut: true });
-      }
+        // idempotency: already cashed out?
+        if (booking?.meta?.instantCashout === true) {
+          return res.json({ ok: true, alreadyCashedOut: true });
+        }
 
-      // safety hold (default 3 days)
-      const Settings = mongoose.models.Settings;
-      const s = Settings ? await Settings.findOne().lean() : null;
-      const holdDays = Number(s?.payouts?.instantCashoutHoldDays ?? 3);
-      const cutoff = Date.now() - holdDays * 24 * 60 * 60 * 1000;
+        // safety hold (default 3 days)
+        const Settings = mongoose.models.Settings;
+        const s = Settings ? await Settings.findOne().lean() : null;
+        const holdDays = Number(s?.payouts?.instantCashoutHoldDays ?? 3);
+        const cutoff = Date.now() - holdDays * 24 * 60 * 60 * 1000;
 
-      const completedAtMs = booking.completedAt ? new Date(booking.completedAt).getTime() : 0;
-      if (!completedAtMs || completedAtMs > cutoff) {
-        return res.status(400).json({
-          error: "hold_active",
-          message: `Instant cashout available after ${holdDays} day(s) from completion.`,
-        });
-      }
+        const completedAtMs = booking.completedAt
+          ? new Date(booking.completedAt).getTime()
+          : 0;
+        if (!completedAtMs || completedAtMs > cutoff) {
+          return res.status(400).json({
+            error: "hold_active",
+            message: `Instant cashout available after ${holdDays} day(s) from completion.`,
+          });
+        }
 
-      // ✅ pull exact amount credited for THIS booking (no guessing)
-      const fundTx = await WalletTx.findOne({
-        ownerUid: req.user.uid,
-        type: "booking_fund",
-        "meta.bookingId": booking._id.toString(),
-      })
-        .sort({ createdAt: 1 })
-        .lean();
+        // ✅ pull exact amount credited for THIS booking (no guessing)
+        const fundTx = await WalletTx.findOne({
+          ownerUid: req.user.uid,
+          type: "booking_fund",
+          "meta.bookingId": booking._id.toString(),
+        })
+          .sort({ createdAt: 1 })
+          .lean();
 
-      const creditedKobo = Math.floor(Number(fundTx?.amountKobo || 0));
-      if (!creditedKobo || creditedKobo <= 0) {
-        return res.status(400).json({ error: "not_funded_yet" });
-      }
+        const creditedKobo = Math.floor(Number(fundTx?.amountKobo || 0));
+        if (!creditedKobo || creditedKobo <= 0) {
+          return res.status(400).json({ error: "not_funded_yet" });
+        }
 
-      // ✅ strong idempotency: block if already cashed out in ledger
-      const already = await WalletTx.findOne({
-        ownerUid: req.user.uid,
-        type: "withdraw_pending",
-        "meta.bookingId": booking._id.toString(),
-        "meta.reason": "instant_cashout",
-      }).lean();
+        // ✅ strong idempotency: block if already cashed out in ledger
+        const already = await WalletTx.findOne({
+          ownerUid: req.user.uid,
+          type: "withdraw_pending",
+          "meta.bookingId": booking._id.toString(),
+          "meta.reason": "instant_cashout",
+        }).lean();
 
-      if (already) {
+        if (already) {
+          await Booking.updateOne(
+            { _id: booking._id },
+            {
+              $set: {
+                payoutReleased: true,
+                "meta.instantCashout": true,
+                "meta.instantCashoutAt": new Date(),
+              },
+            },
+          );
+          return res.json({ ok: true, alreadyCashedOut: true });
+        }
+
+        // ✅ perform the move: Pending → Available (minus fee)
+        const result = await withdrawPendingWithFee(
+          req.user.uid,
+          creditedKobo,
+          {
+            bookingId: booking._id.toString(),
+            reason: "instant_cashout",
+          },
+        );
+
+        // lock booking so auto-release cron won’t touch it later
         await Booking.updateOne(
           { _id: booking._id },
-          { $set: { payoutReleased: true, "meta.instantCashout": true, "meta.instantCashoutAt": new Date() } }
-        );
-        return res.json({ ok: true, alreadyCashedOut: true });
-      }
-
-      // ✅ perform the move: Pending → Available (minus fee)
-      const result = await withdrawPendingWithFee(req.user.uid, creditedKobo, {
-        bookingId: booking._id.toString(),
-        reason: "instant_cashout",
-      });
-
-      // lock booking so auto-release cron won’t touch it later
-      await Booking.updateOne(
-        { _id: booking._id },
-        {
-          $set: {
-            payoutReleased: true,
-            "meta.instantCashout": true,
-            "meta.instantCashoutAt": new Date(),
-            "meta.instantCashoutFeeKobo": result?.feeKobo ?? 0,
-            "meta.instantCashoutNetKobo": result?.creditedAvailableKobo ?? 0,
+          {
+            $set: {
+              payoutReleased: true,
+              "meta.instantCashout": true,
+              "meta.instantCashoutAt": new Date(),
+              "meta.instantCashoutFeeKobo": result?.feeKobo ?? 0,
+              "meta.instantCashoutNetKobo": result?.creditedAvailableKobo ?? 0,
+            },
           },
-        }
-      );
+        );
 
-      return res.json({
-        ok: true,
-        bookingId: booking._id.toString(),
-        ...result,
-      });
-    } catch (e) {
-      console.error("[payouts/instant-cashout] error:", e?.message || e);
-      return res.status(500).json({ error: "instant_cashout_failed" });
-    }
-  });
+        return res.json({
+          ok: true,
+          bookingId: booking._id.toString(),
+          ...result,
+        });
+      } catch (e) {
+        console.error("[payouts/instant-cashout] error:", e?.message || e);
+        return res.status(500).json({ error: "instant_cashout_failed" });
+      }
+    },
+  );
 
   return router;
 }

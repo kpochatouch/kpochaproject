@@ -76,18 +76,14 @@ export default function adminProsRoutes({
           fresh.displayName ||
           fresh.fullName ||
           fresh.name ||
-          [
-            fresh?.identity?.firstName,
-            fresh?.identity?.lastName,
-          ].filter(Boolean).join(" ").trim() ||
+          [fresh?.identity?.firstName, fresh?.identity?.lastName]
+            .filter(Boolean)
+            .join(" ")
+            .trim() ||
           pro.name ||
           "";
 
-        const phone =
-          fresh.phone ||
-          fresh?.identity?.phone ||
-          pro.phone ||
-          "";
+        const phone = fresh.phone || fresh?.identity?.phone || pro.phone || "";
 
         // raw profiles are now uppercase for state/lga in Profile.js, keep that
         const lga = (fresh.lga || pro.lga || "").toString().toUpperCase();
@@ -129,7 +125,7 @@ export default function adminProsRoutes({
             {
               $or: [{ uid: ownerUid }, { clientId: ownerUid }],
             },
-            { $set: appSet }
+            { $set: appSet },
           );
         }
 
@@ -138,7 +134,7 @@ export default function adminProsRoutes({
         console.error("[admin:pros:resync] error:", err);
         return res.status(500).json({ error: "resync_failed" });
       }
-    }
+    },
   );
 
   return r;

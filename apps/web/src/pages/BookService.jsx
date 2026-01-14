@@ -7,7 +7,6 @@ import { useEffect, useState, useRef } from "react";
 import { api } from "../lib/api";
 import { getAuth, onAuthStateChanged } from "firebase/auth";
 
-
 function usePaystackReady() {
   const [ready, setReady] = useState(!!window.PaystackPop);
   useEffect(() => {
@@ -46,7 +45,9 @@ async function getIdTokenOrNull(timeoutMs = 5000) {
         unsub = onAuthStateChanged(auth, async (user) => {
           if (done) return;
           done = true;
-          try { unsub(); } catch {}
+          try {
+            unsub();
+          } catch {}
           if (!user) return resolve(null);
           try {
             const t = await user.getIdToken(false);
@@ -61,7 +62,9 @@ async function getIdTokenOrNull(timeoutMs = 5000) {
       setTimeout(() => {
         if (!done) {
           done = true;
-          try { unsub(); } catch {}
+          try {
+            unsub();
+          } catch {}
           resolve(null);
         }
       }, timeoutMs);
@@ -72,7 +75,6 @@ async function getIdTokenOrNull(timeoutMs = 5000) {
   }
 }
 
-
 export default function BookService() {
   const { barberId } = useParams();
   const nav = useNavigate();
@@ -82,7 +84,8 @@ export default function BookService() {
   // carried from Browse / BarberCard
   const carry = location.state || {};
   const carriedService = carry.serviceName || "";
-  const carriedAmount = typeof carry.amountNaira !== "undefined" ? carry.amountNaira : "";
+  const carriedAmount =
+    typeof carry.amountNaira !== "undefined" ? carry.amountNaira : "";
   const carriedState = (carry.state || "").toString().toUpperCase();
   const carriedLga = (carry.lga || "").toString().toUpperCase();
 
@@ -96,7 +99,7 @@ export default function BookService() {
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
 
-    // load pro + me + client-profile — wait for Firebase auth before calling protected endpoints
+  // load pro + me + client-profile — wait for Firebase auth before calling protected endpoints
   useEffect(() => {
     let alive = true;
     let unsub = null;
@@ -132,32 +135,41 @@ export default function BookService() {
           }
         } catch (innerErr) {
           // client profile may be absent for some users — that's okay
-          console.info("[book] no client profile (ok)", innerErr?.response?.data || innerErr?.message || innerErr);
+          console.info(
+            "[book] no client profile (ok)",
+            innerErr?.response?.data || innerErr?.message || innerErr,
+          );
         }
 
         // best-effort GPS → to help the pro
-if ("geolocation" in navigator) {
-  navigator.geolocation.getCurrentPosition(
-    (pos) => {
-      if (!alive) return;
-      const { latitude: lat, longitude } = pos.coords || {};
-      // use `lng` name to match server expectation (and avoid NaN casts)
-      const lng = typeof longitude !== "undefined" ? Number(longitude) : undefined;
-      const latNum = typeof lat !== "undefined" ? Number(lat) : undefined;
-      if (Number.isFinite(latNum) && Number.isFinite(lng)) {
-        setCoords({ lat: latNum, lng });
-      } else {
-        // fallback to leaving coords null if we couldn't get usable numbers
-        setCoords(null);
-      }
-    },
-    () => {},
-    { enableHighAccuracy: true, timeout: 10000 }
-  );
-}
-
+        if ("geolocation" in navigator) {
+          navigator.geolocation.getCurrentPosition(
+            (pos) => {
+              if (!alive) return;
+              const { latitude: lat, longitude } = pos.coords || {};
+              // use `lng` name to match server expectation (and avoid NaN casts)
+              const lng =
+                typeof longitude !== "undefined"
+                  ? Number(longitude)
+                  : undefined;
+              const latNum =
+                typeof lat !== "undefined" ? Number(lat) : undefined;
+              if (Number.isFinite(latNum) && Number.isFinite(lng)) {
+                setCoords({ lat: latNum, lng });
+              } else {
+                // fallback to leaving coords null if we couldn't get usable numbers
+                setCoords(null);
+              }
+            },
+            () => {},
+            { enableHighAccuracy: true, timeout: 10000 },
+          );
+        }
       } catch (err) {
-        console.error("[book] protected fetch error:", err?.response?.data || err?.message || err);
+        console.error(
+          "[book] protected fetch error:",
+          err?.response?.data || err?.message || err,
+        );
         if (alive) setErr("Could not load booking.");
       }
     }
@@ -199,105 +211,115 @@ if ("geolocation" in navigator) {
     };
   }, [barberId]);
 
-
   // If no carriedService, fall back to the first service from backend
-const fallbackServiceName =
-  carriedService ||
-  (Array.isArray(barber?.services) && barber.services.length
-    ? (typeof barber.services[0] === "string"
-        ? barber.services[0]                     // string style
-        : barber.services[0]?.name || "")        // object style { name, price }
-    : "");
+  const fallbackServiceName =
+    carriedService ||
+    (Array.isArray(barber?.services) && barber.services.length
+      ? typeof barber.services[0] === "string"
+        ? barber.services[0] // string style
+        : barber.services[0]?.name || "" // object style { name, price }
+      : "");
 
-const serviceName = fallbackServiceName;
+  const serviceName = fallbackServiceName;
 
-// Amount: use carriedAmount if present, otherwise price of that first service
-const amountNaira =
-  carriedAmount !== "" && carriedAmount !== null && typeof carriedAmount !== "undefined"
-    ? Number(carriedAmount)
-    : (Array.isArray(barber?.services) && barber.services.length
+  // Amount: use carriedAmount if present, otherwise price of that first service
+  const amountNaira =
+    carriedAmount !== "" &&
+    carriedAmount !== null &&
+    typeof carriedAmount !== "undefined"
+      ? Number(carriedAmount)
+      : Array.isArray(barber?.services) && barber.services.length
         ? Number(
             typeof barber.services[0] === "string"
               ? 0
-              : barber.services[0]?.price || 0
+              : barber.services[0]?.price || 0,
           )
-        : 0);
+        : 0;
 
+  async function startPaystackInline(booking, idToken = null) {
+    if (!window.PaystackPop || typeof window.PaystackPop.setup !== "function") {
+      throw new Error("paystack_not_ready");
+    }
+    const email = me?.email || "customer@example.com";
 
-async function startPaystackInline(booking, idToken = null) {
-  if (!window.PaystackPop || typeof window.PaystackPop.setup !== "function") {
-    throw new Error("paystack_not_ready");
-  }
-  const email = me?.email || "customer@example.com";
+    return new Promise((resolve, reject) => {
+      const handler = window.PaystackPop.setup({
+        key: String(import.meta.env.VITE_PAYSTACK_PUBLIC_KEY || ""),
+        email,
+        amount: Number(booking.amountKobo),
+        ref: "BOOKING-" + booking._id,
+        metadata: {
+          custom_fields: [
+            {
+              display_name: "Service",
+              variable_name: "service",
+              value: serviceName,
+            },
+            {
+              display_name: "Address",
+              variable_name: "address",
+              value: address.trim(),
+            },
+            coords
+              ? {
+                  display_name: "GPS",
+                  variable_name: "gps",
+                  value: `${coords.lat},${coords.lng}`,
+                }
+              : null,
+          ].filter(Boolean),
+        },
 
-  return new Promise((resolve, reject) => {
-    const handler = window.PaystackPop.setup({
-      key: String(import.meta.env.VITE_PAYSTACK_PUBLIC_KEY || ""),
-      email,
-      amount: Number(booking.amountKobo),
-      ref: "BOOKING-" + booking._id,
-      metadata: {
-        custom_fields: [
-          { display_name: "Service", variable_name: "service", value: serviceName },
-          { display_name: "Address", variable_name: "address", value: address.trim() },
-          coords
-            ? {
-                display_name: "GPS",
-                variable_name: "gps",
-                value: `${coords.lat},${coords.lng}`,
-              }
-            : null,
-        ].filter(Boolean),
-      },
+        // NOTE: plain function; async work inside
+        callback: function (res) {
+          (async () => {
+            try {
+              const headers = idToken
+                ? { Authorization: `Bearer ${idToken}` }
+                : {};
 
-      // NOTE: plain function; async work inside
-      callback: function (res) {
-        (async () => {
-          try {
-            const headers = idToken ? { Authorization: `Bearer ${idToken}` } : {};
+              // optional: verify immediately
+              await api.post(
+                "/api/payments/verify",
+                { bookingId: booking._id, reference: res.reference },
+                { headers },
+              );
 
-            // optional: verify immediately
-            await api.post(
-              "/api/payments/verify",
-              { bookingId: booking._id, reference: res.reference },
-              { headers }
-            );
+              // save info for PaymentConfirm.jsx
+              sessionStorage.setItem(
+                "pay_ref",
+                JSON.stringify({
+                  bookingId: booking._id,
+                  reference: res.reference,
+                }),
+              );
 
-            // save info for PaymentConfirm.jsx
-            sessionStorage.setItem(
-              "pay_ref",
-              JSON.stringify({
-                bookingId: booking._id,
-                reference: res.reference,
-              })
-            );
+              // go to payment confirm page (not booking details)
+              nav(
+                `/payment/confirm?bookingId=${booking._id}&reference=${encodeURIComponent(
+                  res.reference,
+                )}`,
+              );
 
-            // go to payment confirm page (not booking details)
-            nav(
-              `/payment/confirm?bookingId=${booking._id}&reference=${encodeURIComponent(
-                res.reference
-              )}`
-            );
+              resolve();
+            } catch (e) {
+              console.error(
+                "verify payment error:",
+                e?.response?.data || e?.message || e,
+              );
+              reject(e);
+            }
+          })();
+        },
 
-            resolve();
-          } catch (e) {
-            console.error("verify payment error:", e?.response?.data || e?.message || e);
-            reject(e);
-          }
-        })();
-      },
+        onClose: function () {
+          reject(new Error("pay_cancelled"));
+        },
+      });
 
-      onClose: function () {
-        reject(new Error("pay_cancelled"));
-      },
+      handler.openIframe();
     });
-
-    handler.openIframe();
-  });
-}
-
-
-
+  }
 
   async function startPaystackRedirect(booking) {
     // fallback if inline fails
@@ -317,7 +339,9 @@ async function startPaystackInline(booking, idToken = null) {
       return;
     }
     if (!client?.fullName || !client?.phone) {
-      setErr("Update your client profile (name + phone + address) before booking.");
+      setErr(
+        "Update your client profile (name + phone + address) before booking.",
+      );
       return;
     }
     if (!serviceName) {
@@ -325,131 +349,133 @@ async function startPaystackInline(booking, idToken = null) {
       return;
     }
 
-// compute amount in kobo and validate
-const amountNairaNum = Number(amountNaira || 0);
-if (!Number.isFinite(amountNairaNum) || amountNairaNum <= 0) {
-  setErr("Invalid price for this service.");
-  return;
-}
-const amountKobo = Math.round(amountNairaNum * 100);
-if (!Number.isFinite(amountKobo) || amountKobo <= 0) {
-  setErr("Invalid price for this service.");
-  return;
-}
+    // compute amount in kobo and validate
+    const amountNairaNum = Number(amountNaira || 0);
+    if (!Number.isFinite(amountNairaNum) || amountNairaNum <= 0) {
+      setErr("Invalid price for this service.");
+      return;
+    }
+    const amountKobo = Math.round(amountNairaNum * 100);
+    if (!Number.isFinite(amountKobo) || amountKobo <= 0) {
+      setErr("Invalid price for this service.");
+      return;
+    }
 
-if (!address.trim()) {
-  setErr("Please confirm or edit your address/landmark.");
-  return;
-}
+    if (!address.trim()) {
+      setErr("Please confirm or edit your address/landmark.");
+      return;
+    }
 
-// NORMALIZE COORDS -> ensure we send numeric { lat, lng } or null
-const normalizedCoords =
-  coords && typeof coords === "object" && (coords.lat != null || coords.latitude != null)
-    ? (() => {
-        const latRaw = coords.lat ?? coords.latitude;
-        // accept either lon or lng or longitude
-        const lngRaw = coords.lng ?? coords.lon ?? coords.longitude;
-        const latNum = Number(latRaw);
-        const lngNum = Number(lngRaw);
-        // only send coords when both are valid numbers
-        if (Number.isFinite(latNum) && Number.isFinite(lngNum)) {
-          return { lat: latNum, lng: lngNum };
-        }
-        return null;
-      })()
-    : null;
+    // NORMALIZE COORDS -> ensure we send numeric { lat, lng } or null
+    const normalizedCoords =
+      coords &&
+      typeof coords === "object" &&
+      (coords.lat != null || coords.latitude != null)
+        ? (() => {
+            const latRaw = coords.lat ?? coords.latitude;
+            // accept either lon or lng or longitude
+            const lngRaw = coords.lng ?? coords.lon ?? coords.longitude;
+            const latNum = Number(latRaw);
+            const lngNum = Number(lngRaw);
+            // only send coords when both are valid numbers
+            if (Number.isFinite(latNum) && Number.isFinite(lngNum)) {
+              return { lat: latNum, lng: lngNum };
+            }
+            return null;
+          })()
+        : null;
 
-const payload = {
-  proId: barberId,
-  serviceName,
-  amountKobo,
-  addressText: address.trim(),
+    const payload = {
+      proId: barberId,
+      serviceName,
+      amountKobo,
+      addressText: address.trim(),
 
-  // ✅ match backend fields (/bookings/instant expects these)
-  clientName: client.fullName,
-  clientPhone: client.phone,
+      // ✅ match backend fields (/bookings/instant expects these)
+      clientName: client.fullName,
+      clientPhone: client.phone,
 
-  country: "Nigeria",
-  state: carriedState || client.state || "",
-  lga: carriedLga || client.lga || "",
-  coords: normalizedCoords,
+      country: "Nigeria",
+      state: carriedState || client.state || "",
+      lga: carriedLga || client.lga || "",
+      coords: normalizedCoords,
 
-  // backend uses paymentMethodRequested in meta
-  paymentMethod: "card",
-};
+      // backend uses paymentMethodRequested in meta
+    };
 
-
-try {
-  setBusy(true);
-
-  // 1) Availability check (only if we have coords)
-  if (normalizedCoords) {
     try {
-      const { data: avail } = await api.post("/api/availability/check", {
-        lat: normalizedCoords.lat,
-        lng: normalizedCoords.lng,
-      });
+      setBusy(true);
 
-      if (!avail?.ok) {
-        if (avail?.reason === "NO_PRO_AVAILABLE") {
-          setErr("No professional is currently available around this location.");
-        } else {
-          setErr("Could not confirm availability. Please try again in a moment.");
+      // 1) Availability check (only if we have coords)
+      if (normalizedCoords) {
+        try {
+          const { data: avail } = await api.post("/api/availability/check", {
+            lat: normalizedCoords.lat,
+            lng: normalizedCoords.lng,
+          });
+
+          if (!avail?.ok) {
+            if (avail?.reason === "NO_PRO_AVAILABLE") {
+              setErr(
+                "No professional is currently available around this location.",
+              );
+            } else {
+              setErr(
+                "Could not confirm availability. Please try again in a moment.",
+              );
+            }
+            return; // stop here, do not create booking
+          }
+
+          // Optionally: you can show ETA somewhere later with avail.etaMins
+          // e.g., "Pro can arrive in about 10 minutes"
+        } catch (e) {
+          console.error(
+            "[availability] check failed:",
+            e?.response?.data || e?.message || e,
+          );
+          // Fail-soft: you can either block or allow booking when availability fails.
+          // I'll allow booking but you can choose to block if you prefer.
+          // setErr("We couldn't confirm availability right now. Please try again.");
+          // return;
         }
-        return; // stop here, do not create booking
       }
 
-      // Optionally: you can show ETA somewhere later with avail.etaMins
-      // e.g., "Pro can arrive in about 10 minutes"
+      // 2) Get ID token (if any) and attach to headers
+      const idToken = await getIdTokenOrNull();
+      const headers = idToken ? { Authorization: `Bearer ${idToken}` } : {};
+
+      // 3) Create booking (protected route)
+      const { data } = await api.post("/api/bookings/instant", payload, {
+        headers,
+      });
+      const booking = data?.booking || data;
+      if (!booking?._id) {
+        console.error("booking create response:", data);
+        throw new Error("booking_init_failed");
+      }
+
+      // 4) Payment happens on BookingDetails (wallet OR card)
+      // This keeps the flow simple and avoids duplicate Paystack logic.
+      nav(`/bookings/${booking._id}`);
+      return;
     } catch (e) {
-      console.error("[availability] check failed:", e?.response?.data || e?.message || e);
-      // Fail-soft: you can either block or allow booking when availability fails.
-      // I'll allow booking but you can choose to block if you prefer.
-      // setErr("We couldn't confirm availability right now. Please try again.");
-      // return;
+      console.error("handleBook error:", e?.response?.data || e?.message || e);
+      const serverMsg = e?.response?.data?.error || e?.response?.data?.message;
+      setErr(serverMsg || "Booking failed. Please try again.");
+    } finally {
+      setBusy(false);
     }
   }
-
-  // 2) Get ID token (if any) and attach to headers
-  const idToken = await getIdTokenOrNull();
-  const headers = idToken ? { Authorization: `Bearer ${idToken}` } : {};
-
-  // 3) Create booking (protected route)
-  const { data } = await api.post("/api/bookings/instant", payload, { headers });
-  const booking = data?.booking || data;
-  if (!booking?._id) {
-    console.error("booking create response:", data);
-    throw new Error("booking_init_failed");
-  }
-
-  // 4) Go to Paystack
-  try {
-    if (paystackReady) {
-      await startPaystackInline(booking, idToken);
-    } else {
-      await startPaystackRedirect(booking);
-    }
-  } catch (e) {
-    console.error("Payment start error:", e);
-    setErr("Payment could not start. Open the booking detail to pay again.");
-    nav(`/bookings/${booking._id}`);
-  }
-} catch (e) {
-  console.error("handleBook error:", e?.response?.data || e?.message || e);
-  const serverMsg = e?.response?.data?.error || e?.response?.data?.message;
-  setErr(serverMsg || "Booking failed. Please try again.");
-} finally {
-  setBusy(false);
-}
-  }
-
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-10">
       <h1 className="text-2xl font-semibold mb-2">Confirm &amp; Pay</h1>
       <p className="text-zinc-400 mb-6">
         You&apos;re booking{" "}
-        <span className="text-gold font-medium">{barber?.name || "Professional"}</span>
+        <span className="text-gold font-medium">
+          {barber?.name || "Professional"}
+        </span>
       </p>
 
       {err && (
@@ -473,14 +499,17 @@ try {
         <div className="flex items-center justify-between">
           <span className="text-sm text-zinc-400">Area</span>
           <span>
-            {carriedState || client?.state || "—"} • {carriedLga || client?.lga || "—"}
+            {carriedState || client?.state || "—"} •{" "}
+            {carriedLga || client?.lga || "—"}
           </span>
         </div>
       </div>
 
       {/* address (only editable part) */}
       <label className="block mb-6">
-        <div className="text-sm text-zinc-300 mb-1">Address / Landmark (edit for this booking)</div>
+        <div className="text-sm text-zinc-300 mb-1">
+          Address / Landmark (edit for this booking)
+        </div>
         <input
           value={address}
           onChange={(e) => setAddress(e.target.value)}

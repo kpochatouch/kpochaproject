@@ -5,8 +5,8 @@ import { registerSocketHandler } from "../lib/api";
 /**
  * SAFE useSocket
  *
- * 
- * 
+ *
+ *
  * - ONLY manages handlers for this component.
  * - Does NOT call connectSocket()
  * - Does NOT call disconnectSocket()
@@ -35,7 +35,9 @@ export default function useSocket(initialHandlers = {}) {
       // cleanup registered handlers
       try {
         for (const off of Array.from(unregistersRef.current)) {
-          try { off(); } catch {}
+          try {
+            off();
+          } catch {}
         }
       } finally {
         unregistersRef.current.clear();

@@ -139,9 +139,7 @@ export default function VoiceMessageButton({ onRecorded, disabled = false }) {
 
   if (!supported) return null;
 
-  const label = recording
-    ? `🎧 ${seconds.toString().padStart(2, "0")}s`
-    : "🎧";
+  const label = recording ? `🎧 ${seconds.toString().padStart(2, "0")}s` : "🎧";
 
   return (
     <button
@@ -153,9 +151,7 @@ export default function VoiceMessageButton({ onRecorded, disabled = false }) {
         recording ? "bg-red-500 text-white" : "bg-zinc-900 text-zinc-200"
       }`}
       title={
-        recording
-          ? "Recording… tap to stop"
-          : "Tap to record a voice message"
+        recording ? "Recording… tap to stop" : "Tap to record a voice message"
       }
     >
       {label}

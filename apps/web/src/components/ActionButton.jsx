@@ -1,5 +1,11 @@
 //apps/web/src/components/ActionButton.jsx
-export default function ActionButton({ active = false, onClick, disabled = false, children, className = "" }) {
+export default function ActionButton({
+  active = false,
+  onClick,
+  disabled = false,
+  children,
+  className = "",
+}) {
   return (
     <button
       onClick={onClick}

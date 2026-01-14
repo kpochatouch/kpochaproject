@@ -71,11 +71,11 @@ export default function PostDetail() {
   const [duration, setDuration] = useState(0);
   const [seeking, setSeeking] = useState(false);
 
-  const lastTimeUpdateRef = useRef(0);       // UI throttle
+  const lastTimeUpdateRef = useRef(0); // UI throttle
   const playTriggeredByObserverRef = useRef(false); // keep API same as FeedCard
-  const hasSentInitialViewRef = useRef(false);      // for non-video single view
-  const watchAccumRef = useRef(0);           // seconds watched since last tick
-  const lastWatchTsRef = useRef(0);          // timestamp for watch-time
+  const hasSentInitialViewRef = useRef(false); // for non-video single view
+  const watchAccumRef = useRef(0); // seconds watched since last tick
+  const lastWatchTsRef = useRef(0); // timestamp for watch-time
 
   // 🆕 auto-jump state
   const hasAutoJumpedRef = useRef(false);
@@ -154,13 +154,9 @@ export default function PostDetail() {
               ? srv.savesCount
               : prev.savesCount,
           likedByMe:
-            typeof srv.likedByMe === "boolean"
-              ? srv.likedByMe
-              : prev.likedByMe,
+            typeof srv.likedByMe === "boolean" ? srv.likedByMe : prev.likedByMe,
           savedByMe:
-            typeof srv.savedByMe === "boolean"
-              ? srv.savedByMe
-              : prev.savedByMe,
+            typeof srv.savedByMe === "boolean" ? srv.savedByMe : prev.savedByMe,
         }));
       } catch {
         // ignore
@@ -413,7 +409,10 @@ export default function PostDetail() {
     try {
       const res = await api.post(`/api/posts/${id}/comments`, { text: txt });
       const real = res?.data?.comment;
-      setComments((c) => [real || optimistic, ...c.filter((cm) => cm._id !== tmpId)]);
+      setComments((c) => [
+        real || optimistic,
+        ...c.filter((cm) => cm._id !== tmpId),
+      ]);
       mergeStatsFromServer(res?.data || {});
     } catch {
       setComments((c) => c.filter((cm) => cm._id !== tmpId));
@@ -444,11 +443,9 @@ export default function PostDetail() {
     if (!window.confirm("Delete / hide this post?")) return;
     setDeleting(true);
     try {
-      await api
-        .delete(`/api/posts/${id}`)
-        .catch(async () => {
-          await api.patch(`/api/posts/${id}/hide`);
-        });
+      await api.delete(`/api/posts/${id}`).catch(async () => {
+        await api.patch(`/api/posts/${id}/hide`);
+      });
       navigate("/browse", { replace: true });
     } catch {
       alert("Failed to delete/hide post");
@@ -560,18 +557,18 @@ export default function PostDetail() {
     }
 
     // 🆕 Auto-jump only when video is basically 100% done
-const total = duration || vid.duration || 0;
+    const total = duration || vid.duration || 0;
 
-if (
-  total > 0 &&
-  !hasAutoJumpedRef.current &&
-  nextPost &&
-  nextPost._id &&
-  (vid.currentTime || 0) >= total - 0.3 // last 0.3s ≈ 100%
-) {
-  hasAutoJumpedRef.current = true;
-  navigate(`/post/${nextPost._id}`);
-}
+    if (
+      total > 0 &&
+      !hasAutoJumpedRef.current &&
+      nextPost &&
+      nextPost._id &&
+      (vid.currentTime || 0) >= total - 0.3 // last 0.3s ≈ 100%
+    ) {
+      hasAutoJumpedRef.current = true;
+      navigate(`/post/${nextPost._id}`);
+    }
   }
 
   function onSeekStart() {
@@ -606,7 +603,7 @@ if (
     const baseDuration = duration || vid.duration || 0;
     const next = Math.min(
       Math.max((vid.currentTime || 0) + seconds, 0),
-      baseDuration || 0
+      baseDuration || 0,
     );
     vid.currentTime = next;
     setCurrentTime(next);
@@ -622,7 +619,8 @@ if (
       }
       if (vid.requestFullscreen) return void vid.requestFullscreen();
       const anyVid = /** @type {any} */ (vid);
-      if (anyVid.webkitEnterFullscreen) return void anyVid.webkitEnterFullscreen();
+      if (anyVid.webkitEnterFullscreen)
+        return void anyVid.webkitEnterFullscreen();
     } catch {
       // ignore
     }
@@ -711,7 +709,7 @@ if (
 
     try {
       const res = await api.get(
-        `/api/profile/public-by-uid/${encodeURIComponent(uid)}`
+        `/api/profile/public-by-uid/${encodeURIComponent(uid)}`,
       );
       const data = res?.data;
       if (data && data.profile && data.profile.username) {
@@ -862,7 +860,9 @@ if (
                       <button
                         onClick={async () => {
                           try {
-                            await api.patch(`/api/posts/${id}/comments/disable`);
+                            await api.patch(
+                              `/api/posts/${id}/comments/disable`,
+                            );
                             setPost((p) => ({ ...p, commentsDisabled: true }));
                             setShowComments(false);
                             setMenuOpen(false);
@@ -906,8 +906,8 @@ if (
       {media && (
         <div
           className="relative w-full bg-black overflow-hidden aspect-[4/5] sm:aspect-[4/5] lg:aspect-[3/4] xl:aspect-[1/1] max-h-[80vh]"
-          onTouchStart={handleSwipeStart}   // 🆕 swipe start
-          onTouchEnd={handleSwipeEnd}       // 🆕 swipe end
+          onTouchStart={handleSwipeStart} // 🆕 swipe start
+          onTouchEnd={handleSwipeEnd} // 🆕 swipe end
         >
           {isVideo ? (
             <>
@@ -994,15 +994,9 @@ if (
                   value={Math.min(currentTime, duration || 0)}
                   onMouseDown={onSeekStart}
                   onTouchStart={onSeekStart}
-                  onChange={(e) =>
-                    onSeekChange(Number(e.target.value || 0))
-                  }
-                  onMouseUp={(e) =>
-                    onSeekCommit(Number(e.target.value || 0))
-                  }
-                  onTouchEnd={(e) =>
-                    onSeekCommit(Number(e.target.value || 0))
-                  }
+                  onChange={(e) => onSeekChange(Number(e.target.value || 0))}
+                  onMouseUp={(e) => onSeekCommit(Number(e.target.value || 0))}
+                  onTouchEnd={(e) => onSeekCommit(Number(e.target.value || 0))}
                   className="w-full accent-[#F5C542]"
                 />
               </div>

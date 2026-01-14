@@ -187,11 +187,11 @@ export default function PublicProfile() {
                 : normalizePostsArray(data.posts.items || []);
             } else if (data._posts) {
               payloadPosts = normalizePostsArray(
-                Array.isArray(data._posts) ? data._posts : []
+                Array.isArray(data._posts) ? data._posts : [],
               );
             } else if (normalized._posts) {
               payloadPosts = normalizePostsArray(
-                Array.isArray(normalized._posts) ? normalized._posts : []
+                Array.isArray(normalized._posts) ? normalized._posts : [],
               );
             } else {
               payloadPosts = [];
@@ -209,10 +209,10 @@ export default function PublicProfile() {
       if (payloadProfile && payloadPosts.length === 0) {
         try {
           const pid = encodeURIComponent(
-            payloadProfile.ownerUid || payloadProfile.id || idOrHandle
+            payloadProfile.ownerUid || payloadProfile.id || idOrHandle,
           );
           const res = await api.get(
-            `/api/posts?ownerUid=${pid}&limit=${pageSize}`
+            `/api/posts?ownerUid=${pid}&limit=${pageSize}`,
           );
           payloadPosts = res?.data?.items || res?.data || [];
         } catch {
@@ -282,12 +282,14 @@ export default function PublicProfile() {
     const onProfileFollow = (payload) => {
       try {
         const eventOwner =
-          payload?.targetUid ?? payload?.target?.uid ?? payload?.ownerUid ?? null;
+          payload?.targetUid ??
+          payload?.target?.uid ??
+          payload?.ownerUid ??
+          null;
         if (!eventOwner || String(eventOwner) !== String(owner)) return;
 
         // legacy payload may carry followers/followersCount → patch quickly
-        const followers =
-          payload.followers ?? payload.followersCount ?? null;
+        const followers = payload.followers ?? payload.followersCount ?? null;
         if (typeof followers === "number") {
           setProfile((p) => ({
             ...(p || {}),
@@ -305,7 +307,6 @@ export default function PublicProfile() {
         console.warn("profile:follow handler failed", err?.message || err);
       }
     };
-
 
     // when a new post is created anywhere, if it belongs to this profile -> prepend
     const onPostCreated = (payload) => {
@@ -349,7 +350,7 @@ export default function PublicProfile() {
               ...p,
               stats: { ...(p.stats || {}), ...(payload.stats || payload) },
             };
-          })
+          }),
         );
       } catch (err) {
         console.warn("post:stats handler failed", err?.message || err);
@@ -398,7 +399,6 @@ export default function PublicProfile() {
     };
   }, [profile?.ownerUid, profile?.uid, profile?.id, fetchProfile]);
 
-
   /* ------------------------- follow / unfollow (optimistic) ------------------------- */
   useEffect(() => {
     const owner = canonicalOwnerUid(profile);
@@ -407,7 +407,7 @@ export default function PublicProfile() {
     (async () => {
       try {
         const { data } = await api.get(
-          `/api/follow/${encodeURIComponent(owner)}/status`
+          `/api/follow/${encodeURIComponent(owner)}/status`,
         );
         if (!alive) return;
         setFollowing(Boolean(data?.following));
@@ -420,7 +420,7 @@ export default function PublicProfile() {
     };
   }, [profile?.ownerUid, profile?.uid, profile?.id, fetchProfile]);
 
-    // Canonical stats loader – ensures followers/posts/jobs/rating survive refresh
+  // Canonical stats loader – ensures followers/posts/jobs/rating survive refresh
   useEffect(() => {
     const owner = canonicalOwnerUid(profile);
     if (!owner) return;
@@ -429,7 +429,7 @@ export default function PublicProfile() {
     (async () => {
       try {
         const { data } = await api.get(
-          `/api/activity/profile-stats/${encodeURIComponent(owner)}`
+          `/api/activity/profile-stats/${encodeURIComponent(owner)}`,
         );
         if (!alive || !data) return;
 
@@ -460,7 +460,6 @@ export default function PublicProfile() {
     };
   }, [profile?.ownerUid, profile?.uid, profile?.id]);
 
-
   async function follow() {
     const owner = canonicalOwnerUid(profile);
     if (!owner || followPending) return;
@@ -482,7 +481,7 @@ export default function PublicProfile() {
     }));
     try {
       const { data } = await api.post(
-        `/api/follow/${encodeURIComponent(owner)}`
+        `/api/follow/${encodeURIComponent(owner)}`,
       );
       setProfile((p) => ({
         ...(p || {}),
@@ -529,7 +528,7 @@ export default function PublicProfile() {
     }));
     try {
       const { data } = await api.delete(
-        `/api/follow/${encodeURIComponent(owner)}`
+        `/api/follow/${encodeURIComponent(owner)}`,
       );
       setProfile((p) => ({
         ...(p || {}),
@@ -584,20 +583,16 @@ export default function PublicProfile() {
     const svcPrice = primary?.price;
 
     // 4) Navigate to BookService with same shape as Browse.goBook
-    navigate(
-      `/book/${proId}?service=${encodeURIComponent(svcName || "")}`,
-      {
-        state: {
-          proId,
-          serviceName: svcName || undefined,
-          amountNaira:
-            typeof svcPrice !== "undefined" ? svcPrice : undefined,
-          country: "Nigeria",
-          state: (profile.state || "").toUpperCase(),
-          lga: (profile.lga || "").toUpperCase(),
-        },
-      }
-    );
+    navigate(`/book/${proId}?service=${encodeURIComponent(svcName || "")}`, {
+      state: {
+        proId,
+        serviceName: svcName || undefined,
+        amountNaira: typeof svcPrice !== "undefined" ? svcPrice : undefined,
+        country: "Nigeria",
+        state: (profile.state || "").toUpperCase(),
+        lga: (profile.lga || "").toUpperCase(),
+      },
+    });
   }
 
   /* ------------------ Posts pagination & infinite scroll ------------------ */
@@ -606,10 +601,7 @@ export default function PublicProfile() {
       const owner =
         profile?.ownerUid || canonicalOwnerUid(profile) || idOrHandle;
       if (!owner) {
-        console.warn(
-          "[PublicProfile] no owner uid, skip fetchPosts",
-          profile
-        );
+        console.warn("[PublicProfile] no owner uid, skip fetchPosts", profile);
         return;
       }
 
@@ -627,12 +619,12 @@ export default function PublicProfile() {
           list = Array.isArray(res.data)
             ? res.data
             : Array.isArray(res.data?.items)
-            ? res.data.items
-            : [];
+              ? res.data.items
+              : [];
         } catch (err) {
           console.warn(
             "[PublicProfile] /api/posts failed, will try /posts/author/:uid",
-            err?.response?.data || err?.message || err
+            err?.response?.data || err?.message || err,
           );
         }
 
@@ -640,18 +632,18 @@ export default function PublicProfile() {
         if (!list.length && !before) {
           try {
             const res2 = await api.get(
-              `/api/posts/author/${encodeURIComponent(owner)}`
+              `/api/posts/author/${encodeURIComponent(owner)}`,
             );
             const list2 = Array.isArray(res2.data)
               ? res2.data
               : Array.isArray(res2.data?.items)
-              ? res2.data.items
-              : [];
+                ? res2.data.items
+                : [];
             if (list2.length) list = list2;
           } catch (err2) {
             console.warn(
               "[PublicProfile] /api/posts/author fallback failed",
-              err2?.response?.data || err2?.message || err2
+              err2?.response?.data || err2?.message || err2,
             );
           }
         }
@@ -660,7 +652,7 @@ export default function PublicProfile() {
           setPosts((prev) => {
             const existing = new Set(prev.map((p) => p._id || p.id));
             const newItems = list.filter(
-              (it) => !existing.has(it._id || it.id)
+              (it) => !existing.has(it._id || it.id),
             );
             return newItems.length ? [...prev, ...newItems] : prev;
           });
@@ -677,7 +669,7 @@ export default function PublicProfile() {
         setLoadingPosts(false);
       }
     },
-    [profile, idOrHandle]
+    [profile, idOrHandle],
   );
 
   // attach IntersectionObserver for infinite scroll
@@ -702,15 +694,13 @@ export default function PublicProfile() {
               const rawCursor = last.createdAt || last._id || null;
               if (!rawCursor) return;
               const d = new Date(rawCursor);
-              const before = isNaN(d.getTime())
-                ? rawCursor
-                : d.toISOString();
+              const before = isNaN(d.getTime()) ? rawCursor : d.toISOString();
               fetchPosts({ append: true, before });
             }
           }
         }
       },
-      { root: null, rootMargin: "800px", threshold: 0 }
+      { root: null, rootMargin: "800px", threshold: 0 },
     );
     observerRef.current.observe(sentinel);
     return () => {
@@ -756,28 +746,21 @@ export default function PublicProfile() {
     typeof profile.ratingAverage === "number"
       ? Number(profile.ratingAverage)
       : typeof profile.metrics?.avgRating === "number"
-      ? Number(profile.metrics.avgRating)
-      : 0;
+        ? Number(profile.metrics.avgRating)
+        : 0;
 
   const badges = Array.isArray(profile.badges) ? profile.badges : [];
   const gallery = Array.isArray(profile.gallery) ? profile.gallery : [];
 
   const isAdmin = !!meIsAdmin || Boolean(currentUser?.isAdmin);
 
-    const followers =
-    profile.followersCount ?? profile.metrics?.followers ?? 0;
+  const followers = profile.followersCount ?? profile.metrics?.followers ?? 0;
 
   const postsCount =
-    profile.postsCount ??
-    profile.metrics?.postsCount ??
-    posts.length ??
-    0;
+    profile.postsCount ?? profile.metrics?.postsCount ?? posts.length ?? 0;
 
   const jobsCompleted =
-    profile.jobsCompleted ??
-    profile.metrics?.jobsCompleted ??
-    0;
-
+    profile.jobsCompleted ?? profile.metrics?.jobsCompleted ?? 0;
 
   return (
     <div className="min-h-screen bg-[#0b0c10] text-white">
@@ -830,16 +813,12 @@ export default function PublicProfile() {
                     ★
                   </span>
                 ))}
-                {Array.from({ length: 5 - Math.round(rating) }).map(
-                  (_, i) => (
-                    <span key={i} className="text-zinc-600">
-                      ★
-                    </span>
-                  )
-                )}
-                <span className="text-zinc-300 ml-1">
-                  {rating.toFixed(1)}
-                </span>
+                {Array.from({ length: 5 - Math.round(rating) }).map((_, i) => (
+                  <span key={i} className="text-zinc-600">
+                    ★
+                  </span>
+                ))}
+                <span className="text-zinc-300 ml-1">{rating.toFixed(1)}</span>
               </div>
             )}
           </div>
@@ -909,9 +888,7 @@ export default function PublicProfile() {
                     key={i}
                     className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3"
                   >
-                    <div className="font-medium">
-                      {svc.name || svc}
-                    </div>
+                    <div className="font-medium">{svc.name || svc}</div>
                     {svc.price != null && (
                       <div className="text-sm text-zinc-200 mt-1">
                         ₦{Number(svc.price).toLocaleString()}
@@ -967,8 +944,7 @@ export default function PublicProfile() {
             const meUsername =
               currentUser?.username || currentUser?.handle || null;
 
-            const ownerUid =
-              profile?.ownerUid || canonicalOwnerUid(profile);
+            const ownerUid = profile?.ownerUid || canonicalOwnerUid(profile);
             const profileUsername = profile?.username || profile?.id || null;
 
             // 1) If both have real UIDs -> require equality
@@ -977,9 +953,7 @@ export default function PublicProfile() {
                 return (
                   <FeedComposer
                     lga={profile.lga || ""}
-                    onPosted={() =>
-                      fetchPosts({ append: false, before: null })
-                    }
+                    onPosted={() => fetchPosts({ append: false, before: null })}
                   />
                 );
               }
@@ -996,9 +970,7 @@ export default function PublicProfile() {
               return (
                 <FeedComposer
                   lga={profile.lga || ""}
-                  onPosted={() =>
-                    fetchPosts({ append: false, before: null })
-                  }
+                  onPosted={() => fetchPosts({ append: false, before: null })}
                 />
               );
             }
@@ -1012,9 +984,7 @@ export default function PublicProfile() {
               return (
                 <FeedComposer
                   lga={profile.lga || ""}
-                  onPosted={() =>
-                    fetchPosts({ append: false, before: null })
-                  }
+                  onPosted={() => fetchPosts({ append: false, before: null })}
                 />
               );
             }
@@ -1049,9 +1019,7 @@ export default function PublicProfile() {
               {loadingMore ? (
                 <div className="text-sm text-zinc-400">Loading…</div>
               ) : !hasMore ? (
-                <div className="text-xs text-zinc-500">
-                  No more posts
-                </div>
+                <div className="text-xs text-zinc-500">No more posts</div>
               ) : null}
             </div>
           </section>
@@ -1065,9 +1033,7 @@ export default function PublicProfile() {
               <div className="text-sm text-zinc-200">
                 <div>
                   <strong>
-                    {profile.followersCount ??
-                      profile.metrics?.followers ??
-                      0}
+                    {profile.followersCount ?? profile.metrics?.followers ?? 0}
                   </strong>{" "}
                   followers
                 </div>
@@ -1086,9 +1052,7 @@ export default function PublicProfile() {
 
             <section className="rounded-lg border border-zinc-800 bg-black/40 p-4">
               <h2 className="text-lg font-semibold mb-2">Location</h2>
-              <p className="text-sm text-zinc-200">
-                {location || "Nigeria"}
-              </p>
+              <p className="text-sm text-zinc-200">{location || "Nigeria"}</p>
             </section>
 
             <section className="rounded-lg border border-zinc-800 bg-black/40 p-4">
@@ -1160,8 +1124,7 @@ export default function PublicProfile() {
                           fetchPosts({ append: false, before: null });
                         } catch (e) {
                           setAdMsg(
-                            e?.response?.data?.error ||
-                              "Failed to publish ad"
+                            e?.response?.data?.error || "Failed to publish ad",
                           );
                         }
                       }}
@@ -1171,9 +1134,7 @@ export default function PublicProfile() {
                     </button>
                   </div>
                   {adMsg && (
-                    <p className="text-[10px] text-zinc-500 mt-2">
-                      {adMsg}
-                    </p>
+                    <p className="text-[10px] text-zinc-500 mt-2">{adMsg}</p>
                   )}
                 </>
               ) : null}

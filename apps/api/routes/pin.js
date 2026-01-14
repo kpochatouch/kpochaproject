@@ -17,7 +17,7 @@ export default function pinRoutes({ requireAuth, Application }) {
 
   /* --------------------------- helpers --------------------------- */
   const isValidPin = (p) => typeof p === "string" && /^[0-9]{4,6}$/.test(p);
-  const hashPin = async (pin) => bcrypt.hash(pin, 10);          // simplified salt
+  const hashPin = async (pin) => bcrypt.hash(pin, 10); // simplified salt
   const verifyPin = (pin, hash) => bcrypt.compare(pin || "", hash || "");
 
   async function getOrCreateApp(uid, email) {
@@ -57,10 +57,12 @@ export default function pinRoutes({ requireAuth, Application }) {
       const pin = String(req.body?.pin || "").trim();
 
       if (!uid) return res.status(401).json({ error: "unauthorized" });
-      if (!isValidPin(pin)) return res.status(400).json({ error: "invalid_pin_format" });
+      if (!isValidPin(pin))
+        return res.status(400).json({ error: "invalid_pin_format" });
 
       const appDoc = await getOrCreateApp(uid, email);
-      if (appDoc.withdrawPinHash) return res.status(409).json({ error: "pin_already_set" });
+      if (appDoc.withdrawPinHash)
+        return res.status(409).json({ error: "pin_already_set" });
 
       appDoc.withdrawPinHash = await hashPin(pin);
       appDoc.hasPin = true;
@@ -81,11 +83,14 @@ export default function pinRoutes({ requireAuth, Application }) {
       const newPin = String(req.body?.newPin || "").trim();
 
       if (!uid) return res.status(401).json({ error: "unauthorized" });
-      if (!isValidPin(newPin)) return res.status(400).json({ error: "invalid_pin_format" });
-      if (hitLimit(uid)) return res.status(429).json({ error: "too_many_attempts" });
+      if (!isValidPin(newPin))
+        return res.status(400).json({ error: "invalid_pin_format" });
+      if (hitLimit(uid))
+        return res.status(429).json({ error: "too_many_attempts" });
 
       const appDoc = await Application.findOne({ uid });
-      if (!appDoc?.withdrawPinHash) return res.status(409).json({ error: "no_pin_to_reset" });
+      if (!appDoc?.withdrawPinHash)
+        return res.status(409).json({ error: "no_pin_to_reset" });
 
       const ok = await verifyPin(currentPin, appDoc.withdrawPinHash);
       if (!ok) return res.status(400).json({ error: "invalid_pin" });
@@ -109,8 +114,10 @@ export default function pinRoutes({ requireAuth, Application }) {
       const newPin = String(req.body?.newPin || "").trim();
 
       if (!uid) return res.status(401).json({ error: "unauthorized" });
-      if (!isValidPin(newPin)) return res.status(400).json({ error: "invalid_pin_format" });
-      if (hitLimit(uid)) return res.status(429).json({ error: "too_many_attempts" });
+      if (!isValidPin(newPin))
+        return res.status(400).json({ error: "invalid_pin_format" });
+      if (hitLimit(uid))
+        return res.status(429).json({ error: "too_many_attempts" });
 
       const appDoc = await getOrCreateApp(uid, email);
       appDoc.withdrawPinHash = await hashPin(newPin);

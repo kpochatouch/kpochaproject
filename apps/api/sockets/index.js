@@ -72,7 +72,9 @@ export default function attachSockets(httpServer) {
   const io = new Server(httpServer, {
     cors: {
       origin: (origin, cb) =>
-        originAllowed(origin) ? cb(null, true) : cb(new Error("Socket.IO CORS blocked")),
+        originAllowed(origin)
+          ? cb(null, true)
+          : cb(new Error("Socket.IO CORS blocked")),
       credentials: true,
       methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
       allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
@@ -99,9 +101,7 @@ export default function attachSockets(httpServer) {
   io.on("connection", (socket) => {
     console.log("[sockets] client connected", socket.id);
     const hinted =
-      socket.handshake.auth?.uid ||
-      socket.handshake.query?.uid ||
-      null;
+      socket.handshake.auth?.uid || socket.handshake.query?.uid || null;
 
     // authReady promise: handlers await this so they always
     // see the final verified socket.data.uid
@@ -113,13 +113,13 @@ export default function attachSockets(httpServer) {
           socket.handshake.query?.token ||
           null;
 
-
         let uid = hinted;
 
         if (provided) {
-          const raw = typeof provided === "string" && provided.startsWith("Bearer ")
-            ? provided.slice(7)
-            : provided;
+          const raw =
+            typeof provided === "string" && provided.startsWith("Bearer ")
+              ? provided.slice(7)
+              : provided;
           try {
             const decoded = await admin.auth().verifyIdToken(raw);
             uid = decoded.uid;
@@ -152,8 +152,9 @@ export default function attachSockets(httpServer) {
       socket.data.room = r;
       socket.data.who = who || socket.data.uid || hinted || "anon";
 
-      const peers = Array.from(io.sockets.adapter.rooms.get(r) || [])
-        .filter((id) => id !== socket.id);
+      const peers = Array.from(io.sockets.adapter.rooms.get(r) || []).filter(
+        (id) => id !== socket.id,
+      );
 
       socket.to(r).emit("presence:join", {
         user: socket.data.who,
@@ -174,8 +175,9 @@ export default function attachSockets(httpServer) {
       socket.data.room = r;
       socket.data.who = who || socket.data.uid || hinted || "anon";
 
-      const peers = Array.from(io.sockets.adapter.rooms.get(r) || [])
-        .filter((id) => id !== socket.id);
+      const peers = Array.from(io.sockets.adapter.rooms.get(r) || []).filter(
+        (id) => id !== socket.id,
+      );
 
       socket.to(r).emit("presence:join", {
         user: socket.data.who,
@@ -205,75 +207,73 @@ export default function attachSockets(httpServer) {
        Chat
     --------------------------------------------------- */
     socket.on("chat:message", async (msg = {}, ack) => {
-  await authReady;
-  try {
-    const r = roomName(msg.room) || socket.data.room;
-    if (!r) return ack?.({ ok: false, error: "room_required" });
+      await authReady;
+      try {
+        const r = roomName(msg.room) || socket.data.room;
+        if (!r) return ack?.({ ok: false, error: "room_required" });
 
-    const text = msg.text ?? msg.message ?? msg.body ?? "";
-const meta = msg.meta || {};
-const attachmentsRaw = Array.isArray(meta.attachments) ? meta.attachments : [];
+        const text = msg.text ?? msg.message ?? msg.body ?? "";
+        const meta = msg.meta || {};
+        const attachmentsRaw = Array.isArray(meta.attachments)
+          ? meta.attachments
+          : [];
 
-// allow pure meta.call messages for call bubbles
-const hasCallMeta = !!meta.call;
+        // allow pure meta.call messages for call bubbles
+        const hasCallMeta = !!meta.call;
 
-if (!text && attachmentsRaw.length === 0 && !hasCallMeta) {
-  return ack?.({ ok: false, error: "message_empty" });
-}
+        if (!text && attachmentsRaw.length === 0 && !hasCallMeta) {
+          return ack?.({ ok: false, error: "message_empty" });
+        }
 
+        const fromUid = socket.data.uid || msg.fromUid || hinted || socket.id;
 
-    const fromUid = socket.data.uid || msg.fromUid || hinted || socket.id;
+        // determine DM peer
+        let toUid = null;
+        const parts = String(r).split(":");
+        if (parts[0] === "dm" && parts.length === 3) {
+          const [, a, b] = parts;
+          toUid = fromUid === a ? b : fromUid === b ? a : null;
+        }
 
-    // determine DM peer
-    let toUid = null;
-    const parts = String(r).split(":");
-    if (parts[0] === "dm" && parts.length === 3) {
-      const [, a, b] = parts;
-      toUid = fromUid === a ? b : fromUid === b ? a : null;
-    }
+        const attachments = attachmentsRaw.map((a) => ({
+          url: a.url,
+          type: a.type || "file",
+          name: a.name || "",
+          size: a.size || 0,
+        }));
 
-    const attachments = attachmentsRaw.map((a) => ({
-      url: a.url,
-      type: a.type || "file",
-      name: a.name || "",
-      size: a.size || 0,
-    }));
+        const res = await chatService.saveMessage({
+          room: r,
+          fromUid,
+          toUid,
+          body: text,
+          attachments,
+          meta,
+          clientId: msg.clientId || null,
+        });
 
-    const res = await chatService.saveMessage({
-      room: r,
-      fromUid,
-      toUid,
-      body: text,
-      attachments,
-      meta,
-      clientId: msg.clientId || null,
+        // chatService.saveMessage already:
+        //  - builds payload
+        //  - attaches sender
+        //  - emits "chat:message" to the room
+        const payload = res.message;
+
+        return ack?.({
+          ok: true,
+          id: payload?.id,
+          existing: !!res.existing,
+        });
+      } catch (err) {
+        console.warn("[chat:message] error:", err?.message || err);
+        return ack?.({ ok: false, error: "save_failed" });
+      }
     });
 
-    // chatService.saveMessage already:
-    //  - builds payload
-    //  - attaches sender
-    //  - emits "chat:message" to the room
-    const payload = res.message;
-
-    return ack?.({
-      ok: true,
-      id: payload?.id,
-      existing: !!res.existing,
-    });
-  } catch (err) {
-    console.warn("[chat:message] error:", err?.message || err);
-    return ack?.({ ok: false, error: "save_failed" });
-  }
-});
-
-
-        // 🔥 NEW: mark messages in a room as read via socket (no HTTP)
+    // 🔥 NEW: mark messages in a room as read via socket (no HTTP)
     socket.on("chat:read", async (payload = {}, ack) => {
       await authReady;
       try {
-        const r = roomName(
-          (payload && payload.room) || socket.data.room || ""
-        );
+        const r = roomName((payload && payload.room) || socket.data.room || "");
         if (!r) {
           ack?.({ ok: false, error: "room_required" });
           return;
@@ -297,55 +297,53 @@ if (!text && attachmentsRaw.length === 0 && !hasCallMeta) {
       }
     });
 
-
-/* ---------------------------------------------------
+    /* ---------------------------------------------------
    WebRTC signaling (PROOF-BASED)
    - ack now tells you deliveredTo count
 --------------------------------------------------- */
-["webrtc:offer", "webrtc:answer", "webrtc:ice"].forEach((evt) => {
-  socket.on(evt, async (raw = {}, cb) => {
-    await authReady;
+    ["webrtc:offer", "webrtc:answer", "webrtc:ice"].forEach((evt) => {
+      socket.on(evt, async (raw = {}, cb) => {
+        await authReady;
 
-    const r = roomName(raw.room) || socket.data.room;
-    const payload = raw?.payload ?? raw;
+        const r = roomName(raw.room) || socket.data.room;
+        const payload = raw?.payload ?? raw;
 
-    if (!r || payload == null) {
-      cb?.({ ok: false, error: "room_or_payload_required" });
-      return;
-    }
+        if (!r || payload == null) {
+          cb?.({ ok: false, error: "room_or_payload_required" });
+          return;
+        }
 
-    // Count recipients in the room (excluding sender)
-    const roomSet = io.sockets.adapter.rooms.get(r);
-    const totalInRoom = roomSet ? roomSet.size : 0;
-    const deliveredTo = Math.max(0, totalInRoom - 1);
+        // Count recipients in the room (excluding sender)
+        const roomSet = io.sockets.adapter.rooms.get(r);
+        const totalInRoom = roomSet ? roomSet.size : 0;
+        const deliveredTo = Math.max(0, totalInRoom - 1);
 
-    // Forward to everyone else in the room
-    socket.to(r).emit(evt, {
-      payload,
-      from: socket.data.uid || hinted || socket.id,
-      room: r,
-      ts: Date.now(),
-    });
+        // Forward to everyone else in the room
+        socket.to(r).emit(evt, {
+          payload,
+          from: socket.data.uid || hinted || socket.id,
+          room: r,
+          ts: Date.now(),
+        });
 
-    // ✅ This ACK is the KEY: it proves delivery count
-    cb?.({
-      ok: true,
-      room: r,
-      deliveredTo,
-      totalInRoom,
-    });
+        // ✅ This ACK is the KEY: it proves delivery count
+        cb?.({
+          ok: true,
+          room: r,
+          deliveredTo,
+          totalInRoom,
+        });
 
-    // Optional: warn when forwarding into empty room
-    if (deliveredTo === 0) {
-      console.warn(`[webrtc] ${evt} deliveredTo=0`, {
-        room: r,
-        fromSocket: socket.id,
-        fromUid: socket.data.uid || hinted || null,
+        // Optional: warn when forwarding into empty room
+        if (deliveredTo === 0) {
+          console.warn(`[webrtc] ${evt} deliveredTo=0`, {
+            room: r,
+            fromSocket: socket.id,
+            fromUid: socket.data.uid || hinted || null,
+          });
+        }
       });
-    }
-  });
-});
-
+    });
 
     /* ---------------------------------------------------
        Call: initiate (delegated to callService)
@@ -356,9 +354,12 @@ if (!text && attachmentsRaw.length === 0 && !hasCallMeta) {
         const callerUid = socket.data.uid || hinted || socket.id;
         if (!callerUid) return ack?.({ ok: false, error: "no_uid" });
 
-        if (!p.receiverUid) return ack?.({ ok: false, error: "receiverUid_required" });
+        if (!p.receiverUid)
+          return ack?.({ ok: false, error: "receiverUid_required" });
 
-        const callId = p.callId || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+        const callId =
+          p.callId ||
+          `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
         const room = p.room || `call:${callId}`;
 
         // centralised service creates record, emits and notifies
@@ -394,7 +395,10 @@ if (!text && attachmentsRaw.length === 0 && !hasCallMeta) {
         if (!callId) return ack?.({ ok: false, error: "callId_required" });
         if (!status) return ack?.({ ok: false, error: "status_required" });
 
-        const updated = await callService.updateCallStatus(callId, { status, meta });
+        const updated = await callService.updateCallStatus(callId, {
+          status,
+          meta,
+        });
 
         // callService will emit to rooms/participants; ack with summary
         ack?.({ ok: true, id: String(updated._id), status: updated.status });
@@ -429,7 +433,8 @@ if (!text && attachmentsRaw.length === 0 && !hasCallMeta) {
       return;
     }
 
-    const sub = typeof redis.duplicate === "function" ? redis.duplicate() : redis;
+    const sub =
+      typeof redis.duplicate === "function" ? redis.duplicate() : redis;
     await sub.connect?.();
 
     const safeParse = (raw) => {
@@ -460,7 +465,11 @@ if (!text && attachmentsRaw.length === 0 && !hasCallMeta) {
         safeEmit(profileRoom(p.targetUid), "profile:stats", {
           ownerUid: p.targetUid,
           followersCount: p.followers ?? p.followersCount ?? null,
-          metrics: p.metrics || (typeof p.followers !== "undefined" ? { followers: p.followers } : undefined),
+          metrics:
+            p.metrics ||
+            (typeof p.followers !== "undefined"
+              ? { followers: p.followers }
+              : undefined),
         });
       });
     }

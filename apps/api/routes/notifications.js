@@ -87,7 +87,7 @@ router.put("/notifications/read-all", requireAuth, async (req, res) => {
   try {
     await Notification.updateMany(
       { ownerUid: req.user.uid, seen: { $ne: true } },
-      { $set: { seen: true } }
+      { $set: { seen: true } },
     );
 
     // reset redis counter

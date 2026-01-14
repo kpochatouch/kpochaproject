@@ -173,7 +173,9 @@ export default function ForYou() {
       <div className="max-w-xl mx-auto p-4">
         <div className="bg-[#151515] border border-[#2a2a2a] rounded-xl p-6">
           <div className="text-lg font-semibold mb-2">For You</div>
-          <div className="text-sm text-gray-400">No videos available right now.</div>
+          <div className="text-sm text-gray-400">
+            No videos available right now.
+          </div>
           <div className="mt-4">
             <Link to="/browse" className="text-gold">
               ← Back to feed
@@ -285,13 +287,9 @@ function ForYouPost({ post, me, navigate }) {
               ? srv.savesCount
               : prev.savesCount,
           likedByMe:
-            typeof srv.likedByMe === "boolean"
-              ? srv.likedByMe
-              : prev.likedByMe,
+            typeof srv.likedByMe === "boolean" ? srv.likedByMe : prev.likedByMe,
           savedByMe:
-            typeof srv.savedByMe === "boolean"
-              ? srv.savedByMe
-              : prev.savedByMe,
+            typeof srv.savedByMe === "boolean" ? srv.savedByMe : prev.savedByMe,
         }));
       } catch {
         // ignore
@@ -546,11 +544,9 @@ function ForYouPost({ post, me, navigate }) {
     if (!window.confirm("Delete / hide this post?")) return;
     setDeleting(true);
     try {
-      await api
-        .delete(`/api/posts/${id}`)
-        .catch(async () => {
-          await api.patch(`/api/posts/${id}/hide`);
-        });
+      await api.delete(`/api/posts/${id}`).catch(async () => {
+        await api.patch(`/api/posts/${id}/hide`);
+      });
       navigate("/browse", { replace: true });
     } catch {
       alert("Failed to delete/hide post");
@@ -689,7 +685,7 @@ function ForYouPost({ post, me, navigate }) {
     const baseDuration = duration || vid.duration || 0;
     const next = Math.min(
       Math.max((vid.currentTime || 0) + seconds, 0),
-      baseDuration || 0
+      baseDuration || 0,
     );
     vid.currentTime = next;
     setCurrentTime(next);
@@ -713,10 +709,9 @@ function ForYouPost({ post, me, navigate }) {
   }
 
   function handleVideoError() {
-  console.warn("Video failed to load");
-  setVideoError("This video cannot be played (it may have been removed).");
-}
-
+    console.warn("Video failed to load");
+    setVideoError("This video cannot be played (it may have been removed).");
+  }
 
   function handleMouseEnter() {
     setShowControls(true);
@@ -733,33 +728,32 @@ function ForYouPost({ post, me, navigate }) {
       post?.createdBy === me.uid);
 
   const media =
-  Array.isArray(post?.media) && post.media.length ? post.media[0] : null;
+    Array.isArray(post?.media) && post.media.length ? post.media[0] : null;
 
-const videoSrc =
-  (media && (media.url || media.secure_url || media.path)) ||
-  post.videoUrl ||
-  "";
+  const videoSrc =
+    (media && (media.url || media.secure_url || media.path)) ||
+    post.videoUrl ||
+    "";
 
-const isVideo = (() => {
-  if (!media) return false;
-  if (media.type === "video") return true;
+  const isVideo = (() => {
+    if (!media) return false;
+    if (media.type === "video") return true;
 
-  const u = String(
-    media.url || media.secure_url || media.path || ""
-  ).toLowerCase();
+    const u = String(
+      media.url || media.secure_url || media.path || "",
+    ).toLowerCase();
 
-  if (!u) return false;
+    if (!u) return false;
 
-  // treat common video URLs as video even if type is missing
-  return (
-    u.endsWith(".mp4") ||
-    u.endsWith(".mov") ||
-    u.endsWith(".webm") ||
-    u.endsWith(".mkv") ||
-    u.includes("/video/")
-  );
-})();
-
+    // treat common video URLs as video even if type is missing
+    return (
+      u.endsWith(".mp4") ||
+      u.endsWith(".mov") ||
+      u.endsWith(".webm") ||
+      u.endsWith(".mkv") ||
+      u.includes("/video/")
+    );
+  })();
 
   const pro = post?.pro || {};
   const avatar = pro.photoUrl || post?.authorAvatar || "";
@@ -801,7 +795,7 @@ const isVideo = (() => {
 
     try {
       const res = await api.get(
-        `/api/profile/public-by-uid/${encodeURIComponent(uid)}`
+        `/api/profile/public-by-uid/${encodeURIComponent(uid)}`,
       );
       const data = res?.data;
       if (data && data.profile && data.profile.username) {
@@ -815,15 +809,14 @@ const isVideo = (() => {
     navigate(`/profile/${encodeURIComponent(uid)}`);
   }
 
-// This lets all videos (including old / broken Cloudinary ones) show up.
-if (!videoSrc) {
-  // nothing to play at all, skip it
-  return null;
-}
+  // This lets all videos (including old / broken Cloudinary ones) show up.
+  if (!videoSrc) {
+    // nothing to play at all, skip it
+    return null;
+  }
 
   return (
     <article className="mb-10">
-
       {/* header (profile + book) */}
       <div className="px-4 pt-4 pb-2 flex items-start justify-between gap-3">
         <div className="flex gap-3">
@@ -973,15 +966,15 @@ if (!videoSrc) {
           >
             <span
               className={
-                stats.likedByMe ? "text-[#F5C542] text-lg" : "text-white text-lg"
+                stats.likedByMe
+                  ? "text-[#F5C542] text-lg"
+                  : "text-white text-lg"
               }
             >
               ♥
             </span>
           </button>
-          <div className="text-[11px] text-white">
-            {stats.likesCount ?? 0}
-          </div>
+          <div className="text-[11px] text-white">{stats.likesCount ?? 0}</div>
 
           {/* Comments toggle */}
           <button
@@ -1004,15 +997,15 @@ if (!videoSrc) {
           >
             <span
               className={
-                stats.savedByMe ? "text-[#F5C542] text-lg" : "text-white text-lg"
+                stats.savedByMe
+                  ? "text-[#F5C542] text-lg"
+                  : "text-white text-lg"
               }
             >
               🔖
             </span>
           </button>
-          <div className="text-[11px] text-white">
-            {stats.savesCount ?? 0}
-          </div>
+          <div className="text-[11px] text-white">{stats.savesCount ?? 0}</div>
 
           {/* Share */}
           <button
@@ -1022,9 +1015,7 @@ if (!videoSrc) {
           >
             <span className="text-white text-lg">↗</span>
           </button>
-          <div className="text-[11px] text-white">
-            {stats.sharesCount ?? 0}
-          </div>
+          <div className="text-[11px] text-white">{stats.sharesCount ?? 0}</div>
 
           {/* Views (eye) */}
           <div className="flex flex-col items-center gap-1 mt-1">

@@ -18,8 +18,10 @@ export default function SavedCards({ onUseCard = () => {} }) {
     })();
   }, []);
 
-  if (loading) return <div className="text-sm text-zinc-400">Loading cards…</div>;
-  if (!cards.length) return <div className="text-sm text-zinc-400">No saved cards.</div>;
+  if (loading)
+    return <div className="text-sm text-zinc-400">Loading cards…</div>;
+  if (!cards.length)
+    return <div className="text-sm text-zinc-400">No saved cards.</div>;
 
   return (
     <div className="space-y-2">

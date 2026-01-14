@@ -92,15 +92,10 @@ function RequireRole({ role, children }) {
   const { loading, isAdmin, isPro } = useMe();
   const loc = useLocation();
 
-  const allowed =
-    role === "admin" ? isAdmin : role === "pro" ? isPro : true;
+  const allowed = role === "admin" ? isAdmin : role === "pro" ? isPro : true;
 
   if (loading) return <RouteLoader />;
-  return allowed ? (
-    children
-  ) : (
-    <Navigate to="/" replace state={{ from: loc }} />
-  );
+  return allowed ? children : <Navigate to="/" replace state={{ from: loc }} />;
 }
 
 function WalletSmart() {
@@ -161,18 +156,18 @@ function FindProSmart() {
 export default function App() {
   const location = useLocation();
 
-const hideChatbase =
-  location.pathname.startsWith("/chat") ||
-  location.pathname.startsWith("/inbox") ||
-  (location.pathname.includes("/bookings/") && location.pathname.endsWith("/chat"));
+  const hideChatbase =
+    location.pathname.startsWith("/chat") ||
+    location.pathname.startsWith("/inbox") ||
+    (location.pathname.includes("/bookings/") &&
+      location.pathname.endsWith("/chat"));
 
-useChatbase(!hideChatbase);
+  useChatbase(!hideChatbase);
 
   const navigate = useNavigate();
 
   const { me } = useMe();
   const [incomingCall, setIncomingCall] = useState(null);
-
 
   const myLabel =
     me?.displayName ||
@@ -203,11 +198,11 @@ useChatbase(!hideChatbase);
       if (!payload) return;
       if (
         ["ended", "missed", "cancelled", "declined", "failed"].includes(
-          payload.status
+          payload.status,
         )
       ) {
         setIncomingCall((prev) =>
-          prev && prev.callId === payload.callId ? null : prev
+          prev && prev.callId === payload.callId ? null : prev,
         );
       }
     });
@@ -217,7 +212,6 @@ useChatbase(!hideChatbase);
       offStatus();
     };
   }, []);
-
 
   // Listener for AWS liveness events
   useEffect(() => {
@@ -263,13 +257,8 @@ useChatbase(!hideChatbase);
       {!hideChrome && <Navbar />}
 
       {!hideChrome && me?.isPro && (
-      <BookingAlert
-        pollMs={15000}
-        playSound={true}
-      />
-    )}
-
-
+        <BookingAlert pollMs={15000} playSound={true} />
+      )}
 
       <main className={hideChrome ? "flex-1 bg-black" : "flex-1"}>
         <Suspense fallback={<RouteLoader full />}>
@@ -307,7 +296,6 @@ useChatbase(!hideChatbase);
 
             {/* Entry to “Find a Pro” flow */}
             <Route path="/find" element={<FindProSmart />} />
-
 
             {/* Booking page must be authenticated */}
             <Route
@@ -443,7 +431,7 @@ useChatbase(!hideChatbase);
               }
             />
 
-                        <Route
+            <Route
               path="/chat"
               element={
                 <RequireAuth>
@@ -461,7 +449,6 @@ useChatbase(!hideChatbase);
                 </RequireAuth>
               }
             />
-
 
             {/* Role-based dashboards */}
             <Route
@@ -506,32 +493,28 @@ useChatbase(!hideChatbase);
         </Suspense>
       </main>
 
-                 {!hideChrome && <Footer />}
-                <CallSheet
-                  role="receiver"
-                  room={incomingCall?.room || null}
-                  callId={incomingCall?.callId || null}
-                  callType={incomingCall?.callType || "audio"}
-                  me={myLabel}
-                  // 🔥 show real caller identity from meta put there by Chat.jsx
-                  peerName={
-                    incomingCall?.meta?.fromName ||
-                    incomingCall?.meta?.callerName ||
-                    ""
-                  }
-                  peerAvatar={
-                    incomingCall?.meta?.fromAvatar ||
-                    incomingCall?.meta?.callerAvatar ||
-                    ""
-                  }
-                  // 🔔 allow call summary bubble for DM chat if chatRoom passed
-                  chatRoom={incomingCall?.meta?.chatRoom || null}
-                  open={Boolean(incomingCall?.open && incomingCall?.room)}
-                  onClose={() => setIncomingCall(null)}
-                />
-                <InstallPWAButton />
-              </div>
-            );
-          }
-
-
+      {!hideChrome && <Footer />}
+      <CallSheet
+        role="receiver"
+        room={incomingCall?.room || null}
+        callId={incomingCall?.callId || null}
+        callType={incomingCall?.callType || "audio"}
+        me={myLabel}
+        // 🔥 show real caller identity from meta put there by Chat.jsx
+        peerName={
+          incomingCall?.meta?.fromName || incomingCall?.meta?.callerName || ""
+        }
+        peerAvatar={
+          incomingCall?.meta?.fromAvatar ||
+          incomingCall?.meta?.callerAvatar ||
+          ""
+        }
+        // 🔔 allow call summary bubble for DM chat if chatRoom passed
+        chatRoom={incomingCall?.meta?.chatRoom || null}
+        open={Boolean(incomingCall?.open && incomingCall?.room)}
+        onClose={() => setIncomingCall(null)}
+      />
+      <InstallPWAButton />
+    </div>
+  );
+}

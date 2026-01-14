@@ -24,26 +24,38 @@ export function ThreadItem({ t, onOpen, formatTime }) {
     >
       <div className="flex items-center gap-3 text-left min-w-0">
         {t.avatarUrl ? (
-          <img src={t.avatarUrl} alt={t.displayName} className="w-10 h-10 rounded-full object-cover border border-zinc-700" />
+          <img
+            src={t.avatarUrl}
+            alt={t.displayName}
+            className="w-10 h-10 rounded-full object-cover border border-zinc-700"
+          />
         ) : (
-          <div className="w-10 h-10 rounded-full bg-zinc-800 flex items-center justify-center text-sm">{initial}</div>
+          <div className="w-10 h-10 rounded-full bg-zinc-800 flex items-center justify-center text-sm">
+            {initial}
+          </div>
         )}
 
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold truncate max-w-[160px]">{t.displayName}</span>
+            <span className="text-sm font-semibold truncate max-w-[160px]">
+              {t.displayName}
+            </span>
             {t.unread > 0 && (
               <span className="inline-flex items-center justify-center text-[10px] font-semibold rounded-full min-w-[18px] h-[18px] px-1 bg-gold text-black">
                 {t.unread > 99 ? "99+" : t.unread}
               </span>
             )}
           </div>
-          <div className="text-xs text-zinc-500 truncate max-w-[220px]">{t.lastBody || "Tap to open conversation"}</div>
+          <div className="text-xs text-zinc-500 truncate max-w-[220px]">
+            {t.lastBody || "Tap to open conversation"}
+          </div>
         </div>
       </div>
 
       <div className="flex flex-col items-end gap-1">
-        {timeText && <span className="text-[10px] text-zinc-500">{timeText}</span>}
+        {timeText && (
+          <span className="text-[10px] text-zinc-500">{timeText}</span>
+        )}
       </div>
     </button>
   );
@@ -62,7 +74,10 @@ export default function InboxList({
     return (
       <div className="space-y-2">
         {[1, 2, 3].map((i) => (
-          <div key={i} className="animate-pulse flex items-center justify-between border border-zinc-900 rounded-lg px-3 py-3 bg-black/40">
+          <div
+            key={i}
+            className="animate-pulse flex items-center justify-between border border-zinc-900 rounded-lg px-3 py-3 bg-black/40"
+          >
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-zinc-800" />
               <div className="space-y-2">
@@ -81,7 +96,10 @@ export default function InboxList({
     return (
       <div className="border border-zinc-800 rounded-xl bg-black/40 px-4 py-10 text-center text-sm text-zinc-400">
         <p>No conversations yet.</p>
-        <p className="mt-1">Open someone&apos;s profile and tap <span className="font-semibold">Message</span> to start chatting.</p>
+        <p className="mt-1">
+          Open someone&apos;s profile and tap{" "}
+          <span className="font-semibold">Message</span> to start chatting.
+        </p>
       </div>
     );
   }
@@ -90,13 +108,13 @@ export default function InboxList({
     <>
       <div className="space-y-2">
         {threads.map((t, i) => (
-  <ThreadItem
-    key={t.room || t.peerUid || `thread-${i}`}
-    t={t}
-    onOpen={onOpen}
-    formatTime={formatTime}
-  />
-))}
+          <ThreadItem
+            key={t.room || t.peerUid || `thread-${i}`}
+            t={t}
+            onOpen={onOpen}
+            formatTime={formatTime}
+          />
+        ))}
       </div>
 
       <div className="flex justify-center mt-3">

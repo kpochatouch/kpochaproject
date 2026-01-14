@@ -26,45 +26,54 @@ export default function PaymentConfirm() {
         setDetails({ bookingId, reference });
 
         if (!bookingId || !reference) {
-          setStatus("Missing booking reference. If you paid, please contact support.");
+          setStatus(
+            "Missing booking reference. If you paid, please contact support.",
+          );
           return;
         }
 
         try {
-        const { data: j } = await api.post("/api/payments/verify", {
-          bookingId,
-          reference,
-        });
+          const { data: j } = await api.post("/api/payments/verify", {
+            bookingId,
+            reference,
+          });
 
-        if (j?.ok) {
-          setStatus("✅ Payment confirmed! Redirecting…");
-          sessionStorage.removeItem("pay_ref");
+          if (j?.ok) {
+            setStatus("✅ Payment confirmed! Redirecting…");
+            sessionStorage.removeItem("pay_ref");
 
-          setTimeout(() => {
-            window.location.assign(`/bookings/${bookingId}`);
-          }, 800);
+            setTimeout(() => {
+              window.location.assign(`/bookings/${bookingId}`);
+            }, 800);
 
-          return;
+            return;
+          }
+
+          setStatus(
+            "❌ Payment not confirmed yet. If you were charged, please contact support.",
+          );
+        } catch (e) {
+          const code = e?.response?.status;
+          const msg = e?.response?.data?.error || e?.response?.data?.message;
+
+          if (code === 401) {
+            setStatus(
+              "🔒 You are not logged in. Please login again, then return to verify payment.",
+            );
+          } else if (code === 403 && msg === "not_your_booking") {
+            setStatus("❌ This booking does not belong to you.");
+          } else if (msg === "reference_mismatch") {
+            setStatus("❌ Payment reference mismatch. Please contact support.");
+          } else {
+            setStatus(
+              "❌ Could not verify payment. Please try again or contact support.",
+            );
+          }
         }
-
-        setStatus("❌ Payment not confirmed yet. If you were charged, please contact support.");
-      } catch (e) {
-        const code = e?.response?.status;
-        const msg = e?.response?.data?.error || e?.response?.data?.message;
-
-        if (code === 401) {
-          setStatus("🔒 You are not logged in. Please login again, then return to verify payment.");
-        } else if (code === 403 && msg === "not_your_booking") {
-          setStatus("❌ This booking does not belong to you.");
-        } else if (msg === "reference_mismatch") {
-          setStatus("❌ Payment reference mismatch. Please contact support.");
-        } else {
-          setStatus("❌ Could not verify payment. Please try again or contact support.");
-        }
-      }
-
       } catch {
-        setStatus("❌ Could not verify payment. Please try again or contact support.");
+        setStatus(
+          "❌ Could not verify payment. Please try again or contact support.",
+        );
       }
     })();
   }, []);
@@ -97,21 +106,21 @@ export default function PaymentConfirm() {
         </div>
       )}
 
-<div style={{ marginTop: 20 }}>
-  <button
-    onClick={() => window.location.reload()}
-    style={{
-      padding: "10px 14px",
-      background: "#222",
-      color: "#fff",
-      borderRadius: 8,
-      border: "1px solid #333",
-      cursor: "pointer",
-    }}
-  >
-    Try Again
-  </button>
-</div>
- </div>
+      <div style={{ marginTop: 20 }}>
+        <button
+          onClick={() => window.location.reload()}
+          style={{
+            padding: "10px 14px",
+            background: "#222",
+            color: "#fff",
+            borderRadius: 8,
+            border: "1px solid #333",
+            cursor: "pointer",
+          }}
+        >
+          Try Again
+        </button>
+      </div>
+    </div>
   );
 }

@@ -4,7 +4,6 @@ import { useNavigate, useLocation } from "react-router-dom";
 import useNotifications from "../hooks/useNotifications"; // <- unread badge
 import { menuIcons as icons } from "../constants/menuIcons";
 
-
 export default function SideMenu({ me }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -36,7 +35,6 @@ export default function SideMenu({ me }) {
       to: "/browse?tab=pros",
       active: isBrowsePros,
     },
-
 
     me && {
       key: "profile",
@@ -186,9 +184,7 @@ export default function SideMenu({ me }) {
                 icon={icons[item.key]}
                 active={item.active}
                 collapsed={collapsed}
-                onClick={() =>
-                  item.onClick ? item.onClick() : go(item.to)
-                }
+                onClick={() => (item.onClick ? item.onClick() : go(item.to))}
               />
             ))}
 

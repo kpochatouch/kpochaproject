@@ -1,9 +1,17 @@
 // apps/web/src/components/BookingAlert.jsx
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getProBookings, acceptBooking, registerSocketHandler } from "../lib/api";
+import {
+  getProBookings,
+  acceptBooking,
+  registerSocketHandler,
+} from "../lib/api";
 import { Link } from "react-router-dom";
 
-export default function BookingAlert({ pollMs = 20000, playSound = false, soundSrc }) {
+export default function BookingAlert({
+  pollMs = 20000,
+  playSound = false,
+  soundSrc,
+}) {
   const [queue, setQueue] = useState([]);
   const [busy, setBusy] = useState(false);
 
@@ -31,14 +39,16 @@ export default function BookingAlert({ pollMs = 20000, playSound = false, soundS
 
       // STRICT actionable: scheduled + paid
       const actionable = (Array.isArray(data) ? data : []).filter(
-        (b) => b.status === "scheduled" && b.paymentStatus === "paid"
+        (b) => b.status === "scheduled" && b.paymentStatus === "paid",
       );
 
       const lastAtMs = Number(localStorage.getItem(STORAGE_KEY) || 0);
 
       const norm = actionable.map((b) => ({
         ...b,
-        _createdMs: new Date(b.createdAt || b.updatedAt || Date.now()).getTime(),
+        _createdMs: new Date(
+          b.createdAt || b.updatedAt || Date.now(),
+        ).getTime(),
       }));
 
       const existingIds = new Set(queueRef.current.map((q) => q._id));
@@ -115,8 +125,10 @@ export default function BookingAlert({ pollMs = 20000, playSound = false, soundS
 
   const amountKobo = useMemo(() => {
     if (!current) return 0;
-    if (Number.isFinite(Number(current.amountKobo))) return Number(current.amountKobo);
-    if (Number.isFinite(Number(current.service?.priceKobo))) return Number(current.service.priceKobo);
+    if (Number.isFinite(Number(current.amountKobo)))
+      return Number(current.amountKobo);
+    if (Number.isFinite(Number(current.service?.priceKobo)))
+      return Number(current.service.priceKobo);
     return 0;
   }, [current]);
 
@@ -142,9 +154,15 @@ export default function BookingAlert({ pollMs = 20000, playSound = false, soundS
     <div className="fixed bottom-4 right-4 z-50 w-[22rem] rounded-xl border border-amber-700 bg-black/80 backdrop-blur p-4 shadow-xl">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <div className="text-sm text-amber-300 mb-1">New booking available</div>
-          <div className="font-medium">{svcName} • {formatMoney(amountKobo)}</div>
-          <div className="text-xs text-zinc-400 mt-0.5">{whenText} • {lgaText}</div>
+          <div className="text-sm text-amber-300 mb-1">
+            New booking available
+          </div>
+          <div className="font-medium">
+            {svcName} • {formatMoney(amountKobo)}
+          </div>
+          <div className="text-xs text-zinc-400 mt-0.5">
+            {whenText} • {lgaText}
+          </div>
         </div>
 
         <button
@@ -191,7 +209,10 @@ export default function BookingAlert({ pollMs = 20000, playSound = false, soundS
 function formatMoney(kobo = 0) {
   const naira = (Number(kobo) || 0) / 100;
   try {
-    return new Intl.NumberFormat("en-NG", { style: "currency", currency: "NGN" }).format(naira);
+    return new Intl.NumberFormat("en-NG", {
+      style: "currency",
+      currency: "NGN",
+    }).format(naira);
   } catch {
     return `₦${naira.toLocaleString()}`;
   }

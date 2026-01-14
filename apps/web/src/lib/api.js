@@ -65,7 +65,10 @@ export function getBookingUiLabel(booking) {
   if (p === "refunded") return "Cancelled — refunded to wallet";
 
   if (s === "pending_payment") return "Awaiting payment";
-  if (s === "scheduled") return p === "paid" ? "Paid — waiting for pro response" : "Awaiting payment";
+  if (s === "scheduled")
+    return p === "paid"
+      ? "Paid — waiting for pro response"
+      : "Awaiting payment";
   if (s === "accepted") return "Accepted — job in progress";
   if (s === "completed") return "Completed";
   if (s === "cancelled") return "Cancelled";
@@ -86,17 +89,27 @@ export function getBookingUiLabel(booking) {
  * Therefore, UI should NOT guess per-booking cashout eligibility from booking.meta.
  * Instead, show cashout button based on wallet.pendingKobo > 0 and (optional) a hold window.
  */
-export function getInstantCashoutEligibility({ booking, settings, wallet } = {}) {
+export function getInstantCashoutEligibility({
+  booking,
+  settings,
+  wallet,
+} = {}) {
   const holdDays = Number(settings?.payouts?.instantCashoutHoldDays ?? 3);
 
   // if no pending balance, nothing to cashout
-  const pending = Number(wallet?.wallet?.pendingKobo ?? wallet?.pendingKobo ?? 0);
-  if (!pending || pending <= 0) return { eligible: false, reason: "no_pending", holdDays };
+  const pending = Number(
+    wallet?.wallet?.pendingKobo ?? wallet?.pendingKobo ?? 0,
+  );
+  if (!pending || pending <= 0)
+    return { eligible: false, reason: "no_pending", holdDays };
 
   // If you want a strict hold, enforce it *only if booking.completedAt exists*
   // (best-effort: hold is about time after completion)
-  const completedAtMs = booking?.completedAt ? new Date(booking.completedAt).getTime() : 0;
-  if (!completedAtMs) return { eligible: true, reason: "ok_wallet_based", holdDays };
+  const completedAtMs = booking?.completedAt
+    ? new Date(booking.completedAt).getTime()
+    : 0;
+  if (!completedAtMs)
+    return { eligible: true, reason: "ok_wallet_based", holdDays };
 
   const cutoff = Date.now() - holdDays * 24 * 60 * 60 * 1000;
   if (completedAtMs > cutoff) {
@@ -111,17 +124,16 @@ export function getInstantCashoutEligibility({ booking, settings, wallet } = {})
   return { eligible: true, reason: "ok", holdDays };
 }
 
-
-
 /* =========================================
    BASE URL (normalize, no trailing slash, no /api suffix)
    ========================================= */
-let ROOT =
-  (import.meta.env.VITE_API_BASE_URL ||
-    import.meta.env.VITE_API_BASE ||
-    "")
-    .toString()
-    .trim();
+let ROOT = (
+  import.meta.env.VITE_API_BASE_URL ||
+  import.meta.env.VITE_API_BASE ||
+  ""
+)
+  .toString()
+  .trim();
 
 if (!ROOT) {
   ROOT = "http://localhost:8080";
@@ -162,27 +174,26 @@ function ensureAuthListener() {
   try {
     firebaseAuth = getAuth();
     onAuthStateChanged(firebaseAuth, async (user) => {
-  if (user) {
-    try {
-      // 🔥 force a fresh token when user logs in
-      const t = await user.getIdToken(true);
-      latestToken = t;
-      try {
-        localStorage.setItem("token", t);
-      } catch {}
-      if (typeof onTokenChange === "function") onTokenChange(t);
-    } catch {
-      // ignore
-    }
-  } else {
-    latestToken = null;
-    try {
-      localStorage.removeItem("token");
-    } catch {}
-    if (typeof onTokenChange === "function") onTokenChange(null);
-  }
-});
-
+      if (user) {
+        try {
+          // 🔥 force a fresh token when user logs in
+          const t = await user.getIdToken(true);
+          latestToken = t;
+          try {
+            localStorage.setItem("token", t);
+          } catch {}
+          if (typeof onTokenChange === "function") onTokenChange(t);
+        } catch {
+          // ignore
+        }
+      } else {
+        latestToken = null;
+        try {
+          localStorage.removeItem("token");
+        } catch {}
+        if (typeof onTokenChange === "function") onTokenChange(null);
+      }
+    });
   } catch {
     // firebase not available (SSR/build)
   }
@@ -291,7 +302,6 @@ function _getAuthPayload() {
   return payload;
 }
 
-
 /* generic dispatcher: forwards payload to registered handlers */
 function _dispatch(event, payload) {
   const set = socketListeners.get(event);
@@ -320,7 +330,10 @@ function _reconnectWithBackoff() {
     console.warn("[socket] max reconnect attempts reached");
     return;
   }
-  const delay = Math.min(60_000, BASE_RECONNECT_DELAY * Math.pow(1.5, reconnectAttempts));
+  const delay = Math.min(
+    60_000,
+    BASE_RECONNECT_DELAY * Math.pow(1.5, reconnectAttempts),
+  );
   setTimeout(() => {
     try {
       if (socket && !socket.connected) socket.connect();
@@ -340,25 +353,32 @@ onTokenChange = (newToken) => {
   } catch {}
 };
 
-
-
 /* connectSocket: idempotent, registers optional callbacks */
-export function connectSocket({ onNotification, onBookingAccepted, onBookingPaid, onCallEvent } = {}) {
+export function connectSocket({
+  onNotification,
+  onBookingAccepted,
+  onBookingPaid,
+  onCallEvent,
+} = {}) {
   // add listeners to registry (idempotent) — add directly to socketListeners to avoid recursion
   if (onNotification) {
-    if (!socketListeners.has("notification:received")) socketListeners.set("notification:received", new Set());
+    if (!socketListeners.has("notification:received"))
+      socketListeners.set("notification:received", new Set());
     socketListeners.get("notification:received").add(onNotification);
   }
   if (onBookingAccepted) {
-    if (!socketListeners.has("booking:accepted")) socketListeners.set("booking:accepted", new Set());
+    if (!socketListeners.has("booking:accepted"))
+      socketListeners.set("booking:accepted", new Set());
     socketListeners.get("booking:accepted").add(onBookingAccepted);
   }
   if (onBookingPaid) {
-    if (!socketListeners.has("booking:paid")) socketListeners.set("booking:paid", new Set());
+    if (!socketListeners.has("booking:paid"))
+      socketListeners.set("booking:paid", new Set());
     socketListeners.get("booking:paid").add(onBookingPaid);
   }
   if (onCallEvent) {
-    if (!socketListeners.has("call:status")) socketListeners.set("call:status", new Set());
+    if (!socketListeners.has("call:status"))
+      socketListeners.set("call:status", new Set());
     socketListeners.get("call:status").add(onCallEvent);
   }
 
@@ -398,7 +418,10 @@ export function connectSocket({ onNotification, onBookingAccepted, onBookingPaid
               });
             })
             .catch((err) => {
-              console.warn("[socket] getIdToken(true) failed:", err?.message || err);
+              console.warn(
+                "[socket] getIdToken(true) failed:",
+                err?.message || err,
+              );
               cb(_getAuthPayload()); // fallback to whatever we have
             });
         } catch (e) {
@@ -446,7 +469,9 @@ export function connectSocket({ onNotification, onBookingAccepted, onBookingPaid
       socketConnected = false;
       // do not clear listeners — keep registry for next connect
       if (reason === "io server disconnect") {
-        try { socket.connect(); } catch {}
+        try {
+          socket.connect();
+        } catch {}
       } else {
         _reconnectWithBackoff();
       }
@@ -459,14 +484,17 @@ export function connectSocket({ onNotification, onBookingAccepted, onBookingPaid
     });
 
     // bridge notification events -> unified "notification:received"
-    socket.on("notification:new", (payload) => _dispatch("notification:received", payload));
-    socket.on("notification:received", (payload) => _dispatch("notification:received", payload));
+    socket.on("notification:new", (payload) =>
+      _dispatch("notification:received", payload),
+    );
+    socket.on("notification:received", (payload) =>
+      _dispatch("notification:received", payload),
+    );
 
     // Ensure we always listen for booking events on user room.
-// NOTE: server emits booking:accepted to `user:<uid>` and also `booking:<id>`.
-// booking:paid may NOT always be emitted (webhook path doesn't emit sockets),
-// so UI must still verify/poll booking status after payment redirect.
-
+    // NOTE: server emits booking:accepted to `user:<uid>` and also `booking:<id>`.
+    // booking:paid may NOT always be emitted (webhook path doesn't emit sockets),
+    // so UI must still verify/poll booking status after payment redirect.
 
     socket.connect();
   } catch (e) {
@@ -476,7 +504,6 @@ export function connectSocket({ onNotification, onBookingAccepted, onBookingPaid
 
   return socket;
 }
-
 
 /** disconnect and clear handlers */
 export function disconnectSocket() {
@@ -552,19 +579,24 @@ async function ensureSocketReady(timeoutMs = 8000) {
   });
 }
 
-
 /* -----------------------
    Chat send: prefer socket, fallback to REST
    - returns { ok, id, existing } or throws
    ----------------------- */
-export async function sendChatMessage({ room, text = "", meta = {}, clientId = null }) {
-const hasText = !!(text && text.trim());
-const hasAttachments = Array.isArray(meta?.attachments) && meta.attachments.length > 0;
-const hasCallMeta = !!meta?.call;
+export async function sendChatMessage({
+  room,
+  text = "",
+  meta = {},
+  clientId = null,
+}) {
+  const hasText = !!(text && text.trim());
+  const hasAttachments =
+    Array.isArray(meta?.attachments) && meta.attachments.length > 0;
+  const hasCallMeta = !!meta?.call;
 
-if (!hasText && !hasAttachments && !hasCallMeta) {
-  throw new Error("message_empty");
-}
+  if (!hasText && !hasAttachments && !hasCallMeta) {
+    throw new Error("message_empty");
+  }
 
   // ensure clientId exists (server dedupe expects this)
   if (!clientId) clientId = `c_${uuidv4()}`;
@@ -583,7 +615,10 @@ if (!hasText && !hasAttachments && !hasCallMeta) {
           return reject(new Error(ack.error || "send_failed"));
         });
       } catch (e) {
-        console.warn("[chat] socket emit failed, falling back to REST:", e?.message || e);
+        console.warn(
+          "[chat] socket emit failed, falling back to REST:",
+          e?.message || e,
+        );
         _sendChatMessageRest(payload)
           .then((d) => resolve({ ...d, clientId }))
           .catch(reject);
@@ -597,13 +632,20 @@ if (!hasText && !hasAttachments && !hasCallMeta) {
   }
 }
 
-
-async function _sendChatMessageRest({ room, text, meta = {}, clientId = null }) {
+async function _sendChatMessageRest({
+  room,
+  text,
+  meta = {},
+  clientId = null,
+}) {
   const payload = { room, text, meta, clientId };
   // backend may expose an endpoint like POST /api/chat/send or POST /api/chat/room/:room/message
   // we call POST /api/chat/room/:room/message (safe default)
   try {
-    const { data } = await api.post(`/api/chat/room/${encodeURIComponent(room)}/message`, payload);
+    const { data } = await api.post(
+      `/api/chat/room/${encodeURIComponent(room)}/message`,
+      payload,
+    );
     return data;
   } catch (err) {
     // Try alternative endpoint (older backend): /api/chat
@@ -623,7 +665,13 @@ async function _sendChatMessageRest({ room, text, meta = {}, clientId = null }) 
    - updateCallStatus -> emit 'call:status' (socket) and also call REST fallback
    ----------------------- */
 
-export async function initiateCall({ receiverUid, callType = "audio", meta = {}, room = null, callId = null } = {}) {
+export async function initiateCall({
+  receiverUid,
+  callType = "audio",
+  meta = {},
+  room = null,
+  callId = null,
+} = {}) {
   if (!receiverUid) throw new Error("receiverUid required");
 
   // try socket first
@@ -637,11 +685,16 @@ export async function initiateCall({ receiverUid, callType = "audio", meta = {},
             if (!ack) return reject(new Error("no_ack"));
             if (ack.ok) return resolve(ack);
             return reject(new Error(ack.error || "call_init_failed"));
-          }
+          },
         );
       } catch (e) {
-        console.warn("[call] socket initiate failed, falling back to REST:", e?.message || e);
-        _initiateCallRest({ receiverUid, callType, meta, room, callId }).then(resolve).catch(reject);
+        console.warn(
+          "[call] socket initiate failed, falling back to REST:",
+          e?.message || e,
+        );
+        _initiateCallRest({ receiverUid, callType, meta, room, callId })
+          .then(resolve)
+          .catch(reject);
       }
     });
   }
@@ -655,11 +708,18 @@ async function _initiateCallRest(payload) {
     const { data } = await api.post("/api/call", payload);
     return data;
   } catch (e) {
-    throw new Error(e?.response?.data?.error || e?.message || "call_init_failed");
+    throw new Error(
+      e?.response?.data?.error || e?.message || "call_init_failed",
+    );
   }
 }
 
-export async function updateCallStatus({ id = null, callId = null, status, meta = {} } = {}) {
+export async function updateCallStatus({
+  id = null,
+  callId = null,
+  status,
+  meta = {},
+} = {}) {
   if (!status) throw new Error("status required");
   const body = { status, meta, id, callId };
 
@@ -673,8 +733,13 @@ export async function updateCallStatus({ id = null, callId = null, status, meta 
           return reject(new Error(ack.error || "call_status_failed"));
         });
       } catch (e) {
-        console.warn("[call] socket status failed, falling back to REST:", e?.message || e);
-        _updateCallStatusRest({ id, callId, status, meta }).then(resolve).catch(reject);
+        console.warn(
+          "[call] socket status failed, falling back to REST:",
+          e?.message || e,
+        );
+        _updateCallStatusRest({ id, callId, status, meta })
+          .then(resolve)
+          .catch(reject);
       }
     });
   }
@@ -682,29 +747,35 @@ export async function updateCallStatus({ id = null, callId = null, status, meta 
   return _updateCallStatusRest({ id, callId, status, meta });
 }
 
-async function _updateCallStatusRest({ id = null, callId = null, status, meta = {} } = {}) {
+async function _updateCallStatusRest({
+  id = null,
+  callId = null,
+  status,
+  meta = {},
+} = {}) {
   try {
     // Prefer canonical callId first
     if (callId) {
       const { data } = await api.put(
         `/api/call/${encodeURIComponent(String(callId))}/status`,
-        { status, meta }
+        { status, meta },
       );
       return data;
     } else if (id) {
       const { data } = await api.put(
         `/api/call/${encodeURIComponent(String(id))}/status`,
-        { status, meta }
+        { status, meta },
       );
       return data;
     } else {
       throw new Error("id_or_callId_required");
     }
   } catch (e) {
-    throw new Error(e?.response?.data?.error || e?.message || "call_status_failed");
+    throw new Error(
+      e?.response?.data?.error || e?.message || "call_status_failed",
+    );
   }
 }
-
 
 /* -----------------------
    WEBRTC signaling helpers (emit & register)
@@ -737,7 +808,10 @@ export function emitWebRTC(event, { room, payload } = {}) {
 /* Chat / Inbox / Thread helpers */
 export async function getChatWith(peerUid, params = {}) {
   if (!peerUid) throw new Error("peerUid required");
-  const { data } = await api.get(`/api/chat/with/${encodeURIComponent(peerUid)}`, { params });
+  const { data } = await api.get(
+    `/api/chat/with/${encodeURIComponent(peerUid)}`,
+    { params },
+  );
   return data;
 }
 /**
@@ -761,12 +835,16 @@ export async function getChatInbox({ cursor = null, limit = 40, q = "" } = {}) {
 
 export async function markThreadRead(peerUid) {
   if (!peerUid) throw new Error("peerUid required");
-  const { data } = await api.put(`/api/chat/thread/${encodeURIComponent(peerUid)}/read`);
+  const { data } = await api.put(
+    `/api/chat/thread/${encodeURIComponent(peerUid)}/read`,
+  );
   return data;
 }
 export async function markRoomRead(room) {
   if (!room) throw new Error("room required");
-  const { data } = await api.put(`/api/chat/room/${encodeURIComponent(room)}/read`);
+  const { data } = await api.put(
+    `/api/chat/room/${encodeURIComponent(room)}/read`,
+  );
   return data;
 }
 
@@ -787,7 +865,9 @@ export async function getNotificationsCounts() {
   }
 }
 export async function markNotificationRead(id) {
-  const { data } = await api.put(`/api/notifications/${encodeURIComponent(id)}/read`);
+  const { data } = await api.put(
+    `/api/notifications/${encodeURIComponent(id)}/read`,
+  );
   return data;
 }
 export async function markAllNotificationsRead() {
@@ -809,7 +889,11 @@ export async function getProMe() {
   }
 }
 export async function loadMeBundle() {
-  const [meRes, clientRes, proRes] = await Promise.allSettled([getMe(), getClientProfile(), getProMe()]);
+  const [meRes, clientRes, proRes] = await Promise.allSettled([
+    getMe(),
+    getClientProfile(),
+    getProMe(),
+  ]);
   const me = meRes.status === "fulfilled" ? meRes.value : null;
   const client = clientRes.status === "fulfilled" ? clientRes.value : null;
   const pro = proRes.status === "fulfilled" ? proRes.value : null;
@@ -817,23 +901,57 @@ export async function loadMeBundle() {
 }
 
 /* Geo */
-export async function getNgGeo() { const { data } = await api.get("/api/geo/ng"); return data; }
-export async function getNgStates() { const { data } = await api.get("/api/geo/ng/states"); return data; }
-export async function getNgLgas(stateName) { const { data } = await api.get(`/api/geo/ng/lgas/${encodeURIComponent(stateName)}`); return data; }
-export async function reverseGeocode({ lat, lon }) { const { data } = await api.get("/api/geo/rev", { params: { lat, lon } }); return data; }
+export async function getNgGeo() {
+  const { data } = await api.get("/api/geo/ng");
+  return data;
+}
+export async function getNgStates() {
+  const { data } = await api.get("/api/geo/ng/states");
+  return data;
+}
+export async function getNgLgas(stateName) {
+  const { data } = await api.get(
+    `/api/geo/ng/lgas/${encodeURIComponent(stateName)}`,
+  );
+  return data;
+}
+export async function reverseGeocode({ lat, lon }) {
+  const { data } = await api.get("/api/geo/rev", { params: { lat, lon } });
+  return data;
+}
 
 /* Browsing pros */
-export async function listBarbers(params = {}) { const { data } = await api.get("/api/barbers", { params }); return data; }
-export async function getBarber(id) { const { data } = await api.get(`/api/barbers/${id}`); return data; }
-export async function listNearbyBarbers({ lat, lon, radiusKm = 25 }) { const { data } = await api.get("/api/barbers/nearby", { params: { lat, lon, radiusKm } }); return data; }
+export async function listBarbers(params = {}) {
+  const { data } = await api.get("/api/barbers", { params });
+  return data;
+}
+export async function getBarber(id) {
+  const { data } = await api.get(`/api/barbers/${id}`);
+  return data;
+}
+export async function listNearbyBarbers({ lat, lon, radiusKm = 25 }) {
+  const { data } = await api.get("/api/barbers/nearby", {
+    params: { lat, lon, radiusKm },
+  });
+  return data;
+}
 
 /* Feed */
-export async function listPublicFeed(params = {}) { const { data } = await api.get("/api/posts/public", { params }); return data; }
-export async function createPost(payload) { const { data } = await api.post("/api/posts", payload); return data; }
+export async function listPublicFeed(params = {}) {
+  const { data } = await api.get("/api/posts/public", { params });
+  return data;
+}
+export async function createPost(payload) {
+  const { data } = await api.post("/api/posts", payload);
+  return data;
+}
 
 /* Payments (Paystack) */
 export async function verifyPayment({ bookingId, reference }) {
-  const { data } = await api.post("/api/payments/verify", { bookingId, reference });
+  const { data } = await api.post("/api/payments/verify", {
+    bookingId,
+    reference,
+  });
   return data;
 }
 export async function initPayment({ bookingId, email }) {
@@ -841,29 +959,58 @@ export async function initPayment({ bookingId, email }) {
   return data;
 }
 
-
 /* Bookings client */
-export async function createBooking(payload) { const { data } = await api.post("/api/bookings", payload); return data.booking; }
-export async function createInstantBooking(payload) { const { data } = await api.post("/api/bookings/instant", payload); return data; }
-export async function setBookingReference(bookingId, paystackReference) { const { data } = await api.put(`/api/bookings/${bookingId}/reference`, { paystackReference }); return data.ok === true; }
-export async function getMyBookings() { const { data } = await api.get("/api/bookings/me"); return data; }
-export async function getBooking(id) { const { data } = await api.get(`/api/bookings/${id}`); return data; }
-export async function cancelBooking(id) { const { data } = await api.put(`/api/bookings/${id}/cancel`); return data.booking; }
-
-/* Bookings - pro */
-export async function getProBookings() { const { data } = await api.get("/api/bookings/pro/me"); return data; }
-export async function acceptBooking(id) { const { data } = await api.put(`/api/bookings/${id}/accept`); return data.booking; }
-export async function declineBooking(id, payload = {}) {
-  const { data } = await api.put(`/api/bookings/${id}/cancel-by-pro`, payload);
-  return data.booking || data;
+export async function createBooking(payload) {
+  const { data } = await api.post("/api/bookings", payload);
+  return data.booking;
+}
+export async function createInstantBooking(payload) {
+  const { data } = await api.post("/api/bookings/instant", payload);
+  return data;
+}
+export async function setBookingReference(bookingId, paystackReference) {
+  const { data } = await api.put(`/api/bookings/${bookingId}/reference`, {
+    paystackReference,
+  });
+  return data.ok === true;
+}
+export async function getMyBookings() {
+  const { data } = await api.get("/api/bookings/me");
+  return data;
+}
+export async function getBooking(id) {
+  const { data } = await api.get(`/api/bookings/${id}`);
+  return data;
+}
+export async function cancelBooking(id) {
+  const { data } = await api.put(`/api/bookings/${id}/cancel`);
+  return data.booking;
 }
 
-export async function completeBooking(id, payload = {}) { const { data } = await api.put(`/api/bookings/${id}/complete`, payload); return data.booking; }
+/* Bookings - pro */
+export async function getProBookings() {
+  const { data } = await api.get("/api/bookings/pro/me");
+  return data;
+}
+export async function acceptBooking(id) {
+  const { data } = await api.put(`/api/bookings/${id}/accept`);
+  return data.booking;
+}
+
+export async function completeBooking(id, payload = {}) {
+  const { data } = await api.put(`/api/bookings/${id}/complete`, payload);
+  return data.booking;
+}
 
 /* Bookings - pro (extra) */
 export async function cancelBookingByPro(id, payload = {}) {
   const { data } = await api.put(`/api/bookings/${id}/cancel-by-pro`, payload);
   return data.booking || data;
+}
+
+// Alias (UI can still say "Decline")
+export async function declineBooking(id, payload = {}) {
+  return cancelBookingByPro(id, payload);
 }
 
 /* Admin wallets */
@@ -876,70 +1023,183 @@ export async function getPlatformWalletAdmin() {
   return data;
 }
 export async function setPlatformRecipientCode(recipientCode) {
-  const { data } = await api.post("/api/wallet/platform/recipient", { recipientCode });
+  const { data } = await api.post("/api/wallet/platform/recipient", {
+    recipientCode,
+  });
   return data;
 }
 export async function withdrawPlatformToBank(amountKobo) {
-  const { data } = await api.post("/api/wallet/platform/withdraw", { amountKobo });
+  const { data } = await api.post("/api/wallet/platform/withdraw", {
+    amountKobo,
+  });
   return data;
 }
 
-
 /* Reviews (unchanged) */
-export async function createProReview(opts) { const { data } = await api.post("/api/reviews", opts); return data; }
-export async function getProReviews(proId) { const { data } = await api.get(`/api/reviews/pro/${encodeURIComponent(proId)}`); return data; }
-export async function getMyReviewOnPro(proId) { const { data } = await api.get(`/api/reviews/pro/${encodeURIComponent(proId)}/me`); return data; }
-export async function createClientReview(opts) { const { data } = await api.post("/api/reviews/client", opts); return data; }
-export async function getClientReviews(clientUid) { const { data } = await api.get(`/api/reviews/client/${encodeURIComponent(clientUid)}`); return data; }
-export async function getMyReviewOnClient(clientUid) { const { data } = await api.get(`/api/reviews/client/${encodeURIComponent(clientUid)}/me`); return data; }
-
-/* Wallet */
-export async function getWalletMe() { const { data } = await api.get("/api/wallet/me"); return data; }
-export async function initWalletTopup(amountKobo) { const { data } = await api.get("/api/wallet/topup/init", { params: { amountKobo } }); return data; }
-export async function verifyWalletTopup(reference) { const { data } = await api.get("/api/wallet/topup/verify", { params: { reference } }); return data; }
-export async function withdrawPendingToAvailable() {
-  throw new Error("withdraw_pending_endpoint_removed_use_instantCashoutForBooking");
+export async function createProReview(opts) {
+  const { data } = await api.post("/api/reviews", opts);
+  return data;
+}
+export async function getProReviews(proId) {
+  const { data } = await api.get(
+    `/api/reviews/pro/${encodeURIComponent(proId)}`,
+  );
+  return data;
+}
+export async function getMyReviewOnPro(proId) {
+  const { data } = await api.get(
+    `/api/reviews/pro/${encodeURIComponent(proId)}/me`,
+  );
+  return data;
+}
+export async function createClientReview(opts) {
+  const { data } = await api.post("/api/reviews/client", opts);
+  return data;
+}
+export async function getClientReviews(clientUid) {
+  const { data } = await api.get(
+    `/api/reviews/client/${encodeURIComponent(clientUid)}`,
+  );
+  return data;
+}
+export async function getMyReviewOnClient(clientUid) {
+  const { data } = await api.get(
+    `/api/reviews/client/${encodeURIComponent(clientUid)}/me`,
+  );
+  return data;
 }
 
-export async function withdrawToBank({ amountKobo, pin }) { const { data } = await api.post("/api/wallet/withdraw", { amountKobo, pin }); return data; }
-export const getMyWallet = getWalletMe;
-export async function getMyTransactions() { const data = await getWalletMe(); return data?.transactions || []; }
-export async function getClientWalletMe() { const { data } = await api.get("/api/wallet/client/me"); return data; }
-export async function payBookingWithWallet(bookingId) { const { data } = await api.post("/api/wallet/pay-booking", { bookingId }); return data; }
+/* Wallet */
+export async function getWalletMe() {
+  const { data } = await api.get("/api/wallet/me");
+  return data;
+}
+export async function initWalletTopup(amountKobo) {
+  const { data } = await api.get("/api/wallet/topup/init", {
+    params: { amountKobo },
+  });
+  return data;
+}
+export async function verifyWalletTopup(reference) {
+  const { data } = await api.get("/api/wallet/topup/verify", {
+    params: { reference },
+  });
+  return data;
+}
+export async function withdrawPendingToAvailable() {
+  throw new Error(
+    "withdraw_pending_endpoint_removed_use_instantCashoutForBooking",
+  );
+}
 
+export async function withdrawToBank({ amountKobo, pin }) {
+  const { data } = await api.post("/api/wallet/withdraw", { amountKobo, pin });
+  return data;
+}
+export const getMyWallet = getWalletMe;
+export async function getMyTransactions() {
+  const data = await getWalletMe();
+  return data?.transactions || [];
+}
+export async function getClientWalletMe() {
+  const { data } = await api.get("/api/wallet/client/me");
+  return data;
+}
+export async function payBookingWithWallet(bookingId) {
+  const { data } = await api.post("/api/wallet/pay-booking", { bookingId });
+  return data;
+}
 
 /* Payout (instant cashout per booking) */
 export async function instantCashoutForBooking(bookingId) {
   if (!bookingId) throw new Error("bookingId required");
   const { data } = await api.post(
-    `/api/payouts/instant-cashout/${encodeURIComponent(String(bookingId))}`
+    `/api/payouts/instant-cashout/${encodeURIComponent(String(bookingId))}`,
   );
   return data;
 }
 
-
 /* PIN */
-export async function setWithdrawPin(pin) { const { data } = await api.post("/api/pin/me/set", { pin }); return data; }
-export async function resetWithdrawPin(currentPin, newPin) { const { data } = await api.put("/api/pin/me/reset", { currentPin, newPin }); return data; }
+export async function setWithdrawPin(pin) {
+  const { data } = await api.post("/api/pin/me/set", { pin });
+  return data;
+}
+export async function resetWithdrawPin(currentPin, newPin) {
+  const { data } = await api.put("/api/pin/me/reset", { currentPin, newPin });
+  return data;
+}
 
 /* Settings */
-export async function getSettings() { const { data } = await api.get("/api/settings"); return data; }
-export async function getAdminSettings() { const { data } = await api.get("/api/settings/admin"); return data; }
-export async function updateSettings(payload) { const { data } = await api.put("/api/settings", payload); return data; }
+export async function getSettings() {
+  const { data } = await api.get("/api/settings");
+  return data;
+}
+export async function getAdminSettings() {
+  const { data } = await api.get("/api/settings/admin");
+  return data;
+}
+export async function updateSettings(payload) {
+  const { data } = await api.put("/api/settings", payload);
+  return data;
+}
 
 /* Pro / profile / applications */
-export async function submitProApplication(payload) { const { data } = await api.post("/api/applications", payload); return data; }
-export async function getClientProfile() { const { data } = await api.get("/api/profile/me"); return data; }
-export async function updateClientProfile(payload) { const clean = stripEmpty(payload); const { data } = await api.put("/api/profile/me", clean); return data; }
+export async function submitProApplication(payload) {
+  const { data } = await api.post("/api/applications", payload);
+  return data;
+}
+export async function getClientProfile() {
+  const { data } = await api.get("/api/profile/me");
+  return data;
+}
+export async function updateClientProfile(payload) {
+  const clean = stripEmpty(payload);
+  const { data } = await api.put("/api/profile/me", clean);
+  return data;
+}
 export const saveClientProfile = updateClientProfile;
-export async function getClientProfileForBooking(clientUid, bookingId) { const { data } = await api.get(`/api/profile/client/${clientUid}/for-booking/${encodeURIComponent(bookingId)}`); return data; }
-export async function getClientProfileAdmin(clientUid) { const { data } = await api.get(`/api/profile/client/${clientUid}/admin`); return data; }
-export async function updateProProfile(payload) { const { data } = await api.put("/api/profile/pro/me", payload); return data; }
-export async function getPublicProProfile(proId) { const { data } = await api.get(`/api/profile/pro/${proId}`); return data; }
-export async function getPublicProfile(username) { if (!username) throw new Error("username required"); const { data } = await api.get(`/api/profile/public/${encodeURIComponent(username)}`); return data; }
-export async function getPublicProfileByUid(uid) { if (!uid) throw new Error("uid required"); const { data } = await api.get(`/api/profile/public-by-uid/${encodeURIComponent(uid)}`); return data; }
-export async function getProProfileAdmin(proId) { const { data } = await api.get(`/api/profile/pro/${proId}/admin`); return data; }
-export async function ensureClientProfile() { const { data } = await api.post("/api/profile/ensure"); return data; }
+export async function getClientProfileForBooking(clientUid, bookingId) {
+  const { data } = await api.get(
+    `/api/profile/client/${clientUid}/for-booking/${encodeURIComponent(
+      bookingId,
+    )}`,
+  );
+  return data;
+}
+export async function getClientProfileAdmin(clientUid) {
+  const { data } = await api.get(`/api/profile/client/${clientUid}/admin`);
+  return data;
+}
+export async function updateProProfile(payload) {
+  const { data } = await api.put("/api/profile/pro/me", payload);
+  return data;
+}
+export async function getPublicProProfile(proId) {
+  const { data } = await api.get(`/api/profile/pro/${proId}`);
+  return data;
+}
+export async function getPublicProfile(username) {
+  if (!username) throw new Error("username required");
+  const { data } = await api.get(
+    `/api/profile/public/${encodeURIComponent(username)}`,
+  );
+  return data;
+}
+export async function getPublicProfileByUid(uid) {
+  if (!uid) throw new Error("uid required");
+  const { data } = await api.get(
+    `/api/profile/public-by-uid/${encodeURIComponent(uid)}`,
+  );
+  return data;
+}
+export async function getProProfileAdmin(proId) {
+  const { data } = await api.get(`/api/profile/pro/${proId}/admin`);
+  return data;
+}
+export async function ensureClientProfile() {
+  const { data } = await api.post("/api/profile/ensure");
+  return data;
+}
 
 /* helpers */
 function stripEmpty(obj = {}) {
@@ -997,7 +1257,7 @@ export default {
   ensureClientProfile,
   loadMeBundle,
 
-    // booking UI helpers
+  // booking UI helpers
   fmtNairaFromKobo,
   getRingingRemainingMs,
   getBookingUiLabel,
@@ -1007,7 +1267,7 @@ export default {
   instantCashoutForBooking,
   // booking (extra)
   cancelBookingByPro,
-   declineBooking,
+  declineBooking,
 
   // admin wallets
   getEscrowWalletAdmin,

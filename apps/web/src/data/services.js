@@ -188,6 +188,7 @@ export const SERVICES = [
 
 // Utility to turn any name into a stable id.
 export const serviceId = (name) =>
-  String(name).toLowerCase()
+  String(name)
+    .toLowerCase()
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "");

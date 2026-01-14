@@ -23,7 +23,7 @@ export default {
     } catch (e) {
       console.warn(
         "[matchingClient] requestMatch error:",
-        e?.response?.data || e?.message || e
+        e?.response?.data || e?.message || e,
       );
       return {}; // important fallback
     }
@@ -33,14 +33,14 @@ export default {
     if (!matchId) return {};
     try {
       const { data } = await api.get(
-        `/api/match/${encodeURIComponent(matchId)}/status`
+        `/api/match/${encodeURIComponent(matchId)}/status`,
       );
       return data || {};
     } catch (e) {
       // we MUST rethrow for InstantRequest polling logic
       console.warn(
         "[matchingClient] getStatus error:",
-        e?.response?.data || e?.message || e
+        e?.response?.data || e?.message || e,
       );
       throw e;
     }
@@ -50,13 +50,13 @@ export default {
     if (!matchId) return {};
     try {
       const { data } = await api.post(
-        `/api/match/${encodeURIComponent(matchId)}/cancel`
+        `/api/match/${encodeURIComponent(matchId)}/cancel`,
       );
       return data || {};
     } catch (e) {
       console.warn(
         "[matchingClient] cancel error:",
-        e?.response?.data || e?.message || e
+        e?.response?.data || e?.message || e,
       );
       return {};
     }

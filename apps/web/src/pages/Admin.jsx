@@ -11,7 +11,13 @@ export default function Admin() {
   const location = useLocation();
   const navigate = useNavigate();
   const qs = new URLSearchParams(location.search);
-  const initialTab = qs.get("tab") === "settings" ? "settings" : "pending";
+  const tabParam = qs.get("tab");
+  const initialTab =
+    tabParam === "settings"
+      ? "settings"
+      : tabParam === "wallet"
+        ? "wallet"
+        : "pending";
 
   const [tab, setTab] = useState(initialTab);
 
@@ -19,13 +25,14 @@ export default function Admin() {
   const token = useMemo(() => localStorage.getItem("token") || "", []);
   const authHeaders = useCallback(
     () => (token ? { Authorization: `Bearer ${token}` } : {}),
-    [token]
+    [token],
   );
 
   function switchTab(next) {
     setTab(next);
     const q = new URLSearchParams(location.search);
     if (next === "settings") q.set("tab", "settings");
+    else if (next === "wallet") q.set("tab", "wallet");
     else q.delete("tab");
     navigate({ search: q.toString() }, { replace: true });
   }
@@ -99,7 +106,7 @@ export default function Admin() {
                 "Content-Type": "application/json",
                 ...authHeaders(),
               },
-            }
+            },
           ).catch(() => {
             // ignore resync errors; approval must still succeed
           });
@@ -114,7 +121,7 @@ export default function Admin() {
         setBusyId(null);
       }
     },
-    [authHeaders, loadPending, pending]
+    [authHeaders, loadPending, pending],
   );
 
   const filtered = pending.filter((p) => {
@@ -160,7 +167,7 @@ export default function Admin() {
         ? Number(s.payouts.releaseDays)
         : 7,
       instantCashoutFeePercent: Number.isFinite(
-        Number(s?.payouts?.instantCashoutFeePercent)
+        Number(s?.payouts?.instantCashoutFeePercent),
       )
         ? Number(s.payouts.instantCashoutFeePercent)
         : 3,
@@ -247,7 +254,7 @@ export default function Admin() {
     try {
       const res = await fetch(
         `${API}/api/admin/release-booking/${encodeURIComponent(
-          mrBookingId.trim()
+          mrBookingId.trim(),
         )}`,
         {
           method: "POST",
@@ -255,7 +262,7 @@ export default function Admin() {
             "Content-Type": "application/json",
             ...authHeaders(),
           },
-        }
+        },
       );
       const json = await res.json();
       setMrPayload(json);
@@ -267,7 +274,7 @@ export default function Admin() {
           ? "Already released earlier."
           : `Released ₦${(
               (json.releasedKobo || 0) / 100
-            ).toLocaleString()} to Available.`
+            ).toLocaleString()} to Available.`,
       );
     } catch (e) {
       setMrError(e.message || "Release failed");
@@ -276,12 +283,120 @@ export default function Admin() {
     }
   }, [authHeaders, mrBookingId]);
 
+  // ======================================================================
+  // TAB 3: Admin Wallet (Escrow + Platform)
+  // ======================================================================
+  const [escrow, setEscrow] = useState(null);
+  const [platform, setPlatform] = useState(null);
+
+  const [wLoading, setWLoading] = useState(false);
+  const [wError, setWError] = useState("");
+  const [wOk, setWOk] = useState("");
+
+  const [platformRecipient, setPlatformRecipient] = useState("");
+  const [withdrawNaira, setWithdrawNaira] = useState("");
+  const [wBusy, setWBusy] = useState(false);
+
+  const money = (kobo = 0) =>
+    `₦${(Math.floor(Number(kobo || 0)) / 100).toLocaleString()}`;
+
+  const loadAdminWallet = useCallback(async () => {
+    setWError("");
+    setWOk("");
+    setWLoading(true);
+    try {
+      const [eRes, pRes, sRes] = await Promise.all([
+        fetch(`${API}/api/wallet/escrow`, { headers: { ...authHeaders() } }),
+        fetch(`${API}/api/wallet/platform`, { headers: { ...authHeaders() } }),
+        fetch(`${API}/api/settings/admin`, { headers: { ...authHeaders() } }),
+      ]);
+
+      const eJson = await eRes.json();
+      const pJson = await pRes.json();
+      const sJson = await sRes.json();
+
+      if (!eRes.ok) throw new Error(eJson?.error || "escrow_load_failed");
+      if (!pRes.ok) throw new Error(pJson?.error || "platform_load_failed");
+      if (!sRes.ok) throw new Error(sJson?.error || "settings_load_failed");
+
+      setEscrow(eJson);
+      setPlatform(pJson);
+
+      // recipient code is stored in Settings, not in /wallet/platform response
+      setPlatformRecipient(
+        String(sJson?.payouts?.platformRecipientCode || "").trim(),
+      );
+    } catch (e) {
+      setWError(e?.message || "Failed to load admin wallets.");
+    } finally {
+      setWLoading(false);
+    }
+  }, [authHeaders]);
+
+  const savePlatformRecipient = useCallback(async () => {
+    setWError("");
+    setWOk("");
+    setWBusy(true);
+    try {
+      const recipientCode = String(platformRecipient || "").trim();
+      if (!recipientCode) throw new Error("recipient_required");
+
+      const res = await fetch(`${API}/api/wallet/platform/recipient`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ recipientCode }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json?.ok)
+        throw new Error(json?.error || "set_recipient_failed");
+
+      setWOk("Platform recipient code saved.");
+      await loadAdminWallet();
+    } catch (e) {
+      setWError(e?.message || "Failed to save recipient code.");
+    } finally {
+      setWBusy(false);
+    }
+  }, [authHeaders, platformRecipient, loadAdminWallet]);
+
+  const withdrawPlatform = useCallback(async () => {
+    setWError("");
+    setWOk("");
+    setWBusy(true);
+    try {
+      const naira = Number(withdrawNaira);
+      if (!Number.isFinite(naira) || naira <= 0)
+        throw new Error("invalid_amount");
+      const amountKobo = Math.floor(naira * 100);
+
+      const res = await fetch(`${API}/api/wallet/platform/withdraw`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ amountKobo }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json?.ok) {
+        throw new Error(
+          json?.message || json?.error || "platform_withdraw_failed",
+        );
+      }
+
+      setWOk("Platform withdrawal sent to Paystack.");
+      setWithdrawNaira("");
+      await loadAdminWallet();
+    } catch (e) {
+      setWError(e?.message || "Platform withdraw failed.");
+    } finally {
+      setWBusy(false);
+    }
+  }, [authHeaders, withdrawNaira, loadAdminWallet]);
+
   // ---------- lifecycle ----------
   useEffect(() => {
     if (tab === "pending") loadPending();
     if (tab === "settings") loadSettings();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab]);
+    if (tab === "wallet") loadAdminWallet();
+  }, [tab, loadPending, loadSettings, loadAdminWallet]);
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-8">
@@ -292,11 +407,23 @@ export default function Admin() {
 
       {/* Tabs */}
       <div className="mt-6 border-b border-zinc-800 flex gap-6">
-        <TabButton active={tab === "pending"} onClick={() => switchTab("pending")}>
+        <TabButton
+          active={tab === "pending"}
+          onClick={() => switchTab("pending")}
+        >
           Pending Applications
         </TabButton>
-        <TabButton active={tab === "settings"} onClick={() => switchTab("settings")}>
+        <TabButton
+          active={tab === "settings"}
+          onClick={() => switchTab("settings")}
+        >
           System Settings
+        </TabButton>
+        <TabButton
+          active={tab === "wallet"}
+          onClick={() => switchTab("wallet")}
+        >
+          Admin Wallet
         </TabButton>
       </div>
 
@@ -348,14 +475,18 @@ export default function Admin() {
                       .join(" ") ||
                     "(none)";
 
-                  const lga =
-                    (p.lga ||
-                      p?.identity?.city ||
-                      p?.identity?.state ||
-                      "(none)")?.toString();
+                  const lga = (
+                    p.lga ||
+                    p?.identity?.city ||
+                    p?.identity?.state ||
+                    "(none)"
+                  )?.toString();
 
                   return (
-                    <div key={id} className="rounded-xl border border-zinc-800 p-4">
+                    <div
+                      key={id}
+                      className="rounded-xl border border-zinc-800 p-4"
+                    >
                       <div className="grid md:grid-cols-2 gap-2">
                         <Row label="Name" value={displayName} />
                         <Row label="Email" value={p.email || "(none)"} />
@@ -366,7 +497,8 @@ export default function Admin() {
                         <Row label="LGA" value={lga} />
                         <Row label="Services" value={services} />
                         <div className="text-xs text-zinc-500 break-all">
-                          <strong>clientId:</strong> {p.clientId || "(none)"} &nbsp;|&nbsp;
+                          <strong>clientId:</strong> {p.clientId || "(none)"}{" "}
+                          &nbsp;|&nbsp;
                           <strong>_id:</strong> {p._id}
                         </div>
                       </div>
@@ -395,7 +527,7 @@ export default function Admin() {
               </div>
             )}
           </section>
-        ) : (
+        ) : tab === "settings" ? (
           <section className="space-y-4">
             {/* Settings */}
             {sError && (
@@ -464,8 +596,8 @@ export default function Admin() {
                     />
                   </div>
                   <p className="text-xs text-zinc-500">
-                    These values are saved to the server. Payout calculations should read
-                    them from Settings.
+                    These values are saved to the server. Payout calculations
+                    should read them from Settings.
                   </p>
                 </Card>
 
@@ -536,8 +668,10 @@ export default function Admin() {
                   />
                   <p className="text-xs text-zinc-500 mt-1">
                     Tip:{" "}
-                    <code className="bg-zinc-900 px-1 py-0.5 rounded">0 2 * * *</code> = 02:00
-                    daily.
+                    <code className="bg-zinc-900 px-1 py-0.5 rounded">
+                      0 2 * * *
+                    </code>{" "}
+                    = 02:00 daily.
                   </p>
                 </Card>
 
@@ -603,12 +737,14 @@ export default function Admin() {
                 {/* Security */}
                 <Card title="Security">
                   <label className="block text-xs text-zinc-400 mb-1">
-                    Allowed Origins (CORS) — comma separated. These merge with your .env
-                    CORS_ORIGIN.
+                    Allowed Origins (CORS) — comma separated. These merge with
+                    your .env CORS_ORIGIN.
                   </label>
                   <input
                     className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2"
-                    value={(settings?.security?.allowedOrigins || []).join(", ")}
+                    value={(settings?.security?.allowedOrigins || []).join(
+                      ", ",
+                    )}
                     onChange={(e) =>
                       setSettings({
                         ...settings,
@@ -628,8 +764,8 @@ export default function Admin() {
                 {/* Manual Release (admin tool) */}
                 <Card title="Manual Release (single booking)">
                   <p className="text-sm text-zinc-400 mb-2">
-                    Move a booking’s pro share from <em>Pending</em> to <em>Available</em>. Use
-                    this for special cases or support.
+                    Move a booking’s pro share from <em>Pending</em> to{" "}
+                    <em>Available</em>. Use this for special cases or support.
                   </p>
                   {mrError && (
                     <div className="rounded border border-red-800 bg-red-900/40 text-red-100 px-3 py-2 mb-2">
@@ -658,7 +794,7 @@ export default function Admin() {
                   </div>
                   {mrPayload && (
                     <pre className="mt-3 text-xs bg-zinc-950 border border-zinc-800 rounded p-3 overflow-auto">
-{JSON.stringify(mrPayload, null, 2)}
+                      {JSON.stringify(mrPayload, null, 2)}
                     </pre>
                   )}
                 </Card>
@@ -679,6 +815,167 @@ export default function Admin() {
                     Reload
                   </button>
                 </div>
+              </div>
+            )}
+          </section>
+        ) : (
+          // ===================== WALLET TAB =====================
+          <section className="space-y-4">
+            {wError && (
+              <div className="rounded border border-red-800 bg-red-900/40 text-red-100 px-3 py-2">
+                {wError}
+              </div>
+            )}
+            {wOk && (
+              <div className="rounded border border-green-800 bg-green-900/30 text-green-100 px-3 py-2">
+                {wOk}
+              </div>
+            )}
+
+            {wLoading ? (
+              <div>Loading wallets…</div>
+            ) : (
+              <div className="grid gap-6">
+                <Card title="Escrow Wallet (__ESCROW__)">
+                  <div className="grid md:grid-cols-4 gap-2">
+                    <Row
+                      label="Pending"
+                      value={money(escrow?.wallet?.pendingKobo)}
+                    />
+                    <Row
+                      label="Available"
+                      value={money(escrow?.wallet?.availableKobo)}
+                    />
+                    <Row
+                      label="Withdrawn"
+                      value={money(escrow?.wallet?.withdrawnKobo)}
+                    />
+                    <Row
+                      label="Earned"
+                      value={money(escrow?.wallet?.earnedKobo)}
+                    />
+                  </div>
+
+                  <div className="mt-3 text-xs text-zinc-500">
+                    Recent transactions
+                  </div>
+                  <div className="mt-2 divide-y divide-zinc-800 rounded-lg border border-zinc-800">
+                    {(escrow?.transactions || []).slice(0, 20).map((t) => (
+                      <div
+                        key={t._id}
+                        className="p-3 flex items-center justify-between"
+                      >
+                        <div className="text-xs text-zinc-400">
+                          <span className="px-2 py-0.5 rounded bg-zinc-900">
+                            {t.type}
+                          </span>
+                          <span className="ml-2">
+                            {new Date(t.createdAt).toLocaleString()}
+                          </span>
+                        </div>
+                        <div className="text-sm font-semibold">
+                          {t.direction === "credit"
+                            ? "+"
+                            : t.direction === "debit"
+                              ? "−"
+                              : ""}{" "}
+                          {money(t.amountKobo)}
+                        </div>
+                      </div>
+                    ))}
+                    {(!escrow?.transactions ||
+                      escrow.transactions.length === 0) && (
+                      <div className="p-3 text-zinc-400">No transactions.</div>
+                    )}
+                  </div>
+                </Card>
+
+                <Card title="Platform Wallet (__PLATFORM__)">
+                  <div className="grid md:grid-cols-4 gap-2">
+                    <Row
+                      label="Pending"
+                      value={money(platform?.wallet?.pendingKobo)}
+                    />
+                    <Row
+                      label="Available"
+                      value={money(platform?.wallet?.availableKobo)}
+                    />
+                    <Row
+                      label="Withdrawn"
+                      value={money(platform?.wallet?.withdrawnKobo)}
+                    />
+                    <Row
+                      label="Earned"
+                      value={money(platform?.wallet?.earnedKobo)}
+                    />
+                  </div>
+
+                  <div className="mt-3 text-xs text-zinc-500">
+                    Recent transactions
+                  </div>
+                  <div className="mt-2 divide-y divide-zinc-800 rounded-lg border border-zinc-800">
+                    {(platform?.transactions || []).slice(0, 20).map((t) => (
+                      <div
+                        key={t._id}
+                        className="p-3 flex items-center justify-between"
+                      >
+                        <div className="text-xs text-zinc-400">
+                          <span className="px-2 py-0.5 rounded bg-zinc-900">
+                            {t.type}
+                          </span>
+                          <span className="ml-2">
+                            {new Date(t.createdAt).toLocaleString()}
+                          </span>
+                        </div>
+                        <div className="text-sm font-semibold">
+                          {t.direction === "credit"
+                            ? "+"
+                            : t.direction === "debit"
+                              ? "−"
+                              : ""}{" "}
+                          {money(t.amountKobo)}
+                        </div>
+                      </div>
+                    ))}
+                    {(!platform?.transactions ||
+                      platform.transactions.length === 0) && (
+                      <div className="p-3 text-zinc-400">No transactions.</div>
+                    )}
+                  </div>
+                </Card>
+
+                <Card title="Platform payout setup">
+                  <Input
+                    label="Paystack recipient code (Settings.payouts.platformRecipientCode)"
+                    value={platformRecipient}
+                    onChange={(e) => setPlatformRecipient(e.target.value)}
+                    placeholder="RCP_xxxxx"
+                  />
+                  <button
+                    onClick={savePlatformRecipient}
+                    disabled={wBusy || !platformRecipient.trim()}
+                    className="px-4 py-2 rounded-lg bg-white text-black disabled:opacity-60"
+                  >
+                    {wBusy ? "Saving…" : "Save recipient code"}
+                  </button>
+                </Card>
+
+                <Card title="Withdraw platform → bank">
+                  <Input
+                    label="Amount (₦)"
+                    type="number"
+                    value={withdrawNaira}
+                    onChange={(e) => setWithdrawNaira(e.target.value)}
+                    placeholder="5000"
+                  />
+                  <button
+                    onClick={withdrawPlatform}
+                    disabled={wBusy || !String(withdrawNaira || "").trim()}
+                    className="px-4 py-2 rounded-lg border border-zinc-700 hover:bg-zinc-900 disabled:opacity-60"
+                  >
+                    {wBusy ? "Processing…" : "Withdraw"}
+                  </button>
+                </Card>
               </div>
             )}
           </section>

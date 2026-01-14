@@ -45,14 +45,18 @@ const NotificationSchema = new Schema(
     groupKey: { type: String, default: null, index: true },
 
     // Priority: "low" | "default" | "high" or numeric
-    priority: { type: String, enum: ["low", "default", "high"], default: "default" },
+    priority: {
+      type: String,
+      enum: ["low", "default", "high"],
+      default: "default",
+    },
 
     // Soft-delete in case you want to archive/cleanup notifications without removing DB row
     deleted: { type: Boolean, default: false, index: true },
   },
   {
     timestamps: true, // createdAt, updatedAt
-  }
+  },
 );
 
 /**
@@ -62,7 +66,10 @@ const NotificationSchema = new Schema(
  * - type + ownerUid for bulk ops and analytics
  * - groupKey helps grouping queries (collapse chat message spams)
  */
-NotificationSchema.index({ ownerUid: 1, createdAt: -1 }, { name: "owner_createdAt_idx" });
+NotificationSchema.index(
+  { ownerUid: 1, createdAt: -1 },
+  { name: "owner_createdAt_idx" },
+);
 NotificationSchema.index({ ownerUid: 1, seen: 1 }, { name: "owner_seen_idx" });
 NotificationSchema.index({ type: 1, ownerUid: 1 }, { name: "type_owner_idx" });
 
@@ -78,14 +85,18 @@ NotificationSchema.methods.markSeen = async function () {
   return this;
 };
 
-NotificationSchema.methods.markDelivered = async function (channel = "push", providerMeta = {}) {
+NotificationSchema.methods.markDelivered = async function (
+  channel = "push",
+  providerMeta = {},
+) {
   if (!channel) return this;
   if (channel === "push") this.deliveredPush = true;
   else if (channel === "email") this.deliveredEmail = true;
   else if (channel === "sms") this.deliveredSms = true;
 
   // attach provider metadata to meta.deliveries for traceability
-  const deliveries = this.meta && this.meta.deliveries ? this.meta.deliveries : [];
+  const deliveries =
+    this.meta && this.meta.deliveries ? this.meta.deliveries : [];
   deliveries.push({ channel, providerMeta, at: new Date() });
   this.meta = { ...this.meta, deliveries };
   await this.save();
@@ -110,6 +121,7 @@ NotificationSchema.methods.softDelete = async function () {
 };
 
 const Notification =
-  mongoose.models.Notification || mongoose.model("Notification", NotificationSchema);
+  mongoose.models.Notification ||
+  mongoose.model("Notification", NotificationSchema);
 
 export default Notification;

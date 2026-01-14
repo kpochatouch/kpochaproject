@@ -24,7 +24,7 @@ export default function Chat() {
   const navigate = useNavigate();
   const query = useQuery();
   const { me: currentUser, loading: meLoading } = useMe();
-    const startCallType = query.get("call"); // "audio" | "video" | null
+  const startCallType = query.get("call"); // "audio" | "video" | null
 
   const [socket, setSocket] = useState(null);
   const [room, setRoom] = useState(null);
@@ -53,7 +53,7 @@ export default function Chat() {
     currentUser?.userId ||
     null;
 
-    const myLabel =
+  const myLabel =
     currentUser?.displayName ||
     currentUser?.fullName ||
     currentUser?.username ||
@@ -72,9 +72,9 @@ export default function Chat() {
   } = {}) {
     return {
       call: {
-        direction,   // "outgoing" | "incoming"
-        type,        // "audio" | "video"
-        status,      // "dialing" | "ringing" | "accepted" | "ended" | "missed" | "cancelled"
+        direction, // "outgoing" | "incoming"
+        type, // "audio" | "video"
+        status, // "dialing" | "ringing" | "accepted" | "ended" | "missed" | "cancelled"
         callId,
       },
     };
@@ -139,7 +139,10 @@ export default function Chat() {
             }),
           });
         } catch (err) {
-          console.warn("[chat] could not write call bubble:", err?.message || err);
+          console.warn(
+            "[chat] could not write call bubble:",
+            err?.message || err,
+          );
         }
       }
     } catch (e) {
@@ -147,8 +150,6 @@ export default function Chat() {
       alert("Could not start call. Please try again.");
     }
   }
-
-
 
   function handleCallClose() {
     setCallState((prev) => ({ ...prev, open: false }));
@@ -171,8 +172,7 @@ export default function Chat() {
 
         if (p) {
           setPeerProfile({
-            displayName:
-              p.displayName || p.fullName || p.username || "",
+            displayName: p.displayName || p.fullName || p.username || "",
             avatarUrl: p.avatarUrl || p.photoUrl || "",
           });
         } else {
@@ -257,24 +257,23 @@ export default function Chat() {
   // ------------------ SOCKET SETUP ------------------ //
 
   // 3) Attach socket + join room once we know the room id
-    useEffect(() => {
+  useEffect(() => {
     if (!room || !myLabel) return;
 
     const s = connectSocket(); // should return the shared singleton
     setSocket(s);
 
-  function joinRoom() {
-  if (!room) return;
+    function joinRoom() {
+      if (!room) return;
 
-  console.log("[Chat.jsx] room:join →", room);
-  s.emit("room:join", { room, who: myLabel });
+      console.log("[Chat.jsx] room:join →", room);
+      s.emit("room:join", { room, who: myLabel });
 
-  console.log("[Chat.jsx] chat:read EMIT →", { room });
-  s.emit("chat:read", { room }, (ack) => {
-    console.log("[Chat.jsx] chat:read ACK ←", ack);
-  });
-}
-
+      console.log("[Chat.jsx] chat:read EMIT →", { room });
+      s.emit("chat:read", { room }, (ack) => {
+        console.log("[Chat.jsx] chat:read ACK ←", ack);
+      });
+    }
 
     // join immediately
     joinRoom();
@@ -293,8 +292,7 @@ export default function Chat() {
     };
   }, [room, myLabel]);
 
-
-   // 4) Listen only for call status (close caller UI when call ends/fails)
+  // 4) Listen only for call status (close caller UI when call ends/fails)
   useEffect(() => {
     if (!socket) return;
 
@@ -315,7 +313,7 @@ export default function Chat() {
 
         if (
           ["ended", "cancelled", "declined", "missed", "failed"].includes(
-            status
+            status,
           )
         ) {
           return { ...prev, open: false };
@@ -338,11 +336,11 @@ export default function Chat() {
     };
   }, [socket]);
 
-    // 🔥 Auto-start call when URL has ?call=audio or ?call=video
+  // 🔥 Auto-start call when URL has ?call=audio or ?call=video
   useEffect(() => {
-    if (!startCallType) return;        // no call param → do nothing
-    if (!peerUid) return;              // no peer to call
-    if (!room) return;                 // DM room not ready yet
+    if (!startCallType) return; // no call param → do nothing
+    if (!peerUid) return; // no peer to call
+    if (!room) return; // DM room not ready yet
     if (!currentUser || !myUid) return;
 
     const id = setTimeout(() => {
@@ -355,17 +353,14 @@ export default function Chat() {
 
   // ------------------ GUARDS ------------------ //
 
-    if (meLoading) {
+  if (meLoading) {
     return <RouteLoader full />;
   }
-
 
   if (!currentUser) {
     return (
       <div className="max-w-4xl mx-auto px-4 py-10">
-        <p className="text-sm text-zinc-300">
-          Please log in to use chat.
-        </p>
+        <p className="text-sm text-zinc-300">Please log in to use chat.</p>
         <button
           type="button"
           onClick={() => navigate("/login")}
@@ -382,17 +377,16 @@ export default function Chat() {
       <div className="max-w-4xl mx-auto px-4 py-10 space-y-3">
         <h1 className="text-2xl font-semibold">Chat</h1>
         <p className="text-sm text-zinc-400">
-          Open someone&apos;s profile and click{" "}
-          <strong>Message</strong> to start a conversation.
+          Open someone&apos;s profile and click <strong>Message</strong> to
+          start a conversation.
         </p>
       </div>
     );
   }
 
-    if (loadingHistory && !room) {
-  return <RouteLoader full />;
-}
-
+  if (loadingHistory && !room) {
+    return <RouteLoader full />;
+  }
 
   if (!room) {
     return (
@@ -404,8 +398,7 @@ export default function Chat() {
     );
   }
 
-  const peerName =
-    peerProfile?.displayName || peerUid.slice(0, 6) + "…";
+  const peerName = peerProfile?.displayName || peerUid.slice(0, 6) + "…";
   const peerAvatar = peerProfile?.avatarUrl || "";
 
   // ------------------ RENDER ------------------ //

@@ -32,15 +32,12 @@ const ClientReviewSchema = new mongoose.Schema(
       index: true,
     },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 ClientReviewSchema.index({ clientUid: 1, createdAt: -1 });
 // one review per (reviewer -> client). If you ever want multiple, drop this unique index.
-ClientReviewSchema.index(
-  { reviewerUid: 1, clientUid: 1 },
-  { unique: true }
-);
+ClientReviewSchema.index({ reviewerUid: 1, clientUid: 1 }, { unique: true });
 
 export const ClientReview =
   mongoose.models.ClientReview ||

@@ -20,9 +20,13 @@ const { Schema } = mongoose;
 const ParticipantSchema = new Schema(
   {
     uid: { type: String, required: true, index: true },
-    role: { type: String, enum: ["caller", "receiver", "participant"], default: "participant" },
+    role: {
+      type: String,
+      enum: ["caller", "receiver", "participant"],
+      default: "participant",
+    },
   },
-  { _id: false }
+  { _id: false },
 );
 
 const CallRecordSchema = new Schema(
@@ -52,7 +56,7 @@ const CallRecordSchema = new Schema(
         "missed",
         "busy",
         "cancelled",
-        "failed"
+        "failed",
       ],
       default: "initiated",
       index: true,
@@ -82,7 +86,7 @@ const CallRecordSchema = new Schema(
     // Provider / debug metadata: TURN used, SIP ids, provider call id, ICE stats, networkQuality, etc.
     meta: { type: Schema.Types.Mixed, default: {} },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 /**
@@ -91,11 +95,20 @@ const CallRecordSchema = new Schema(
  * - active / not-ended calls
  * - quick lookup by callId
  */
-CallRecordSchema.index({ "participants.uid": 1, createdAt: -1 }, { name: "participant_recent_idx" });
-CallRecordSchema.index({ callerUid: 1, receiverUid: 1, createdAt: -1 }, { name: "caller_receiver_idx" });
+CallRecordSchema.index(
+  { "participants.uid": 1, createdAt: -1 },
+  { name: "participant_recent_idx" },
+);
+CallRecordSchema.index(
+  { callerUid: 1, receiverUid: 1, createdAt: -1 },
+  { name: "caller_receiver_idx" },
+);
 CallRecordSchema.index({ callId: 1 }, { name: "callId_idx" });
 CallRecordSchema.index({ room: 1, createdAt: -1 }, { name: "room_recent_idx" });
-CallRecordSchema.index({ status: 1, createdAt: -1 }, { name: "status_recent_idx" });
+CallRecordSchema.index(
+  { status: 1, createdAt: -1 },
+  { name: "status_recent_idx" },
+);
 
 /**
  * Helpers
@@ -104,13 +117,18 @@ CallRecordSchema.index({ status: 1, createdAt: -1 }, { name: "status_recent_idx"
 // Compute duration when endedAt is set
 CallRecordSchema.methods.computeDuration = function () {
   if (!this.connectedAt || !this.endedAt) return 0;
-  const dur = Math.max(0, Math.floor((this.endedAt.getTime() - this.connectedAt.getTime()) / 1000));
+  const dur = Math.max(
+    0,
+    Math.floor((this.endedAt.getTime() - this.connectedAt.getTime()) / 1000),
+  );
   this.duration = dur;
   return dur;
 };
 
 // Mark call as connected (accepted)
-CallRecordSchema.methods.markConnected = async function (connectedAt = new Date()) {
+CallRecordSchema.methods.markConnected = async function (
+  connectedAt = new Date(),
+) {
   this.connectedAt = connectedAt;
   this.status = "accepted";
   // startedAt can be set earlier by initiator; ensure it's set
@@ -121,7 +139,10 @@ CallRecordSchema.methods.markConnected = async function (connectedAt = new Date(
 };
 
 // End the call and compute duration
-CallRecordSchema.methods.endCall = async function (endedAt = new Date(), endedStatus = "ended") {
+CallRecordSchema.methods.endCall = async function (
+  endedAt = new Date(),
+  endedStatus = "ended",
+) {
   this.endedAt = endedAt;
   this.status = endedStatus || "ended";
   this.computeDuration();
@@ -162,7 +183,10 @@ CallRecordSchema.pre("validate", function (next) {
   const pUids = (this.participants || []).map((p) => p.uid);
   if (!pUids.includes(this.callerUid)) {
     // Add caller to participants automatically if missing
-    this.participants = [{ uid: this.callerUid, role: "caller" }, ...(this.participants || [])];
+    this.participants = [
+      { uid: this.callerUid, role: "caller" },
+      ...(this.participants || []),
+    ];
   }
 
   // If receiverUid is set and not in participants add it

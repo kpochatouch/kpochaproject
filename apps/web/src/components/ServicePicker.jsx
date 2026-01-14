@@ -24,12 +24,24 @@ export function getDefaultCatalog() {
     { id: "cut_style", name: "Cut & Style (bob, layers, pixie, etc.)" },
     { id: "relaxer_retouch_full", name: "Relaxer retouch / full application" },
     { id: "texturizer_jerry_curl", name: "Texturizer / Jerry curl" },
-    { id: "deep_conditioning_steam", name: "Deep conditioning / Steam treatment" },
-    { id: "protein_olaplex_keratin", name: "Protein treatment / Olaplex / Keratin" },
-    { id: "hot_oil_scalp_dandruff", name: "Hot oil / Scalp therapy / Dandruff treatment" },
+    {
+      id: "deep_conditioning_steam",
+      name: "Deep conditioning / Steam treatment",
+    },
+    {
+      id: "protein_olaplex_keratin",
+      name: "Protein treatment / Olaplex / Keratin",
+    },
+    {
+      id: "hot_oil_scalp_dandruff",
+      name: "Hot oil / Scalp therapy / Dandruff treatment",
+    },
     { id: "roller_flexi_rod_set", name: "Roller set / Flexi-rod set" },
     { id: "updo_bridal_updo", name: "Up-do / Bridal up-do" },
-    { id: "frontal_closure_install", name: "Frontal & Closure Installation (13x4, 4x4, 5x5)" },
+    {
+      id: "frontal_closure_install",
+      name: "Frontal & Closure Installation (13x4, 4x4, 5x5)",
+    },
     { id: "weave_weft_install", name: "Weave/Weft Install (sew-in / bonding)" },
     { id: "wig_making_machine_hand", name: "Wig Making (machine/hand)" },
     { id: "wig_revamp", name: "Wig Revamp (wash, restyle, repair)" },
@@ -67,7 +79,10 @@ export function getDefaultCatalog() {
     { id: "child_cut", name: "Children’s Hair (0–12): Cut" },
     { id: "child_cornrows", name: "Children’s Hair (0–12): Cornrows" },
     { id: "child_basic_braids", name: "Children’s Hair (0–12): Basic braids" },
-    { id: "child_treatment_style", name: "Children’s Hair (0–12): Treatment & style" },
+    {
+      id: "child_treatment_style",
+      name: "Children’s Hair (0–12): Treatment & style",
+    },
 
     // ===== Hair Coloring
     { id: "root_touch_up", name: "Color root touch-up" },
@@ -81,7 +96,10 @@ export function getDefaultCatalog() {
     { id: "fade_taper_low_mid_high", name: "Fade: Taper/Low/Mid/High" },
     { id: "afro_shape_sponge_curls", name: "Afro shape / Sponge curls" },
     { id: "line_up_shape_up", name: "Line-up / Shape-up" },
-    { id: "beard_trim_hot_towel", name: "Beard trim / Sculpt / Hot towel shave" },
+    {
+      id: "beard_trim_hot_towel",
+      name: "Beard trim / Sculpt / Hot towel shave",
+    },
     { id: "razor_shave_head_shave", name: "Razor shave / Head shave" },
     { id: "hair_enhancement_dye", name: "Hair enhancement / Dye (beard/hair)" },
     { id: "designs_basic_advanced", name: "Designs (basic/advanced)" },
@@ -90,7 +108,10 @@ export function getDefaultCatalog() {
     // ===== Nails
     { id: "classic_manicure", name: "Classic Manicure" },
     { id: "classic_pedicure", name: "Classic Pedicure" },
-    { id: "spa_manicure_pedicure", name: "Spa Manicure / Pedicure (scrub & massage)" },
+    {
+      id: "spa_manicure_pedicure",
+      name: "Spa Manicure / Pedicure (scrub & massage)",
+    },
     { id: "gel_polish_hands", name: "Gel Polish (hands)" },
     { id: "gel_polish_feet", name: "Gel Polish (feet)" },
     { id: "acrylic_extensions", name: "Acrylic Extensions (tips/forms)" },
@@ -111,7 +132,10 @@ export function getDefaultCatalog() {
     { id: "bridal_day", name: "Bridal day" },
     { id: "traditional_engagement", name: "Traditional engagement look" },
     { id: "photoshoot_video_makeup", name: "Photoshoot / Video shoot makeup" },
-    { id: "gele_tying_auto_turbo_classic", name: "Gele tying (auto/turbo/classic)" },
+    {
+      id: "gele_tying_auto_turbo_classic",
+      name: "Gele tying (auto/turbo/classic)",
+    },
 
     // ===== Lashes & Brows
     { id: "lash_ext_classic", name: "Lash Extensions: Classic" },
@@ -122,11 +146,20 @@ export function getDefaultCatalog() {
     { id: "lash_removal", name: "Lash Removal" },
     { id: "brow_shaping_wax_thread", name: "Brow Shaping (wax/thread)" },
     { id: "brow_tint_lamination", name: "Brow Tint / Lamination" },
-    { id: "microblading_microshading_combo", name: "Microblading / Microshading / Combo brows" },
+    {
+      id: "microblading_microshading_combo",
+      name: "Microblading / Microshading / Combo brows",
+    },
 
     // ===== Skincare & Spa
-    { id: "express_deep_cleanse_facial", name: "Express facial / Deep-cleanse facial" },
-    { id: "acne_anti_aging_facial", name: "Acne treatment facial / Anti-aging facial" },
+    {
+      id: "express_deep_cleanse_facial",
+      name: "Express facial / Deep-cleanse facial",
+    },
+    {
+      id: "acne_anti_aging_facial",
+      name: "Acne treatment facial / Anti-aging facial",
+    },
     { id: "dermaplaning", name: "Dermaplaning" },
     { id: "microdermabrasion_peel", name: "Microdermabrasion / Peel" },
     { id: "back_facial_bacial", name: "Back facial (Bacial)" },
@@ -156,15 +189,24 @@ export function getDefaultCatalog() {
     { id: "sugaring", name: "Sugaring" },
 
     // ===== Bridal & Events (Bundles)
-    { id: "bridal_hair_makeup_trial_day", name: "Bridal Hair + Makeup (trial + day)" },
+    {
+      id: "bridal_hair_makeup_trial_day",
+      name: "Bridal Hair + Makeup (trial + day)",
+    },
     {
       id: "traditional_engagement_bundle",
       name: "Traditional Engagement (makeup + gele + hair)",
     },
     { id: "bridal_party_per_person", name: "Bridal Party (per person)" },
     { id: "groom_package", name: "Groom Package (haircut + beard + facial)" },
-    { id: "photoshoot_package_hair_makeup", name: "Photoshoot Package (hair + makeup)" },
-    { id: "home_service_bridal_with_travel", name: "Home Service Bridal (with travel)" },
+    {
+      id: "photoshoot_package_hair_makeup",
+      name: "Photoshoot Package (hair + makeup)",
+    },
+    {
+      id: "home_service_bridal_with_travel",
+      name: "Home Service Bridal (with travel)",
+    },
 
     // ===== Tattoos & Piercing (Optional)
     { id: "piercing_ear_lobe", name: "Piercing: Ear lobe" },
@@ -181,12 +223,27 @@ export function getDefaultCatalog() {
     { id: "trim_ends_dusting", name: "Trim / Ends dusting" },
     { id: "hair_steaming", name: "Hair steaming" },
     { id: "wig_styling_curling", name: "Wig styling / Curling" },
-    { id: "frontal_custom_bleach_pluck", name: "Frontal customization / Bleach knots / Pluck" },
-    { id: "extra_bundles_per_bundle", name: "Extra bundles install (per bundle)" },
-    { id: "beads_accessories_install", name: "Beads / Accessories installation" },
+    {
+      id: "frontal_custom_bleach_pluck",
+      name: "Frontal customization / Bleach knots / Pluck",
+    },
+    {
+      id: "extra_bundles_per_bundle",
+      name: "Extra bundles install (per bundle)",
+    },
+    {
+      id: "beads_accessories_install",
+      name: "Beads / Accessories installation",
+    },
     { id: "beard_dye_enhancement", name: "Beard dye / Enhancement" },
-    { id: "nail_art_per_nail_full_set", name: "Nail art (per nail / full set)" },
-    { id: "cuticle_treatment_paraffin", name: "Cuticle treatment / Paraffin dip" },
+    {
+      id: "nail_art_per_nail_full_set",
+      name: "Nail art (per nail / full set)",
+    },
+    {
+      id: "cuticle_treatment_paraffin",
+      name: "Cuticle treatment / Paraffin dip",
+    },
     { id: "lash_bath_sealant", name: "Lash bath / Sealant" },
     { id: "gele_only_addon", name: "Gele only (as add-on)" },
     { id: "massage_10_15_min", name: "10–15 min scalp/foot/hand massage" },
@@ -194,13 +251,25 @@ export function getDefaultCatalog() {
     { id: "home_service_travel_fee", name: "Home service travel fee" },
     { id: "outside_lga_travel_fee", name: "Outside-LGA travel fee" },
     { id: "emergency_same_day_fee", name: "Emergency/same-day booking fee" },
-    { id: "assistant_extra_time_fee", name: "Assistant/extra time fee (very long/thick hair)" },
+    {
+      id: "assistant_extra_time_fee",
+      name: "Assistant/extra time fee (very long/thick hair)",
+    },
 
     // ===== Kids & Teens (Bundle)
-    { id: "kids_cornrows_braids_basic", name: "Kids cornrows / braids (basic)" },
-    { id: "kids_twists_loc_maintenance", name: "Kids twists / loc maintenance" },
+    {
+      id: "kids_cornrows_braids_basic",
+      name: "Kids cornrows / braids (basic)",
+    },
+    {
+      id: "kids_twists_loc_maintenance",
+      name: "Kids twists / loc maintenance",
+    },
     { id: "kids_haircut_lineup", name: "Kids haircut / line-up" },
-    { id: "party_styling_beads_ribbons", name: "Party styling (beads/ribbons)" },
+    {
+      id: "party_styling_beads_ribbons",
+      name: "Party styling (beads/ribbons)",
+    },
 
     // ===== Maintenance / Recurring
     { id: "wig_wash_restyle", name: "Wig wash & restyle" },
@@ -210,7 +279,10 @@ export function getDefaultCatalog() {
     { id: "lash_refill_maintenance", name: "Lash refill (maintenance)" },
     { id: "gel_polish_change", name: "Gel polish change" },
     { id: "nail_refill_maintenance", name: "Nail refill (maintenance)" },
-    { id: "color_root_touchup_maint", name: "Color root touch-up (maintenance)" },
+    {
+      id: "color_root_touchup_maint",
+      name: "Color root touch-up (maintenance)",
+    },
 
     // ===== Your original baseline (kept for backward-compat; de-dup will remove overlap)
     { id: "haircut", name: "Haircut" },
@@ -337,8 +409,8 @@ export default function ServicePicker({
         typeof raw.price === "number"
           ? raw.price
           : Number.isFinite(Number(raw.price))
-          ? Number(raw.price)
-          : undefined;
+            ? Number(raw.price)
+            : undefined;
 
       map.set(key, {
         id: raw.id,

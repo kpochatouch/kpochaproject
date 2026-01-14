@@ -43,13 +43,15 @@ export default function awsLivenessRoutes({ requireAuth }) {
 
     try {
       const out = await rek.send(
-        new GetFaceLivenessSessionResultsCommand({ SessionId: sessionId })
+        new GetFaceLivenessSessionResultsCommand({ SessionId: sessionId }),
       );
 
       // AWS will tell us if it’s a success
       const status = out?.Status || out?.status;
       if (status !== "SUCCEEDED") {
-        return res.status(400).json({ error: "liveness_failed", detail: status });
+        return res
+          .status(400)
+          .json({ error: "liveness_failed", detail: status });
       }
 
       // ✅ store it on the profile so other routes can trust it
@@ -69,7 +71,7 @@ export default function awsLivenessRoutes({ requireAuth }) {
             },
           },
         },
-        { upsert: true }
+        { upsert: true },
       );
 
       return res.json({ ok: true, at: now });
@@ -89,7 +91,7 @@ export default function awsLivenessRoutes({ requireAuth }) {
       const col = mongoose.connection.db.collection("profiles");
       const doc = await col.findOne(
         { uid },
-        { projection: { livenessVerifiedAt: 1 } }
+        { projection: { livenessVerifiedAt: 1 } },
       );
       return res.json({
         ok: true,
@@ -108,7 +110,7 @@ export default function awsLivenessRoutes({ requireAuth }) {
       const out = await rek.send(
         new GetFaceLivenessSessionResultsCommand({
           SessionId: id,
-        })
+        }),
       );
       return res.json({ ok: true, result: out });
     } catch (err) {

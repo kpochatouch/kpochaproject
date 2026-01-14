@@ -15,11 +15,10 @@ export async function getOrCreateWallet(ownerUid) {
   const w = await Wallet.findOneAndUpdate(
     { ownerUid },
     { $setOnInsert: { ownerUid } },
-    { new: true, upsert: true, setDefaultsOnInsert: true }
+    { new: true, upsert: true, setDefaultsOnInsert: true },
   );
   return w;
 }
-
 
 function asStrId(v) {
   return v?._id?.toString?.() || v?.toString?.() || "";
@@ -33,7 +32,13 @@ async function ensureEscrowWallet() {
  * Atomic transfer: decrement fromUid.available, increment toUid.available, write 2 ledger txs.
  * Uses a Mongo transaction for consistency.
  */
-async function transferAvailableToAvailable(fromUid, toUid, amountKobo, meta = {}, types = {}) {
+async function transferAvailableToAvailable(
+  fromUid,
+  toUid,
+  amountKobo,
+  meta = {},
+  types = {},
+) {
   const amt = Math.floor(Number(amountKobo || 0));
   if (!amt || amt <= 0) throw new Error("amount_invalid");
 
@@ -45,26 +50,26 @@ async function transferAvailableToAvailable(fromUid, toUid, amountKobo, meta = {
     await Wallet.updateOne(
       { ownerUid: fromUid },
       { $setOnInsert: { ownerUid: fromUid } },
-      { upsert: true, session }
+      { upsert: true, session },
     );
     await Wallet.updateOne(
       { ownerUid: toUid },
       { $setOnInsert: { ownerUid: toUid } },
-      { upsert: true, session }
+      { upsert: true, session },
     );
 
     // debit with guard
     const fromAfter = await Wallet.findOneAndUpdate(
       { ownerUid: fromUid, availableKobo: { $gte: amt } },
       { $inc: { availableKobo: -amt } },
-      { new: true, session }
+      { new: true, session },
     );
     if (!fromAfter) throw new Error("insufficient_funds");
 
     const toAfter = await Wallet.findOneAndUpdate(
       { ownerUid: toUid },
       { $inc: { availableKobo: amt } },
-      { new: true, session }
+      { new: true, session },
     );
 
     const debitType = types.debitType || "transfer_debit";
@@ -91,7 +96,7 @@ async function transferAvailableToAvailable(fromUid, toUid, amountKobo, meta = {
           meta,
         },
       ],
-      { session }
+      { session },
     );
 
     out = { ok: true, amt, fromAfter, toAfter };
@@ -109,7 +114,6 @@ async function ensurePlatformWallet() {
   return getOrCreateWallet(PLATFORM_UID);
 }
 
-
 /**
  * Fund escrow for a CARD (Paystack) booking:
  * 1) credit __PAYSTACK__.available (money received)
@@ -117,7 +121,10 @@ async function ensurePlatformWallet() {
  *
  * Idempotent per booking: if escrow already funded for this booking, no-op.
  */
-export async function fundEscrowFromPaystackForBooking(booking, { reference = null } = {}) {
+export async function fundEscrowFromPaystackForBooking(
+  booking,
+  { reference = null } = {},
+) {
   const bookingId = asStrId(booking);
   if (!bookingId) throw new Error("booking_id_missing");
 
@@ -128,52 +135,55 @@ export async function fundEscrowFromPaystackForBooking(booking, { reference = nu
   await ensurePaystackWallet();
 
   // ✅ Idempotency: if escrow already funded for this booking, do nothing.
-const already = await WalletTx.findOne({
-  ownerUid: ESCROW_UID,
-  type: "escrow_hold_in",
-  "meta.bookingId": bookingId,
-}).lean();
-if (already) return { ok: true, alreadyEscrowed: true };
+  const already = await WalletTx.findOne({
+    ownerUid: ESCROW_UID,
+    type: "escrow_hold_in",
+    "meta.bookingId": bookingId,
+  }).lean();
+  if (already) return { ok: true, alreadyEscrowed: true };
 
-// ✅ If inflow exists but escrow is NOT funded, we must still attempt the transfer.
-// Otherwise a partial failure can leave booking "paid" but escrow empty forever.
-const inflowExists = await WalletTx.findOne({
-  ownerUid: PAYSTACK_UID,
-  type: "paystack_inflow",
-  "meta.bookingId": bookingId,
-}).lean();
-
-  // 1) Credit PAYSTACK wallet (represents money received) — only once
-if (!inflowExists) {
-  const payAfter = await Wallet.findOneAndUpdate(
-    { ownerUid: PAYSTACK_UID },
-    { $inc: { availableKobo: amountKobo } },
-    { new: true, upsert: true, setDefaultsOnInsert: true }
-  );
-
-  await WalletTx.create({
+  // ✅ If inflow exists but escrow is NOT funded, we must still attempt the transfer.
+  // Otherwise a partial failure can leave booking "paid" but escrow empty forever.
+  const inflowExists = await WalletTx.findOne({
     ownerUid: PAYSTACK_UID,
     type: "paystack_inflow",
-    direction: "credit",
-    amountKobo,
-    reference: reference || null, // ✅ indexed field
-    balancePendingKobo: Number(payAfter.pendingKobo || 0),
-    balanceAvailableKobo: Number(payAfter.availableKobo || 0),
-    meta: { bookingId, reference: reference || null },
-  });
-}
+    "meta.bookingId": bookingId,
+  }).lean();
 
+  // 1) Credit PAYSTACK wallet (represents money received) — only once
+  if (!inflowExists) {
+    const payAfter = await Wallet.findOneAndUpdate(
+      { ownerUid: PAYSTACK_UID },
+      { $inc: { availableKobo: amountKobo } },
+      { new: true, upsert: true, setDefaultsOnInsert: true },
+    );
+
+    await WalletTx.create({
+      ownerUid: PAYSTACK_UID,
+      type: "paystack_inflow",
+      direction: "credit",
+      amountKobo,
+      reference: reference || null, // ✅ indexed field
+      balancePendingKobo: Number(payAfter.pendingKobo || 0),
+      balanceAvailableKobo: Number(payAfter.availableKobo || 0),
+      meta: { bookingId, reference: reference || null },
+    });
+  }
 
   // 2) Transfer PAYSTACK -> ESCROW (uses your atomic ledger transfer)
   return transferAvailableToAvailable(
     PAYSTACK_UID,
     ESCROW_UID,
     amountKobo,
-    { bookingId, escrow: true, reason: "card_paystack_hold", reference: reference || null },
-    { debitType: "paystack_to_escrow_out", creditType: "escrow_hold_in" }
+    {
+      bookingId,
+      escrow: true,
+      reason: "card_paystack_hold",
+      reference: reference || null,
+    },
+    { debitType: "paystack_to_escrow_out", creditType: "escrow_hold_in" },
   );
 }
-
 
 export async function holdFundsInEscrowForBooking(booking) {
   const bookingId = asStrId(booking);
@@ -196,11 +206,15 @@ export async function holdFundsInEscrowForBooking(booking) {
     ESCROW_UID,
     booking.amountKobo,
     { bookingId, escrow: true, reason: "booking_hold" },
-    { debitType: "booking_hold", creditType: "escrow_hold_in" }
+    { debitType: "booking_hold", creditType: "escrow_hold_in" },
   );
 }
 
-export async function refundEscrowToClientForBooking(booking, refundAmountKobo, meta = {}) {
+export async function refundEscrowToClientForBooking(
+  booking,
+  refundAmountKobo,
+  meta = {},
+) {
   const bookingId = asStrId(booking);
   if (!bookingId) throw new Error("booking_id_missing");
   if (!booking?.clientUid) throw new Error("client_uid_missing");
@@ -220,10 +234,9 @@ export async function refundEscrowToClientForBooking(booking, refundAmountKobo, 
     booking.clientUid,
     refundAmountKobo,
     { bookingId, escrow: true, ...meta },
-    { debitType: "escrow_refund_out", creditType: "booking_refund_wallet" }
+    { debitType: "escrow_refund_out", creditType: "booking_refund_wallet" },
   );
 }
-
 
 /* ------------------------------------------------------------------ */
 /* Helpers: config with soft dependency on Settings (no hard import)  */
@@ -232,8 +245,12 @@ export async function refundEscrowToClientForBooking(booking, refundAmountKobo, 
 let _cache = { proPct: null, feePct: null, cancelFeePct: null, ts: 0 };
 const CACHE_MS = 5 * 60 * 1000; // 5 minutes
 
-function now() { return Date.now(); }
-function fresh() { return now() - _cache.ts < CACHE_MS; }
+function now() {
+  return Date.now();
+}
+function fresh() {
+  return now() - _cache.ts < CACHE_MS;
+}
 
 function envNumber(name, fallback) {
   const v = Number(process.env[name]);
@@ -278,7 +295,9 @@ async function getWithdrawPendingFeePercent() {
 async function getClientCancelFeePercentAfterAccept() {
   if (fresh() && _cache.cancelFeePct != null) return _cache.cancelFeePct;
   const s = await readSettingsDoc();
-  const fromSettings = Number(s?.bookingRules?.clientCancelFeePercentAfterAccept);
+  const fromSettings = Number(
+    s?.bookingRules?.clientCancelFeePercentAfterAccept,
+  );
   const envPct = envNumber("CLIENT_CANCEL_FEE_AFTER_ACCEPT_PCT", 3);
   const pct = Number.isFinite(fromSettings) ? fromSettings : envPct;
   _cache.cancelFeePct = pct;
@@ -384,17 +403,17 @@ export async function creditProPendingForBooking(booking, meta = {}) {
     await Wallet.updateOne(
       { ownerUid: ESCROW_UID },
       { $setOnInsert: { ownerUid: ESCROW_UID } },
-      { upsert: true, session }
+      { upsert: true, session },
     );
     await Wallet.updateOne(
       { ownerUid },
       { $setOnInsert: { ownerUid } },
-      { upsert: true, session }
+      { upsert: true, session },
     );
     await Wallet.updateOne(
       { ownerUid: PLATFORM_UID },
       { $setOnInsert: { ownerUid: PLATFORM_UID } },
-      { upsert: true, session }
+      { upsert: true, session },
     );
 
     // Debit escrow.available for BOTH pro + platform in one go (guard)
@@ -403,7 +422,7 @@ export async function creditProPendingForBooking(booking, meta = {}) {
     const escrowAfter = await Wallet.findOneAndUpdate(
       { ownerUid: ESCROW_UID, availableKobo: { $gte: totalOut } },
       { $inc: { availableKobo: -totalOut } },
-      { new: true, session }
+      { new: true, session },
     );
     if (!escrowAfter) throw new Error("escrow_insufficient");
 
@@ -411,14 +430,14 @@ export async function creditProPendingForBooking(booking, meta = {}) {
     const proAfter = await Wallet.findOneAndUpdate(
       { ownerUid },
       { $inc: { pendingKobo: proShareKobo, earnedKobo: proShareKobo } },
-      { new: true, session }
+      { new: true, session },
     );
 
     // Credit platform.available
     const platformAfter = await Wallet.findOneAndUpdate(
       { ownerUid: PLATFORM_UID },
       { $inc: { availableKobo: platformShareKobo } },
-      { new: true, session }
+      { new: true, session },
     );
 
     // Ledger: escrow out + pro funded + platform commission
@@ -468,7 +487,7 @@ export async function creditProPendingForBooking(booking, meta = {}) {
             ]
           : []),
       ],
-      { session }
+      { session },
     );
 
     result = {
@@ -498,7 +517,6 @@ export async function creditProPendingForBooking(booking, meta = {}) {
   return result;
 }
 
-
 /* ------------------------------------------------------------------ */
 /* Movement: Pending -> Available                                     */
 /* ------------------------------------------------------------------ */
@@ -507,21 +525,27 @@ export async function creditProPendingForBooking(booking, meta = {}) {
  * Move pending -> available.
  * If amountKobo is null/undefined, release ALL pending.
  */
-export async function releasePendingToAvailable(ownerUid, amountKobo = null, meta = {}) {
+export async function releasePendingToAvailable(
+  ownerUid,
+  amountKobo = null,
+  meta = {},
+) {
   if (!ownerUid) throw new Error("ownerUid_required");
 
   // If amountKobo is null => release ALL pending, but we must read it first safely.
   const w = await getOrCreateWallet(ownerUid);
   const pend = Math.max(0, Number(w.pendingKobo || 0));
   const amt =
-    amountKobo == null ? pend : Math.max(0, Math.min(pend, Math.floor(+amountKobo)));
+    amountKobo == null
+      ? pend
+      : Math.max(0, Math.min(pend, Math.floor(+amountKobo)));
 
   if (amt <= 0) throw new Error("nothing_to_release");
 
   const after = await Wallet.findOneAndUpdate(
     { ownerUid, pendingKobo: { $gte: amt } },
     { $inc: { pendingKobo: -amt, availableKobo: amt } },
-    { new: true }
+    { new: true },
   );
   if (!after) throw new Error("insufficient_pending");
 
@@ -538,7 +562,6 @@ export async function releasePendingToAvailable(ownerUid, amountKobo = null, met
   return { ok: true, releasedKobo: amt, wallet: after };
 }
 
-
 /* ------------------------------------------------------------------ */
 /* Withdraw from Available                                            */
 /* ------------------------------------------------------------------ */
@@ -552,7 +575,7 @@ export async function withdrawAvailable(ownerUid, amountKobo, meta = {}) {
   const after = await Wallet.findOneAndUpdate(
     { ownerUid, availableKobo: { $gte: amt } },
     { $inc: { availableKobo: -amt, withdrawnKobo: amt } },
-    { new: true }
+    { new: true },
   );
   if (!after) throw new Error("insufficient_available");
 
@@ -568,7 +591,6 @@ export async function withdrawAvailable(ownerUid, amountKobo, meta = {}) {
 
   return { ok: true, withdrawnKobo: amt, wallet: after };
 }
-
 
 /* ------------------------------------------------------------------ */
 /* Instant cashout from Pending (fee)                                 */
@@ -601,7 +623,7 @@ export async function withdrawPendingWithFee(ownerUid, amountKobo, meta = {}) {
           availableKobo: net, // ✅ only the net hits the pro available
         },
       },
-      { new: true, session }
+      { new: true, session },
     );
     if (!proAfter) throw new Error("insufficient_pending");
 
@@ -611,7 +633,7 @@ export async function withdrawPendingWithFee(ownerUid, amountKobo, meta = {}) {
       platformAfter = await Wallet.findOneAndUpdate(
         { ownerUid: PLATFORM_UID },
         { $inc: { availableKobo: fee } },
-        { new: true, upsert: true, setDefaultsOnInsert: true, session }
+        { new: true, upsert: true, setDefaultsOnInsert: true, session },
       );
     }
 
@@ -651,7 +673,12 @@ export async function withdrawPendingWithFee(ownerUid, amountKobo, meta = {}) {
         amountKobo: fee,
         balancePendingKobo: Number(platformAfter?.pendingKobo || 0),
         balanceAvailableKobo: Number(platformAfter?.availableKobo || 0),
-        meta: { ...meta, fromUid: ownerUid, source: "withdraw_pending", feePct },
+        meta: {
+          ...meta,
+          fromUid: ownerUid,
+          source: "withdraw_pending",
+          feePct,
+        },
       });
     }
 
@@ -681,7 +708,10 @@ export async function withdrawPendingWithFee(ownerUid, amountKobo, meta = {}) {
  * Idempotent: if booking.payoutReleased is true or nothing to move, it exits safely.
  * Accepts booking object or bookingId.
  */
-export async function releasePendingToAvailableForBooking(bookingOrId, meta = {}) {
+export async function releasePendingToAvailableForBooking(
+  bookingOrId,
+  meta = {},
+) {
   // 1) Resolve booking
   const booking =
     typeof bookingOrId === "object" && bookingOrId?._id
@@ -695,7 +725,7 @@ export async function releasePendingToAvailableForBooking(bookingOrId, meta = {}
   const ownerUid = await resolveProOwnerUid(booking);
   if (!ownerUid) throw new Error("pro_owner_uid_not_found");
 
-    // 3) Amount to move: use the ACTUAL funded amount from ledger (prevents drift)
+  // 3) Amount to move: use the ACTUAL funded amount from ledger (prevents drift)
   const bookingIdStr = booking._id.toString();
 
   const fundTx = await WalletTx.findOne({
@@ -708,7 +738,10 @@ export async function releasePendingToAvailableForBooking(bookingOrId, meta = {}
 
   const creditedKobo = Math.floor(Number(fundTx?.amountKobo || 0));
   if (!creditedKobo || creditedKobo <= 0) {
-    await Booking.updateOne({ _id: booking._id }, { $set: { payoutReleased: true } });
+    await Booking.updateOne(
+      { _id: booking._id },
+      { $set: { payoutReleased: true } },
+    );
     return { ok: true, nothingToRelease: true };
   }
 
@@ -718,9 +751,11 @@ export async function releasePendingToAvailableForBooking(bookingOrId, meta = {}
     ...meta,
   });
 
-
   // 5) Mark booking as released
-  await Booking.updateOne({ _id: booking._id }, { $set: { payoutReleased: true } });
+  await Booking.updateOne(
+    { _id: booking._id },
+    { $set: { payoutReleased: true } },
+  );
 
   return { ok: true, ...rel };
 }
@@ -746,7 +781,9 @@ export async function cancelBookingAndRefund(bookingOrId, options = {}) {
 
   // 1) resolve booking document (full, not lean; we will mutate + save)
   const booking =
-    typeof bookingOrId === "object" && bookingOrId?._id && typeof bookingOrId.save === "function"
+    typeof bookingOrId === "object" &&
+    bookingOrId?._id &&
+    typeof bookingOrId.save === "function"
       ? bookingOrId
       : await Booking.findById(bookingOrId);
 
@@ -765,7 +802,6 @@ export async function cancelBookingAndRefund(bookingOrId, options = {}) {
       alreadyCancelled: true,
     };
   }
-
 
   const wasAccepted = !!booking.acceptedAt || booking.status === "accepted";
   const wasPaid = booking.paymentStatus === "paid";
@@ -790,11 +826,11 @@ export async function cancelBookingAndRefund(bookingOrId, options = {}) {
     refundAmountKobo = Math.max(0, amountKobo - cancelFeeKobo);
   }
 
-   // 4) Update booking document
+  // 4) Update booking document
   booking.status = "cancelled";
   booking.cancelledAt = new Date();
 
-    // 5) Refund client from ESCROW -> client wallet (idempotent)
+  // 5) Refund client from ESCROW -> client wallet (idempotent)
   let walletRefunded = false;
 
   if (wasPaid && refundAmountKobo > 0 && booking.clientUid) {
@@ -810,161 +846,176 @@ export async function cancelBookingAndRefund(bookingOrId, options = {}) {
     walletRefunded = !!r?.ok;
   }
 
- // ✅ Split client cancel fee from ESCROW -> (PRO comp + PLATFORM dispute pool) 50/50 (IDEMPOTENT)
-let proCompKobo = 0;
-let platformFeeKobo = 0;
-if (wasPaid && wasAccepted && cancelFeeKobo > 0) {
-  await ensurePlatformWallet();
-  await ensureEscrowWallet();
+  // ✅ Split client cancel fee from ESCROW -> (PRO comp + PLATFORM dispute pool) 50/50 (IDEMPOTENT)
+  let proCompKobo = 0;
+  let platformFeeKobo = 0;
+  if (wasPaid && wasAccepted && cancelFeeKobo > 0) {
+    await ensurePlatformWallet();
+    await ensureEscrowWallet();
 
-  const bookingIdStr = booking._id.toString();
-  const proUid = await resolveProOwnerUid(booking);
+    const bookingIdStr = booking._id.toString();
+    const proUid = await resolveProOwnerUid(booking);
 
-  // 50/50 split by your rule
-  platformFeeKobo = Math.floor(cancelFeeKobo / 2);
-  proCompKobo = Math.max(0, cancelFeeKobo - platformFeeKobo);
+    // 50/50 split by your rule
+    platformFeeKobo = Math.floor(cancelFeeKobo / 2);
+    proCompKobo = Math.max(0, cancelFeeKobo - platformFeeKobo);
 
-  // --- 1) PLATFORM gets half (RACE-SAFE IDEMPOTENT) ---
-if (platformFeeKobo > 0) {
-  const session = await mongoose.startSession();
-  await session.withTransaction(async () => {
-    const platformAlready2 = await WalletTx.findOne(
-      {
-        ownerUid: PLATFORM_UID,
-        type: "platform_cancel_fee_in",
-        "meta.bookingId": bookingIdStr,
-      },
-      null,
-      { session }
-    ).lean();
-
-    if (platformAlready2) return;
-
-    // Do the same transfer logic, but inside this txn/session:
-    // (inline transferAvailableToAvailable so all reads/writes share the same session)
-    await Wallet.updateOne(
-      { ownerUid: ESCROW_UID },
-      { $setOnInsert: { ownerUid: ESCROW_UID } },
-      { upsert: true, session }
-    );
-    await Wallet.updateOne(
-      { ownerUid: PLATFORM_UID },
-      { $setOnInsert: { ownerUid: PLATFORM_UID } },
-      { upsert: true, session }
-    );
-
-    const escrowAfter = await Wallet.findOneAndUpdate(
-      { ownerUid: ESCROW_UID, availableKobo: { $gte: platformFeeKobo } },
-      { $inc: { availableKobo: -platformFeeKobo } },
-      { new: true, session }
-    );
-    if (!escrowAfter) throw new Error("escrow_insufficient_for_cancel_fee_platform");
-
-    const platformAfter = await Wallet.findOneAndUpdate(
-      { ownerUid: PLATFORM_UID },
-      { $inc: { availableKobo: platformFeeKobo } },
-      { new: true, session }
-    );
-
-    await WalletTx.create(
-      [
-        {
-          ownerUid: ESCROW_UID,
-          type: "escrow_cancel_fee_out",
-          direction: "debit",
-          amountKobo: platformFeeKobo,
-          balancePendingKobo: Number(escrowAfter.pendingKobo || 0),
-          balanceAvailableKobo: Number(escrowAfter.availableKobo || 0),
-          meta: {
-            bookingId: bookingIdStr,
-            cancelledBy,
-            reason,
-            source: "client_cancel_fee_platform",
-          },
-        },
-        {
-          ownerUid: PLATFORM_UID,
-          type: "platform_cancel_fee_in",
-          direction: "credit",
-          amountKobo: platformFeeKobo,
-          balancePendingKobo: Number(platformAfter.pendingKobo || 0),
-          balanceAvailableKobo: Number(platformAfter.availableKobo || 0),
-          meta: {
-            bookingId: bookingIdStr,
-            cancelledBy,
-            reason,
-            source: "client_cancel_fee_platform",
-          },
-        },
-      ],
-      { session }
-    );
-  });
-  session.endSession();
-}
-
-
-  // --- 2) PRO gets half as compensation (IDEMPOTENT) ---
-  if (proUid && proCompKobo > 0) {
-    const proAlready = await WalletTx.findOne({
-      ownerUid: proUid,
-      type: "cancel_fee_compensation",
-      "meta.bookingId": bookingIdStr,
-    }).lean();
-
-    if (!proAlready) {
-      // Use a transaction to keep escrow debit + pro credit + 2 ledger writes consistent
+    // --- 1) PLATFORM gets half (RACE-SAFE IDEMPOTENT) ---
+    if (platformFeeKobo > 0) {
       const session = await mongoose.startSession();
       await session.withTransaction(async () => {
-        // Re-check inside txn for safety (double-call race)
-        const proAlready2 = await WalletTx.findOne(
-          { ownerUid: proUid, type: "cancel_fee_compensation", "meta.bookingId": bookingIdStr },
+        const platformAlready2 = await WalletTx.findOne(
+          {
+            ownerUid: PLATFORM_UID,
+            type: "platform_cancel_fee_in",
+            "meta.bookingId": bookingIdStr,
+          },
           null,
-          { session }
+          { session },
         ).lean();
-        if (proAlready2) return;
+
+        if (platformAlready2) return;
+
+        // Do the same transfer logic, but inside this txn/session:
+        // (inline transferAvailableToAvailable so all reads/writes share the same session)
+        await Wallet.updateOne(
+          { ownerUid: ESCROW_UID },
+          { $setOnInsert: { ownerUid: ESCROW_UID } },
+          { upsert: true, session },
+        );
+        await Wallet.updateOne(
+          { ownerUid: PLATFORM_UID },
+          { $setOnInsert: { ownerUid: PLATFORM_UID } },
+          { upsert: true, session },
+        );
 
         const escrowAfter = await Wallet.findOneAndUpdate(
-          { ownerUid: ESCROW_UID, availableKobo: { $gte: proCompKobo } },
-          { $inc: { availableKobo: -proCompKobo } },
-          { new: true, session }
+          { ownerUid: ESCROW_UID, availableKobo: { $gte: platformFeeKobo } },
+          { $inc: { availableKobo: -platformFeeKobo } },
+          { new: true, session },
         );
-        if (!escrowAfter) throw new Error("escrow_insufficient_for_cancel_fee");
+        if (!escrowAfter)
+          throw new Error("escrow_insufficient_for_cancel_fee_platform");
 
-        const proAfter = await Wallet.findOneAndUpdate(
-          { ownerUid: proUid },
-          { $inc: { pendingKobo: proCompKobo, earnedKobo: proCompKobo } },
-          { new: true, upsert: true, setDefaultsOnInsert: true, session }
+        const platformAfter = await Wallet.findOneAndUpdate(
+          { ownerUid: PLATFORM_UID },
+          { $inc: { availableKobo: platformFeeKobo } },
+          { new: true, session },
         );
 
         await WalletTx.create(
           [
             {
               ownerUid: ESCROW_UID,
-              type: "escrow_cancel_fee_to_pro",
+              type: "escrow_cancel_fee_out",
               direction: "debit",
-              amountKobo: proCompKobo,
+              amountKobo: platformFeeKobo,
               balancePendingKobo: Number(escrowAfter.pendingKobo || 0),
               balanceAvailableKobo: Number(escrowAfter.availableKobo || 0),
-              meta: { bookingId: bookingIdStr, cancelledBy, reason, source: "client_cancel_fee_pro" },
+              meta: {
+                bookingId: bookingIdStr,
+                cancelledBy,
+                reason,
+                source: "client_cancel_fee_platform",
+              },
             },
             {
-              ownerUid: proUid,
-              type: "cancel_fee_compensation",
+              ownerUid: PLATFORM_UID,
+              type: "platform_cancel_fee_in",
               direction: "credit",
-              amountKobo: proCompKobo,
-              balancePendingKobo: Number(proAfter.pendingKobo || 0),
-              balanceAvailableKobo: Number(proAfter.availableKobo || 0),
-              meta: { bookingId: bookingIdStr, cancelledBy, reason, source: "client_cancel_fee_pro" },
+              amountKobo: platformFeeKobo,
+              balancePendingKobo: Number(platformAfter.pendingKobo || 0),
+              balanceAvailableKobo: Number(platformAfter.availableKobo || 0),
+              meta: {
+                bookingId: bookingIdStr,
+                cancelledBy,
+                reason,
+                source: "client_cancel_fee_platform",
+              },
             },
           ],
-          { session }
+          { session },
         );
       });
       session.endSession();
     }
+
+    // --- 2) PRO gets half as compensation (IDEMPOTENT) ---
+    if (proUid && proCompKobo > 0) {
+      const proAlready = await WalletTx.findOne({
+        ownerUid: proUid,
+        type: "cancel_fee_compensation",
+        "meta.bookingId": bookingIdStr,
+      }).lean();
+
+      if (!proAlready) {
+        // Use a transaction to keep escrow debit + pro credit + 2 ledger writes consistent
+        const session = await mongoose.startSession();
+        await session.withTransaction(async () => {
+          // Re-check inside txn for safety (double-call race)
+          const proAlready2 = await WalletTx.findOne(
+            {
+              ownerUid: proUid,
+              type: "cancel_fee_compensation",
+              "meta.bookingId": bookingIdStr,
+            },
+            null,
+            { session },
+          ).lean();
+          if (proAlready2) return;
+
+          const escrowAfter = await Wallet.findOneAndUpdate(
+            { ownerUid: ESCROW_UID, availableKobo: { $gte: proCompKobo } },
+            { $inc: { availableKobo: -proCompKobo } },
+            { new: true, session },
+          );
+          if (!escrowAfter)
+            throw new Error("escrow_insufficient_for_cancel_fee");
+
+          const proAfter = await Wallet.findOneAndUpdate(
+            { ownerUid: proUid },
+            { $inc: { pendingKobo: proCompKobo, earnedKobo: proCompKobo } },
+            { new: true, upsert: true, setDefaultsOnInsert: true, session },
+          );
+
+          await WalletTx.create(
+            [
+              {
+                ownerUid: ESCROW_UID,
+                type: "escrow_cancel_fee_to_pro",
+                direction: "debit",
+                amountKobo: proCompKobo,
+                balancePendingKobo: Number(escrowAfter.pendingKobo || 0),
+                balanceAvailableKobo: Number(escrowAfter.availableKobo || 0),
+                meta: {
+                  bookingId: bookingIdStr,
+                  cancelledBy,
+                  reason,
+                  source: "client_cancel_fee_pro",
+                },
+              },
+              {
+                ownerUid: proUid,
+                type: "cancel_fee_compensation",
+                direction: "credit",
+                amountKobo: proCompKobo,
+                balancePendingKobo: Number(proAfter.pendingKobo || 0),
+                balanceAvailableKobo: Number(proAfter.availableKobo || 0),
+                meta: {
+                  bookingId: bookingIdStr,
+                  cancelledBy,
+                  reason,
+                  source: "client_cancel_fee_pro",
+                },
+              },
+            ],
+            { session },
+          );
+        });
+        session.endSession();
+      }
+    }
   }
-}
 
   // mark booking paymentStatus as refunded if it was paid
   if (wasPaid && booking.paymentStatus === "paid") {

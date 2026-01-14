@@ -3,9 +3,18 @@
 @tailwind utilities;
 
 .gradient-hero {
-  background: radial-gradient(1200px 600px at 20% 0%, rgba(212,175,55,0.15), transparent 60%),
-              radial-gradient(800px 400px at 80% 0%, rgba(212,175,55,0.08), transparent 60%),
-              #000;
+  background:
+    radial-gradient(
+      1200px 600px at 20% 0%,
+      rgba(212, 175, 55, 0.15),
+      transparent 60%
+    ),
+    radial-gradient(
+      800px 400px at 80% 0%,
+      rgba(212, 175, 55, 0.08),
+      transparent 60%
+    ),
+    #000;
 }
 
 /* ✅ keep the working AWS behavior */
@@ -42,8 +51,13 @@
 }
 
 @keyframes kpo-star-glow {
-  0%, 100% { text-shadow: 0 0 6px rgba(255, 215, 0, 0.5); }
-  50%      { text-shadow: 0 0 12px rgba(255, 215, 0, 1); }
+  0%,
+  100% {
+    text-shadow: 0 0 6px rgba(255, 215, 0, 0.5);
+  }
+  50% {
+    text-shadow: 0 0 12px rgba(255, 215, 0, 1);
+  }
 }
 
 .kpo-star-glow {

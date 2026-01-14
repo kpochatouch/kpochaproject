@@ -19,7 +19,11 @@ r.post("/availability/check", async (req, res) => {
     }
 
     // Build a safe internal URL (respect proxies if any)
-    const proto = (req.headers["x-forwarded-proto"] || req.protocol || "http").toString();
+    const proto = (
+      req.headers["x-forwarded-proto"] ||
+      req.protocol ||
+      "http"
+    ).toString();
     const host = req.get("host");
     const u = new URL(`${proto}://${host}/api/barbers/nearby`);
     u.searchParams.set("lat", String(lat));

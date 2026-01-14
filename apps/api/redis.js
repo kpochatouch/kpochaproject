@@ -11,7 +11,9 @@ if (url) {
   baseClient = client;
 
   client.on("connect", () => console.log("[redis] ✅ Connected"));
-  client.on("error", (err) => console.error("[redis] ❌ Error:", err?.message || err));
+  client.on("error", (err) =>
+    console.error("[redis] ❌ Error:", err?.message || err),
+  );
 
   try {
     // top-level await is fine because your server.js is ESM
@@ -20,7 +22,7 @@ if (url) {
   } catch (err) {
     console.error(
       "[redis] ❌ Failed to connect, continuing without Redis:",
-      err?.message || err
+      err?.message || err,
     );
     redis = null;
   }
@@ -45,7 +47,10 @@ export async function createSubscriber() {
     await sub.connect();
     return sub;
   } catch (err) {
-    console.warn("[redis] ⚠️ Failed to create dedicated subscriber:", err?.message || err);
+    console.warn(
+      "[redis] ⚠️ Failed to create dedicated subscriber:",
+      err?.message || err,
+    );
     return null;
   }
 }

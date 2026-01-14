@@ -33,7 +33,7 @@ const ApplicationSchema = new mongoose.Schema(
   {
     timestamps: true,
     strict: false, // keep full payload as-is
-  }
+  },
 );
 
 /* ----------------------------------- Pros ---------------------------------- */
@@ -49,7 +49,7 @@ const ServiceItemSchema = new mongoose.Schema(
     description: { type: String, default: "" },
     durationMins: { type: Number, default: 0 },
   },
-  { _id: false }
+  { _id: false },
 );
 
 const ContactPublicSchema = new mongoose.Schema(
@@ -58,7 +58,7 @@ const ContactPublicSchema = new mongoose.Schema(
     shopName: { type: String, default: "" },
     shopAddress: { type: String, default: "" },
   },
-  { _id: false }
+  { _id: false },
 );
 
 const ContactPrivateSchema = new mongoose.Schema(
@@ -66,7 +66,7 @@ const ContactPrivateSchema = new mongoose.Schema(
     homeAddress: { type: String, default: "" }, // never expose publicly
     altPhone: { type: String, default: "" },
   },
-  { _id: false }
+  { _id: false },
 );
 
 const BadgeSchema = new mongoose.Schema(
@@ -78,7 +78,7 @@ const BadgeSchema = new mongoose.Schema(
     },
     label: { type: String, default: "" },
   },
-  { _id: false }
+  { _id: false },
 );
 
 const MetricsSchema = new mongoose.Schema(
@@ -96,7 +96,7 @@ const MetricsSchema = new mongoose.Schema(
     rankScore: { type: Number, default: 0 },
     rewardPoints: { type: Number, default: 0 },
   },
-  { _id: false }
+  { _id: false },
 );
 
 const ProSchema = new mongoose.Schema(
@@ -150,7 +150,7 @@ const ProSchema = new mongoose.Schema(
   {
     timestamps: true,
     strict: false,
-  }
+  },
 );
 
 // Helpful indexes (these make /api/barbers?state=... or ?lga=... faster)
@@ -186,10 +186,7 @@ export function proToBarber(doc) {
     d?.professional?.lga ||
     "";
   const stateRaw =
-    d.state ||
-    d?.identity?.state ||
-    d?.professional?.state ||
-    "";
+    d.state || d?.identity?.state || d?.professional?.state || "";
 
   const lga = lgaRaw ? String(lgaRaw).toUpperCase() : "";
   const state = stateRaw ? String(stateRaw).toUpperCase() : "";
@@ -207,50 +204,61 @@ export function proToBarber(doc) {
   }
 
   // 2b) normalize services → always { name, price, ... }
-const normalizedServices = Array.isArray(rawServices)
-  ? rawServices
-      .filter((s) => (typeof s?.visible === "boolean" ? s.visible : true))
-      .map((s) => {
-        // if it's just "Barbering" → turn into an object
-        if (typeof s === "string") {
-          return { name: s, price: 0 };
-        }
+  const normalizedServices = Array.isArray(rawServices)
+    ? rawServices
+        .filter((s) => (typeof s?.visible === "boolean" ? s.visible : true))
+        .map((s) => {
+          // if it's just "Barbering" → turn into an object
+          if (typeof s === "string") {
+            return { name: s, price: 0 };
+          }
 
-        // accept multiple legacy price fields
-        let rawPrice;
+          // accept multiple legacy price fields
+          let rawPrice;
 
-        if (s?.price !== undefined && s?.price !== null && s.price !== "") {
-          rawPrice = s.price;
-        } else if (s?.amount !== undefined && s.amount !== null && s.amount !== "") {
-          rawPrice = s.amount;
-        } else if (s?.priceNaira !== undefined && s.priceNaira !== null && s.priceNaira !== "") {
-          rawPrice = s.priceNaira;
-        } else if (s?.promoPrice !== undefined && s.promoPrice !== null && s.promoPrice !== "") {
-          rawPrice = s.promoPrice;
-        } else {
-          rawPrice = 0;
-        }
+          if (s?.price !== undefined && s?.price !== null && s.price !== "") {
+            rawPrice = s.price;
+          } else if (
+            s?.amount !== undefined &&
+            s.amount !== null &&
+            s.amount !== ""
+          ) {
+            rawPrice = s.amount;
+          } else if (
+            s?.priceNaira !== undefined &&
+            s.priceNaira !== null &&
+            s.priceNaira !== ""
+          ) {
+            rawPrice = s.priceNaira;
+          } else if (
+            s?.promoPrice !== undefined &&
+            s.promoPrice !== null &&
+            s.promoPrice !== ""
+          ) {
+            rawPrice = s.promoPrice;
+          } else {
+            rawPrice = 0;
+          }
 
-        // strip commas, ₦, spaces
-        const cleaned = String(rawPrice)
-          .replace(/[₦₦,]/g, "")
-          .trim();
+          // strip commas, ₦, spaces
+          const cleaned = String(rawPrice).replace(/[₦₦,]/g, "").trim();
 
-        const n = Number(cleaned);
-        const priceNum = Number.isFinite(n) ? n : 0;
+          const n = Number(cleaned);
+          const priceNum = Number.isFinite(n) ? n : 0;
 
-        return {
-          name: s?.name || "",
-          price: priceNum,
-          description: s?.description || s?.desc || "",
-          durationMins: Number.isFinite(Number(s?.durationMins || s?.durationMin))
-            ? Number(s.durationMins || s.durationMin)
-            : 0,
-        };
-      })
-      .filter((s) => s.name)
-  : [];
-
+          return {
+            name: s?.name || "",
+            price: priceNum,
+            description: s?.description || s?.desc || "",
+            durationMins: Number.isFinite(
+              Number(s?.durationMins || s?.durationMin),
+            )
+              ? Number(s.durationMins || s.durationMin)
+              : 0,
+          };
+        })
+        .filter((s) => s.name)
+    : [];
 
   // 2c) derive a starting price so UI doesn't have to compute
   const startingPrice =
@@ -284,7 +292,9 @@ const normalizedServices = Array.isArray(rawServices)
     // name: prefer pro.name, but fall back to identity if pro.name is empty
     name:
       d.name ||
-      [d?.identity?.firstName, d?.identity?.lastName].filter(Boolean).join(" ") ||
+      [d?.identity?.firstName, d?.identity?.lastName]
+        .filter(Boolean)
+        .join(" ") ||
       "",
 
     // avatar for barber card
@@ -323,8 +333,7 @@ export const Application =
   mongoose.models.Application ||
   mongoose.model("Application", ApplicationSchema);
 
-export const Pro =
-  mongoose.models.Pro || mongoose.model("Pro", ProSchema);
+export const Pro = mongoose.models.Pro || mongoose.model("Pro", ProSchema);
 
 /* -------------------------------------------------------------------------- */
 /* SUMMARY

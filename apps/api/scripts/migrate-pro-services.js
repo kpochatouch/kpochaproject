@@ -25,7 +25,11 @@ function toMoneyString(v) {
     const cursor = Pro.find({}).cursor();
     let changedCount = 0;
 
-    for (let pro = await cursor.next(); pro != null; pro = await cursor.next()) {
+    for (
+      let pro = await cursor.next();
+      pro != null;
+      pro = await cursor.next()
+    ) {
       let changed = false;
 
       if (Array.isArray(pro.servicesDetailed) && pro.servicesDetailed.length) {

@@ -102,45 +102,42 @@ export default function BarberCard({ barber = {}, onOpen, onBook }) {
     typeof barber.startingPrice === "number" && barber.startingPrice >= 0
       ? barber.startingPrice
       : services.length
-      ? Math.min(
-          ...services
-            .map((s) => Number(s.price) || 0)
-            .filter((n) => Number.isFinite(n))
-        )
-      : 0;
+        ? Math.min(
+            ...services
+              .map((s) => Number(s.price) || 0)
+              .filter((n) => Number.isFinite(n)),
+          )
+        : 0;
 
   const bio = String(barber.bio || barber.description || "").trim();
   const photoUrl = barber.photoUrl || barber.avatarUrl || "";
 
-// ======================= FIXED RATING LOGIC ===========================
-const ratingCount = Number(barber.ratingCount || 0);
+  // ======================= FIXED RATING LOGIC ===========================
+  const ratingCount = Number(barber.ratingCount || 0);
 
-const rawRating =
-  typeof barber.rating === "number"
-    ? barber.rating
-    : Number(
-        barber?.metrics && typeof barber.metrics.avgRating !== "undefined"
-          ? barber.metrics.avgRating
-          : 0
-      ) || 0;
+  const rawRating =
+    typeof barber.rating === "number"
+      ? barber.rating
+      : Number(
+          barber?.metrics && typeof barber.metrics.avgRating !== "undefined"
+            ? barber.metrics.avgRating
+            : 0,
+        ) || 0;
 
-// Only show rating if there are REAL reviews
-const hasRealReviews = ratingCount > 0 && rawRating > 0;
+  // Only show rating if there are REAL reviews
+  const hasRealReviews = ratingCount > 0 && rawRating > 0;
 
-const rating = hasRealReviews
-  ? Math.max(0, Math.min(5, rawRating))
-  : 0;
+  const rating = hasRealReviews ? Math.max(0, Math.min(5, rawRating)) : 0;
 
-// Stars
-const fullStars =
-  hasRealReviews && Number.isFinite(Number(barber?.ratingStars?.full))
-    ? Math.max(0, Math.min(5, Number(barber.ratingStars.full)))
-    : hasRealReviews
-    ? Math.max(0, Math.min(5, Math.round(rating)))
-    : 0;
+  // Stars
+  const fullStars =
+    hasRealReviews && Number.isFinite(Number(barber?.ratingStars?.full))
+      ? Math.max(0, Math.min(5, Number(barber.ratingStars.full)))
+      : hasRealReviews
+        ? Math.max(0, Math.min(5, Math.round(rating)))
+        : 0;
 
-const emptyStars = 5 - fullStars;
-
+  const emptyStars = 5 - fullStars;
 
   function handleAvatarClick() {
     onOpen?.(barber);
@@ -230,13 +227,9 @@ const emptyStars = 5 - fullStars;
                     ★
                   </span>
                 ))}
-                <span className="ml-1 font-semibold">
-                  {rating.toFixed(1)}
-                </span>
+                <span className="ml-1 font-semibold">{rating.toFixed(1)}</span>
                 {ratingCount > 0 && (
-                  <span className="text-zinc-500 ml-1">
-                    ({ratingCount})
-                  </span>
+                  <span className="text-zinc-500 ml-1">({ratingCount})</span>
                 )}
               </span>
             )}

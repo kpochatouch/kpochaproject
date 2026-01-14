@@ -32,7 +32,9 @@ export async function listDevices() {
 export function stopMediaStream(stream) {
   if (!stream) return;
   stream.getTracks().forEach((t) => {
-    try { t.stop(); } catch {}
+    try {
+      t.stop();
+    } catch {}
   });
 }
 
@@ -74,7 +76,9 @@ export function attachLocalStreamToPeer(pc, localStream) {
     if (sender && sender.replaceTrack) {
       sender.replaceTrack(track).catch(() => {});
     } else {
-      try { pc.addTrack(track, localStream); } catch {}
+      try {
+        pc.addTrack(track, localStream);
+      } catch {}
     }
   });
 }
@@ -107,7 +111,13 @@ export async function startOutgoingCall({
   if (!receiverUid) throw new Error("receiverUid required");
 
   // call record on server
-  const ack = await initiateCall({ receiverUid, callType, meta: {}, room, callId });
+  const ack = await initiateCall({
+    receiverUid,
+    callType,
+    meta: {},
+    room,
+    callId,
+  });
 
   // ack should contain room & callId (server-created)
   const { room: callRoom, callId: serverCallId } = ack;
@@ -124,7 +134,12 @@ export async function startOutgoingCall({
 /**
  * updateCall - wrapper for change status
  */
-export async function updateCall({ id = null, callId = null, status, meta = {} } = {}) {
+export async function updateCall({
+  id = null,
+  callId = null,
+  status,
+  meta = {},
+} = {}) {
   return updateCallStatus({ id, callId, status, meta });
 }
 

@@ -34,13 +34,17 @@ export default function WalletPage() {
   const [settings, setSettings] = useState(null);
   const feePct = useMemo(
     () => Number(settings?.payouts?.instantCashoutFeePercent ?? 3),
-    [settings]
+    [settings],
   );
   const autoReleaseOn = !!settings?.payouts?.enableAutoRelease;
 
   // modals
   const [pinModal, setPinModal] = useState({ open: false, mode: "set" }); // "set" | "reset"
-  const [pinPrompt, setPinPrompt] = useState({ open: false, onSubmit: null, error: "" });
+  const [pinPrompt, setPinPrompt] = useState({
+    open: false,
+    onSubmit: null,
+    error: "",
+  });
   const [forgotOpen, setForgotOpen] = useState(false);
 
   async function load() {
@@ -48,19 +52,18 @@ export default function WalletPage() {
     setLoading(true);
     try {
       const [meRes, wRes, sRes, bRes] = await Promise.allSettled([
-      api.get("/api/me"),
-      api.get("/api/wallet/me"),
-      api.get("/api/settings"),
-      getProBookings(), // ✅ pro bookings for cashout list
-    ]);
+        api.get("/api/me"),
+        api.get("/api/wallet/me"),
+        api.get("/api/settings"),
+        getProBookings(), // ✅ pro bookings for cashout list
+      ]);
 
       const meData = meRes.status === "fulfilled" ? meRes.value.data : null;
-      const wData  = wRes.status  === "fulfilled" ? wRes.value.data  : null;
-      const sData  = sRes.status  === "fulfilled" ? sRes.value.data  : null;
+      const wData = wRes.status === "fulfilled" ? wRes.value.data : null;
+      const sData = sRes.status === "fulfilled" ? sRes.value.data : null;
 
       const bData = bRes.status === "fulfilled" ? bRes.value : [];
-      setProBookings(Array.isArray(bData) ? bData : (bData?.bookings || []));
-
+      setProBookings(Array.isArray(bData) ? bData : bData?.bookings || []);
 
       setMe(meData);
       setMeHasPin(!!meData?.hasPin);
@@ -73,7 +76,9 @@ export default function WalletPage() {
       setLoading(false);
     }
   }
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+  }, []);
 
   const fmt = (k) => `₦${(Math.floor(k || 0) / 100).toLocaleString()}`;
 
@@ -93,9 +98,20 @@ export default function WalletPage() {
   // ----------------- Withdraw from Available -----------------
   async function withdrawFromAvailable() {
     const naira = Number(amtFromAvailable);
-    if (!Number.isFinite(naira) || naira <= 0) return alert("Enter a valid amount in ₦.");
-    const max = (wallet?.availableKobo || 0) / 100;
-    if (naira > max) return alert(`You can withdraw at most ₦${max.toLocaleString()} from Available.`);
+    if (!Number.isFinite(naira) || naira <= 0)
+      return alert("Enter a valid amount in ₦.");
+    const availableKobo = Number(wallet?.availableKobo || 0);
+    const max = availableKobo / 100;
+
+    if (availableKobo <= 0) {
+      return alert("Insufficient funds in Available.");
+    }
+    if (naira > max) {
+      return alert(
+        `Insufficient funds. You can withdraw at most ₦${max.toLocaleString()} from Available.`,
+      );
+    }
+
     const amountKobo = Math.floor(naira * 100);
 
     openWithdrawPinPrompt(async (pin) => {
@@ -105,34 +121,49 @@ export default function WalletPage() {
         setPinPrompt({ open: false, onSubmit: null, error: "" });
         await load();
       } catch (e) {
-        showInvalidPin(e?.response?.data?.error);
+        const code = e?.response?.data?.error;
+
+        // PIN-related errors keep using your existing inline PIN UI
+        if (code === "invalid_pin" || code === "no_pin") {
+          return showInvalidPin(code);
+        }
+
+        // Balance / setup errors should show a normal message
+        if (code === "insufficient_available") {
+          return alert("Insufficient funds in Available.");
+        }
+        if (code === "no_payout_account") {
+          return alert("Add your payout (bank) account first.");
+        }
+
+        // fallback
+        return alert(code || "Withdrawal failed. Please try again.");
       }
     });
   }
-
   async function cashoutBooking(booking) {
-  const bookingId = booking?._id;
-  if (!bookingId) return;
+    const bookingId = booking?._id;
+    if (!bookingId) return;
 
-  setCashoutBusy((m) => ({ ...m, [bookingId]: true }));
-  try {
-    await instantCashoutForBooking(bookingId);
-    await load();
-  } catch (e) {
-    const msg =
-      e?.response?.data?.message ||
-      e?.response?.data?.error ||
-      e?.message ||
-      "Instant cashout failed";
-    alert(msg);
-  } finally {
-    setCashoutBusy((m) => {
-      const copy = { ...m };
-      delete copy[bookingId];
-      return copy;
-    });
+    setCashoutBusy((m) => ({ ...m, [bookingId]: true }));
+    try {
+      await instantCashoutForBooking(bookingId);
+      await load();
+    } catch (e) {
+      const msg =
+        e?.response?.data?.message ||
+        e?.response?.data?.error ||
+        e?.message ||
+        "Instant cashout failed";
+      alert(msg);
+    } finally {
+      setCashoutBusy((m) => {
+        const copy = { ...m };
+        delete copy[bookingId];
+        return copy;
+      });
+    }
   }
-}
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-10">
@@ -140,7 +171,9 @@ export default function WalletPage() {
         <h2 className="text-2xl font-semibold">Wallet</h2>
 
         <button
-          onClick={() => setPinModal({ open: true, mode: meHasPin ? "reset" : "set" })}
+          onClick={() =>
+            setPinModal({ open: true, mode: meHasPin ? "reset" : "set" })
+          }
           className="text-xs bg-zinc-800 hover:bg-zinc-700 rounded px-2 py-1"
           title={meHasPin ? "Reset your wallet PIN" : "Set your wallet PIN"}
         >
@@ -157,13 +190,14 @@ export default function WalletPage() {
       </div>
 
       <p className="text-zinc-400 mt-2">
-      Earnings move to{" "}
-      <span className="inline-block px-2 bg-zinc-800 rounded">Pending</span>{" "}
-      only after the job is completed.
-    </p>
-    <p className="text-zinc-500 text-xs mt-1">
-      Instant cashout moves money from Pending → Available (not to bank). Bank withdrawal uses Available.
-    </p>
+        Earnings move to{" "}
+        <span className="inline-block px-2 bg-zinc-800 rounded">Pending</span>{" "}
+        only after the job is completed.
+      </p>
+      <p className="text-zinc-500 text-xs mt-1">
+        Instant cashout moves money from Pending → Available (not to bank). Bank
+        withdrawal uses Available.
+      </p>
 
       <p className="text-zinc-500 text-xs mt-1 mb-6">
         Instant cashout fee from Pending: <strong>{feePct}%</strong>
@@ -174,7 +208,9 @@ export default function WalletPage() {
         </strong>
       </p>
 
-      {err && <div className="bg-red-900 text-red-100 rounded p-4 mb-6">{err}</div>}
+      {err && (
+        <div className="bg-red-900 text-red-100 rounded p-4 mb-6">{err}</div>
+      )}
 
       {loading ? (
         <div>Loading…</div>
@@ -183,7 +219,10 @@ export default function WalletPage() {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
             <Card title="Pending" value={fmt(wallet?.pendingKobo)} />
             <Card title="Available" value={fmt(wallet?.availableKobo)} />
-            <Card title="Withdrawn (lifetime)" value={fmt(wallet?.withdrawnKobo)} />
+            <Card
+              title="Withdrawn (lifetime)"
+              value={fmt(wallet?.withdrawnKobo)}
+            />
             <Card title="Earned (lifetime)" value={fmt(wallet?.earnedKobo)} />
           </div>
 
@@ -198,49 +237,62 @@ export default function WalletPage() {
 
             <div className="rounded-lg border border-zinc-800 divide-y divide-zinc-800">
               {(proBookings || [])
-                .filter((b) => b?.status === "completed" && b?.paymentStatus === "paid")
-                .sort((a, b) => new Date(b.completedAt || b.updatedAt || 0) - new Date(a.completedAt || a.updatedAt || 0))
+                .filter(
+                  (b) =>
+                    b?.status === "completed" && b?.paymentStatus === "paid",
+                )
+                .sort(
+                  (a, b) =>
+                    new Date(b.completedAt || b.updatedAt || 0) -
+                    new Date(a.completedAt || a.updatedAt || 0),
+                )
                 .map((b) => {
                   const already = b?.meta?.instantCashout === true;
                   const busy = !!cashoutBusy[b._id];
 
-
                   return (
-                    <div key={b._id} className="p-4 flex items-center justify-between gap-4">
+                    <div
+                      key={b._id}
+                      className="p-4 flex items-center justify-between gap-4"
+                    >
                       <div>
                         <div className="text-sm font-medium">
                           Booking #{String(b._id).slice(-6)}
                         </div>
                         <div className="text-xs text-zinc-500 mt-1">
                           Completed:{" "}
-                          {b.completedAt ? new Date(b.completedAt).toLocaleString() : "—"}
+                          {b.completedAt
+                            ? new Date(b.completedAt).toLocaleString()
+                            : "—"}
                           <span className="mx-2">•</span>
-                          Amount: <strong>{fmtNairaFromKobo(b.amountKobo || 0)}</strong>
+                          Amount:{" "}
+                          <strong>{fmtNairaFromKobo(b.amountKobo || 0)}</strong>
                         </div>
                       </div>
 
                       <div className="flex items-center gap-2">
                         {already ? (
-                      <span className="text-xs px-2 py-1 rounded bg-zinc-800 text-green-300">
-                        Cashed out
-                      </span>
-                    ) : (
-                      <button
-                        disabled={busy}
-                        onClick={() => cashoutBooking(b)}
-                        className="rounded-lg bg-gold text-black px-4 py-2 font-semibold disabled:opacity-50"
-                        title={`Cashout (Pending → Available) fee ${feePct}%`}
-                      >
-                        {busy ? "Processing…" : "Cashout now"}
-                      </button>
-                    )}
-
+                          <span className="text-xs px-2 py-1 rounded bg-zinc-800 text-green-300">
+                            Cashed out
+                          </span>
+                        ) : (
+                          <button
+                            disabled={busy}
+                            onClick={() => cashoutBooking(b)}
+                            className="rounded-lg bg-gold text-black px-4 py-2 font-semibold disabled:opacity-50"
+                            title={`Cashout (Pending → Available) fee ${feePct}%`}
+                          >
+                            {busy ? "Processing…" : "Cashout now"}
+                          </button>
+                        )}
                       </div>
                     </div>
                   );
                 })}
 
-              {(!(proBookings || []).some((b) => b?.status === "completed" && b?.paymentStatus === "paid")) && (
+              {!(proBookings || []).some(
+                (b) => b?.status === "completed" && b?.paymentStatus === "paid",
+              ) && (
                 <div className="p-6 text-zinc-400 text-sm">
                   No completed paid bookings yet.
                 </div>
@@ -248,9 +300,7 @@ export default function WalletPage() {
             </div>
           </div>
 
-
           <div className="flex flex-col md:flex-row gap-4 mb-8">
-
             <div className="flex gap-2 items-center">
               <input
                 type="number"
@@ -274,9 +324,14 @@ export default function WalletPage() {
           <h3 className="text-lg font-semibold mb-3">Recent Transactions</h3>
           <div className="divide-y divide-zinc-800 rounded-lg border border-zinc-800">
             {(tx || []).map((t) => (
-              <div key={t._id} className="p-4 flex items-center justify-between">
+              <div
+                key={t._id}
+                className="p-4 flex items-center justify-between"
+              >
                 <div className="flex items-center gap-3">
-                  <span className="text-xs px-2 py-1 rounded bg-zinc-800">{t.type}</span>
+                  <span className="text-xs px-2 py-1 rounded bg-zinc-800">
+                    {t.type}
+                  </span>
                   {t.meta?.bookingId && (
                     <span className="text-xs px-2 py-1 rounded bg-zinc-900">
                       Booking: {String(t.meta.bookingId).slice(-6)}
@@ -291,19 +346,25 @@ export default function WalletPage() {
                     t.direction === "credit"
                       ? "text-green-400"
                       : t.direction === "debit"
-                      ? "text-red-400"
-                      : "text-zinc-300"
+                        ? "text-red-400"
+                        : "text-zinc-300"
                   } font-semibold`}
                 >
-                  {t.direction === "credit" ? "+" : t.direction === "debit" ? "−" : ""} {fmt(t.amountKobo)}
+                  {t.direction === "credit"
+                    ? "+"
+                    : t.direction === "debit"
+                      ? "−"
+                      : ""}{" "}
+                  {fmt(t.amountKobo)}
                 </div>
               </div>
             ))}
-            {(!tx || tx.length === 0) && <div className="p-6 text-zinc-400">No transactions yet.</div>}
+            {(!tx || tx.length === 0) && (
+              <div className="p-6 text-zinc-400">No transactions yet.</div>
+            )}
           </div>
         </>
       )}
-
 
       {/* PIN modals */}
       <PinModal
@@ -434,7 +495,9 @@ function PinModal({ open, mode, onClose, onDone }) {
         </div>
 
         <div className="flex justify-end gap-2">
-          <button onClick={onClose} className="px-3 py-2 border rounded">Cancel</button>
+          <button onClick={onClose} className="px-3 py-2 border rounded">
+            Cancel
+          </button>
           <button
             disabled={!canSubmit || busy}
             onClick={submit}
@@ -449,10 +512,19 @@ function PinModal({ open, mode, onClose, onDone }) {
 }
 
 /** Numeric PIN prompt for withdraws (no browser password popup) */
-function PinPrompt({ open, error, onClose, onSubmit, onResetPin, onForgotPin }) {
+function PinPrompt({
+  open,
+  error,
+  onClose,
+  onSubmit,
+  onResetPin,
+  onForgotPin,
+}) {
   const [pin, setPin] = useState("");
   const disabled = !/^\d{4,6}$/.test(pin);
-  useEffect(() => { if (!open) setPin(""); }, [open]);
+  useEffect(() => {
+    if (!open) setPin("");
+  }, [open]);
   if (!open) return null;
 
   return (
@@ -472,7 +544,9 @@ function PinPrompt({ open, error, onClose, onSubmit, onResetPin, onForgotPin }) 
           onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
         />
         <div className="flex justify-end gap-2 mb-3">
-          <button onClick={onClose} className="px-3 py-2 border rounded">Cancel</button>
+          <button onClick={onClose} className="px-3 py-2 border rounded">
+            Cancel
+          </button>
           <button
             disabled={disabled}
             onClick={() => onSubmit?.(pin)}
@@ -483,10 +557,16 @@ function PinPrompt({ open, error, onClose, onSubmit, onResetPin, onForgotPin }) 
         </div>
 
         <div className="text-xs flex items-center justify-between">
-          <button className="underline text-zinc-400 hover:text-zinc-200" onClick={onResetPin}>
+          <button
+            className="underline text-zinc-400 hover:text-zinc-200"
+            onClick={onResetPin}
+          >
             Reset PIN
           </button>
-          <button className="underline text-zinc-400 hover:text-zinc-200" onClick={onForgotPin}>
+          <button
+            className="underline text-zinc-400 hover:text-zinc-200"
+            onClick={onForgotPin}
+          >
             Forgot PIN?
           </button>
         </div>
@@ -498,7 +578,11 @@ function PinPrompt({ open, error, onClose, onSubmit, onResetPin, onForgotPin }) 
 /** Forgot PIN flow with Firebase re-auth if available; otherwise skip straight to new PIN */
 function ForgotPinModal({ open, email, onClose, onSetNewPin }) {
   let auth = null;
-  try { auth = getAuth(); } catch { /* Firebase not present */ }
+  try {
+    auth = getAuth();
+  } catch {
+    /* Firebase not present */
+  }
 
   const hasFirebase = !!auth?.app;
   const [mode, setMode] = useState(hasFirebase ? "choose" : "new"); // choose | pass | new | ok
@@ -511,8 +595,11 @@ function ForgotPinModal({ open, email, onClose, onSetNewPin }) {
   useEffect(() => {
     if (!open) {
       setMode(hasFirebase ? "choose" : "new");
-      setBusy(false); setErr("");
-      setPassword(""); setNewPin(""); setNewPin2("");
+      setBusy(false);
+      setErr("");
+      setPassword("");
+      setNewPin("");
+      setNewPin2("");
     }
   }, [open, hasFirebase]);
 
@@ -521,7 +608,8 @@ function ForgotPinModal({ open, email, onClose, onSetNewPin }) {
   async function verifyWithPassword() {
     if (!hasFirebase) return setMode("new");
     try {
-      setBusy(true); setErr("");
+      setBusy(true);
+      setErr("");
       const cred = EmailAuthProvider.credential(email, password);
       await reauthenticateWithCredential(auth.currentUser, cred);
       setMode("new");
@@ -534,7 +622,8 @@ function ForgotPinModal({ open, email, onClose, onSetNewPin }) {
   async function verifyWithGoogle() {
     if (!hasFirebase) return setMode("new");
     try {
-      setBusy(true); setErr("");
+      setBusy(true);
+      setErr("");
       await reauthenticateWithPopup(auth.currentUser, new GoogleAuthProvider());
       setMode("new");
     } catch (e) {
@@ -547,7 +636,8 @@ function ForgotPinModal({ open, email, onClose, onSetNewPin }) {
     if (!/^\d{4,6}$/.test(newPin)) return setErr("PIN must be 4–6 digits.");
     if (newPin !== newPin2) return setErr("PINs do not match.");
     try {
-      setBusy(true); setErr("");
+      setBusy(true);
+      setErr("");
       await onSetNewPin(newPin); // calls /api/pin/me/forgot on the parent
       setMode("ok");
     } catch (e) {
@@ -584,14 +674,18 @@ function ForgotPinModal({ open, email, onClose, onSetNewPin }) {
               </button>
             </div>
             <div className="flex justify-end mt-4">
-              <button onClick={onClose} className="px-3 py-2 border rounded">Close</button>
+              <button onClick={onClose} className="px-3 py-2 border rounded">
+                Close
+              </button>
             </div>
           </>
         )}
 
         {mode === "pass" && (
           <>
-            <div className="text-lg font-semibold mb-2">Verify with Password</div>
+            <div className="text-lg font-semibold mb-2">
+              Verify with Password
+            </div>
             <div className="text-xs text-zinc-500 mb-1">{email}</div>
             {err && <div className="text-sm text-red-300 mb-2">{err}</div>}
             <input
@@ -603,7 +697,10 @@ function ForgotPinModal({ open, email, onClose, onSetNewPin }) {
               onChange={(e) => setPassword(e.target.value)}
             />
             <div className="flex justify-end gap-2">
-              <button onClick={() => setMode("choose")} className="px-3 py-2 border rounded">
+              <button
+                onClick={() => setMode("choose")}
+                className="px-3 py-2 border rounded"
+              >
                 Back
               </button>
               <button
@@ -624,7 +721,8 @@ function ForgotPinModal({ open, email, onClose, onSetNewPin }) {
               <p className="text-xs text-zinc-500 mb-2">Identity verified.</p>
             ) : (
               <p className="text-xs text-zinc-500 mb-2">
-                Firebase not detected — proceeding to set a new PIN. (Server still enforces auth.)
+                Firebase not detected — proceeding to set a new PIN. (Server
+                still enforces auth.)
               </p>
             )}
             {err && <div className="text-sm text-red-300 mb-2">{err}</div>}
@@ -649,10 +747,14 @@ function ForgotPinModal({ open, email, onClose, onSetNewPin }) {
               onChange={(e) => setNewPin2(e.target.value.replace(/\D/g, ""))}
             />
             <div className="flex justify-end gap-2">
-              <button onClick={onClose} className="px-3 py-2 border rounded">Cancel</button>
+              <button onClick={onClose} className="px-3 py-2 border rounded">
+                Cancel
+              </button>
               <button
                 onClick={setFreshPin}
-                disabled={!/^\d{4,6}$/.test(newPin) || newPin !== newPin2 || busy}
+                disabled={
+                  !/^\d{4,6}$/.test(newPin) || newPin !== newPin2 || busy
+                }
                 className="px-3 py-2 rounded bg-gold text-black disabled:opacity-50"
               >
                 {busy ? "Saving…" : "Save"}
@@ -664,9 +766,14 @@ function ForgotPinModal({ open, email, onClose, onSetNewPin }) {
         {mode === "ok" && (
           <>
             <div className="text-lg font-semibold mb-2">PIN Updated</div>
-            <p className="text-sm text-zinc-400 mb-4">Your Wallet PIN was reset successfully.</p>
+            <p className="text-sm text-zinc-400 mb-4">
+              Your Wallet PIN was reset successfully.
+            </p>
             <div className="flex justify-end">
-              <button onClick={onClose} className="px-3 py-2 rounded bg-zinc-800 hover:bg-zinc-700">
+              <button
+                onClick={onClose}
+                className="px-3 py-2 rounded bg-zinc-800 hover:bg-zinc-700"
+              >
                 Done
               </button>
             </div>

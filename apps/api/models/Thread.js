@@ -24,10 +24,19 @@ const ThreadSchema = new Schema(
       index: true,
     },
     participants: { type: [String], default: [] }, // array of UIDs
-    bookingId: { type: Schema.Types.ObjectId, ref: "Booking", default: null, index: true },
+    bookingId: {
+      type: Schema.Types.ObjectId,
+      ref: "Booking",
+      default: null,
+      index: true,
+    },
 
     // Last message snapshot for inbox
-    lastMessageId: { type: Schema.Types.ObjectId, ref: "ChatMessage", default: null },
+    lastMessageId: {
+      type: Schema.Types.ObjectId,
+      ref: "ChatMessage",
+      default: null,
+    },
     lastMessageAt: { type: Date, default: null, index: true },
     lastMessagePreview: { type: String, default: "" },
     lastMessageFrom: { type: String, default: "" },
@@ -45,7 +54,7 @@ const ThreadSchema = new Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 /* Indexes */
@@ -74,7 +83,9 @@ ThreadSchema.statics.getOrCreateDMThread = async function (uidA, uidB) {
   const existing = await this.findOne({ room }).lean();
   if (existing) return existing;
 
-  const participants = Array.from(new Set([String(uidA), String(uidB)])).filter(Boolean);
+  const participants = Array.from(new Set([String(uidA), String(uidB)])).filter(
+    Boolean,
+  );
   const t = await this.create({
     room,
     type: "dm",
@@ -128,7 +139,11 @@ ThreadSchema.statics.touchLastMessage = async function (room, opts = {}) {
     // create a minimal thread if missing
     const created = await this.create({
       room,
-      type: room.startsWith("dm:") ? "dm" : room.startsWith("booking:") ? "booking" : "group",
+      type: room.startsWith("dm:")
+        ? "dm"
+        : room.startsWith("booking:")
+          ? "booking"
+          : "group",
       participants: [],
       lastMessageAt,
       lastMessageId,

@@ -24,7 +24,7 @@ export async function createPost({ payload = {}, proOwnerUid }) {
   await PostStats.findOneAndUpdate(
     { postId: post._id },
     { $setOnInsert: { postId: post._id, trendingScore: 0 } },
-    { upsert: true, new: true }
+    { upsert: true, new: true },
   );
 
   // emit socket event for feed listeners

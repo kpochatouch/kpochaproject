@@ -35,6 +35,7 @@ We use WebRTC for real-time audio/video calls.
 
 👉 **Implementation notes & debugging guide:**  
 See [`docs/webrtc.md`](docs/webrtc.md) for a detailed explanation of:
+
 - why calls failed across networks
 - how the “stash + flush” signaling fix works
 - a manual regression checklist

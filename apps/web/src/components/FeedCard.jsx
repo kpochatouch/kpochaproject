@@ -49,7 +49,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
   const [loadingSave, setLoadingSave] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [commentsDisabled, setCommentsDisabled] = useState(
-    !!post.commentsDisabled
+    !!post.commentsDisabled,
   );
 
   // media / view refs
@@ -83,7 +83,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
 
   const canComment = useMemo(
     () => !commentsDisabled && !!currentUser,
-    [commentsDisabled, currentUser]
+    [commentsDisabled, currentUser],
   );
 
   function formatTime(sec = 0) {
@@ -133,13 +133,9 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
               ? srv.savesCount
               : prev.savesCount,
           likedByMe:
-            typeof srv.likedByMe === "boolean"
-              ? srv.likedByMe
-              : prev.likedByMe,
+            typeof srv.likedByMe === "boolean" ? srv.likedByMe : prev.likedByMe,
           savedByMe:
-            typeof srv.savedByMe === "boolean"
-              ? srv.savedByMe
-              : prev.savedByMe,
+            typeof srv.savedByMe === "boolean" ? srv.savedByMe : prev.savedByMe,
         }));
       } catch {
         // ignore
@@ -244,7 +240,8 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
     const obs = new IntersectionObserver(
       async (entries) => {
         const entry = entries[0];
-        const nowInView = entry.isIntersecting && entry.intersectionRatio >= 0.6;
+        const nowInView =
+          entry.isIntersecting && entry.intersectionRatio >= 0.6;
         setInView(nowInView);
 
         if (nowInView) {
@@ -259,7 +256,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
           el.pause();
         }
       },
-      { threshold: [0, 0.4, 0.6, 0.8, 1] }
+      { threshold: [0, 0.4, 0.6, 0.8, 1] },
     );
 
     obs.observe(el);
@@ -290,7 +287,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
           obs.disconnect();
         }
       },
-      { threshold: [0, 0.4, 0.6, 0.8, 1] }
+      { threshold: [0, 0.4, 0.6, 0.8, 1] },
     );
     obs.observe(el);
     return () => obs.disconnect();
@@ -334,9 +331,9 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
     // Initialize watch-time timestamp if not set
     if (!lastWatchTsRef.current) {
       lastWatchTsRef.current =
-        (typeof performance !== "undefined" && performance.now
+        typeof performance !== "undefined" && performance.now
           ? performance.now()
-          : Date.now());
+          : Date.now();
     }
   }
 
@@ -415,7 +412,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
     const baseDuration = duration || vid.duration || 0;
     const next = Math.min(
       Math.max((vid.currentTime || 0) + seconds, 0),
-      baseDuration || 0
+      baseDuration || 0,
     );
     vid.currentTime = next;
     setCurrentTime(next);
@@ -606,7 +603,10 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
         text: txt,
       });
       const real = res?.data?.comment;
-      setComments((c) => [real || optimistic, ...c.filter((cm) => cm._id !== tmpId)]);
+      setComments((c) => [
+        real || optimistic,
+        ...c.filter((cm) => cm._id !== tmpId),
+      ]);
       mergeStatsFromServer(res?.data || {});
     } catch {
       setComments((c) => c.filter((cm) => cm._id !== tmpId));
@@ -637,11 +637,9 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
     if (!window.confirm("Delete / hide this post?")) return;
     setDeleting(true);
     try {
-      await api
-        .delete(`/api/posts/${postId}`)
-        .catch(async () => {
-          await api.patch(`/api/posts/${postId}/hide`);
-        });
+      await api.delete(`/api/posts/${postId}`).catch(async () => {
+        await api.patch(`/api/posts/${postId}/hide`);
+      });
       onDeleted?.(postId);
     } catch {
       alert("Failed to delete/hide post");
@@ -728,7 +726,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
       // try to resolve username server-side
       try {
         const res = await api.get(
-          `/api/profile/public-by-uid/${encodeURIComponent(uid)}`
+          `/api/profile/public-by-uid/${encodeURIComponent(uid)}`,
         );
         const data = res?.data;
         if (data && data.profile && data.profile.username) {
@@ -1008,15 +1006,9 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
                   value={Math.min(currentTime, duration || 0)}
                   onMouseDown={onSeekStart}
                   onTouchStart={onSeekStart}
-                  onChange={(e) =>
-                    onSeekChange(Number(e.target.value || 0))
-                  }
-                  onMouseUp={(e) =>
-                    onSeekCommit(Number(e.target.value || 0))
-                  }
-                  onTouchEnd={(e) =>
-                    onSeekCommit(Number(e.target.value || 0))
-                  }
+                  onChange={(e) => onSeekChange(Number(e.target.value || 0))}
+                  onMouseUp={(e) => onSeekCommit(Number(e.target.value || 0))}
+                  onTouchEnd={(e) => onSeekCommit(Number(e.target.value || 0))}
                   className="w-full accent-[#F5C542]"
                   aria-label="Seek"
                 />
@@ -1072,29 +1064,29 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
       {showComments && (
         <div className="px-4 py-3 border-t border-[#1F1F1F]">
           {!commentsDisabled ? (
-  <form onSubmit={submitComment} className="flex gap-2 mb-3">
-    <input
-      value={commentText}
-      onChange={(e) => setCommentText(e.target.value)}
-      placeholder={
-        currentUser ? "Write a comment..." : "Login to comment..."
-      }
-      className="flex-1 bg-[#121212] border border-[#2b2b2b] rounded-full px-3 py-2 text-sm text-white"
-      disabled={!currentUser}
-    />
-    <button
-      className="text-sm bg-[#F5C542] text-black rounded-full px-3 py-1"
-      type="submit"
-      disabled={!currentUser}
-    >
-      Post
-    </button>
-  </form>
-) : (
-  <div className="text-xs text-red-400 mb-3">
-    Comments are disabled for this post.
-  </div>
-)}
+            <form onSubmit={submitComment} className="flex gap-2 mb-3">
+              <input
+                value={commentText}
+                onChange={(e) => setCommentText(e.target.value)}
+                placeholder={
+                  currentUser ? "Write a comment..." : "Login to comment..."
+                }
+                className="flex-1 bg-[#121212] border border-[#2b2b2b] rounded-full px-3 py-2 text-sm text-white"
+                disabled={!currentUser}
+              />
+              <button
+                className="text-sm bg-[#F5C542] text-black rounded-full px-3 py-1"
+                type="submit"
+                disabled={!currentUser}
+              >
+                Post
+              </button>
+            </form>
+          ) : (
+            <div className="text-xs text-red-400 mb-3">
+              Comments are disabled for this post.
+            </div>
+          )}
 
           <div className="space-y-3">
             {comments.map((c) => (

@@ -25,6 +25,7 @@ import {
   acceptBooking,
   completeBooking,
   verifyPayment,
+  initPayment,
   payBookingWithWallet,
   cancelBooking,
   getSettings,
@@ -57,7 +58,7 @@ function formatWhen(iso) {
 /* -------- Paystack loader (same idea as BookService) -------- */
 function usePaystackReady() {
   const [ready, setReady] = useState(
-    typeof window !== "undefined" && !!window.PaystackPop
+    typeof window !== "undefined" && !!window.PaystackPop,
   );
 
   useEffect(() => {
@@ -79,7 +80,6 @@ function usePaystackReady() {
   return ready;
 }
 
-
 export default function BookingDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -98,18 +98,15 @@ export default function BookingDetails() {
   const [ringElapsed, setRingElapsed] = useState(0); // seconds passed while scheduled
   const [autoCancelled, setAutoCancelled] = useState(false); // prevent double calls
 
-    // ⭐ NEW: client reputation state
+  // ⭐ NEW: client reputation state
   const [clientReputation, setClientReputation] = useState(null);
   const [clientReputationLoading, setClientReputationLoading] = useState(false);
   const [clientReputationErr, setClientReputationErr] = useState("");
 
   // derived (supports new snapshot + legacy fields)
   const svcName = useMemo(
-    () =>
-      booking?.service?.serviceName ||
-      booking?.serviceName ||
-      "Service",
-    [booking]
+    () => booking?.service?.serviceName || booking?.serviceName || "Service",
+    [booking],
   );
 
   const priceKobo = useMemo(
@@ -117,20 +114,20 @@ export default function BookingDetails() {
       Number.isFinite(Number(booking?.amountKobo))
         ? Number(booking.amountKobo)
         : Number(booking?.service?.priceKobo) || 0,
-    [booking]
+    [booking],
   );
 
   const isClient = useMemo(
     () => !!me && booking && me.uid === booking.clientUid,
-    [me, booking]
+    [me, booking],
   );
 
   const isProOwner = useMemo(
     () => !!me && booking && me.uid === booking.proOwnerUid,
-    [me, booking]
+    [me, booking],
   );
 
-    // Load client reputation (pro side only)
+  // Load client reputation (pro side only)
   useEffect(() => {
     if (!booking || !isProOwner) return;
     const clientUid = booking.clientUid;
@@ -152,10 +149,7 @@ export default function BookingDetails() {
         }
 
         const total = list.length;
-        const sum = list.reduce(
-          (acc, r) => acc + (Number(r.rating) || 0),
-          0
-        );
+        const sum = list.reduce((acc, r) => acc + (Number(r.rating) || 0), 0);
         const avg = total ? sum / total : null;
         const last = list[0];
 
@@ -174,23 +168,20 @@ export default function BookingDetails() {
     };
   }, [booking, isProOwner]);
 
-
   const canAccept = useMemo(
     () =>
       isProOwner &&
       booking?.paymentStatus === "paid" &&
       (booking?.status === "scheduled" ||
         booking?.status === "pending_payment"),
-    [isProOwner, booking]
+    [isProOwner, booking],
   );
 
   // Either client OR pro can complete when status is "accepted"
   const canComplete = useMemo(
     () =>
-      !!booking &&
-      booking.status === "accepted" &&
-      (isClient || isProOwner),
-    [booking, isClient, isProOwner]
+      !!booking && booking.status === "accepted" && (isClient || isProOwner),
+    [booking, isClient, isProOwner],
   );
 
   const canClientPay = useMemo(
@@ -199,7 +190,7 @@ export default function BookingDetails() {
       booking?.paymentStatus !== "paid" &&
       (booking?.status === "pending_payment" ||
         booking?.status === "scheduled"),
-    [isClient, booking]
+    [isClient, booking],
   );
 
   // Name: safe to show to both parties (no phone exposed)
@@ -209,7 +200,7 @@ export default function BookingDetails() {
       booking?.client?.name ||
       booking?.clientProfile?.fullName ||
       "",
-    [booking]
+    [booking],
   );
 
   // Who can see client contact details card?
@@ -220,8 +211,7 @@ export default function BookingDetails() {
     if (isClient) return true;
     if (
       isProOwner &&
-      (booking.status === "accepted" ||
-        booking.status === "completed")
+      (booking.status === "accepted" || booking.status === "completed")
     ) {
       return true;
     }
@@ -233,10 +223,7 @@ export default function BookingDetails() {
   // - After accept/completed: both sides can initiate call/chat
   const showChatButton = useMemo(() => {
     if (!booking) return false;
-    if (
-      booking.status !== "accepted" &&
-      booking.status !== "completed"
-    )
+    if (booking.status !== "accepted" && booking.status !== "completed")
       return false;
 
     if (isProOwner) return true;
@@ -254,12 +241,7 @@ export default function BookingDetails() {
   // Client ID used for pro -> client review links
   const clientIdForReview = useMemo(() => {
     if (!booking) return null;
-    return (
-      booking.clientUid ||
-      booking.clientId ||
-      booking.client?._id ||
-      null
-    );
+    return booking.clientUid || booking.clientId || booking.client?._id || null;
   }, [booking]);
 
   // Load viewer + booking
@@ -281,9 +263,7 @@ export default function BookingDetails() {
         try {
           const mine = await getMyBookings();
           found =
-            (mine || []).find(
-              (b) => String(b._id) === String(id)
-            ) || found;
+            (mine || []).find((b) => String(b._id) === String(id)) || found;
         } catch {}
 
         // 2) Pro list (if pro)
@@ -291,9 +271,8 @@ export default function BookingDetails() {
           try {
             const proItems = await getProBookings();
             found =
-              (proItems || []).find(
-                (b) => String(b._id) === String(id)
-              ) || found;
+              (proItems || []).find((b) => String(b._id) === String(id)) ||
+              found;
           } catch {}
         }
 
@@ -301,7 +280,7 @@ export default function BookingDetails() {
         if (!found) {
           try {
             const { data } = await api.get(
-              `/api/bookings/${encodeURIComponent(id)}`
+              `/api/bookings/${encodeURIComponent(id)}`,
             );
             found = data || found;
           } catch {}
@@ -309,9 +288,7 @@ export default function BookingDetails() {
 
         if (!alive) return;
         if (!found) {
-          setErr(
-            "Booking not found or you do not have permission to view it."
-          );
+          setErr("Booking not found or you do not have permission to view it.");
         } else {
           setBooking(found);
           setAutoCancelled(false); // reset when we load a booking
@@ -335,8 +312,7 @@ export default function BookingDetails() {
       try {
         const s = await getSettings();
         if (!mounted) return;
-        const secs =
-          Number(s?.bookingRules?.ringTimeoutSeconds) || 120;
+        const secs = Number(s?.bookingRules?.ringTimeoutSeconds) || 120;
         setRingSeconds(secs);
       } catch {
         if (!mounted) return;
@@ -359,7 +335,7 @@ export default function BookingDetails() {
     } catch (e) {
       console.error(
         "auto-timeout cancel booking error:",
-        e?.response?.data || e?.message || e
+        e?.response?.data || e?.message || e,
       );
       // silently fail – user can still cancel manually
     } finally {
@@ -383,11 +359,7 @@ export default function BookingDetails() {
       const elapsed = Math.floor((Date.now() - start) / 1000);
       setRingElapsed(elapsed);
 
-      if (
-        !autoCancelled &&
-        ringSeconds &&
-        elapsed >= ringSeconds
-      ) {
+      if (!autoCancelled && ringSeconds && elapsed >= ringSeconds) {
         setAutoCancelled(true);
         void autoCancelAfterTimeout();
       }
@@ -408,7 +380,7 @@ export default function BookingDetails() {
       booking.status === "cancelled"
     ) {
       alert(
-        "We’re sorry, this service request has been cancelled.\n\nYou can now choose another professional."
+        "We’re sorry, this service request has been cancelled.\n\nYou can now choose another professional.",
       );
       navigate("/browse", { replace: true });
     }
@@ -422,9 +394,7 @@ export default function BookingDetails() {
       setBooking(updated);
       alert("Booking accepted.");
     } catch {
-      alert(
-        "Could not accept booking. Ensure payment is 'paid'."
-      );
+      alert("Could not accept booking. Ensure payment is 'paid'.");
     } finally {
       setBusy(false);
     }
@@ -439,11 +409,11 @@ export default function BookingDetails() {
 
       if (isClient) {
         alert(
-          "Thank you for confirming. Please remember to leave a review for your professional."
+          "Thank you for confirming. Please remember to leave a review for your professional.",
         );
       } else if (isProOwner) {
         alert(
-          "Job marked as completed. You can now leave a review for this client."
+          "Job marked as completed. You can now leave a review for this client.",
         );
       } else {
         alert("Booking completed.");
@@ -458,7 +428,7 @@ export default function BookingDetails() {
   async function onClientCancelNow() {
     if (!booking) return;
     const sure = window.confirm(
-      "Do you want to cancel this booking now? If the pro has not accepted yet, your payment will be refunded according to our rules."
+      "Do you want to cancel this booking now? If the pro has not accepted yet, your payment will be refunded according to our rules.",
     );
     if (!sure) return;
 
@@ -470,7 +440,7 @@ export default function BookingDetails() {
     } catch (e) {
       console.error(
         "cancel booking error:",
-        e?.response?.data || e?.message || e
+        e?.response?.data || e?.message || e,
       );
       alert("Could not cancel booking. Please try again.");
     } finally {
@@ -495,7 +465,7 @@ export default function BookingDetails() {
     // 1) Check Paystack SDK
     if (!window.PaystackPop || typeof window.PaystackPop.setup !== "function") {
       alert(
-        "Paystack library not loaded yet. Please wait a moment or refresh and try again."
+        "Paystack library not loaded yet. Please wait a moment or refresh and try again.",
       );
       return;
     }
@@ -525,27 +495,27 @@ export default function BookingDetails() {
       let email = me?.email || "customer@example.com";
       try {
         const token = localStorage.getItem("token") || "";
-        const payloadJwt = JSON.parse(
-          atob((token.split(".")[1] || "e30="))
-        );
+        const payloadJwt = JSON.parse(atob(token.split(".")[1] || "e30="));
         if (payloadJwt?.email) email = payloadJwt.email;
       } catch (e) {
-        console.warn(
-          "JWT decode failed, using fallback email:",
-          e
-        );
+        console.warn("JWT decode failed, using fallback email:", e);
       }
 
-      const ref = `BOOKING-${booking._id}`;
-      const amountKobo =
-        Number(booking.amountKobo || priceKobo) || 0;
+      // ✅ Always init first so backend stores the canonical reference
+      const init = await initPayment({ bookingId: booking._id, email });
+      const ref = init?.reference || `BOOKING-${booking._id}-${Date.now()}`;
 
-      console.log("DEBUG: About to call PaystackPop.setup()");
+      const amountKobo = Number(booking.amountKobo || priceKobo) || 0;
+
+      console.log("DEBUG: About to call PaystackPop.setup()", {
+        ref,
+        amountKobo,
+      });
 
       const handler = window.PaystackPop.setup({
         key: String(pubKey),
         email,
-        amount: amountKobo, // kobo
+        amount: amountKobo,
         ref,
         metadata: {
           custom_fields: [
@@ -574,32 +544,33 @@ export default function BookingDetails() {
               });
 
               if (v?.ok) {
-                // reload my bookings to get fresh status
-                const mine =
-                  (await getMyBookings().catch(() => [])) || [];
-                const updated =
-                  mine.find(
-                    (b) =>
-                      String(b._id) === String(booking._id)
-                  ) ||
-                  {
-                    ...booking,
-                    paymentStatus: "paid",
-                    status:
-                      booking.status === "pending_payment"
-                        ? "scheduled"
-                        : booking.status,
-                  };
-                setBooking(updated);
+                // ✅ reload booking from server (single source of truth)
+                try {
+                  const { data: fresh } = await api.get(
+                    `/api/bookings/${encodeURIComponent(booking._id)}`,
+                  );
+                  setBooking(fresh || booking);
+                } catch {
+                  // fallback if GET fails
+                  setBooking((b) =>
+                    b
+                      ? {
+                          ...b,
+                          paymentStatus: "paid",
+                          status:
+                            b.status === "pending_payment"
+                              ? "scheduled"
+                              : b.status,
+                        }
+                      : b,
+                  );
+                }
                 alert("Payment successful.");
               } else {
                 alert("Payment verification failed.");
               }
             } catch (err) {
-              console.error(
-                "verifyPayment error:",
-                err
-              );
+              console.error("verifyPayment error:", err);
               alert("Payment verification error.");
             } finally {
               setBusy(false);
@@ -615,13 +586,10 @@ export default function BookingDetails() {
 
       handler.openIframe();
     } catch (err) {
-      console.error(
-        "[BookingDetails] PaystackPop.setup FAILED:",
-        err
-      );
+      console.error("[BookingDetails] PaystackPop.setup FAILED:", err);
       setBusy(false);
       alert(
-        "Could not start card payment. See console for PaystackPop.setup error."
+        "Could not start card payment. See console for PaystackPop.setup error.",
       );
     }
   }
@@ -642,24 +610,18 @@ export default function BookingDetails() {
             ? {
                 ...b,
                 paymentStatus: "paid",
-                status:
-                  b.status === "pending_payment"
-                    ? "scheduled"
-                    : b.status,
+                status: b.status === "pending_payment" ? "scheduled" : b.status,
               }
-            : b
+            : b,
         );
       }
       alert("Wallet payment successful.");
     } catch (e) {
-      console.error(
-        "wallet pay error:",
-        e?.response?.data || e?.message || e
-      );
+      console.error("wallet pay error:", e?.response?.data || e?.message || e);
       alert(
         e?.response?.data?.message ||
           e?.response?.data?.error ||
-          "Wallet payment failed. Please try again or choose card."
+          "Wallet payment failed. Please try again or choose card.",
       );
     } finally {
       setBusy(false);
@@ -677,16 +639,10 @@ export default function BookingDetails() {
       ) : (
         <>
           <div className="flex items-center justify-between mb-4">
-            <h1 className="text-2xl font-semibold">
-              Booking Details
-            </h1>
+            <h1 className="text-2xl font-semibold">Booking Details</h1>
             <div className="flex items-center gap-2">
               <Badge
-                tone={
-                  booking?.paymentStatus === "paid"
-                    ? "emerald"
-                    : "amber"
-                }
+                tone={booking?.paymentStatus === "paid" ? "emerald" : "amber"}
               >
                 {booking?.paymentStatus || "unpaid"}
               </Badge>
@@ -710,10 +666,7 @@ export default function BookingDetails() {
                 active={booking?.status === "scheduled"}
               />
               <Line />
-              <Step
-                label="Accepted"
-                active={booking?.status === "accepted"}
-              />
+              <Step label="Accepted" active={booking?.status === "accepted"} />
               <Line />
               <Step
                 label="Completed"
@@ -733,8 +686,7 @@ export default function BookingDetails() {
             </div>
             <div className="text-sm text-zinc-400">
               When: {formatWhen(booking?.scheduledFor)}{" "}
-              <span className="mx-2">•</span> LGA:{" "}
-              {booking?.lga}
+              <span className="mx-2">•</span> LGA: {booking?.lga}
             </div>
             {clientDisplayName && (
               <div className="text-xs text-zinc-400 mt-1">
@@ -756,9 +708,7 @@ export default function BookingDetails() {
           {/* Client & Pro contact view */}
           {showClientContactToViewer && (
             <div className="rounded-xl border border-zinc-800 p-4 bg-black/30 mb-4">
-              <div className="font-medium mb-2">
-                Client Contact (private)
-              </div>
+              <div className="font-medium mb-2">Client Contact (private)</div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                 <div>
                   <div className="text-zinc-500">Name</div>
@@ -768,15 +718,12 @@ export default function BookingDetails() {
                   <div className="text-zinc-500">Phone</div>
                   <div>
                     {isClient
-                      ? booking?.clientContactPrivate?.phone ||
-                        "—"
+                      ? booking?.clientContactPrivate?.phone || "—"
                       : "Hidden – use in-app chat/call"}
                   </div>
                 </div>
                 <div className="sm:col-span-2">
-                  <div className="text-zinc-500">
-                    Service Address
-                  </div>
+                  <div className="text-zinc-500">Service Address</div>
                   <div className="break-words">
                     {booking?.clientContactPrivate?.address ||
                       booking?.addressText ||
@@ -786,19 +733,17 @@ export default function BookingDetails() {
               </div>
               {isClient && (
                 <p className="text-xs text-zinc-500 mt-2">
-                  Your phone number is kept private. Professionals
-                  contact you through in-app chat and calls only.
+                  Your phone number is kept private. Professionals contact you
+                  through in-app chat and calls only.
                 </p>
               )}
             </div>
           )}
 
-                    {/* Client reputation (only visible to pro) */}
+          {/* Client reputation (only visible to pro) */}
           {isProOwner && (
             <div className="rounded-xl border border-zinc-800 p-4 bg-black/30 mb-4">
-              <div className="font-medium mb-2">
-                Client Reputation
-              </div>
+              <div className="font-medium mb-2">Client Reputation</div>
 
               {clientReputationLoading ? (
                 <div className="text-sm text-zinc-400">
@@ -840,12 +785,11 @@ export default function BookingDetails() {
               )}
 
               <p className="mt-2 text-xs text-zinc-500">
-                This reputation is based on reviews from other
-                professionals who have worked with this client.
+                This reputation is based on reviews from other professionals who
+                have worked with this client.
               </p>
             </div>
           )}
-
 
           {/* CALLING / RINGING PHASE */}
           {booking?.paymentStatus === "paid" &&
@@ -862,9 +806,7 @@ export default function BookingDetails() {
           <div className="flex flex-col gap-3">
             {canClientPay && (
               <div className="rounded-xl border border-zinc-800 bg-black/30 p-3 space-y-3">
-                <div className="text-sm font-medium">
-                  Choose payment method
-                </div>
+                <div className="text-sm font-medium">Choose payment method</div>
                 <PaymentMethodPicker
                   amount={priceKobo / 100}
                   value={payMethod}
@@ -878,22 +820,19 @@ export default function BookingDetails() {
                       ? onClientPayWithWallet
                       : onClientPayNow
                   }
-                  disabled={
-                    busy ||
-                    (payMethod === "card" && !paystackReady)
-                  }
+                  disabled={busy || (payMethod === "card" && !paystackReady)}
                   className="rounded-lg bg-gold text-black px-4 py-2 font-semibold disabled:opacity-50"
                 >
                   {busy
                     ? "Processing…"
                     : payMethod === "wallet"
-                    ? "Pay from Wallet"
-                    : "Pay with Card"}
+                      ? "Pay from Wallet"
+                      : "Pay with Card"}
                 </button>
                 {payMethod === "card" && !paystackReady && (
                   <p className="text-xs text-zinc-500 mt-1">
-                    Loading card payment… if it doesn’t
-                    appear, refresh the page.
+                    Loading card payment… if it doesn’t appear, refresh the
+                    page.
                   </p>
                 )}
               </div>
@@ -967,9 +906,7 @@ export default function BookingDetails() {
           <div className="mt-6 text-xs text-zinc-500 space-y-1">
             <div>Booking ID: {booking?._id}</div>
             {booking?.paystackReference && (
-              <div>
-                Paystack Ref: {booking.paystackReference}
-              </div>
+              <div>Paystack Ref: {booking.paystackReference}</div>
             )}
             <div>Created: {formatWhen(booking?.createdAt)}</div>
             {booking?.updatedAt && (
@@ -986,8 +923,7 @@ export default function BookingDetails() {
 function Badge({ children, tone = "zinc" }) {
   const tones = {
     zinc: "bg-zinc-900/40 border-zinc-800 text-zinc-200",
-    emerald:
-      "bg-emerald-900/30 border-emerald-800 text-emerald-200",
+    emerald: "bg-emerald-900/30 border-emerald-800 text-emerald-200",
     amber: "bg-amber-900/30 border-amber-800 text-amber-200",
     sky: "bg-sky-900/30 border-sky-800 text-sky-200",
   };
@@ -1013,9 +949,7 @@ function Step({ label, active }) {
   return (
     <div
       className={`px-2 py-1 rounded text-xs ${
-        active
-          ? "bg-gold text-black"
-          : "bg-zinc-800 text-zinc-500"
+        active ? "bg-gold text-black" : "bg-zinc-800 text-zinc-500"
       }`}
     >
       {label}
@@ -1046,22 +980,15 @@ function CallingPanel({ booking, ringSeconds, ringElapsed, onCancel }) {
 
   return (
     <div className="rounded-xl border border-zinc-800 bg-black/40 p-4 mb-4 text-center animate-pulse">
-      <div className="text-lg font-semibold text-gold">
-        {title}
-      </div>
-      <div className="text-sm text-zinc-400 mt-1">
-        {subtitle}
-      </div>
+      <div className="text-lg font-semibold text-gold">{title}</div>
+      <div className="text-sm text-zinc-400 mt-1">{subtitle}</div>
 
       {/* Simple progress bar */}
       <div className="mt-3 h-1 w-full bg-zinc-800 rounded-full overflow-hidden">
         <div
           className="h-full bg-gold transition-all"
           style={{
-            width: `${Math.min(
-              100,
-              Math.round(progress * 100)
-            )}%`,
+            width: `${Math.min(100, Math.round(progress * 100))}%`,
           }}
         />
       </div>

@@ -1,7 +1,12 @@
 // apps/web/src/pages/BecomePro.jsx
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, getClientProfile, updateClientProfile, ensureClientProfile } from "../lib/api";
+import {
+  api,
+  getClientProfile,
+  updateClientProfile,
+  ensureClientProfile,
+} from "../lib/api";
 import NgGeoPicker from "../components/NgGeoPicker.jsx";
 import ServicePicker from "../components/ServicePicker.jsx";
 
@@ -26,7 +31,11 @@ function formatMoneyForInput(s = "") {
   return frac != null ? `${withCommas}.${frac}` : withCommas;
 }
 function normName(s = "") {
-  return String(s).toLowerCase().replace(/\s+/g, " ").replace(/[^\w ]+/g, "").trim();
+  return String(s)
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/[^\w ]+/g, "")
+    .trim();
 }
 
 /* ---------- Upload widget helper ---------- */
@@ -72,8 +81,9 @@ function useCloudinaryWidget() {
           folder,
         },
         (err, res) => {
-          if (!err && res && res.event === "success") onSuccess(res.info.secure_url);
-        }
+          if (!err && res && res.event === "success")
+            onSuccess(res.info.secure_url);
+        },
       );
     } catch {
       return null;
@@ -141,7 +151,15 @@ export default function BecomePro() {
 
   // ===== Availability
   const [availability, setAvailability] = useState({
-    days: { Mon: false, Tue: false, Wed: false, Thu: false, Fri: false, Sat: false, Sun: false },
+    days: {
+      Mon: false,
+      Tue: false,
+      Wed: false,
+      Thu: false,
+      Fri: false,
+      Sat: false,
+      Sun: false,
+    },
     start: "",
     end: "",
     emergency: "no",
@@ -177,7 +195,10 @@ export default function BecomePro() {
     testimonials: "",
   });
 
-  const [agreements, setAgreements] = useState({ terms: false, privacy: false });
+  const [agreements, setAgreements] = useState({
+    terms: false,
+    privacy: false,
+  });
 
   // ===== Pull Nigeria states for picker + nationwide logic
   const [allStates, setAllStates] = useState([]);
@@ -200,7 +221,9 @@ export default function BecomePro() {
         const meData = meRes?.data || null;
         const clientData = clientRes?.data || null;
         const proData = proRes?.data || null;
-        const states = Array.isArray(geoRes?.data?.states) ? geoRes.data.states : [];
+        const states = Array.isArray(geoRes?.data?.states)
+          ? geoRes.data.states
+          : [];
 
         setMe(meData);
         setClientProfile(clientData);
@@ -292,7 +315,10 @@ export default function BecomePro() {
     };
   }, []);
 
-  const stateList = useMemo(() => (allStates || []).slice().sort(), [allStates]);
+  const stateList = useMemo(
+    () => (allStates || []).slice().sort(),
+    [allStates],
+  );
 
   /* -------- GPS: Use my location -------- */
   async function useMyLocation() {
@@ -317,12 +343,14 @@ export default function BecomePro() {
 
         try {
           const { data } = await api.get(
-            `/api/geo/rev?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`
+            `/api/geo/rev?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`,
           );
           const props = data?.features?.[0]?.properties || {};
-          const guessedState = String(props.state || props.region || "").toUpperCase();
+          const guessedState = String(
+            props.state || props.region || "",
+          ).toUpperCase();
           const guessedLga = String(
-            props.county || props.city || props.district || props.suburb || ""
+            props.county || props.city || props.district || props.suburb || "",
           ).toUpperCase();
           const formatted = props.formatted || "";
 
@@ -353,8 +381,11 @@ export default function BecomePro() {
         setVerification((v) => ({
           ...v,
           selfieWithIdUrl: url || v.selfieWithIdUrl,
-          livenessMetrics: metricsRaw ? JSON.parse(metricsRaw) : v.livenessMetrics || {},
-          faceVerificationVideoUrl: videoUrl || v.faceVerificationVideoUrl || "",
+          livenessMetrics: metricsRaw
+            ? JSON.parse(metricsRaw)
+            : v.livenessMetrics || {},
+          faceVerificationVideoUrl:
+            videoUrl || v.faceVerificationVideoUrl || "",
         }));
         localStorage.removeItem("kpocha:selfieUrl");
         localStorage.removeItem("kpocha:livenessMetrics");
@@ -418,7 +449,8 @@ export default function BecomePro() {
     if (!identity.gender) m.push("Gender");
     if (!identity.dob) m.push("Date of birth");
     if (!identity.state) m.push("State");
-    if (!professional.nationwide && !identity.lga) m.push("LGA (or select Nationwide)");
+    if (!professional.nationwide && !identity.lga)
+      m.push("LGA (or select Nationwide)");
 
     const resolvedRows = servicesDetailed
       .map((r) => ({ ...r, resolvedName: (r.name || "").trim() }))
@@ -503,7 +535,8 @@ export default function BecomePro() {
           ...(topLat && topLon ? { lat: topLat, lon: topLon } : {}),
           // 👇 make sure backend can map this to client later
           email: identity.email || me?.email || "",
-          phone: identity.phone || clientProfile?.phone || me?.identity?.phone || "",
+          phone:
+            identity.phone || clientProfile?.phone || me?.identity?.phone || "",
           state: identity.state,
           city: identity.lga,
         },
@@ -517,7 +550,9 @@ export default function BecomePro() {
         },
         availability: {
           ...availability,
-          statesCovered: professional.nationwide ? stateList : availability.statesCovered,
+          statesCovered: professional.nationwide
+            ? stateList
+            : availability.statesCovered,
         },
         servicesDetailed: normalizedRows,
         verification: {
@@ -533,7 +568,10 @@ export default function BecomePro() {
         status: "submitted",
         acceptedTerms: !!agreements.terms,
         acceptedPrivacy: !!agreements.privacy,
-        agreements: { terms: !!agreements.terms, privacy: !!agreements.privacy },
+        agreements: {
+          terms: !!agreements.terms,
+          privacy: !!agreements.privacy,
+        },
       };
 
       await submitProApplication(payload);
@@ -576,17 +614,23 @@ export default function BecomePro() {
             <Input
               label="First Name *"
               value={identity.firstName}
-              onChange={(e) => setIdentity({ ...identity, firstName: e.target.value })}
+              onChange={(e) =>
+                setIdentity({ ...identity, firstName: e.target.value })
+              }
             />
             <Input
               label="Middle Name"
               value={identity.middleName}
-              onChange={(e) => setIdentity({ ...identity, middleName: e.target.value })}
+              onChange={(e) =>
+                setIdentity({ ...identity, middleName: e.target.value })
+              }
             />
             <Input
               label="Last Name *"
               value={identity.lastName}
-              onChange={(e) => setIdentity({ ...identity, lastName: e.target.value })}
+              onChange={(e) =>
+                setIdentity({ ...identity, lastName: e.target.value })
+              }
             />
           </div>
 
@@ -594,20 +638,26 @@ export default function BecomePro() {
             <Select
               label="Gender *"
               value={identity.gender}
-              onChange={(e) => setIdentity({ ...identity, gender: e.target.value })}
+              onChange={(e) =>
+                setIdentity({ ...identity, gender: e.target.value })
+              }
               options={["Male", "Female", "Other"]}
             />
             <Input
               label="Date of Birth *"
               type="date"
               value={identity.dob}
-              onChange={(e) => setIdentity({ ...identity, dob: e.target.value })}
+              onChange={(e) =>
+                setIdentity({ ...identity, dob: e.target.value })
+              }
             />
             <Input
               label="Email"
               type="email"
               value={identity.email}
-              onChange={(e) => setIdentity({ ...identity, email: e.target.value })}
+              onChange={(e) =>
+                setIdentity({ ...identity, email: e.target.value })
+              }
             />
           </div>
 
@@ -615,12 +665,16 @@ export default function BecomePro() {
             <Input
               label="Phone (optional)"
               value={identity.phone}
-              onChange={(e) => setIdentity({ ...identity, phone: e.target.value })}
+              onChange={(e) =>
+                setIdentity({ ...identity, phone: e.target.value })
+              }
             />
             <Input
               label="WhatsApp (optional)"
               value={identity.whatsapp}
-              onChange={(e) => setIdentity({ ...identity, whatsapp: e.target.value })}
+              onChange={(e) =>
+                setIdentity({ ...identity, whatsapp: e.target.value })
+              }
             />
             <div>
               <Label>Profile Photo (optional)</Label>
@@ -629,11 +683,15 @@ export default function BecomePro() {
                   className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-200"
                   placeholder="Photo URL"
                   value={identity.photoUrl}
-                  onChange={(e) => setIdentity({ ...identity, photoUrl: e.target.value })}
+                  onChange={(e) =>
+                    setIdentity({ ...identity, photoUrl: e.target.value })
+                  }
                 />
                 <UploadButton
                   title={widgetReady ? "Upload" : "Upload (loading…)"}
-                  onUploaded={(url) => setIdentity({ ...identity, photoUrl: url })}
+                  onUploaded={(url) =>
+                    setIdentity({ ...identity, photoUrl: url })
+                  }
                   widgetFactory={widgetFactory}
                   disabled={!widgetReady || !CLOUD_NAME || !UPLOAD_PRESET}
                 />
@@ -653,7 +711,10 @@ export default function BecomePro() {
                 type="checkbox"
                 checked={professional.nationwide}
                 onChange={(e) =>
-                  setProfessional({ ...professional, nationwide: e.target.checked })
+                  setProfessional({
+                    ...professional,
+                    nationwide: e.target.checked,
+                  })
                 }
               />
               Offer services nationwide (Nigeria)
@@ -682,13 +743,17 @@ export default function BecomePro() {
               <Input
                 label="Latitude (optional)"
                 value={business.lat}
-                onChange={(e) => setBusiness({ ...business, lat: e.target.value })}
+                onChange={(e) =>
+                  setBusiness({ ...business, lat: e.target.value })
+                }
                 placeholder="e.g. 6.5244"
               />
               <Input
                 label="Longitude (optional)"
                 value={business.lon}
-                onChange={(e) => setBusiness({ ...business, lon: e.target.value })}
+                onChange={(e) =>
+                  setBusiness({ ...business, lon: e.target.value })
+                }
                 placeholder="e.g. 3.3792"
               />
               <div className="flex items-end">
@@ -707,21 +772,26 @@ export default function BecomePro() {
         {/* SECTION: Services & Pricing */}
         <Section title="Services & Pricing">
           <p className="text-xs text-zinc-400 mb-2">
-            Add at least one service. Price and Promo Price are optional; leaving price blank
-            means ₦0 (free add-on).
+            Add at least one service. Price and Promo Price are optional;
+            leaving price blank means ₦0 (free add-on).
           </p>
 
           <div className="space-y-3">
             {servicesDetailed.map((row, i) => {
               const isOther = row.id === "other";
               return (
-                <div key={i} className="border border-yellow-500/40 rounded-lg p-3 bg-black">
+                <div
+                  key={i}
+                  className="border border-yellow-500/40 rounded-lg p-3 bg-black"
+                >
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                     <div>
                       <Label>Service</Label>
                       <ServicePicker
                         value={row.id || row.name}
-                        onChange={(value, meta) => onPickService(i, value, meta)}
+                        onChange={(value, meta) =>
+                          onPickService(i, value, meta)
+                        }
                         includeOther={true}
                         otherText={row.otherText}
                         onOtherText={(txt) => onOtherText(i, txt)}
@@ -740,7 +810,9 @@ export default function BecomePro() {
                         inputMode="decimal"
                         placeholder="e.g. 15,000"
                         value={row.price}
-                        onChange={(e) => updateRow(i, { price: e.target.value })}
+                        onChange={(e) =>
+                          updateRow(i, { price: e.target.value })
+                        }
                       />
                       <p className="text-[11px] text-zinc-500 mt-1">
                         You can type numbers with commas for clarity.
@@ -754,7 +826,9 @@ export default function BecomePro() {
                         inputMode="decimal"
                         placeholder="e.g. 12,000"
                         value={row.promoPrice}
-                        onChange={(e) => updateRow(i, { promoPrice: e.target.value })}
+                        onChange={(e) =>
+                          updateRow(i, { promoPrice: e.target.value })
+                        }
                       />
                     </div>
                   </div>
@@ -800,18 +874,24 @@ export default function BecomePro() {
               <Input
                 label="Business / Shop Name"
                 value={business.shopName}
-                onChange={(e) => setBusiness({ ...business, shopName: e.target.value })}
+                onChange={(e) =>
+                  setBusiness({ ...business, shopName: e.target.value })
+                }
               />
               <Input
                 label="Business Address"
                 value={business.shopAddress}
-                onChange={(e) => setBusiness({ ...business, shopAddress: e.target.value })}
+                onChange={(e) =>
+                  setBusiness({ ...business, shopAddress: e.target.value })
+                }
               />
 
               <UploadRow
                 label="Photo (outside)"
                 value={business.shopPhotoOutside}
-                onChange={(v) => setBusiness({ ...business, shopPhotoOutside: v })}
+                onChange={(v) =>
+                  setBusiness({ ...business, shopPhotoOutside: v })
+                }
                 widgetFactory={widgetFactory}
                 widgetReady={widgetReady}
                 folder="kpocha/pro-apps/shops"
@@ -819,7 +899,9 @@ export default function BecomePro() {
               <UploadRow
                 label="Photo (inside)"
                 value={business.shopPhotoInside}
-                onChange={(v) => setBusiness({ ...business, shopPhotoInside: v })}
+                onChange={(v) =>
+                  setBusiness({ ...business, shopPhotoInside: v })
+                }
                 widgetFactory={widgetFactory}
                 widgetReady={widgetReady}
                 folder="kpocha/pro-apps/shops"
@@ -854,18 +936,24 @@ export default function BecomePro() {
               label="Start time"
               type="time"
               value={availability.start}
-              onChange={(e) => setAvailability({ ...availability, start: e.target.value })}
+              onChange={(e) =>
+                setAvailability({ ...availability, start: e.target.value })
+              }
             />
             <Input
               label="End time"
               type="time"
               value={availability.end}
-              onChange={(e) => setAvailability({ ...availability, end: e.target.value })}
+              onChange={(e) =>
+                setAvailability({ ...availability, end: e.target.value })
+              }
             />
             <Select
               label="Emergency service?"
               value={availability.emergency}
-              onChange={(e) => setAvailability({ ...availability, emergency: e.target.value })}
+              onChange={(e) =>
+                setAvailability({ ...availability, emergency: e.target.value })
+              }
               options={["no", "yes"]}
             />
           </div>
@@ -875,7 +963,10 @@ export default function BecomePro() {
               label="Home service?"
               value={availability.homeService}
               onChange={(e) =>
-                setAvailability({ ...availability, homeService: e.target.value })
+                setAvailability({
+                  ...availability,
+                  homeService: e.target.value,
+                })
               }
               options={["no", "yes"]}
             />
@@ -900,7 +991,9 @@ export default function BecomePro() {
           <Select
             label="ID Type *"
             value={verification.idType}
-            onChange={(e) => setVerification({ ...verification, idType: e.target.value })}
+            onChange={(e) =>
+              setVerification({ ...verification, idType: e.target.value })
+            }
             options={[
               "National ID",
               "Voter’s Card",
@@ -956,7 +1049,10 @@ export default function BecomePro() {
                   placeholder="Paste selfie image URL (fallback)"
                   value={verification.selfieWithIdUrl}
                   onChange={(e) =>
-                    setVerification({ ...verification, selfieWithIdUrl: e.target.value })
+                    setVerification({
+                      ...verification,
+                      selfieWithIdUrl: e.target.value,
+                    })
                   }
                 />
                 <p className="text-[11px] text-zinc-500 mt-1">
@@ -971,7 +1067,10 @@ export default function BecomePro() {
               label="(Optional) Face verification video URL"
               value={verification.faceVerificationVideoUrl}
               onChange={(e) =>
-                setVerification({ ...verification, faceVerificationVideoUrl: e.target.value })
+                setVerification({
+                  ...verification,
+                  faceVerificationVideoUrl: e.target.value,
+                })
               }
               placeholder="(future support)"
             />
@@ -989,12 +1088,16 @@ export default function BecomePro() {
             <Input
               label="Account Name *"
               value={bank.accountName}
-              onChange={(e) => setBank({ ...bank, accountName: e.target.value })}
+              onChange={(e) =>
+                setBank({ ...bank, accountName: e.target.value })
+              }
             />
             <Input
               label="Account Number *"
               value={bank.accountNumber}
-              onChange={(e) => setBank({ ...bank, accountNumber: e.target.value })}
+              onChange={(e) =>
+                setBank({ ...bank, accountNumber: e.target.value })
+              }
               placeholder="10 digits"
             />
             <Input
@@ -1004,7 +1107,9 @@ export default function BecomePro() {
               placeholder="11 digits"
             />
           </div>
-          <p className="text-[11px] text-zinc-500 mt-1">We’ll validate digits on submit.</p>
+          <p className="text-[11px] text-zinc-500 mt-1">
+            We’ll validate digits on submit.
+          </p>
         </Section>
 
         {/* SECTION: Social / Portfolio */}
@@ -1013,29 +1118,39 @@ export default function BecomePro() {
             <Input
               label="Instagram"
               value={portfolio.instagram}
-              onChange={(e) => setPortfolio({ ...portfolio, instagram: e.target.value })}
+              onChange={(e) =>
+                setPortfolio({ ...portfolio, instagram: e.target.value })
+              }
             />
             <Input
               label="TikTok"
               value={portfolio.tiktok}
-              onChange={(e) => setPortfolio({ ...portfolio, tiktok: e.target.value })}
+              onChange={(e) =>
+                setPortfolio({ ...portfolio, tiktok: e.target.value })
+              }
             />
             <Input
               label="Facebook"
               value={portfolio.facebook}
-              onChange={(e) => setPortfolio({ ...portfolio, facebook: e.target.value })}
+              onChange={(e) =>
+                setPortfolio({ ...portfolio, facebook: e.target.value })
+              }
             />
             <Input
               label="Website / Portfolio"
               value={portfolio.website}
-              onChange={(e) => setPortfolio({ ...portfolio, website: e.target.value })}
+              onChange={(e) =>
+                setPortfolio({ ...portfolio, website: e.target.value })
+              }
             />
           </div>
           <textarea
             className="w-full mt-3 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-200"
             placeholder="Testimonials / Reviews"
             value={portfolio.testimonials}
-            onChange={(e) => setPortfolio({ ...portfolio, testimonials: e.target.value })}
+            onChange={(e) =>
+              setPortfolio({ ...portfolio, testimonials: e.target.value })
+            }
           />
         </Section>
 
@@ -1057,7 +1172,9 @@ export default function BecomePro() {
                 </>
               }
               checked={agreements.terms}
-              onChange={() => setAgreements({ ...agreements, terms: !agreements.terms })}
+              onChange={() =>
+                setAgreements({ ...agreements, terms: !agreements.terms })
+              }
             />
             <Check
               label={
@@ -1074,7 +1191,9 @@ export default function BecomePro() {
                 </>
               }
               checked={agreements.privacy}
-              onChange={() => setAgreements({ ...agreements, privacy: !agreements.privacy })}
+              onChange={() =>
+                setAgreements({ ...agreements, privacy: !agreements.privacy })
+              }
             />
           </div>
         </Section>
@@ -1140,7 +1259,13 @@ function Check({ label, ...props }) {
     </label>
   );
 }
-function UploadButton({ title = "Upload", onUploaded, widgetFactory, disabled, folder }) {
+function UploadButton({
+  title = "Upload",
+  onUploaded,
+  widgetFactory,
+  disabled,
+  folder,
+}) {
   function open() {
     const widget = widgetFactory?.(onUploaded, folder);
     if (!widget) {
@@ -1161,7 +1286,14 @@ function UploadButton({ title = "Upload", onUploaded, widgetFactory, disabled, f
     </button>
   );
 }
-function UploadRow({ label, value, onChange, widgetFactory, widgetReady, folder }) {
+function UploadRow({
+  label,
+  value,
+  onChange,
+  widgetFactory,
+  widgetReady,
+  folder,
+}) {
   return (
     <div>
       <Label>{label}</Label>

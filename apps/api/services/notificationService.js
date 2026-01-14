@@ -58,10 +58,7 @@ async function resolveActorSnapshot(uid) {
     if (client) {
       return {
         actorName:
-          client.displayName ||
-          client.fullName ||
-          client.username ||
-          null,
+          client.displayName || client.fullName || client.username || null,
         actorAvatar:
           client.photoUrl ||
           (client.identity && client.identity.photoUrl) ||
@@ -84,13 +81,12 @@ async function resolveActorSnapshot(uid) {
   } catch (e) {
     console.warn(
       "[notificationService] resolveActorSnapshot failed:",
-      e?.message || e
+      e?.message || e,
     );
   }
 
   return null;
 }
-
 
 /**
  * Increment unread counter in Redis (non-fatal)
@@ -112,7 +108,10 @@ async function incrUnreadCounter(uid, delta = 1) {
   } catch (err) {
     // non-fatal
     // eslint-disable-next-line no-console
-    console.warn("[notificationService] incrUnreadCounter failed", err?.message || err);
+    console.warn(
+      "[notificationService] incrUnreadCounter failed",
+      err?.message || err,
+    );
   }
 }
 
@@ -142,7 +141,10 @@ async function decrUnreadCounter(uid, delta = 1) {
   } catch (err) {
     // non-fatal
     // eslint-disable-next-line no-console
-    console.warn("[notificationService] decrUnreadCounter failed", err?.message || err);
+    console.warn(
+      "[notificationService] decrUnreadCounter failed",
+      err?.message || err,
+    );
   }
 }
 
@@ -157,7 +159,10 @@ function emitToUser(uid, event, payload) {
     io.to(`user:${uid}`).emit(event, payload);
   } catch (err) {
     // eslint-disable-next-line no-console
-    console.warn("[notificationService] socket emit failed", err?.message || err);
+    console.warn(
+      "[notificationService] socket emit failed",
+      err?.message || err,
+    );
   }
 }
 
@@ -167,39 +172,30 @@ function emitToUser(uid, event, payload) {
  */
 export async function createNotification(rawArgs = {}, { lean = false } = {}) {
   const args = normalizeCreateArgs(rawArgs);
-  const {
-    ownerUid,
-    actorUid,
-    type,
-    data,
-    meta,
-    groupKey,
-    priority,
-  } = args;
+  const { ownerUid, actorUid, type, data, meta, groupKey, priority } = args;
 
   // Create DB doc
   // 🔥 NEW: attach actor snapshot ONCE
-let actorSnapshot = null;
-if (actorUid) {
-  actorSnapshot = await resolveActorSnapshot(actorUid);
-}
+  let actorSnapshot = null;
+  if (actorUid) {
+    actorSnapshot = await resolveActorSnapshot(actorUid);
+  }
 
-const doc = await Notification.create({
-  ownerUid,
-  actorUid: actorUid || "",
-  type,
-  seen: false,
-  readAt: null,
-  data,
-  meta: {
-    ...meta,
-    ...(actorSnapshot || {}),
-  },
-  groupKey,
-  priority,
-  deleted: false,
-});
-
+  const doc = await Notification.create({
+    ownerUid,
+    actorUid: actorUid || "",
+    type,
+    seen: false,
+    readAt: null,
+    data,
+    meta: {
+      ...meta,
+      ...(actorSnapshot || {}),
+    },
+    groupKey,
+    priority,
+    deleted: false,
+  });
 
   // Increment unread in Redis (best-effort)
   await incrUnreadCounter(ownerUid, 1);
@@ -260,20 +256,29 @@ export async function markAllRead(uid, { type = null, groupKey = null } = {}) {
   if (type) q.type = type;
   if (groupKey) q.groupKey = groupKey;
 
-  const res = await Notification.updateMany(q, { $set: { seen: true, readAt: new Date() } });
+  const res = await Notification.updateMany(q, {
+    $set: { seen: true, readAt: new Date() },
+  });
   const modified = res.modifiedCount ?? res.nModified ?? 0;
 
   // Reset redis counter conservatively: set to DB count of remaining unread items
   try {
     if (redisClient) {
-      const remaining = await Notification.countDocuments({ ownerUid: uid, seen: false, deleted: false });
+      const remaining = await Notification.countDocuments({
+        ownerUid: uid,
+        seen: false,
+        deleted: false,
+      });
       const key = `notifications:unread:${uid}`;
       await redisClient.set(key, String(remaining));
     }
   } catch (err) {
     // ignore
     // eslint-disable-next-line no-console
-    console.warn("[notificationService] markAllRead redis sync failed", err?.message || err);
+    console.warn(
+      "[notificationService] markAllRead redis sync failed",
+      err?.message || err,
+    );
   }
 
   // Emit event for client to refresh UI
@@ -298,15 +303,25 @@ export async function unreadCount(uid) {
   } catch (err) {
     // ignore and fallback
     // eslint-disable-next-line no-console
-    console.warn("[notificationService] unreadCount redis read failed", err?.message || err);
+    console.warn(
+      "[notificationService] unreadCount redis read failed",
+      err?.message || err,
+    );
   }
 
   // Fallback DB
   try {
-    return await Notification.countDocuments({ ownerUid: uid, seen: false, deleted: false });
+    return await Notification.countDocuments({
+      ownerUid: uid,
+      seen: false,
+      deleted: false,
+    });
   } catch (err) {
     // eslint-disable-next-line no-console
-    console.warn("[notificationService] unreadCount db failed", err?.message || err);
+    console.warn(
+      "[notificationService] unreadCount db failed",
+      err?.message || err,
+    );
     return 0;
   }
 }
@@ -314,7 +329,10 @@ export async function unreadCount(uid) {
 /**
  * List notifications (with pagination using before cursor)
  */
-export async function listNotifications(uid, { limit = 50, before = null, unreadOnly = false } = {}) {
+export async function listNotifications(
+  uid,
+  { limit = 50, before = null, unreadOnly = false } = {},
+) {
   if (!uid) throw new Error("uid required");
   const q = { ownerUid: uid, deleted: false };
   if (before) q.createdAt = { $lt: new Date(before) };
@@ -335,12 +353,19 @@ export async function resetUnreadCounter(uid) {
   if (!uid) return;
   try {
     if (!redisClient) return;
-    const remaining = await Notification.countDocuments({ ownerUid: uid, seen: false, deleted: false });
+    const remaining = await Notification.countDocuments({
+      ownerUid: uid,
+      seen: false,
+      deleted: false,
+    });
     const key = `notifications:unread:${uid}`;
     await redisClient.set(key, String(remaining));
   } catch (err) {
     // eslint-disable-next-line no-console
-    console.warn("[notificationService] resetUnreadCounter failed", err?.message || err);
+    console.warn(
+      "[notificationService] resetUnreadCounter failed",
+      err?.message || err,
+    );
   }
 }
 

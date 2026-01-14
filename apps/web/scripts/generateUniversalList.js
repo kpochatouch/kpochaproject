@@ -81,8 +81,8 @@ const body =
       (it) =>
         `  { id: '${it.id}', name: '${it.name.replace(/'/g, "\\'")}', category: '${it.category.replace(
           /'/g,
-          "\\'"
-        )}' },`
+          "\\'",
+        )}' },`,
     )
     .join("\n") +
   "\n];\n";
@@ -90,4 +90,6 @@ const body =
 const outPath = path.join(__dirname, "universalList.js");
 fs.writeFileSync(outPath, header + body, "utf8");
 
-console.log(`✅ universalList.js generated with ${out.length} items at: ${outPath}`);
+console.log(
+  `✅ universalList.js generated with ${out.length} items at: ${outPath}`,
+);

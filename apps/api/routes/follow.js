@@ -53,7 +53,7 @@ async function recomputeFollowersCount(targetUid) {
     const followers = await Follow.countDocuments({ targetUid });
     await Pro.updateOne(
       { ownerUid: targetUid },
-      { $set: { "metrics.followers": followers } }
+      { $set: { "metrics.followers": followers } },
     ).catch(() => {});
     return followers;
   } catch {
@@ -72,9 +72,7 @@ async function invalidateProfileCacheAndEmit(ownerUid, counts = {}) {
 
     const uname = prof?.username;
     if (redisClient && uname) {
-      await redisClient.del(
-        `public:profile:${String(uname).toLowerCase()}`
-      );
+      await redisClient.del(`public:profile:${String(uname).toLowerCase()}`);
     }
   } catch (e) {
     console.warn("[public/profile] invalidate failed:", e?.message || e);
@@ -105,7 +103,7 @@ router.post("/follow", requireAuth, async (req, res) => {
     await Follow.updateOne(
       { followerUid, targetUid },
       { $setOnInsert: { followerUid, targetUid } },
-      { upsert: true }
+      { upsert: true },
     );
 
     const newFollowersCount = await recomputeFollowersCount(targetUid);
@@ -113,7 +111,11 @@ router.post("/follow", requireAuth, async (req, res) => {
       followersCount: newFollowersCount,
     });
 
-    return res.json({ ok: true, following: true, followers: newFollowersCount });
+    return res.json({
+      ok: true,
+      following: true,
+      followers: newFollowersCount,
+    });
   } catch (e) {
     console.error("[follow:post] error", e?.stack || e);
     return res.status(500).json({ error: "follow_failed" });
@@ -134,7 +136,11 @@ router.delete("/follow", requireAuth, async (req, res) => {
       followersCount: newFollowersCount,
     });
 
-    return res.json({ ok: true, following: false, followers: newFollowersCount });
+    return res.json({
+      ok: true,
+      following: false,
+      followers: newFollowersCount,
+    });
   } catch (e) {
     console.error("[follow:delete] error", e?.stack || e);
     return res.status(500).json({ error: "unfollow_failed" });
@@ -201,7 +207,7 @@ router.post("/follow/:uid", requireAuth, async (req, res) => {
     await Follow.updateOne(
       { followerUid: me, targetUid },
       { $setOnInsert: { followerUid: me, targetUid } },
-      { upsert: true }
+      { upsert: true },
     );
 
     const newFollowersCount = await recomputeFollowersCount(targetUid);
@@ -209,7 +215,11 @@ router.post("/follow/:uid", requireAuth, async (req, res) => {
       followersCount: newFollowersCount,
     });
 
-    return res.json({ ok: true, following: true, followers: newFollowersCount });
+    return res.json({
+      ok: true,
+      following: true,
+      followers: newFollowersCount,
+    });
   } catch (e) {
     console.error("[follow:post/:uid] error", e?.stack || e);
     return res.status(500).json({ error: "follow_failed" });
@@ -229,7 +239,11 @@ router.delete("/follow/:uid", requireAuth, async (req, res) => {
       followersCount: newFollowersCount,
     });
 
-    return res.json({ ok: true, following: false, followers: newFollowersCount });
+    return res.json({
+      ok: true,
+      following: false,
+      followers: newFollowersCount,
+    });
   } catch (e) {
     console.error("[follow:delete/:uid] error", e?.stack || e);
     return res.status(500).json({ error: "unfollow_failed" });
@@ -259,7 +273,7 @@ router.post("/pros/:proId/follow", requireAuth, async (req, res) => {
     await Follow.updateOne(
       { followerUid: me, targetUid },
       { $setOnInsert: { followerUid: me, targetUid } },
-      { upsert: true }
+      { upsert: true },
     );
 
     const newFollowersCount = await recomputeFollowersCount(targetUid);
@@ -267,7 +281,11 @@ router.post("/pros/:proId/follow", requireAuth, async (req, res) => {
       followersCount: newFollowersCount,
     });
 
-    return res.json({ ok: true, following: true, followers: newFollowersCount });
+    return res.json({
+      ok: true,
+      following: true,
+      followers: newFollowersCount,
+    });
   } catch (e) {
     console.error("[pros:post/follow] error", e?.stack || e);
     return res.status(500).json({ error: "follow_failed" });
@@ -288,7 +306,11 @@ router.delete("/pros/:proId/follow", requireAuth, async (req, res) => {
       followersCount: newFollowersCount,
     });
 
-    return res.json({ ok: true, following: false, followers: newFollowersCount });
+    return res.json({
+      ok: true,
+      following: false,
+      followers: newFollowersCount,
+    });
   } catch (e) {
     console.error("[pros:delete/follow] error", e?.stack || e);
     return res.status(500).json({ error: "unfollow_failed" });

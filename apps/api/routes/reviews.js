@@ -4,8 +4,16 @@ import mongoose from "mongoose";
 import { Review } from "../models/Review.js";
 import { Pro } from "../models.js";
 import { ClientReview } from "../models/ClientReview.js";
-function clamp(n, min, max) { return Math.max(min, Math.min(max, n)); }
-function safeObjectId(id) { try { return new mongoose.Types.ObjectId(id); } catch { return null; } }
+function clamp(n, min, max) {
+  return Math.max(min, Math.min(max, n));
+}
+function safeObjectId(id) {
+  try {
+    return new mongoose.Types.ObjectId(id);
+  } catch {
+    return null;
+  }
+}
 
 export default function reviewsRouter({ requireAuth } = {}) {
   const r = express.Router();
@@ -14,7 +22,8 @@ export default function reviewsRouter({ requireAuth } = {}) {
   // CREATE a review (client -> pro)
   r.post("/reviews", mustAuth, async (req, res) => {
     try {
-      if (!req.user?.uid) return res.status(401).json({ error: "auth_required" });
+      if (!req.user?.uid)
+        return res.status(401).json({ error: "auth_required" });
       const { proId, rating, title, comment, photos } = req.body || {};
       const _proId = safeObjectId(proId);
       if (!_proId) return res.status(400).json({ error: "bad_pro_id" });
@@ -38,7 +47,7 @@ export default function reviewsRouter({ requireAuth } = {}) {
         const total = Number(p?.metrics?.totalReviews || 0);
         const avg = Number(p?.metrics?.avgRating || 0);
         const nextTotal = total + 1;
-        const nextAvg = ((avg * total) + review.rating) / nextTotal;
+        const nextAvg = (avg * total + review.rating) / nextTotal;
 
         p.metrics.totalReviews = nextTotal;
         p.metrics.avgRating = Math.round(nextAvg * 10) / 10;
@@ -76,7 +85,8 @@ export default function reviewsRouter({ requireAuth } = {}) {
   // GET my review for a pro (unique-per-user flow)
   r.get("/reviews/pro/:proId/me", mustAuth, async (req, res) => {
     try {
-      if (!req.user?.uid) return res.status(401).json({ error: "auth_required" });
+      if (!req.user?.uid)
+        return res.status(401).json({ error: "auth_required" });
       const _proId = safeObjectId(req.params.proId);
       if (!_proId) return res.status(400).json({ error: "bad_pro_id" });
 
@@ -93,7 +103,7 @@ export default function reviewsRouter({ requireAuth } = {}) {
     }
   });
 
-    /* =======================================================================
+  /* =======================================================================
    * PRO → CLIENT REVIEWS
    *  - Used when a pro reviews a client after a completed booking.
    *  - Frontend will hit something like /api/reviews/client (POST)
@@ -204,7 +214,6 @@ export default function reviewsRouter({ requireAuth } = {}) {
       res.status(500).json({ error: "mine_failed" });
     }
   });
-
 
   return r;
 }

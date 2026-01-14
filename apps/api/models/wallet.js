@@ -14,7 +14,7 @@ const WalletSchema = new mongoose.Schema(
     withdrawnKobo: { type: Number, default: 0, min: 0 },
     earnedKobo: { type: Number, default: 0, min: 0 },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 // (Optional) convenient alias used by FE in some places.
@@ -31,7 +31,11 @@ const WalletTxSchema = new mongoose.Schema(
     type: { type: String, required: true },
 
     // "credit" or "debit" or "neutral"
-    direction: { type: String, enum: ["credit", "debit", "neutral"], required: true },
+    direction: {
+      type: String,
+      enum: ["credit", "debit", "neutral"],
+      required: true,
+    },
 
     // tx amount (0 allowed for neutral/init records)
     amountKobo: { type: Number, required: true, min: 0 },
@@ -46,7 +50,7 @@ const WalletTxSchema = new mongoose.Schema(
     // anything helpful (bookingId, paystack payload, etc.)
     meta: { type: mongoose.Schema.Types.Mixed, default: {} },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 // One-time booking-scoped idempotency (bulletproof under concurrency)
@@ -55,12 +59,18 @@ WalletTxSchema.index(
   {
     unique: true,
     partialFilterExpression: {
-      type: { $in: ["booking_fund", "escrow_hold_in", "platform_cancel_fee_in", "cancel_fee_compensation"] },
+      type: {
+        $in: [
+          "booking_fund",
+          "escrow_hold_in",
+          "platform_cancel_fee_in",
+          "cancel_fee_compensation",
+        ],
+      },
       "meta.bookingId": { $exists: true, $type: "string" },
     },
-  }
+  },
 );
-
 
 // helpful index for recent history per user
 WalletTxSchema.index({ ownerUid: 1, createdAt: -1 });
@@ -69,9 +79,8 @@ WalletTxSchema.index({ ownerUid: 1, createdAt: -1 });
 // (Only applies when reference is present, mainly topup_credit)
 WalletTxSchema.index(
   { ownerUid: 1, type: 1, reference: 1 },
-  { unique: true, partialFilterExpression: { reference: { $type: "string" } } }
+  { unique: true, partialFilterExpression: { reference: { $type: "string" } } },
 );
-
 
 /**
  * Top-up intent: created before redirect/inline; verified once by Paystack callback.
@@ -82,11 +91,16 @@ const WalletTopupIntentSchema = new mongoose.Schema(
     ownerUid: { type: String, required: true, index: true },
     reference: { type: String, required: true, unique: true, index: true }, // Paystack ref
     amountKobo: { type: Number, required: true, min: 1 },
-    status: { type: String, enum: ["created", "verified", "failed"], default: "created", index: true },
+    status: {
+      type: String,
+      enum: ["created", "verified", "failed"],
+      default: "created",
+      index: true,
+    },
     meta: { type: mongoose.Schema.Types.Mixed, default: {} }, // any provider payload
     verifiedAt: { type: Date, default: null },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 export const Wallet =
@@ -121,7 +135,10 @@ export async function ensureWalletIndexes() {
 
   // Keep topup intent reference unique (if you ever use WalletTopupIntent)
   try {
-    await WalletTopupIntent.collection.createIndex({ reference: 1 }, { unique: true });
+    await WalletTopupIntent.collection.createIndex(
+      { reference: 1 },
+      { unique: true },
+    );
   } catch (e) {
     // ignore
   }
@@ -133,11 +150,14 @@ export async function ensureWalletIndexes() {
     // ignore
   }
 
-    // Strong idempotency for topups
+  // Strong idempotency for topups
   try {
     await WalletTx.collection.createIndex(
       { ownerUid: 1, type: 1, reference: 1 },
-      { unique: true, partialFilterExpression: { reference: { $type: "string" } } }
+      {
+        unique: true,
+        partialFilterExpression: { reference: { $type: "string" } },
+      },
     );
   } catch (e) {
     // ignore
@@ -160,10 +180,9 @@ export async function ensureWalletIndexes() {
           },
           "meta.bookingId": { $exists: true, $type: "string" },
         },
-      }
+      },
     );
   } catch (e) {
     // ignore
   }
 }
-

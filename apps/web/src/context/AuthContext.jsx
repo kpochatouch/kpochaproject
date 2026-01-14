@@ -29,17 +29,20 @@ export function AuthProvider({ children }) {
     });
 
     // ✅ Optional: refresh ID token every 50 minutes to keep session valid
-    const refreshLoop = setInterval(async () => {
-      const currentUser = auth.currentUser;
-      if (currentUser) {
-        try {
-          const freshToken = await currentUser.getIdToken(true);
-          setAuthToken(freshToken);
-        } catch {
-          // silently fail (network loss etc.)
+    const refreshLoop = setInterval(
+      async () => {
+        const currentUser = auth.currentUser;
+        if (currentUser) {
+          try {
+            const freshToken = await currentUser.getIdToken(true);
+            setAuthToken(freshToken);
+          } catch {
+            // silently fail (network loss etc.)
+          }
         }
-      }
-    }, 50 * 60 * 1000); // 50 minutes
+      },
+      50 * 60 * 1000,
+    ); // 50 minutes
 
     return () => {
       unsub();

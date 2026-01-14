@@ -14,7 +14,9 @@ export default function DeactivateAccount() {
   const [ok, setOk] = useState("");
 
   async function load() {
-    setErr(""); setOk(""); setLoading(true);
+    setErr("");
+    setOk("");
+    setLoading(true);
     try {
       const [{ data: meData }, { data: status }] = await Promise.all([
         api.get("/api/me"),
@@ -29,12 +31,17 @@ export default function DeactivateAccount() {
     }
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+  }, []);
 
   async function submit() {
     try {
-      setErr(""); setOk("");
-      const { data } = await api.post("/api/account/deactivate-request", { reason });
+      setErr("");
+      setOk("");
+      const { data } = await api.post("/api/account/deactivate-request", {
+        reason,
+      });
       setReq(data?.request || null);
       setOk("Your deactivation request has been submitted.");
     } catch (e) {
@@ -50,19 +57,31 @@ export default function DeactivateAccount() {
     <div className="max-w-2xl mx-auto px-4 py-8">
       <div className="flex items-baseline justify-between mb-4">
         <h1 className="text-2xl font-semibold">Deactivate Account</h1>
-        <Link to="/settings" className="text-sm underline">← Back to Settings</Link>
+        <Link to="/settings" className="text-sm underline">
+          ← Back to Settings
+        </Link>
       </div>
 
       {loading && <div>Loading…</div>}
       {!loading && (
         <>
-          {err && <div className="mb-4 rounded border border-red-800 bg-red-900/40 text-red-100 px-3 py-2">{err}</div>}
-          {ok &&  <div className="mb-4 rounded border border-green-800 bg-green-900/30 text-green-100 px-3 py-2">{ok}</div>}
+          {err && (
+            <div className="mb-4 rounded border border-red-800 bg-red-900/40 text-red-100 px-3 py-2">
+              {err}
+            </div>
+          )}
+          {ok && (
+            <div className="mb-4 rounded border border-green-800 bg-green-900/30 text-green-100 px-3 py-2">
+              {ok}
+            </div>
+          )}
 
           <div className="rounded-lg border border-zinc-800 p-4 space-y-4 bg-black/40">
             <p className="text-sm text-zinc-300">
-              Deactivating your account will disable sign-in and hide your profile. No data will be deleted.
-              An admin will review your request and either approve or reject it. You can cancel by contacting support before approval.
+              Deactivating your account will disable sign-in and hide your
+              profile. No data will be deleted. An admin will review your
+              request and either approve or reject it. You can cancel by
+              contacting support before approval.
             </p>
 
             <div className="grid gap-2">
@@ -72,7 +91,7 @@ export default function DeactivateAccount() {
                 className="w-full bg-black border border-zinc-800 rounded-lg px-3 py-2"
                 placeholder="Tell us why you want to leave…"
                 value={reason}
-                onChange={(e)=>setReason(e.target.value)}
+                onChange={(e) => setReason(e.target.value)}
                 disabled={pending || approved}
               />
             </div>
@@ -80,13 +99,19 @@ export default function DeactivateAccount() {
             <div className="flex items-center justify-between">
               <StatusBadge status={req?.status} createdAt={req?.createdAt} />
               <div className="flex gap-2">
-                <Link to="/settings" className="px-3 py-2 border rounded">Cancel</Link>
+                <Link to="/settings" className="px-3 py-2 border rounded">
+                  Cancel
+                </Link>
                 <button
                   onClick={submit}
                   disabled={pending || approved}
                   className="px-4 py-2 rounded bg-red-700 hover:bg-red-600 disabled:opacity-50"
                 >
-                  {pending ? "Request Pending" : approved ? "Approved" : "Submit Request"}
+                  {pending
+                    ? "Request Pending"
+                    : approved
+                      ? "Approved"
+                      : "Submit Request"}
                 </button>
               </div>
             </div>
@@ -94,8 +119,8 @@ export default function DeactivateAccount() {
 
           {/* Tips */}
           <div className="text-xs text-zinc-500 mt-4">
-            • If approved, your account will be disabled (soft deactivated).<br/>
-            • If rejected, you’ll remain active and may re-apply later.
+            • If approved, your account will be disabled (soft deactivated).
+            <br />• If rejected, you’ll remain active and may re-apply later.
           </div>
         </>
       )}
@@ -104,16 +129,29 @@ export default function DeactivateAccount() {
 }
 
 function StatusBadge({ status, createdAt }) {
-  if (!status) return <span className="text-zinc-400 text-sm">No request submitted yet.</span>;
+  if (!status)
+    return (
+      <span className="text-zinc-400 text-sm">No request submitted yet.</span>
+    );
   const map = {
-    pending: { label: "Pending review", cls: "bg-yellow-900/40 text-yellow-200 border-yellow-800" },
-    approved:{ label: "Approved", cls: "bg-green-900/30 text-green-100 border-green-800" },
-    rejected:{ label: "Rejected", cls: "bg-red-900/30 text-red-100 border-red-800" },
+    pending: {
+      label: "Pending review",
+      cls: "bg-yellow-900/40 text-yellow-200 border-yellow-800",
+    },
+    approved: {
+      label: "Approved",
+      cls: "bg-green-900/30 text-green-100 border-green-800",
+    },
+    rejected: {
+      label: "Rejected",
+      cls: "bg-red-900/30 text-red-100 border-red-800",
+    },
   };
   const m = map[status] || map.pending;
   return (
     <span className={`text-sm px-2 py-1 rounded border ${m.cls}`}>
-      {m.label}{createdAt ? ` — ${new Date(createdAt).toLocaleString()}` : ""}
+      {m.label}
+      {createdAt ? ` — ${new Date(createdAt).toLocaleString()}` : ""}
     </span>
   );
 }

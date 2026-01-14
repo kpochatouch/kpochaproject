@@ -57,10 +57,6 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-
-
-
-
 /* ------------------------------------------------------------------
    UTILS
    ------------------------------------------------------------------ */
@@ -129,7 +125,6 @@ function bodyTouchesSensitiveClient(body = {}) {
   return false;
 }
 
-
 // ✅ allow frontend to tell us “I just did liveness, remember it”
 async function rememberLivenessToday(uid) {
   try {
@@ -137,7 +132,7 @@ async function rememberLivenessToday(uid) {
     await col.updateOne(
       { uid },
       { $set: { livenessVerifiedAt: new Date() } },
-      { upsert: true }
+      { upsert: true },
     );
   } catch (e) {
     console.warn("[profile:liveness:remember] skipped:", e?.message || e);
@@ -171,7 +166,7 @@ router.post("/profile/ensure", requireAuth, async (req, res) => {
               fullName: base.fullName,
             },
           },
-          { upsert: true }
+          { upsert: true },
         );
       } catch (e) {
         console.warn("[profile:ensure] raw sync skipped:", e?.message || e);
@@ -200,10 +195,13 @@ router.post("/profile/ensure", requireAuth, async (req, res) => {
               : {}),
           },
         },
-        { upsert: true }
+        { upsert: true },
       );
     } catch (e) {
-      console.warn("[profile:ensure-existing] raw sync skipped:", e?.message || e);
+      console.warn(
+        "[profile:ensure-existing] raw sync skipped:",
+        e?.message || e,
+      );
     }
 
     return res.json({ ok: true, created: false });
@@ -324,7 +322,7 @@ async function handlePutClientMe(req, res) {
     const updated = await ClientProfile.findOneAndUpdate(
       { uid },
       { $set: clientSet },
-      { new: true }
+      { new: true },
     ).lean();
 
     // sync raw "profiles" collection
@@ -387,24 +385,32 @@ async function handlePutClientMe(req, res) {
     }
 
     // invalidate public cache for this username (if profile has username)
-try {
-  const usernameToInvalidate = (updated && updated.username) || (payload && payload.username);
-  if (redisClient && usernameToInvalidate) {
-    const key = `public:profile:${String(usernameToInvalidate).toLowerCase()}`;
-    await redisClient.del(key);
-  }
-} catch (err) {
-  console.warn("[public/profile] invalidate after client update failed:", err?.message || err);
-}
+    try {
+      const usernameToInvalidate =
+        (updated && updated.username) || (payload && payload.username);
+      if (redisClient && usernameToInvalidate) {
+        const key = `public:profile:${String(usernameToInvalidate).toLowerCase()}`;
+        await redisClient.del(key);
+      }
+    } catch (err) {
+      console.warn(
+        "[public/profile] invalidate after client update failed:",
+        err?.message || err,
+      );
+    }
 
-// immediate socket notify (optional but recommended)
-try {
-  const io = getIO();
-  io.to(`profile:${updated.uid}`).emit("profile:stats", { ownerUid: updated.uid });
-} catch (err) {
-  console.warn("[public/profile] socket emit after client update failed:", err?.message || err);
-}
-
+    // immediate socket notify (optional but recommended)
+    try {
+      const io = getIO();
+      io.to(`profile:${updated.uid}`).emit("profile:stats", {
+        ownerUid: updated.uid,
+      });
+    } catch (err) {
+      console.warn(
+        "[public/profile] socket emit after client update failed:",
+        err?.message || err,
+      );
+    }
 
     const masked = maskClientProfileForClientView(updated) || {};
     return res.json({
@@ -434,7 +440,9 @@ router.put("/profile/me", requireAuth, handlePutClientMe);
    PUBLIC PROFILE - READ-ONLY PROJECTION (public)
    GET /profile/public/:username
    ------------------------------------------------------------------ */
-const PUBLIC_PROFILE_CACHE_SEC = Number(process.env.PUBLIC_PROFILE_CACHE_SEC || 60);
+const PUBLIC_PROFILE_CACHE_SEC = Number(
+  process.env.PUBLIC_PROFILE_CACHE_SEC || 60,
+);
 
 async function handleGetPublicProfile(req, res) {
   try {
@@ -466,20 +474,28 @@ async function handleGetPublicProfile(req, res) {
     // If param looks like Mongo ObjectId → try Pro._id first
     const looksLikeObjectId = /^[0-9a-fA-F]{24}$/.test(username);
     if (looksLikeObjectId) {
-      pro = await Pro.findById(username).lean().catch(() => null);
+      pro = await Pro.findById(username)
+        .lean()
+        .catch(() => null);
       if (pro) {
-        client = await ClientProfile.findOne({ uid: pro.ownerUid }).lean().catch(() => null);
+        client = await ClientProfile.findOne({ uid: pro.ownerUid })
+          .lean()
+          .catch(() => null);
       }
     }
 
     // If still no client, try username exact
     if (!client) {
-      client = await ClientProfile.findOne({ username }).lean().catch(() => null);
+      client = await ClientProfile.findOne({ username })
+        .lean()
+        .catch(() => null);
     }
 
     // Try uid
     if (!client) {
-      client = await ClientProfile.findOne({ uid: username }).lean().catch(() => null);
+      client = await ClientProfile.findOne({ uid: username })
+        .lean()
+        .catch(() => null);
     }
 
     // Try case-insensitive username
@@ -487,14 +503,20 @@ async function handleGetPublicProfile(req, res) {
       const esc = username.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       client = await ClientProfile.findOne({
         username: new RegExp(`^${esc}$`, "i"),
-      }).lean().catch(() => null);
+      })
+        .lean()
+        .catch(() => null);
     }
 
     // If still no client, maybe the value is actually ownerUid
     if (!client && !pro) {
-      pro = await Pro.findOne({ ownerUid: username }).lean().catch(() => null);
+      pro = await Pro.findOne({ ownerUid: username })
+        .lean()
+        .catch(() => null);
       if (pro) {
-        client = await ClientProfile.findOne({ uid: pro.ownerUid }).lean().catch(() => null);
+        client = await ClientProfile.findOne({ uid: pro.ownerUid })
+          .lean()
+          .catch(() => null);
       }
     }
 
@@ -506,35 +528,52 @@ async function handleGetPublicProfile(req, res) {
     const ownerUid = client ? client.uid : pro.ownerUid;
 
     // 2) Pro doc if exists (load fresh if we only found client above)
-    const proDoc = pro || (await Pro.findOne({ ownerUid }).lean().catch(() => null));
+    const proDoc =
+      pro ||
+      (await Pro.findOne({ ownerUid })
+        .lean()
+        .catch(() => null));
     const publicFromPro = proDoc ? proToBarber(proDoc) : null;
 
     // 3) Merge identity fields (client is primary for identity)
     const profilePublic = {
       ownerUid,
-      username: (client && client.username) || (publicFromPro && publicFromPro.id) || username,
+      username:
+        (client && client.username) ||
+        (publicFromPro && publicFromPro.id) ||
+        username,
       displayName:
         (client && (client.displayName || client.fullName)) ||
         (publicFromPro && publicFromPro.name) ||
         "",
       avatarUrl:
-        (client && client.photoUrl) || (publicFromPro && publicFromPro.photoUrl) || "",
-      coverUrl: (client && client.coverUrl) || (proDoc && proDoc.coverUrl) || "",
+        (client && client.photoUrl) ||
+        (publicFromPro && publicFromPro.photoUrl) ||
+        "",
+      coverUrl:
+        (client && client.coverUrl) || (proDoc && proDoc.coverUrl) || "",
       bio: (client && client.bio) || (proDoc && proDoc.bio) || "",
       isPro: Boolean(proDoc),
       services: (publicFromPro && publicFromPro.services) || [],
-      gallery: (publicFromPro && publicFromPro.gallery) || (client && client.gallery) || [],
+      gallery:
+        (publicFromPro && publicFromPro.gallery) ||
+        (client && client.gallery) ||
+        [],
       contactPublic: (proDoc && proDoc.contactPublic) || {},
       badges: (publicFromPro && publicFromPro.badges) || [],
       metrics: (proDoc && proDoc.metrics) || {},
       followersCount: 0,
       postsCount: 0,
       jobsCompleted: 0,
-      ratingAverage: Number((proDoc && proDoc.metrics && proDoc.metrics.avgRating) || 0),
+      ratingAverage: Number(
+        (proDoc && proDoc.metrics && proDoc.metrics.avgRating) || 0,
+      ),
     };
 
     // 4) Counts: prefer pro.metrics, fall back to client or aggregate
-    profilePublic.followersCount = Number(proDoc?.metrics?.followers || (client && client.followersCount) || 0);
+    profilePublic.followersCount = Number(
+      proDoc?.metrics?.followers || (client && client.followersCount) || 0,
+    );
 
     try {
       profilePublic.postsCount = await Post.countDocuments({
@@ -559,10 +598,15 @@ async function handleGetPublicProfile(req, res) {
       profilePublic.jobsCompleted = Number(proDoc.metrics.jobsCompleted || 0);
     } else {
       try {
-        const bookingQueryOr = [{ proOwnerUid: ownerUid }, { proUid: ownerUid }];
+        const bookingQueryOr = [
+          { proOwnerUid: ownerUid },
+          { proUid: ownerUid },
+        ];
         if (proDoc && proDoc._id) {
           try {
-            bookingQueryOr.push({ proId: new mongoose.Types.ObjectId(proDoc._id) });
+            bookingQueryOr.push({
+              proId: new mongoose.Types.ObjectId(proDoc._id),
+            });
           } catch {}
         }
         profilePublic.jobsCompleted = await Booking.countDocuments({
@@ -573,30 +617,32 @@ async function handleGetPublicProfile(req, res) {
       }
     }
 
-    if (proDoc?.metrics?.avgRating) profilePublic.ratingAverage = Number(proDoc.metrics.avgRating);
+    if (proDoc?.metrics?.avgRating)
+      profilePublic.ratingAverage = Number(proDoc.metrics.avgRating);
 
     // 5) Recent public posts (small page) — tolerant owner-fields query
-const postsRaw = await Post.find({
-  isPublic: true,
-  hidden: { $ne: true },
-  deleted: { $ne: true },
-  $or: [
-    { proOwnerUid: ownerUid },
-    { ownerUid: ownerUid },
-    { proUid: ownerUid },
-    { createdBy: ownerUid },
-  ],
-})
-  .sort({ createdAt: -1 })
-  .limit(10)
-  .lean();
-
+    const postsRaw = await Post.find({
+      isPublic: true,
+      hidden: { $ne: true },
+      deleted: { $ne: true },
+      $or: [
+        { proOwnerUid: ownerUid },
+        { ownerUid: ownerUid },
+        { proUid: ownerUid },
+        { createdBy: ownerUid },
+      ],
+    })
+      .sort({ createdAt: -1 })
+      .limit(10)
+      .lean();
 
     // Enrich posts with PostStats
     const pIds = postsRaw.map((p) => p._id?.toString()).filter(Boolean);
     let statsMap = {};
     if (pIds.length && PostStats) {
-      const stats = await PostStats.find({ postId: { $in: pIds } }).lean().catch(() => []);
+      const stats = await PostStats.find({ postId: { $in: pIds } })
+        .lean()
+        .catch(() => []);
       statsMap = stats.reduce((acc, s) => {
         acc[String(s.postId)] = s;
         return acc;
@@ -621,12 +667,20 @@ const postsRaw = await Post.find({
       };
     });
 
-    const payload = { ok: true, profile: profilePublic, posts: { items: publicPosts, cursor: null } };
+    const payload = {
+      ok: true,
+      profile: profilePublic,
+      posts: { items: publicPosts, cursor: null },
+    };
 
     // Cache payload
     if (redisClient) {
       try {
-        await redisClient.setEx(cacheKey, PUBLIC_PROFILE_CACHE_SEC, JSON.stringify(payload));
+        await redisClient.setEx(
+          cacheKey,
+          PUBLIC_PROFILE_CACHE_SEC,
+          JSON.stringify(payload),
+        );
       } catch (e) {
         console.warn("[public/profile] redis set failed:", e?.message || e);
       }
@@ -638,7 +692,6 @@ const postsRaw = await Post.find({
     return res.status(500).json({ error: "server_error" });
   }
 }
-
 
 router.get("/profile/public/:username", handleGetPublicProfile);
 
@@ -656,57 +709,69 @@ router.get("/profile/public-by-uid/:uid", async (req, res) => {
         const cached = await redisClient.get(cacheKey);
         if (cached) return res.status(200).json(JSON.parse(cached));
       } catch (e) {
-        console.warn("[public/profile-by-uid] redis get failed:", e?.message || e);
+        console.warn(
+          "[public/profile-by-uid] redis get failed:",
+          e?.message || e,
+        );
       }
     }
 
     // 1) client profile by uid (fall back to Pro if no ClientProfile exists)
-let client = await ClientProfile.findOne({ uid }).lean();
+    let client = await ClientProfile.findOne({ uid }).lean();
 
-if (!client) {
-  // try to build a client-like object from the Pro doc so public profile still works
-  const pro = await Pro.findOne({ ownerUid: uid }).lean().catch(() => null);
-  if (!pro) {
-    // neither client nor pro found — original behaviour
-    return res.status(404).json({ error: "profile_not_found" });
-  }
+    if (!client) {
+      // try to build a client-like object from the Pro doc so public profile still works
+      const pro = await Pro.findOne({ ownerUid: uid })
+        .lean()
+        .catch(() => null);
+      if (!pro) {
+        // neither client nor pro found — original behaviour
+        return res.status(404).json({ error: "profile_not_found" });
+      }
 
-  // build a client-like object (minimal fields used later)
-  client = {
-    uid: uid,
-    username: pro.username || pro.handle || "",
-    displayName: pro.name || "",
-    photoUrl: pro.photoUrl || pro.avatarUrl || "",
-    coverUrl: pro.coverUrl || "",
-    bio: pro.bio || "",
-    gallery: Array.isArray(pro.gallery) ? pro.gallery : [],
-    followersCount: (pro.metrics && Number(pro.metrics.followers)) || 0,
-  };
+      // build a client-like object (minimal fields used later)
+      client = {
+        uid: uid,
+        username: pro.username || pro.handle || "",
+        displayName: pro.name || "",
+        photoUrl: pro.photoUrl || pro.avatarUrl || "",
+        coverUrl: pro.coverUrl || "",
+        bio: pro.bio || "",
+        gallery: Array.isArray(pro.gallery) ? pro.gallery : [],
+        followersCount: (pro.metrics && Number(pro.metrics.followers)) || 0,
+      };
 
-  // set `pro` and `publicFromPro` for later merging below
-  const publicFromPro = pro ? proToBarber(pro) : null;
-  // keep the original `pro` variable name used later by the handler:
-  // (we'll overwrite the later 'const pro = await Pro.findOne...' or adapt below)
-  // NOTE: We'll still run the standard merging code below which expects `pro` variable,
-  // so if the code later does `const pro = await Pro.findOne({ ownerUid }).lean()` you can skip that part.
-}
-const ownerUid = client.uid;
+      // set `pro` and `publicFromPro` for later merging below
+      const publicFromPro = pro ? proToBarber(pro) : null;
+      // keep the original `pro` variable name used later by the handler:
+      // (we'll overwrite the later 'const pro = await Pro.findOne...' or adapt below)
+      // NOTE: We'll still run the standard merging code below which expects `pro` variable,
+      // so if the code later does `const pro = await Pro.findOne({ ownerUid }).lean()` you can skip that part.
+    }
+    const ownerUid = client.uid;
 
     // 2) pro doc if exists
-    const pro = await Pro.findOne({ ownerUid }).lean().catch(() => null);
+    const pro = await Pro.findOne({ ownerUid })
+      .lean()
+      .catch(() => null);
     const publicFromPro = pro ? proToBarber(pro) : null;
 
     // 3) Merge identity fields (client primary)
     const profilePublic = {
       ownerUid,
       username: client.username || (publicFromPro && publicFromPro.id) || "",
-      displayName: client.displayName || client.fullName || (publicFromPro && publicFromPro.name) || "",
-      avatarUrl: client.photoUrl || (publicFromPro && publicFromPro.photoUrl) || "",
-      coverUrl: client.coverUrl || (pro?.coverUrl || ""),
-      bio: client.bio || (pro?.bio || "") || "",
+      displayName:
+        client.displayName ||
+        client.fullName ||
+        (publicFromPro && publicFromPro.name) ||
+        "",
+      avatarUrl:
+        client.photoUrl || (publicFromPro && publicFromPro.photoUrl) || "",
+      coverUrl: client.coverUrl || pro?.coverUrl || "",
+      bio: client.bio || pro?.bio || "" || "",
       isPro: Boolean(pro),
       services: (publicFromPro && publicFromPro.services) || [],
-      gallery: (publicFromPro && publicFromPro.gallery) || (client.gallery || []),
+      gallery: (publicFromPro && publicFromPro.gallery) || client.gallery || [],
       contactPublic: (pro && pro.contactPublic) || {},
       badges: (publicFromPro && publicFromPro.badges) || [],
       metrics: (pro && pro.metrics) || {},
@@ -717,7 +782,9 @@ const ownerUid = client.uid;
     };
 
     // counts & posts (same logic as username route)
-    profilePublic.followersCount = Number(pro?.metrics?.followers || client.followersCount || 0);
+    profilePublic.followersCount = Number(
+      pro?.metrics?.followers || client.followersCount || 0,
+    );
 
     try {
       profilePublic.postsCount = await Post.countDocuments({
@@ -734,9 +801,16 @@ const ownerUid = client.uid;
       profilePublic.jobsCompleted = Number(pro.metrics.jobsCompleted || 0);
     } else {
       try {
-        const bookingQueryOr = [{ proOwnerUid: ownerUid }, { proUid: ownerUid }];
+        const bookingQueryOr = [
+          { proOwnerUid: ownerUid },
+          { proUid: ownerUid },
+        ];
         if (pro && pro._id) {
-          try { bookingQueryOr.push({ proId: new mongoose.Types.ObjectId(pro._id) }); } catch {}
+          try {
+            bookingQueryOr.push({
+              proId: new mongoose.Types.ObjectId(pro._id),
+            });
+          } catch {}
         }
         profilePublic.jobsCompleted = await Booking.countDocuments({
           $and: [{ status: "completed" }, { $or: bookingQueryOr }],
@@ -746,28 +820,30 @@ const ownerUid = client.uid;
       }
     }
 
-    if (pro?.metrics?.avgRating) profilePublic.ratingAverage = Number(pro.metrics.avgRating);
+    if (pro?.metrics?.avgRating)
+      profilePublic.ratingAverage = Number(pro.metrics.avgRating);
 
     const postsRaw = await Post.find({
-  isPublic: true,
-  hidden: { $ne: true },
-  deleted: { $ne: true },
-  $or: [
-    { proOwnerUid: ownerUid },
-    { ownerUid: ownerUid },
-    { proUid: ownerUid },
-    { createdBy: ownerUid },
-  ],
-})
-  .sort({ createdAt: -1 })
-  .limit(10)
-  .lean();
-
+      isPublic: true,
+      hidden: { $ne: true },
+      deleted: { $ne: true },
+      $or: [
+        { proOwnerUid: ownerUid },
+        { ownerUid: ownerUid },
+        { proUid: ownerUid },
+        { createdBy: ownerUid },
+      ],
+    })
+      .sort({ createdAt: -1 })
+      .limit(10)
+      .lean();
 
     const pIds = postsRaw.map((p) => p._id?.toString()).filter(Boolean);
     let statsMap = {};
     if (pIds.length && PostStats) {
-      const stats = await PostStats.find({ postId: { $in: pIds } }).lean().catch(() => []);
+      const stats = await PostStats.find({ postId: { $in: pIds } })
+        .lean()
+        .catch(() => []);
       statsMap = stats.reduce((acc, s) => {
         acc[String(s.postId)] = s;
         return acc;
@@ -792,14 +868,25 @@ const ownerUid = client.uid;
       };
     });
 
-    const payload = { ok: true, profile: profilePublic, posts: { items: publicPosts, cursor: null } };
+    const payload = {
+      ok: true,
+      profile: profilePublic,
+      posts: { items: publicPosts, cursor: null },
+    };
 
     // cache
     if (redisClient) {
       try {
-        await redisClient.setEx(cacheKey, PUBLIC_PROFILE_CACHE_SEC, JSON.stringify(payload));
+        await redisClient.setEx(
+          cacheKey,
+          PUBLIC_PROFILE_CACHE_SEC,
+          JSON.stringify(payload),
+        );
       } catch (e) {
-        console.warn("[public/profile-by-uid] redis set failed:", e?.message || e);
+        console.warn(
+          "[public/profile-by-uid] redis set failed:",
+          e?.message || e,
+        );
       }
     }
 
@@ -809,8 +896,6 @@ const ownerUid = client.uid;
     return res.status(500).json({ error: "server_error" });
   }
 });
-
-
 
 /* ------------------------------------------------------------------
    ADMIN READ (now shows livenessVerifiedAt too)
@@ -828,7 +913,7 @@ router.get(
     } catch {
       return res.status(500).json({ error: "Failed to load client profile" });
     }
-  }
+  },
 );
 
 /* ------------------------------------------------------------------
@@ -870,7 +955,9 @@ router.get(
       }
 
       if (b.clientUid !== req.params.uid) {
-        return res.status(400).json({ error: "Client UID does not match booking" });
+        return res
+          .status(400)
+          .json({ error: "Client UID does not match booking" });
       }
 
       const p = await ClientProfile.findOne({
@@ -883,7 +970,7 @@ router.get(
         .status(500)
         .json({ error: "Failed to load client profile for booking" });
     }
-  }
+  },
 );
 
 /* ------------------------------------------------------------------
@@ -905,7 +992,9 @@ router.put("/profile/pro/me", requireAuth, async (req, res) => {
   try {
     const pro = await Pro.findOne({ ownerUid: req.user.uid }).lean();
     if (!pro) {
-      return res.status(403).json({ error: "You are not an approved professional" });
+      return res
+        .status(403)
+        .json({ error: "You are not an approved professional" });
     }
 
     const payload = req.body || {};
@@ -913,7 +1002,7 @@ router.put("/profile/pro/me", requireAuth, async (req, res) => {
     const updated = await ProProfile.findOneAndUpdate(
       { ownerUid: req.user.uid },
       { $set: toSet },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
+      { upsert: true, new: true, setDefaultsOnInsert: true },
     ).lean();
 
     const { ownerUid, ...safe } = updated || {};
@@ -936,22 +1025,29 @@ router.get(
     } catch {
       return res.status(500).json({ error: "Failed to load pro profile" });
     }
-  }
+  },
 );
 
 // temporary debug route — remove after verifying data
 router.get("/profile/debug/:id", async (req, res) => {
   try {
     const id = String(req.params.id);
-    const client = await ClientProfile.findOne({ uid: id }).lean().catch(() => null);
-    const clientByUsername = await ClientProfile.findOne({ username: id }).lean().catch(() => null);
-    const proByOwner = await Pro.findOne({ ownerUid: id }).lean().catch(() => null);
-    const proById = await Pro.findById(id).lean().catch(() => null);
+    const client = await ClientProfile.findOne({ uid: id })
+      .lean()
+      .catch(() => null);
+    const clientByUsername = await ClientProfile.findOne({ username: id })
+      .lean()
+      .catch(() => null);
+    const proByOwner = await Pro.findOne({ ownerUid: id })
+      .lean()
+      .catch(() => null);
+    const proById = await Pro.findById(id)
+      .lean()
+      .catch(() => null);
     return res.json({ client, clientByUsername, proByOwner, proById });
   } catch (e) {
     return res.status(500).json({ error: e?.message || String(e) });
   }
 });
-
 
 export default router;

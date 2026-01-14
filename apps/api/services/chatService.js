@@ -79,7 +79,6 @@ function buildPayloadFromDoc(doc) {
   };
 }
 
-
 async function attachSender(payload) {
   if (!payload || !payload.fromUid) return payload;
   const uid = payload.fromUid;
@@ -95,10 +94,7 @@ async function attachSender(payload) {
       payload.sender = {
         uid,
         displayName:
-          client.displayName ||
-          client.fullName ||
-          client.username ||
-          null,
+          client.displayName || client.fullName || client.username || null,
         photoUrl:
           client.photoUrl ||
           (client.identity && client.identity.photoUrl) ||
@@ -150,7 +146,11 @@ export async function saveMessage({
   // 1) dedupe by clientId if provided
   try {
     if (clientId) {
-      const existing = await ChatMessage.findOne({ room, fromUid, clientId }).lean();
+      const existing = await ChatMessage.findOne({
+        room,
+        fromUid,
+        clientId,
+      }).lean();
       if (existing) {
         // build payload from existing doc and attach sender
         let payload = buildPayloadFromDoc(existing);
@@ -193,7 +193,8 @@ export async function saveMessage({
       const lastPreview = (function () {
         const text = String(body || "").trim();
         if (text.length) return text.slice(0, 255);
-        if (payload?.attachments && payload.attachments.length) return "[attachment]";
+        if (payload?.attachments && payload.attachments.length)
+          return "[attachment]";
         return "";
       })();
 
@@ -204,7 +205,8 @@ export async function saveMessage({
         if (parts.length >= 3) {
           const uidA = parts[1];
           const uidB = parts[2];
-          const recipient = uidA === fromUid ? uidB : uidB === fromUid ? uidA : null;
+          const recipient =
+            uidA === fromUid ? uidB : uidB === fromUid ? uidA : null;
           if (recipient && recipient !== fromUid) incrementFor = [recipient];
         }
       } else if (toUid) {
@@ -218,15 +220,21 @@ export async function saveMessage({
         if (String(room).startsWith("dm:")) {
           const parts = String(room).split(":");
           if (parts.length >= 3) {
-            await Thread.getOrCreateDMThread(parts[1], parts[2]).catch(() => null);
+            await Thread.getOrCreateDMThread(parts[1], parts[2]).catch(
+              () => null,
+            );
           }
         } else if (String(room).startsWith("booking:")) {
           const bookingId = String(room).split(":")[1];
-          if (bookingId) await Thread.getOrCreateBookingThread(bookingId).catch(() => null);
+          if (bookingId)
+            await Thread.getOrCreateBookingThread(bookingId).catch(() => null);
         }
       } catch (e) {
         // best-effort
-        console.warn("[chatService] ensure thread participants failed:", e?.message || e);
+        console.warn(
+          "[chatService] ensure thread participants failed:",
+          e?.message || e,
+        );
       }
 
       await Thread.touchLastMessage(room, {
@@ -236,13 +244,19 @@ export async function saveMessage({
         lastMessageFrom: fromUid,
         incrementFor,
       }).catch((err) => {
-        console.warn("[chatService] Thread.touchLastMessage failed:", err?.message || err);
+        console.warn(
+          "[chatService] Thread.touchLastMessage failed:",
+          err?.message || err,
+        );
       });
     } catch (err) {
       console.warn("[chatService] thread update error:", err?.message || err);
     }
   })().catch((err) => {
-    console.warn("[chatService] unexpected thread update error:", err?.message || err);
+    console.warn(
+      "[chatService] unexpected thread update error:",
+      err?.message || err,
+    );
   });
 
   // 3) emit to room — payload already has sender attached
@@ -262,7 +276,8 @@ export async function saveMessage({
         const uidA = parts[1];
         const uidB = parts[2];
         // compute recipient robustly
-        const recipient = uidA === fromUid ? uidB : uidB === fromUid ? uidA : null;
+        const recipient =
+          uidA === fromUid ? uidB : uidB === fromUid ? uidA : null;
         const realRecipient = toUid || recipient || null;
 
         if (realRecipient && realRecipient !== fromUid) {
@@ -281,7 +296,7 @@ export async function saveMessage({
           } catch (e) {
             console.warn(
               "[chatService] createNotification(chat_message) failed:",
-              e?.message || e
+              e?.message || e,
             );
           }
 
@@ -295,7 +310,10 @@ export async function saveMessage({
               at: payload.createdAt,
             });
           } catch (e) {
-            console.warn("[chatService] emit dm:incoming failed:", e?.message || e);
+            console.warn(
+              "[chatService] emit dm:incoming failed:",
+              e?.message || e,
+            );
           }
         }
       }
@@ -311,7 +329,7 @@ export async function saveMessage({
       } catch (e) {
         console.warn(
           "[chatService] createNotification(chat_message) failed:",
-          e?.message || e
+          e?.message || e,
         );
       }
       try {
@@ -323,7 +341,10 @@ export async function saveMessage({
           at: payload.createdAt,
         });
       } catch (e) {
-        console.warn("[chatService] emit dm:incoming (toUid flow) failed:", e?.message || e);
+        console.warn(
+          "[chatService] emit dm:incoming (toUid flow) failed:",
+          e?.message || e,
+        );
       }
     }
   } catch (e) {
@@ -350,7 +371,10 @@ export async function getMessages(room, { limit = 50, before = null } = {}) {
     }
   }
 
-  const docs = await ChatMessage.find(q).sort({ createdAt: -1 }).limit(take).lean();
+  const docs = await ChatMessage.find(q)
+    .sort({ createdAt: -1 })
+    .limit(take)
+    .lean();
   const items = docs.reverse().map(buildPayloadFromDoc);
   const cursor = items.length ? items[items.length - 1].createdAt : null;
   return { items, cursor };
@@ -367,69 +391,76 @@ export async function getInbox(uid) {
 
   // Try to use Thread collection first (fast)
   try {
-    const threads = await Thread.find({ participants: uid, archived: { $ne: true } })
+    const threads = await Thread.find({
+      participants: uid,
+      archived: { $ne: true },
+    })
       .sort({ lastMessageAt: -1 })
       .limit(200)
       .lean();
 
     if (Array.isArray(threads) && threads.length) {
-      const out = await Promise.all(threads.map(async (t) => {
-        let peerUid = null;
-        if (t.type === "dm" || String(t.room).startsWith("dm:")) {
-          const parts = String(t.room).split(":");
-          if (parts.length >= 3) {
-            const a = parts[1];
-            const b = parts[2];
-            peerUid = a === uid ? b : b === uid ? a : null;
+      const out = await Promise.all(
+        threads.map(async (t) => {
+          let peerUid = null;
+          if (t.type === "dm" || String(t.room).startsWith("dm:")) {
+            const parts = String(t.room).split(":");
+            if (parts.length >= 3) {
+              const a = parts[1];
+              const b = parts[2];
+              peerUid = a === uid ? b : b === uid ? a : null;
+            }
+          } else if (t.type === "booking") {
+            // for booking threads, peerUid is ambiguous; leave null or set booking id
+            peerUid = null;
+          } else {
+            // group/system etc.
+            peerUid = null;
           }
-        } else if (t.type === "booking") {
-          // for booking threads, peerUid is ambiguous; leave null or set booking id
-          peerUid = null;
-        } else {
-          // group/system etc.
-          peerUid = null;
-        }
 
-        let unreadCount = 0;
-try {
-  unreadCount = await ChatMessage.countDocuments({
-    room: t.room,
-    toUid: uid,
-    seenBy: { $ne: uid },
-  });
-} catch (e) {
-  console.warn(
-    "[chatService] getInbox unread recompute failed:",
-    e?.message || e
-  );
-  let unreadCount = 0;
-try {
-  unreadCount = await ChatMessage.countDocuments({
-    room: t.room,
-    toUid: uid,
-    seenBy: { $ne: uid },
-  });
-} catch {
-  unreadCount =
-    (t.unreadCounts && Number(t.unreadCounts[uid] || 0)) || 0;
-}
-}
+          let unreadCount = 0;
+          try {
+            unreadCount = await ChatMessage.countDocuments({
+              room: t.room,
+              toUid: uid,
+              seenBy: { $ne: uid },
+            });
+          } catch (e) {
+            console.warn(
+              "[chatService] getInbox unread recompute failed:",
+              e?.message || e,
+            );
+            let unreadCount = 0;
+            try {
+              unreadCount = await ChatMessage.countDocuments({
+                room: t.room,
+                toUid: uid,
+                seenBy: { $ne: uid },
+              });
+            } catch {
+              unreadCount =
+                (t.unreadCounts && Number(t.unreadCounts[uid] || 0)) || 0;
+            }
+          }
 
-
-        return {
-          room: t.room,
-          peerUid,
-          lastBody: t.lastMessagePreview || "",
-          lastFromUid: t.lastMessageFrom || "",
-          lastAt: t.lastMessageAt || t.updatedAt || t.createdAt,
-          unreadCount: Number(unreadCount || 0),
-        };
-      }));
+          return {
+            room: t.room,
+            peerUid,
+            lastBody: t.lastMessagePreview || "",
+            lastFromUid: t.lastMessageFrom || "",
+            lastAt: t.lastMessageAt || t.updatedAt || t.createdAt,
+            unreadCount: Number(unreadCount || 0),
+          };
+        }),
+      );
 
       return out;
     }
   } catch (e) {
-    console.warn("[chatService] getInbox(thread) failed, falling back:", e?.message || e);
+    console.warn(
+      "[chatService] getInbox(thread) failed, falling back:",
+      e?.message || e,
+    );
     // fallback to message-scan below
   }
 
@@ -460,7 +491,8 @@ try {
           peerUid = a === uid ? b : b === uid ? a : null;
         }
       } else {
-        peerUid = lastDoc.fromUid === uid ? lastDoc.toUid || null : lastDoc.fromUid;
+        peerUid =
+          lastDoc.fromUid === uid ? lastDoc.toUid || null : lastDoc.fromUid;
       }
 
       const unreadCount = await ChatMessage.countDocuments({
@@ -478,11 +510,17 @@ try {
         unreadCount: Number(unreadCount || 0),
       });
     } catch (e) {
-      console.warn("[chatService] getInbox: item failed for room", r, e?.message || e);
+      console.warn(
+        "[chatService] getInbox: item failed for room",
+        r,
+        e?.message || e,
+      );
     }
   }
 
-  out.sort((a, b) => new Date(b.lastAt).getTime() - new Date(a.lastAt).getTime());
+  out.sort(
+    (a, b) => new Date(b.lastAt).getTime() - new Date(a.lastAt).getTime(),
+  );
   return out;
 }
 
@@ -500,7 +538,7 @@ export async function markThreadRead(room, uid) {
         room,
         seenBy: { $ne: uid },
       },
-      { $addToSet: { seenBy: uid } }
+      { $addToSet: { seenBy: uid } },
     );
 
     await Thread.markRead(room, uid).catch(() => null);
@@ -515,7 +553,6 @@ export async function markThreadRead(room, uid) {
   }
 }
 
-
 /**
  * markRoomRead(room, uid)
  * - marks all messages in a room as seen by uid
@@ -525,17 +562,19 @@ export async function markRoomRead(room, uid) {
   if (!uid) throw new Error("uid required");
 
   try {
-  const res = await ChatMessage.updateMany(
-  { room, seenBy: { $ne: uid } },
-  { $addToSet: { seenBy: uid } }
-);
-
+    const res = await ChatMessage.updateMany(
+      { room, seenBy: { $ne: uid } },
+      { $addToSet: { seenBy: uid } },
+    );
 
     // also update Thread unreadCounts (best-effort)
     try {
       await Thread.markRead(room, uid).catch(() => null);
     } catch (err) {
-      console.warn("[chatService] Thread.markRead(room) failed:", err?.message || err);
+      console.warn(
+        "[chatService] Thread.markRead(room) failed:",
+        err?.message || err,
+      );
     }
 
     // 🔥 LIVE "SEEN" UPDATE for this room (DM or booking)
@@ -547,7 +586,7 @@ export async function markRoomRead(room, uid) {
     } catch (err) {
       console.warn(
         "[chatService] emit chat:seen (room) failed:",
-        err?.message || err
+        err?.message || err,
       );
     }
 

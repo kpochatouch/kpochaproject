@@ -10,7 +10,7 @@ const DailyBucketSchema = new mongoose.Schema(
     shares: { type: Number, default: 0 },
     saves: { type: Number, default: 0 },
   },
-  { _id: false }
+  { _id: false },
 );
 
 const PostStatsSchema = new mongoose.Schema(
@@ -31,7 +31,7 @@ const PostStatsSchema = new mongoose.Schema(
     savesCount: { type: Number, default: 0 },
 
     // per-user sets for idempotency (optional but handy)
-    likedBy: { type: [String], default: [] },   // uids
+    likedBy: { type: [String], default: [] }, // uids
     savedBy: { type: [String], default: [] },
     sharedBy: { type: [String], default: [] },
 
@@ -43,7 +43,7 @@ const PostStatsSchema = new mongoose.Schema(
 
     lastEngagedAt: { type: Date, default: null },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 const PostStats =

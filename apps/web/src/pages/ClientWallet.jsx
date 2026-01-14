@@ -3,9 +3,16 @@ import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 
 function usePaystackScript() {
-  const [ready, setReady] = useState(!!window.PaystackPop);
+  const [ready, setReady] = useState(
+    typeof window !== "undefined" && !!window.PaystackPop,
+  );
+
   useEffect(() => {
-    if (window.PaystackPop) { setReady(true); return; }
+    if (typeof window === "undefined") return;
+    if (window.PaystackPop) {
+      setReady(true);
+      return;
+    }
     const id = "paystack-inline-sdk";
     if (document.getElementById(id)) return;
     const s = document.createElement("script");
@@ -32,7 +39,8 @@ export default function ClientWallet() {
   const paystackReady = usePaystackScript();
 
   // ---------- helpers ----------
-  const fmtNaira = (k) => `₦${Math.floor((Number(k) || 0) / 100).toLocaleString()}`;
+  const fmtNaira = (k) =>
+    `₦${Math.floor((Number(k) || 0) / 100).toLocaleString()}`;
   const refreshWallet = async () => {
     const { data } = await api.get("/api/wallet/client/me");
     setCreditsKobo(Number(data?.creditsKobo || 0));
@@ -59,7 +67,9 @@ export default function ClientWallet() {
         if (alive) setLoading(false);
       }
     })();
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
   }, []);
 
   // ---------- handle Paystack redirect back (?reference=...) ----------
@@ -84,63 +94,90 @@ export default function ClientWallet() {
         setErr(e?.response?.data?.error || "Could not verify top-up.");
       }
     })();
-    return () => { on = false; };
+    return () => {
+      on = false;
+    };
   }, []);
 
-   // ---------- inline flow ----------
-async function startTopupInline(amountKobo) {
-  const pubKey = String(import.meta.env.VITE_PAYSTACK_PUBLIC_KEY || "");
-  if (!pubKey || !window.PaystackPop || typeof window.PaystackPop.setup !== "function") {
-    throw new Error("inline_not_ready");
-  }
+  // ---------- inline flow ----------
+  async function startTopupInline(amountKobo) {
+    const pubKey = String(import.meta.env.VITE_PAYSTACK_PUBLIC_KEY || "");
+    if (
+      !pubKey ||
+      !window.PaystackPop ||
+      typeof window.PaystackPop.setup !== "function"
+    ) {
+      throw new Error("inline_not_ready");
+    }
 
-  return new Promise((resolve, reject) => {
-    const handler = window.PaystackPop.setup({
-      key: pubKey,
-      email: me?.email || "customer@example.com",
-      amount: Number(amountKobo),
-      ref: `TOPUP-${me?.uid || "anon"}-${Date.now()}`,
-      metadata: {
-        custom_fields: [
-          { display_name: "Topup", variable_name: "topup", value: String(amountKobo) },
-        ],
-      },
-
-      callback: function (response) {
-        (async () => {
-          try {
-            const verify = await api.get("/api/wallet/topup/verify", {
-            params: { reference: response.reference },
-          });
-
-            if (verify?.data?.ok) {
-              await refreshWallet();
-              setTopupNaira("");
-              resolve();
-            } else {
-              reject(new Error("verify_failed"));
-            }
-          } catch (e) {
-            reject(e);
-          }
-        })();
-      },
-
-      onClose: function () {
-        reject(new Error("payment_cancelled"));
-      },
+    // ✅ INIT FIRST (server generates canonical reference + records topup_init)
+    const { data: init } = await api.get("/api/wallet/topup/init", {
+      params: { amountKobo },
     });
 
-    handler.openIframe();
-  });
-}
+    const reference = init?.reference;
+    if (!reference) throw new Error("init_missing_reference");
 
+    return new Promise((resolve, reject) => {
+      const handler = window.PaystackPop.setup({
+        key: pubKey,
+        email: me?.email || "customer@example.com",
+        amount: Number(amountKobo),
+        ref: reference, // ✅ server reference
+        metadata: {
+          custom_fields: [
+            {
+              display_name: "Topup",
+              variable_name: "topup",
+              value: String(amountKobo),
+            },
+            {
+              display_name: "Reference",
+              variable_name: "reference",
+              value: reference,
+            },
+          ],
+        },
+
+        callback: function (response) {
+          (async () => {
+            try {
+              const ref = response?.reference || reference;
+
+              const verify = await api.get("/api/wallet/topup/verify", {
+                params: { reference: ref },
+              });
+
+              if (verify?.data?.ok) {
+                await refreshWallet();
+                setTopupNaira("");
+                resolve();
+              } else {
+                reject(new Error("verify_failed"));
+              }
+            } catch (e) {
+              reject(e);
+            }
+          })();
+        },
+
+        onClose: function () {
+          reject(new Error("payment_cancelled"));
+        },
+      });
+
+      handler.openIframe();
+    });
+  }
 
   // ---------- redirect/init flow ----------
   async function startTopupRedirect(amountKobo) {
     const { data } = await api.get("/api/wallet/topup/init", {
-    params: { amountKobo },
-   });
+      params: {
+        amountKobo,
+        callbackUrl: window.location.href, // so Paystack returns here with ?reference=
+      },
+    });
 
     if (!data?.authorization_url) throw new Error("init_failed");
     // Optional: stash context if you want to show a message on return
@@ -152,7 +189,10 @@ async function startTopupInline(amountKobo) {
   async function startTopup() {
     setErr("");
     const naira = Number(topupNaira);
-    if (!naira || naira <= 0) { setErr("Enter a valid amount."); return; }
+    if (!naira || naira <= 0) {
+      setErr("Enter a valid amount.");
+      return;
+    }
     const kobo = Math.round(naira * 100);
 
     try {
@@ -179,7 +219,8 @@ async function startTopupInline(amountKobo) {
         <h1 className="text-2xl font-semibold">Wallet</h1>
         {!me?.isPro && (
           <span className="text-xs text-zinc-400">
-            This is your <b>client</b> wallet (credits &amp; refunds). No withdrawals.
+            This is your <b>client</b> wallet (credits &amp; refunds). No
+            withdrawals.
           </span>
         )}
       </div>
@@ -196,7 +237,9 @@ async function startTopupInline(amountKobo) {
         <>
           <section className="grid sm:grid-cols-3 gap-4 mt-6">
             <Card title="Credits (usable for bookings)">
-              <div className="text-2xl font-semibold">{fmtNaira(creditsKobo)}</div>
+              <div className="text-2xl font-semibold">
+                {fmtNaira(creditsKobo)}
+              </div>
             </Card>
 
             <Card title="Top up">
@@ -218,7 +261,9 @@ async function startTopupInline(amountKobo) {
                   {busyTopup ? "Starting…" : "Add funds"}
                 </button>
               </div>
-              <div className="text-xs text-zinc-500 mt-1">Powered by Paystack</div>
+              <div className="text-xs text-zinc-500 mt-1">
+                Powered by Paystack
+              </div>
             </Card>
 
             <Card title="Saved cards">
@@ -241,7 +286,9 @@ async function startTopupInline(amountKobo) {
                       className="px-4 py-3 flex items-center justify-between"
                     >
                       <div>
-                        <div className="text-sm capitalize">{t.type || "entry"}</div>
+                        <div className="text-sm capitalize">
+                          {t.type || "entry"}
+                        </div>
                         <div className="text-xs text-zinc-500">
                           {t.ts ? new Date(t.ts).toLocaleString() : ""}
                         </div>

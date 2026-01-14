@@ -3,10 +3,10 @@ import mongoose from "mongoose";
 
 const ClientIDSchema = new mongoose.Schema(
   {
-    type: { type: String, default: "" },      // e.g. "NIN", "DL"
-    numberHash: { type: String, default: "" } // never expose raw number
+    type: { type: String, default: "" }, // e.g. "NIN", "DL"
+    numberHash: { type: String, default: "" }, // never expose raw number
   },
-  { _id: false }
+  { _id: false },
 );
 
 /**
@@ -26,7 +26,7 @@ const ClientProfileSchema = new mongoose.Schema(
     address: { type: String, default: "" },
     photoUrl: { type: String, default: "" },
     isStub: { type: Boolean, default: false },
-     fieldSources: { type: mongoose.Schema.Types.Mixed, default: () => ({}) },
+    fieldSources: { type: mongoose.Schema.Types.Mixed, default: () => ({}) },
 
     id: { type: ClientIDSchema, default: () => ({}) },
 
@@ -37,7 +37,7 @@ const ClientProfileSchema = new mongoose.Schema(
     timestamps: true,
     strict: false,
     collection: "profiles",
-  }
+  },
 );
 
 // ⛔ no pre-save sync between uid/ownerUid anymore
@@ -58,7 +58,7 @@ const ProProfileSchema = new mongoose.Schema(
   {
     timestamps: true,
     strict: false,
-  }
+  },
 );
 
 export const ClientProfile =
@@ -66,5 +66,4 @@ export const ClientProfile =
   mongoose.model("ClientProfile", ClientProfileSchema);
 
 export const ProProfile =
-  mongoose.models.ProProfile ||
-  mongoose.model("ProProfile", ProProfileSchema);
+  mongoose.models.ProProfile || mongoose.model("ProProfile", ProProfileSchema);

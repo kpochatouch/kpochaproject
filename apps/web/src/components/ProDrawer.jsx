@@ -31,11 +31,9 @@ function svcRows(services) {
           price: s?.price ?? null,
           durationMin: s?.durationMin ?? s?.durationMins ?? null,
           desc: s?.desc || s?.description,
-        }
+        },
   );
 }
-
-
 
 /* ------------------------------ component ------------------------------ */
 export default function ProDrawer({ open, pro, onClose, onBook }) {
@@ -47,7 +45,7 @@ export default function ProDrawer({ open, pro, onClose, onBook }) {
   const photos = toArray(pro.photos);
   const services = svcRows(pro.services);
 
-    // ===== FIXED RATING DISPLAY (only if there are real reviews) =====
+  // ===== FIXED RATING DISPLAY (only if there are real reviews) =====
   const ratingCount =
     typeof pro.ratingCount === "number"
       ? pro.ratingCount
@@ -59,24 +57,21 @@ export default function ProDrawer({ open, pro, onClose, onBook }) {
       : Number(
           pro?.metrics && typeof pro.metrics.avgRating !== "undefined"
             ? pro.metrics.avgRating
-            : 0
+            : 0,
         ) || 0;
 
   const hasRealReviews = ratingCount > 0 && rawRating > 0;
 
-  const rating = hasRealReviews
-    ? Math.max(0, Math.min(5, rawRating))
-    : 0;
+  const rating = hasRealReviews ? Math.max(0, Math.min(5, rawRating)) : 0;
 
   const fullStars =
     hasRealReviews && Number.isFinite(Number(pro?.ratingStars?.full))
       ? Math.max(0, Math.min(5, Number(pro.ratingStars.full)))
       : hasRealReviews
-      ? Math.max(0, Math.min(5, Math.round(rating)))
-      : 0;
+        ? Math.max(0, Math.min(5, Math.round(rating)))
+        : 0;
 
   const emptyStars = 5 - fullStars;
-
 
   const proId = pro.id || pro._id;
   const gallery = photos.length ? photos : pro.photoUrl ? [pro.photoUrl] : [];
@@ -183,7 +178,9 @@ export default function ProDrawer({ open, pro, onClose, onBook }) {
                           {onBook ? (
                             <button
                               className="rounded-lg bg-gold text-black px-3 py-1.5 text-sm font-semibold disabled:opacity-50"
-                              onClick={() => s.name && onBook(s.name, s.price ?? 0)}
+                              onClick={() =>
+                                s.name && onBook(s.name, s.price ?? 0)
+                              }
                               disabled={!s.name}
                               title={
                                 s.name
@@ -198,7 +195,7 @@ export default function ProDrawer({ open, pro, onClose, onBook }) {
                               to={
                                 proId
                                   ? `/book/${proId}?service=${encodeURIComponent(
-                                      s.name || ""
+                                      s.name || "",
                                     )}`
                                   : "#"
                               }
@@ -279,7 +276,6 @@ export default function ProDrawer({ open, pro, onClose, onBook }) {
                 Book now
               </Link>
             )}
-
 
             <button
               className="rounded-lg border border-zinc-700 px-4 py-2 hover:bg-zinc-900"

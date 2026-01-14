@@ -16,7 +16,6 @@ import cron from "node-cron";
 
 import { sweepMatches } from "./workers/assignWorker.js";
 
-
 // Models & core routers
 import { Application, Pro, proToBarber } from "./models.js";
 import bookingsRouter from "./routes/bookings.js";
@@ -31,7 +30,6 @@ import {
 } from "./services/walletService.js";
 
 import { ensureWalletIndexes } from "./models/wallet.js";
-
 
 // Feature routers (factories)
 import pinRoutes from "./routes/pin.js";
@@ -56,7 +54,6 @@ import activityRoutes from "./routes/activity.js";
 import chatRoutes from "./routes/chat.js";
 import callRoutes from "./routes/call.js";
 import webrtcRoutes from "./routes/webrtc.js";
-
 
 dotenv.config();
 
@@ -83,7 +80,8 @@ function isAdminUid(uid) {
 function requireAdmin(req, res, next) {
   const uidOk = !!req.user?.uid && ADMIN_UIDS.includes(req.user.uid);
   const emailOk =
-    !!req.user?.email && ADMIN_EMAILS.includes(String(req.user.email).toLowerCase());
+    !!req.user?.email &&
+    ADMIN_EMAILS.includes(String(req.user.email).toLowerCase());
 
   if (!uidOk && !emailOk) {
     return res.status(403).json({ error: "Admin only" });
@@ -105,7 +103,10 @@ try {
     admin.initializeApp(); // ADC fallback
     console.log("[auth] ✅ Firebase Admin initialized (ADC).");
   } catch (e2) {
-    console.error("[auth] ❌ Firebase Admin failed to initialize:", e2?.message || e2);
+    console.error(
+      "[auth] ❌ Firebase Admin failed to initialize:",
+      e2?.message || e2
+    );
     process.exit(1);
   }
 }
@@ -148,7 +149,10 @@ async function fixWalletCollectionOnce() {
 
     if (!hasGood) {
       try {
-        await col.createIndex({ ownerUid: 1 }, { unique: true, name: "ownerUid_1" });
+        await col.createIndex(
+          { ownerUid: 1 },
+          { unique: true, name: "ownerUid_1" }
+        );
         console.log("[wallets] ✅ Ensured unique index ownerUid_1");
       } catch (e) {
         console.warn("[wallets] createIndex warn:", e?.message || e);
@@ -157,10 +161,16 @@ async function fixWalletCollectionOnce() {
 
     try {
       const del = await col.deleteMany({
-        $or: [{ ownerUid: null }, { ownerUid: "" }, { ownerUid: { $exists: false } }],
+        $or: [
+          { ownerUid: null },
+          { ownerUid: "" },
+          { ownerUid: { $exists: false } },
+        ],
       });
       if (del?.deletedCount) {
-        console.log(`[wallets] 🧹 Removed ${del.deletedCount} invalid wallet docs`);
+        console.log(
+          `[wallets] 🧹 Removed ${del.deletedCount} invalid wallet docs`
+        );
       }
     } catch {}
   } catch (err) {
@@ -170,7 +180,10 @@ async function fixWalletCollectionOnce() {
 
 /* ------------------- Settings (singleton) ------------------- */
 const CommissionSplitSchema = new mongoose.Schema(
-  { platform: { type: Number, default: 25 }, pro: { type: Number, default: 75 } },
+  {
+    platform: { type: Number, default: 25 },
+    pro: { type: Number, default: 75 },
+  },
   { _id: false }
 );
 const PayoutsSchema = new mongoose.Schema(
@@ -181,7 +194,7 @@ const PayoutsSchema = new mongoose.Schema(
     instantCashoutHoldDays: { type: Number, default: 3 },
     enableAutoRelease: { type: Boolean, default: true },
     autoReleaseCron: { type: String, default: "0 2 * * *" },
-     platformRecipientCode: { type: String, default: "" },
+    platformRecipientCode: { type: String, default: "" },
   },
   { _id: false }
 );
@@ -204,7 +217,6 @@ const BookingRulesSchema = new mongoose.Schema(
   },
   { _id: false }
 );
-
 
 const MaintenanceSchema = new mongoose.Schema(
   {
@@ -343,25 +355,25 @@ async function initSchedulers() {
         const cutoff = new Date(Date.now() - timeoutMs);
 
         // "Ringing" = paid + scheduled + still not accepted (no acceptedAt)
-       const ringing = await Booking.find({
-        status: "scheduled",
-        paymentStatus: "paid",
-        acceptedAt: { $in: [null, undefined] },
-        ringingStartedAt: { $exists: true, $lte: cutoff },
-      }).limit(200);
-
-      // fallback for old bookings that don't have ringingStartedAt yet
-      if (!ringing.length) {
-        const legacy = await Booking.find({
+        const ringing = await Booking.find({
           status: "scheduled",
           paymentStatus: "paid",
           acceptedAt: { $in: [null, undefined] },
-          ringingStartedAt: { $exists: false },
-          createdAt: { $lte: cutoff },
+          ringingStartedAt: { $exists: true, $lte: cutoff },
         }).limit(200);
 
-        ringing.push(...legacy);
-      }
+        // fallback for old bookings that don't have ringingStartedAt yet
+        if (!ringing.length) {
+          const legacy = await Booking.find({
+            status: "scheduled",
+            paymentStatus: "paid",
+            acceptedAt: { $in: [null, undefined] },
+            ringingStartedAt: { $exists: false },
+            createdAt: { $lte: cutoff },
+          }).limit(200);
+
+          ringing.push(...legacy);
+        }
 
         for (const b of ringing) {
           try {
@@ -393,10 +405,8 @@ async function initSchedulers() {
   /* 3️⃣ Auto-remind on accepted-but-not-completed bookings */
   {
     const rules = s?.bookingRules || {};
-    const hours =
-      rules.completionReminderHours ?? 2; // wait before first reminder
-    const maxRepeat =
-      rules.completionReminderRepeat ?? 1; // how many times max
+    const hours = rules.completionReminderHours ?? 2; // wait before first reminder
+    const maxRepeat = rules.completionReminderRepeat ?? 1; // how many times max
     const remindPro = rules.completionReminderToPro ?? true;
     const remindClient = rules.completionReminderToClient ?? false;
 
@@ -429,8 +439,7 @@ async function initSchedulers() {
                   fromUid: b.clientUid || null,
                   type: "booking_completion_reminder",
                   title: "Reminder: Complete Booking",
-                  body:
-                    "This booking has been pending completion. Please confirm with the client.",
+                  body: "This booking has been pending completion. Please confirm with the client.",
                   data: {
                     bookingId: b._id.toString(),
                     role: "pro",
@@ -445,8 +454,7 @@ async function initSchedulers() {
                   fromUid: b.proOwnerUid || null,
                   type: "booking_completion_reminder",
                   title: "Reminder: Please Complete Booking",
-                  body:
-                    "Your service appears completed. Please mark the booking as completed in the app.",
+                  body: "Your service appears completed. Please mark the booking as completed in the app.",
                   data: {
                     bookingId: b._id.toString(),
                     role: "client",
@@ -506,8 +514,6 @@ async function restartSchedulers() {
   await initSchedulers();
 }
 
-
-
 /* ------------------- Express App ------------------- */
 const app = express();
 
@@ -561,9 +567,13 @@ app.post(
   async (req, res) => {
     try {
       const secret =
-        process.env.PAYSTACK_SECRET_KEY ||
-        process.env.PAYSTACK_WEBHOOK_SECRET ||
-        "";
+        process.env.PAYSTACK_WEBHOOK_SECRET || process.env.PAYSTACK_SECRET_KEY;
+
+      if (!secret) {
+        console.error("[paystack] ❌ Missing webhook secret");
+        return res.status(500).send("Webhook not configured");
+      }
+
       const signature = req.headers["x-paystack-signature"];
       const computed = crypto
         .createHmac("sha512", secret)
@@ -612,7 +622,10 @@ app.use((req, res, next) => {
         ? "Path=/; Max-Age=31536000; SameSite=None; Secure"
         : "Path=/; Max-Age=31536000; SameSite=Lax";
 
-    res.setHeader("Set-Cookie", `anonId=${encodeURIComponent(anonId)}; ${cookieFlags}`);
+    res.setHeader(
+      "Set-Cookie",
+      `anonId=${encodeURIComponent(anonId)}; ${cookieFlags}`
+    );
   }
 
   const forwarded =
@@ -723,8 +736,7 @@ async function getVerifiedClientIdentity(uid) {
       "";
 
     const phone = p.phone || p?.identity?.phone || "";
-    const photoUrl =
-      p.photoUrl || p?.identity?.photoUrl || "";
+    const photoUrl = p.photoUrl || p?.identity?.photoUrl || "";
 
     return { fullName, phone, photoUrl };
   } catch {
@@ -794,7 +806,10 @@ app.get("/api/me", requireAuth, async (req, res) => {
         profileDoc?.displayName ||
         profileDoc?.fullName ||
         profileDoc?.name ||
-        [identity?.firstName, identity?.lastName].filter(Boolean).join(" ").trim();
+        [identity?.firstName, identity?.lastName]
+          .filter(Boolean)
+          .join(" ")
+          .trim();
 
       if (profileName && profileName.trim()) {
         return profileName.trim();
@@ -810,9 +825,7 @@ app.get("/api/me", requireAuth, async (req, res) => {
     function pickPhoto() {
       const identity = profileDoc?.identity || {};
 
-      const profilePhoto =
-        profileDoc?.photoUrl ||
-        identity?.photoUrl;
+      const profilePhoto = profileDoc?.photoUrl || identity?.photoUrl;
 
       if (profilePhoto && profilePhoto.trim()) {
         return profilePhoto.trim();
@@ -862,13 +875,11 @@ app.get("/api/me", requireAuth, async (req, res) => {
     }
 
     res.json(payload);
-
   } catch (e) {
     console.error("[/api/me] error:", e?.message || e);
     res.status(500).json({ error: "failed_me" });
   }
 });
-
 
 // 🔐 helpers for liveness + services
 // put this ABOVE the /api/pros/me routes in server.js
@@ -935,7 +946,10 @@ function normalizeServicesDetailed(arr = []) {
       if (!name) return null;
 
       const priceRaw = (item.price ?? "").toString().replace(/,/g, "").trim();
-      const promoRaw = (item.promoPrice ?? "").toString().replace(/,/g, "").trim();
+      const promoRaw = (item.promoPrice ?? "")
+        .toString()
+        .replace(/,/g, "")
+        .trim();
       const priceNum = priceRaw === "" ? 0 : Number(priceRaw);
       const promoNum = promoRaw === "" ? null : Number(promoRaw);
 
@@ -1041,7 +1055,9 @@ app.put("/api/pros/me", requireAuth, async (req, res) => {
     if (body.bank) proSet.bank = body.bank;
     if (typeof body.bio === "string") proSet.bio = body.bio;
 
-    proSet.status = hasVal(body.status) ? body.status : pro.status || "approved";
+    proSet.status = hasVal(body.status)
+      ? body.status
+      : pro.status || "approved";
 
     const updated = await Pro.findOneAndUpdate(
       { ownerUid: uid },
@@ -1073,10 +1089,7 @@ app.put("/api/pros/me", requireAuth, async (req, res) => {
       if (hasVal(body.state)) toSet.state = body.state.toString().toUpperCase();
       if (hasVal(body.lga)) toSet.lga = body.lga.toString().toUpperCase();
 
-      if (
-        body.availability &&
-        Array.isArray(body.availability.statesCovered)
-      ) {
+      if (body.availability && Array.isArray(body.availability.statesCovered)) {
         toSet.statesCovered = body.availability.statesCovered.map((s) =>
           s.toString().toUpperCase()
         );
@@ -1089,7 +1102,10 @@ app.put("/api/pros/me", requireAuth, async (req, res) => {
 
       await col.updateOne({ uid }, { $set: toSet }, { upsert: true });
     } catch (syncErr) {
-      console.warn("[/api/pros/me PUT] profiles sync skipped:", syncErr?.message || syncErr);
+      console.warn(
+        "[/api/pros/me PUT] profiles sync skipped:",
+        syncErr?.message || syncErr
+      );
     }
 
     const safe = { ...updated, uid };
@@ -1104,8 +1120,6 @@ app.put("/api/pros/me", requireAuth, async (req, res) => {
   }
 });
 
-
-
 /** Enforce verified name/phone on bookings POST */
 app.use("/api/bookings", requireAuth, async (req, _res, next) => {
   try {
@@ -1117,9 +1131,9 @@ app.use("/api/bookings", requireAuth, async (req, _res, next) => {
     req.body.clientName = fullName || req.body.clientName || "";
     req.body.clientPhone = phone || req.body.clientPhone || "";
     req.body.client = {
-    ...(req.body.client || {}),
-    name: fullName || req.body?.client?.name || "",
-  };
+      ...(req.body.client || {}),
+      name: fullName || req.body?.client?.name || "",
+    };
 
     req.body.clientUid = req.user.uid;
 
@@ -1128,7 +1142,6 @@ app.use("/api/bookings", requireAuth, async (req, _res, next) => {
     next();
   }
 });
-
 
 /* ------------------- Routers ------------------- */
 app.use("/api", bookingsRouter);
@@ -1158,7 +1171,6 @@ app.use("/api/wallet", requireAuth, (req, res, next) => {
   return requirePro(req, res, next);
 });
 
-
 app.use("/api", walletWithAuth(requireAuth, requireAdmin));
 
 app.use("/api", pinRoutes({ requireAuth, Application }));
@@ -1167,7 +1179,9 @@ app.use("/api", profileRouter);
 // Ensure posts always carry a canonical ownerUid for WRITE requests only
 // (GET /api/posts/... stays PUBLIC)
 app.use("/api/posts", (req, res, next) => {
-  const needsAuthForWrite = ["POST", "PUT", "PATCH", "DELETE"].includes(req.method);
+  const needsAuthForWrite = ["POST", "PUT", "PATCH", "DELETE"].includes(
+    req.method
+  );
 
   if (!needsAuthForWrite) {
     // public GETs - no auth required
@@ -1190,7 +1204,6 @@ app.use("/api/posts", (req, res, next) => {
   });
 });
 
-
 app.use("/api", postsRouter);
 app.use("/api", followRoutes);
 app.use("/api", commentsRouter);
@@ -1204,8 +1217,7 @@ app.use("/api", notificationsRoutes);
 app.use("/api", activityRoutes);
 app.use("/api", chatRoutes({ requireAuth }));
 app.use("/api", callRoutes({ requireAuth }));
-app.use("/api", webrtcRoutes); 
-
+app.use("/api", webrtcRoutes);
 
 // admin pros
 try {
@@ -1232,9 +1244,9 @@ try {
 
 // optional availability
 try {
-  const { default: availabilityRouter } = await import("./routes/availability.js").catch(
-    () => ({ default: null })
-  );
+  const { default: availabilityRouter } = await import(
+    "./routes/availability.js"
+  ).catch(() => ({ default: null }));
   if (availabilityRouter) {
     app.use("/api", availabilityRouter);
     console.log("[api] ✅ Availability routes mounted");
@@ -1283,7 +1295,12 @@ async function saveSettingsAndRestart(req, res) {
   }
 }
 app.put("/api/settings", requireAuth, requireAdmin, saveSettingsAndRestart);
-app.put("/api/settings/admin", requireAuth, requireAdmin, saveSettingsAndRestart);
+app.put(
+  "/api/settings/admin",
+  requireAuth,
+  requireAdmin,
+  saveSettingsAndRestart
+);
 
 /* ------------------- Pros Admin ------------------- */
 app.get("/api/pros/pending", requireAuth, requireAdmin, async (_req, res) => {
@@ -1304,266 +1321,285 @@ app.get("/api/pros/pending", requireAuth, requireAdmin, async (_req, res) => {
 // small helper to coerce prices coming from forms like "15,000" or "₦ 15,000"
 function toKpochaNumber(val) {
   if (val === null || val === undefined) return 0;
-  const cleaned = String(val)
-    .replace(/[₦,]/g, "")
-    .trim();
+  const cleaned = String(val).replace(/[₦,]/g, "").trim();
   const num = Number(cleaned);
   return Number.isFinite(num) ? num : 0;
 }
 
-
 /** Approve application → upsert Pro, and mark profile as hasPro */
-app.post("/api/pros/approve/:id", requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const appDoc =
-      (await Application.findById(id)) ||
-      (await Application.findOne({ clientId: id })) ||
-      null;
-
-    if (!appDoc) return res.status(404).json({ error: "application_not_found" });
-
-    const ownerUid = appDoc.uid;
-    if (!ownerUid) return res.status(400).json({ error: "missing_applicant_uid" });
-
-    // pull freshest profile, so we can sync photo + phone + lga
-    let freshProfile = null;
+app.post(
+  "/api/pros/approve/:id",
+  requireAuth,
+  requireAdmin,
+  async (req, res) => {
     try {
-      const col = mongoose.connection.db.collection("profiles");
-      freshProfile = await col.findOne({ uid: ownerUid });
-      if (freshProfile) {
-        appDoc.displayName =
-          freshProfile.fullName ||
-          freshProfile.name ||
-          [freshProfile?.identity?.firstName, freshProfile?.identity?.lastName]
+      const { id } = req.params;
+
+      const appDoc =
+        (await Application.findById(id)) ||
+        (await Application.findOne({ clientId: id })) ||
+        null;
+
+      if (!appDoc)
+        return res.status(404).json({ error: "application_not_found" });
+
+      const ownerUid = appDoc.uid;
+      if (!ownerUid)
+        return res.status(400).json({ error: "missing_applicant_uid" });
+
+      // pull freshest profile, so we can sync photo + phone + lga
+      let freshProfile = null;
+      try {
+        const col = mongoose.connection.db.collection("profiles");
+        freshProfile = await col.findOne({ uid: ownerUid });
+        if (freshProfile) {
+          appDoc.displayName =
+            freshProfile.fullName ||
+            freshProfile.name ||
+            [
+              freshProfile?.identity?.firstName,
+              freshProfile?.identity?.lastName,
+            ]
+              .filter(Boolean)
+              .join(" ")
+              .trim() ||
+            appDoc.displayName;
+          appDoc.phone =
+            freshProfile.phone || freshProfile?.identity?.phone || appDoc.phone;
+          appDoc.lga = (
+            freshProfile.lga ||
+            freshProfile.state ||
+            appDoc.lga ||
+            ""
+          )
+            .toString()
+            .toUpperCase();
+          appDoc.identity = {
+            ...(appDoc.identity || {}),
+            ...(freshProfile.identity || {}),
+          };
+          // keep photo too
+          if (freshProfile.photoUrl || freshProfile?.identity?.photoUrl) {
+            appDoc.identity.photoUrl =
+              freshProfile.photoUrl || freshProfile?.identity?.photoUrl;
+          }
+        }
+      } catch (e) {
+        console.warn("[approve:profile sync] skipped:", e?.message || e);
+      }
+
+      // coords
+      const lat = Number(
+        appDoc?.business?.lat ?? appDoc?.identity?.lat ?? appDoc?.lat
+      );
+      const lon = Number(
+        appDoc?.business?.lon ?? appDoc?.identity?.lon ?? appDoc?.lon
+      );
+      const hasCoords = Number.isFinite(lat) && Number.isFinite(lon);
+
+      // normalize services
+      let derivedServices = [];
+
+      // 1) from servicesDetailed (your BecomePro.jsx sends this)
+      if (
+        Array.isArray(appDoc.servicesDetailed) &&
+        appDoc.servicesDetailed.length
+      ) {
+        derivedServices = appDoc.servicesDetailed
+          .map((s) => {
+            const name = (s.name || s.id || "").trim();
+            if (!name) return null;
+            const price = toKpochaNumber(s.price || s.promoPrice || 0);
+            return {
+              name,
+              price,
+              visible: true,
+              description: s.description || "",
+              durationMins: toKpochaNumber(s.durationMins || 0),
+            };
+          })
+          .filter(Boolean);
+      }
+
+      // 2) fallback: from professional.services
+      if (
+        !derivedServices.length &&
+        appDoc?.professional &&
+        Array.isArray(appDoc.professional.services)
+      ) {
+        derivedServices = appDoc.professional.services
+          .map((s) =>
+            typeof s === "string"
+              ? {
+                  name: s,
+                  price: 0,
+                  visible: true,
+                  description: "",
+                  durationMins: 0,
+                }
+              : {
+                  name: s.name || "",
+                  price: toKpochaNumber(s.price),
+                  visible: typeof s.visible === "boolean" ? s.visible : true,
+                  description: s.description || "",
+                  durationMins: toKpochaNumber(s.durationMins || 0),
+                }
+          )
+          .filter((s) => s.name);
+      }
+
+      const base = {
+        ownerUid,
+        name:
+          appDoc.displayName ||
+          [appDoc?.identity?.firstName, appDoc?.identity?.lastName]
             .filter(Boolean)
-            .join(" ")
-            .trim() ||
-          appDoc.displayName;
-        appDoc.phone =
-          freshProfile.phone ||
-          freshProfile?.identity?.phone ||
-          appDoc.phone;
-        appDoc.lga = (
-          freshProfile.lga ||
-          freshProfile.state ||
+            .join(" ") ||
+          appDoc.email ||
+          "Unnamed Pro",
+        email: appDoc.email || "",
+        phone: appDoc.phone || appDoc?.identity?.phone || "",
+        lga: (
           appDoc.lga ||
+          appDoc?.identity?.city ||
+          appDoc?.identity?.state ||
           ""
         )
           .toString()
-          .toUpperCase();
-        appDoc.identity = {
-          ...(appDoc.identity || {}),
-          ...(freshProfile.identity || {}),
-        };
-        // keep photo too
-        if (freshProfile.photoUrl || freshProfile?.identity?.photoUrl) {
-          appDoc.identity.photoUrl =
-            freshProfile.photoUrl || freshProfile?.identity?.photoUrl;
+          .toUpperCase(),
+        identity: appDoc.identity || {},
+        professional: appDoc.professional || {},
+        availability: appDoc.availability || {},
+        bank: appDoc.bank || {},
+        status: "approved",
+        ...(derivedServices.length ? { services: derivedServices } : {}),
+        ...(hasCoords
+          ? { loc: { type: "Point", coordinates: [lon, lat] } }
+          : {}),
+      };
+
+      // 🔁 merge profile ONLY to fill blanks – approved application wins
+      const hasVal = (v) =>
+        v !== undefined &&
+        v !== null &&
+        (typeof v !== "string" || v.trim() !== "");
+
+      if (freshProfile) {
+        // name/display
+        if (!hasVal(base.name) && hasVal(freshProfile.fullName)) {
+          base.name = freshProfile.fullName;
+          base.displayName = freshProfile.fullName;
+          base.fullName = freshProfile.fullName;
+        } else if (!hasVal(base.name) && hasVal(freshProfile.displayName)) {
+          base.name = freshProfile.displayName;
+          base.displayName = freshProfile.displayName;
+        } else if (!hasVal(base.name) && hasVal(freshProfile.name)) {
+          base.name = freshProfile.name;
+        }
+
+        // phone
+        if (!hasVal(base.phone) && hasVal(freshProfile.phone)) {
+          base.phone = freshProfile.phone;
+        }
+
+        // photo
+        if (!hasVal(base.photoUrl) && hasVal(freshProfile.photoUrl)) {
+          base.photoUrl = freshProfile.photoUrl;
+        } else if (
+          !hasVal(base.photoUrl) &&
+          hasVal(freshProfile.identity?.photoUrl)
+        ) {
+          base.photoUrl = freshProfile.identity.photoUrl;
+        }
+
+        // state / lga
+        if (!hasVal(base.state) && hasVal(freshProfile.state)) {
+          base.state = freshProfile.state;
+        }
+        if (!hasVal(base.lga) && hasVal(freshProfile.lga)) {
+          base.lga = freshProfile.lga.toString().toUpperCase();
         }
       }
-    } catch (e) {
-      console.warn("[approve:profile sync] skipped:", e?.message || e);
+
+      const pro = await Pro.findOneAndUpdate(
+        { ownerUid },
+        { $set: base },
+        { new: true, upsert: true }
+      );
+
+      try {
+        const col = mongoose.connection.db.collection("profiles");
+        const userUid = ownerUid; // we got it from the application, but it's the user's UID
+
+        await col.updateOne(
+          { uid: userUid },
+          {
+            $set: {
+              uid: userUid,
+              hasPro: true,
+              proId: pro._id,
+              proStatus: "approved",
+              ...(pro.photoUrl ? { photoUrl: pro.photoUrl } : {}),
+            },
+          },
+          { upsert: true }
+        );
+      } catch (e) {
+        console.warn("[approve:profile flag] skipped", e?.message || e);
+      }
+
+      appDoc.status = "approved";
+      appDoc.approvedAt = new Date();
+      await appDoc.save();
+
+      res.json({
+        ok: true,
+        proId: pro._id.toString(),
+        applicationId: appDoc._id.toString(),
+      });
+    } catch (err) {
+      console.error("[pros/approve]", err?.message || err);
+      res.status(500).json({ error: "approve_failed" });
     }
-
-    // coords
-    const lat = Number(
-      appDoc?.business?.lat ?? appDoc?.identity?.lat ?? appDoc?.lat
-    );
-    const lon = Number(
-      appDoc?.business?.lon ?? appDoc?.identity?.lon ?? appDoc?.lon
-    );
-    const hasCoords = Number.isFinite(lat) && Number.isFinite(lon);
-
-    // normalize services
-    let derivedServices = [];
-
-    // 1) from servicesDetailed (your BecomePro.jsx sends this)
-    if (Array.isArray(appDoc.servicesDetailed) && appDoc.servicesDetailed.length) {
-      derivedServices = appDoc.servicesDetailed
-        .map((s) => {
-          const name = (s.name || s.id || "").trim();
-          if (!name) return null;
-          const price = toKpochaNumber(s.price || s.promoPrice || 0);
-          return {
-            name,
-            price,
-            visible: true,
-            description: s.description || "",
-            durationMins: toKpochaNumber(s.durationMins || 0),
-          };
-        })
-        .filter(Boolean);
-    }
-
-    // 2) fallback: from professional.services
-    if (
-      !derivedServices.length &&
-      appDoc?.professional &&
-      Array.isArray(appDoc.professional.services)
-    ) {
-      derivedServices = appDoc.professional.services
-        .map((s) =>
-          typeof s === "string"
-            ? {
-                name: s,
-                price: 0,
-                visible: true,
-                description: "",
-                durationMins: 0,
-              }
-            : {
-                name: s.name || "",
-                price: toKpochaNumber(s.price),
-                visible: typeof s.visible === "boolean" ? s.visible : true,
-                description: s.description || "",
-                durationMins: toKpochaNumber(s.durationMins || 0),
-              }
-        )
-        .filter((s) => s.name);
-    }
-
-    const base = {
-      ownerUid,
-      name:
-        appDoc.displayName ||
-        [appDoc?.identity?.firstName, appDoc?.identity?.lastName]
-          .filter(Boolean)
-          .join(" ") ||
-        appDoc.email ||
-        "Unnamed Pro",
-      email: appDoc.email || "",
-      phone: appDoc.phone || appDoc?.identity?.phone || "",
-      lga: (
-        appDoc.lga ||
-        appDoc?.identity?.city ||
-        appDoc?.identity?.state ||
-        ""
-      )
-        .toString()
-        .toUpperCase(),
-      identity: appDoc.identity || {},
-      professional: appDoc.professional || {},
-      availability: appDoc.availability || {},
-      bank: appDoc.bank || {},
-      status: "approved",
-      ...(derivedServices.length ? { services: derivedServices } : {}),
-      ...(hasCoords ? { loc: { type: "Point", coordinates: [lon, lat] } } : {}),
-    };
-
-    // 🔁 merge profile ONLY to fill blanks – approved application wins
-    const hasVal = (v) =>
-      v !== undefined &&
-      v !== null &&
-      (typeof v !== "string" || v.trim() !== "");
-
-    if (freshProfile) {
-      // name/display
-      if (!hasVal(base.name) && hasVal(freshProfile.fullName)) {
-        base.name = freshProfile.fullName;
-        base.displayName = freshProfile.fullName;
-        base.fullName = freshProfile.fullName;
-      } else if (!hasVal(base.name) && hasVal(freshProfile.displayName)) {
-        base.name = freshProfile.displayName;
-        base.displayName = freshProfile.displayName;
-      } else if (!hasVal(base.name) && hasVal(freshProfile.name)) {
-        base.name = freshProfile.name;
-      }
-
-      // phone
-      if (!hasVal(base.phone) && hasVal(freshProfile.phone)) {
-        base.phone = freshProfile.phone;
-      }
-
-      // photo
-      if (!hasVal(base.photoUrl) && hasVal(freshProfile.photoUrl)) {
-        base.photoUrl = freshProfile.photoUrl;
-      } else if (!hasVal(base.photoUrl) && hasVal(freshProfile.identity?.photoUrl)) {
-        base.photoUrl = freshProfile.identity.photoUrl;
-      }
-
-      // state / lga
-      if (!hasVal(base.state) && hasVal(freshProfile.state)) {
-        base.state = freshProfile.state;
-      }
-      if (!hasVal(base.lga) && hasVal(freshProfile.lga)) {
-        base.lga = freshProfile.lga.toString().toUpperCase();
-      }
-    }
-
-    const pro = await Pro.findOneAndUpdate(
-      { ownerUid },
-      { $set: base },
-      { new: true, upsert: true }
-    );
-
-try {
-  const col = mongoose.connection.db.collection("profiles");
-  const userUid = ownerUid; // we got it from the application, but it's the user's UID
-
-  await col.updateOne(
-    { uid: userUid },
-    {
-      $set: {
-        uid: userUid,
-        hasPro: true,
-        proId: pro._id,
-        proStatus: "approved",
-        ...(pro.photoUrl ? { photoUrl: pro.photoUrl } : {}),
-      },
-    },
-    { upsert: true }
-  );
-} catch (e) {
-  console.warn("[approve:profile flag] skipped", e?.message || e);
-}
-
-    appDoc.status = "approved";
-    appDoc.approvedAt = new Date();
-    await appDoc.save();
-
-    res.json({
-      ok: true,
-      proId: pro._id.toString(),
-      applicationId: appDoc._id.toString(),
-    });
-  } catch (err) {
-    console.error("[pros/approve]", err?.message || err);
-    res.status(500).json({ error: "approve_failed" });
   }
-});
+);
 
 /** Admin: view single application */
-app.get("/api/applications/:id/admin", requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const doc =
-      (await Application.findById(id).lean()) ||
-      (await Application.findOne({ clientId: id }).lean());
-    if (!doc) return res.status(404).json({ error: "application_not_found" });
-    res.json(doc);
-  } catch (e) {
-    console.error("[applications:admin:view]", e?.message || e);
-    res.status(500).json({ error: "failed" });
+app.get(
+  "/api/applications/:id/admin",
+  requireAuth,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const doc =
+        (await Application.findById(id).lean()) ||
+        (await Application.findOne({ clientId: id }).lean());
+      if (!doc) return res.status(404).json({ error: "application_not_found" });
+      res.json(doc);
+    } catch (e) {
+      console.error("[applications:admin:view]", e?.message || e);
+      res.status(500).json({ error: "failed" });
+    }
   }
-});
+);
 
-/* ------------------- Dev reset ------------------- */
-app.delete("/api/dev/reset", async (_req, res) => {
+/*
+// ❌ DEV RESET — DISABLED
+app.delete("/api/dev/reset", requireAuth, requireAdmin, async (_req, res) => {
   try {
     if (mongoose.connection.readyState === 1) {
       await Application.deleteMany({});
       await Pro.deleteMany({});
       await Booking.deleteMany({});
-      console.log("[reset] ✅ MongoDB collections cleared.");
+      console.log("[reset] MongoDB collections cleared.");
     }
-    res.json({ ok: true, message: "All applications, pros, bookings deleted." });
+    res.json({ ok: true });
   } catch (err) {
-    console.error("[reset] ❌ Reset error:", err);
     res.status(500).json({ error: "Failed to reset database" });
   }
 });
+*/
 
 /* ------------------- Health ------------------- */
 app.get("/api/health", (_req, res) =>
@@ -1641,12 +1677,16 @@ app.get("/api/barbers/:id", async (req, res) => {
 
     // 2) Try ownerUid
     if (!doc) {
-      doc = await Pro.findOne({ ownerUid: id }).lean().catch(() => null);
+      doc = await Pro.findOne({ ownerUid: id })
+        .lean()
+        .catch(() => null);
     }
 
     // 3) Try username
     if (!doc) {
-      doc = await Pro.findOne({ username: id }).lean().catch(() => null);
+      doc = await Pro.findOne({ username: id })
+        .lean()
+        .catch(() => null);
     }
 
     if (!doc) return res.status(404).json({ error: "Not found" });
@@ -1663,8 +1703,6 @@ app.get("/api/barbers/:id", async (req, res) => {
     res.status(500).json({ error: "Failed to load barber" });
   }
 });
-
-
 
 /* ------------------- Contact for booking (restricted) ------------------- */
 app.get(
@@ -1687,15 +1725,10 @@ app.get(
       }
 
       const phone =
-        pro?.contactPublic?.phone ||
-        pro?.phone ||
-        pro?.identity?.phone ||
-        "";
+        pro?.contactPublic?.phone || pro?.phone || pro?.identity?.phone || "";
 
       const shopAddress =
-        pro?.contactPublic?.shopAddress ||
-        pro?.business?.shopAddress ||
-        "";
+        pro?.contactPublic?.shopAddress || pro?.business?.shopAddress || "";
 
       return res.json({
         ok: true,
@@ -1721,13 +1754,17 @@ async function reverseGeocode(lat, lon) {
   const r = await fetch(
     `https://api.geoapify.com/v1/geocode/reverse?lat=${encodeURIComponent(
       lat
-    )}&lon=${encodeURIComponent(lon)}&apiKey=${encodeURIComponent(GEOAPIFY_KEY)}`
+    )}&lon=${encodeURIComponent(lon)}&apiKey=${encodeURIComponent(
+      GEOAPIFY_KEY
+    )}`
   );
   if (!r.ok) return null;
   const j = await r.json();
   const p = j?.features?.[0]?.properties || {};
   const state = (p.state || p.region || "").toString().toUpperCase();
-  const lga = (p.county || p.city || p.district || p.suburb || "").toString().toUpperCase();
+  const lga = (p.county || p.city || p.district || p.suburb || "")
+    .toString()
+    .toUpperCase();
   return { state, lga };
 }
 
@@ -1744,7 +1781,9 @@ app.get("/api/geo/rev", async (req, res) => {
     const r = await fetch(
       `https://api.geoapify.com/v1/geocode/reverse?lat=${encodeURIComponent(
         lat
-      )}&lon=${encodeURIComponent(lon)}&apiKey=${encodeURIComponent(GEOAPIFY_KEY)}`
+      )}&lon=${encodeURIComponent(lon)}&apiKey=${encodeURIComponent(
+        GEOAPIFY_KEY
+      )}`
     );
     if (!r.ok) return res.status(502).json({ error: "geo_provider_failed" });
     const j = await r.json();
@@ -1762,7 +1801,10 @@ app.get("/api/barbers/nearby", async (req, res) => {
 
     const lat = Number(req.query.lat);
     const lon = Number(req.query.lon);
-    const radiusKm = Math.max(1, Math.min(200, Number(req.query.radiusKm || 25)));
+    const radiusKm = Math.max(
+      1,
+      Math.min(200, Number(req.query.radiusKm || 25))
+    );
     if (!Number.isFinite(lat) || !Number.isFinite(lon))
       return res.status(400).json({ error: "lat & lon required" });
 
@@ -1796,7 +1838,10 @@ app.get("/api/barbers/nearby", async (req, res) => {
       if (lga) q.lga = lga;
 
       const docs = await Pro.find(q).limit(100).lean();
-      items = docs.map((d) => ({ ...scrubPublicPro(proToBarber(d)), distanceKm: null }));
+      items = docs.map((d) => ({
+        ...scrubPublicPro(proToBarber(d)),
+        distanceKm: null,
+      }));
     }
 
     return res.json({ mode: used, radiusKm, count: items.length, items });
@@ -1895,17 +1940,28 @@ async function handlePaystackEvent(event) {
   if (event.event === "charge.success") {
     const ref = event?.data?.reference;
     const amount = event?.data?.amount;
-    if (!ref) return console.warn("[paystack] charge.success without reference");
+    if (!ref)
+      return console.warn("[paystack] charge.success without reference");
 
     try {
       const booking = await Booking.findOne({ paystackReference: ref });
       if (!booking) return console.warn("[paystack] no booking for ref:", ref);
 
-      if (amount && booking.amountKobo && Number(amount) !== Number(booking.amountKobo)) {
-        console.warn("[paystack] amount mismatch for", ref, amount, "vs", booking.amountKobo);
+      if (
+        amount &&
+        booking.amountKobo &&
+        Number(amount) !== Number(booking.amountKobo)
+      ) {
+        console.warn(
+          "[paystack] amount mismatch for",
+          ref,
+          amount,
+          "vs",
+          booking.amountKobo
+        );
       }
 
-     booking.paymentStatus = "paid";
+      booking.paymentStatus = "paid";
       if (booking.status === "pending_payment") booking.status = "scheduled";
 
       // ✅ mark ringing start (used by ring-timeout cron)
@@ -1913,22 +1969,26 @@ async function handlePaystackEvent(event) {
 
       await booking.save();
 
-// ✅ IMPORTANT: fund escrow ledger for card payments (idempotent)
-try {
-  await fundEscrowFromPaystackForBooking(booking, { reference: ref });
-  console.log("[paystack] ✅ escrow funded for booking:", booking._id.toString());
-} catch (e) {
-  console.error(
-    "[paystack] ❌ escrow funding failed for booking:",
-    booking._id.toString(),
-    e?.message || e
-  );
-}
+      // ✅ IMPORTANT: fund escrow ledger for card payments (idempotent)
+      try {
+        await fundEscrowFromPaystackForBooking(booking, { reference: ref });
+        console.log(
+          "[paystack] ✅ escrow funded for booking:",
+          booking._id.toString()
+        );
+      } catch (e) {
+        console.error(
+          "[paystack] ❌ escrow funding failed for booking:",
+          booking._id.toString(),
+          e?.message || e
+        );
+      }
 
-// ✅ Option A: do NOT credit pro pending on payment anymore
-console.log("[paystack] ✅ booking paid (escrow held):", booking._id.toString());
-
-
+      // ✅ Option A: do NOT credit pro pending on payment anymore
+      console.log(
+        "[paystack] ✅ booking paid (escrow held):",
+        booking._id.toString()
+      );
     } catch (err) {
       console.error("[paystack] update booking error:", err);
     }
@@ -1941,7 +2001,9 @@ await initSchedulers();
 // optional: clean up stale instant-match entries in Redis
 if (redis) {
   setInterval(() => {
-    sweepMatches().catch(e => console.error("[sweepMatches] err:", e?.message || e));
+    sweepMatches().catch((e) =>
+      console.error("[sweepMatches] err:", e?.message || e)
+    );
   }, 30_000);
 } else {
   console.warn("[sweepMatches] Redis not configured — sweep disabled");

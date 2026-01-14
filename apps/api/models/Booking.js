@@ -22,7 +22,7 @@ const ServiceSnapshotSchema = new mongoose.Schema(
     serviceName: { type: String, required: true },
     priceKobo: { type: Number, required: true, min: 1 }, // snapshot price for this booking
   },
-  { _id: false }
+  { _id: false },
 );
 
 /* ----------------------------- Location/Contact ----------------------------- */
@@ -32,7 +32,7 @@ const LocationSchema = new mongoose.Schema(
     lat: { type: Number, default: null },
     lng: { type: Number, default: null },
   },
-  { _id: false }
+  { _id: false },
 );
 
 const ClientContactPrivateSchema = new mongoose.Schema(
@@ -40,7 +40,7 @@ const ClientContactPrivateSchema = new mongoose.Schema(
     phone: { type: String, default: "" },
     address: { type: String, default: "" }, // full address; keep private
   },
-  { _id: false }
+  { _id: false },
 );
 
 /** Public, minimal client snapshot (read-only identity shown in UI) */
@@ -48,9 +48,8 @@ const ClientPublicSchema = new mongoose.Schema(
   {
     name: { type: String, default: "" },
   },
-  { _id: false }
+  { _id: false },
 );
-
 
 /* --------------------------------- Booking --------------------------------- */
 const BookingSchema = new mongoose.Schema(
@@ -86,8 +85,8 @@ const BookingSchema = new mongoose.Schema(
 
     // Region (upper-cased)
     country: { type: String, default: "Nigeria" }, // ← used by /bookings/instant
-    state: { type: String, default: "" },          // ← used by /bookings/instant
-    lga: { type: String, default: "" },            // e.g., "OREDO"
+    state: { type: String, default: "" }, // ← used by /bookings/instant
+    lga: { type: String, default: "" }, // e.g., "OREDO"
     addressText: { type: String, default: "" },
     location: { type: LocationSchema, default: () => ({}) },
 
@@ -113,12 +112,11 @@ const BookingSchema = new mongoose.Schema(
       index: true,
     },
     acceptedAt: { type: Date }, // when pro accepts (ring timeout / analytics)
-        // Ringing window (starts when payment becomes paid/scheduled)
+    // Ringing window (starts when payment becomes paid/scheduled)
     ringingStartedAt: { type: Date, index: true },
 
     // When booking was cancelled (client/system/admin)
     cancelledAt: { type: Date, index: true },
-
 
     // When pro declines
     decline: {
@@ -128,7 +126,7 @@ const BookingSchema = new mongoose.Schema(
           reasonText: { type: String, default: "" },
           at: { type: Date, default: null },
         },
-        { _id: false }
+        { _id: false },
       ),
       default: () => ({}),
     },
@@ -148,7 +146,7 @@ const BookingSchema = new mongoose.Schema(
     // Timestamps
     completedAt: { type: Date },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 /* ------------------------------ Hooks/Virtuals ------------------------------ */
@@ -165,7 +163,12 @@ BookingSchema.pre("validate", function (next) {
 /* --------------------------------- Indexes ---------------------------------- */
 BookingSchema.index({ proId: 1, scheduledFor: -1 });
 BookingSchema.index({ clientUid: 1, createdAt: -1 });
-BookingSchema.index({ status: 1, paymentStatus: 1, acceptedAt: 1, ringingStartedAt: 1 });
+BookingSchema.index({
+  status: 1,
+  paymentStatus: 1,
+  acceptedAt: 1,
+  ringingStartedAt: 1,
+});
 
 export const Booking =
   mongoose.models.Booking || mongoose.model("Booking", BookingSchema);

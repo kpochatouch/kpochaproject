@@ -48,7 +48,7 @@ export default function InstantRequest() {
     if ("geolocation" in navigator) {
       try {
         const p = await new Promise((res, rej) =>
-          navigator.geolocation.getCurrentPosition(res, rej, { timeout: 8000 })
+          navigator.geolocation.getCurrentPosition(res, rej, { timeout: 8000 }),
         );
         coords = { lat: p.coords.latitude, lon: p.coords.longitude };
         console.log("[instant] geolocation:", coords);
@@ -60,10 +60,10 @@ export default function InstantRequest() {
     // choose location: prefer explicit state/lga from navigation, then from profile
     const p = loadedProfile || profile || {};
     const profileState = String(
-      p.state || p.identity?.state || ""
+      p.state || p.identity?.state || "",
     ).toUpperCase();
     const profileLga = String(
-      p.lga || p.identity?.lga || p.identity?.city || ""
+      p.lga || p.identity?.lga || p.identity?.city || "",
     ).toUpperCase();
 
     const stateParam = regionState || profileState || undefined;
@@ -73,7 +73,7 @@ export default function InstantRequest() {
     if (mode === "wildcard" && !coords && !stateParam && !lgaParam) {
       setSearching(false);
       setErr(
-        "We couldn't determine your location. Please complete your profile with State and LGA, or enable location access."
+        "We couldn't determine your location. Please complete your profile with State and LGA, or enable location access.",
       );
       return;
     }
@@ -83,7 +83,11 @@ export default function InstantRequest() {
 
       // Service-mode: send serviceName to narrow down.
       // Wildcard-mode: DO NOT send serviceName → backend will treat it as "any service in this LGA/state".
-      if (mode === "service" && serviceName && serviceName !== "Selected service") {
+      if (
+        mode === "service" &&
+        serviceName &&
+        serviceName !== "Selected service"
+      ) {
         payload.serviceName = serviceName;
       }
 
@@ -119,7 +123,7 @@ export default function InstantRequest() {
     } catch (e) {
       console.error(
         "[instant] startSearch failed:",
-        e?.response?.data || e?.message || e
+        e?.response?.data || e?.message || e,
       );
       setErr("Could not start instant search.");
       setSearching(false);
@@ -132,12 +136,14 @@ export default function InstantRequest() {
       pollRef.current = null;
     }
     setSearching(false);
-    setErr("No professionals were found nearby. Try again or adjust your search.");
+    setErr(
+      "No professionals were found nearby. Try again or adjust your search.",
+    );
     if (matchIdArg) {
       setMatchId(matchIdArg);
       console.log(
         "[instant] polling stopped — match expired or not found:",
-        matchIdArg
+        matchIdArg,
       );
     }
   }
@@ -156,7 +162,7 @@ export default function InstantRequest() {
           "[instant] poll attempt",
           pollMetaRef.current.attempts,
           "for",
-          id
+          id,
         );
         const s = await matchingClient.getStatus(id);
 
@@ -196,13 +202,13 @@ export default function InstantRequest() {
         } else {
           console.warn(
             "[instant] poll error (transient) — will keep polling:",
-            e?.message || e
+            e?.message || e,
           );
           const elapsed = Date.now() - pollMetaRef.current.startTs;
           if (elapsed > MAX_POLL_MS) {
             console.log(
               "[instant] max poll time exceeded (after error) — stopping",
-              { elapsed, MAX_POLL_MS }
+              { elapsed, MAX_POLL_MS },
             );
             stopPollingAndShowNotFound(id);
           }
@@ -229,10 +235,10 @@ export default function InstantRequest() {
           if (!alive) return;
           console.warn(
             "[instant] profile load failed:",
-            e?.response?.data || e?.message || e
+            e?.response?.data || e?.message || e,
           );
           setErr(
-            "Please complete your profile (state and LGA) before using Instant Request."
+            "Please complete your profile (state and LGA) before using Instant Request.",
           );
           setSearching(false);
         } finally {
@@ -274,7 +280,9 @@ export default function InstantRequest() {
         <p className="text-zinc-400 mb-6">{description}</p>
         <div className="rounded-xl border border-zinc-800 p-6 bg-black/40">
           <div className="text-center">
-            <div className="text-lg font-medium mb-2 text-red-400">Not found</div>
+            <div className="text-lg font-medium mb-2 text-red-400">
+              Not found
+            </div>
             <div className="text-sm text-zinc-400 mb-4">{err}</div>
             {matchId && (
               <div className="text-xs text-zinc-500 mb-3">

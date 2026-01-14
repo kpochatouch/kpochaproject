@@ -4,9 +4,9 @@ import mongoose from "mongoose";
 const FollowSchema = new mongoose.Schema(
   {
     followerUid: { type: String, required: true, index: true }, // who follows
-    targetUid:   { type: String, required: true, index: true }, // who is followed (Pro owner uid)
+    targetUid: { type: String, required: true, index: true }, // who is followed (Pro owner uid)
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 // ensure one edge per pair

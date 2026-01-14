@@ -67,7 +67,7 @@ export default function Login() {
       const cred = await signInWithEmailAndPassword(
         auth,
         email.trim(),
-        password
+        password,
       );
 
       // ⛔ user exists but not verified → send verification that returns to /browse
@@ -78,9 +78,13 @@ export default function Login() {
             url: `${appUrl}/browse`,
             handleCodeInApp: true,
           });
-          setOk("Verification email sent. Check your inbox/spam folder and come back.");
+          setOk(
+            "Verification email sent. Check your inbox/spam folder and come back.",
+          );
         } catch {
-          setErr("Your email is not verified. Please check your inbox/spam folder.");
+          setErr(
+            "Your email is not verified. Please check your inbox/spam folder.",
+          );
         }
         await auth.signOut();
         setBusy(false);
@@ -110,9 +114,13 @@ export default function Login() {
             url: `${appUrl}/browse`,
             handleCodeInApp: true,
           });
-          setOk("Verification email sent. Check your inbox/spam folder and come back.");
+          setOk(
+            "Verification email sent. Check your inbox/spam folder and come back.",
+          );
         } catch {
-          setErr("Your email is not verified. Please check your inbox/spam folder.");
+          setErr(
+            "Your email is not verified. Please check your inbox/spam folder.",
+          );
         }
         await auth.signOut();
         setBusy(false);
