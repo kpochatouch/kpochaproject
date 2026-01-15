@@ -4,6 +4,7 @@ import fetch from "node-fetch"; // ✅ ensure fetch is available (consistent wit
 import { Booking } from "../models/Booking.js";
 import { getIO } from "../sockets/index.js";
 import { fundEscrowFromPaystackForBooking } from "../services/walletService.js";
+import { createNotification } from "../services/notificationService.js";
 
 /**
  * Export a router factory so we can inject requireAuth from the host app.
@@ -30,7 +31,7 @@ export default function paymentsRouter({ requireAuth }) {
 
       // 🔒 Guard: prevent mixing payment methods
       const requested = String(
-        booking?.meta?.paymentMethodRequested || "",
+        booking?.meta?.paymentMethodRequested || ""
       ).toLowerCase();
       if (requested === "wallet") {
         return res.status(400).json({
@@ -76,7 +77,7 @@ export default function paymentsRouter({ requireAuth }) {
               ],
             },
           }),
-        },
+        }
       );
 
       const initJson = await initResp.json();
@@ -124,14 +125,14 @@ export default function paymentsRouter({ requireAuth }) {
 
       const r = await fetch(
         `https://api.paystack.co/transaction/verify/${encodeURIComponent(
-          reference,
+          reference
         )}`,
         {
           headers: {
             Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
             "Content-Type": "application/json",
           },
-        },
+        }
       );
 
       const verify = await r.json();
@@ -162,7 +163,7 @@ export default function paymentsRouter({ requireAuth }) {
 
       // 🔒 Guard: prevent mixing payment methods
       const requested = String(
-        booking?.meta?.paymentMethodRequested || "",
+        booking?.meta?.paymentMethodRequested || ""
       ).toLowerCase();
       if (requested === "wallet") {
         return res.status(400).json({
@@ -191,6 +192,33 @@ export default function paymentsRouter({ requireAuth }) {
           booking.ringingStartedAt = new Date();
           await booking.save();
         }
+
+        // ✅ Always re-emit booking:paid (idempotent) so pro alert is still instant on retries
+        try {
+          const io = getIO();
+          if (io) {
+            const payload = {
+              bookingId: booking._id.toString(),
+              status: booking.status,
+              paymentStatus: booking.paymentStatus,
+              proOwnerUid: booking.proOwnerUid,
+              clientUid: booking.clientUid,
+            };
+
+            if (booking.proOwnerUid)
+              io.to(`user:${booking.proOwnerUid}`).emit(
+                "booking:paid",
+                payload
+              );
+            if (booking.clientUid)
+              io.to(`user:${booking.clientUid}`).emit("booking:paid", payload);
+            io.to(`booking:${booking._id.toString()}`).emit(
+              "booking:paid",
+              payload
+            );
+          }
+        } catch {}
+
         return res.json({ ok: true, status: "success", alreadyPaid: true });
       }
 
@@ -229,13 +257,40 @@ export default function paymentsRouter({ requireAuth }) {
       } catch (e) {
         console.error(
           "[payments/verify] fundEscrowFromPaystackForBooking failed:",
-          e?.message || e,
+          e?.message || e
         );
         // Decide your policy:
         // - If you want to be strict: return 500 and treat payment as not finalized
         // - If you want to be fail-soft: continue (booking is paid, but escrow ledger missing)
         //
         // I recommend FAIL-SOFT for now so users don't get stuck after Paystack success.
+      }
+
+      // ✅ Notify pro ONLY after payment is confirmed (idempotent)
+      try {
+        if (!booking.meta.notifiedProOnPaid) {
+          if (booking.proOwnerUid) {
+            await createNotification({
+              toUid: booking.proOwnerUid,
+              fromUid: booking.clientUid || null,
+              type: "booking_paid",
+              title: "New paid booking",
+              body: "A client has paid. Please accept or decline in the app.",
+              data: {
+                bookingId: booking._id.toString(),
+                status: booking.status,
+                paymentStatus: booking.paymentStatus,
+                paymentMethod: "card",
+                source: "payments_verify",
+              },
+            });
+          }
+
+          booking.meta.notifiedProOnPaid = true;
+          await booking.save();
+        }
+      } catch (e) {
+        console.warn("[payments/verify] notify pro failed:", e?.message || e);
       }
 
       // 🔔 Notify both pro + client in real-time that payment is confirmed
@@ -260,12 +315,12 @@ export default function paymentsRouter({ requireAuth }) {
 
         io.to(`booking:${booking._id.toString()}`).emit(
           "booking:paid",
-          payload,
+          payload
         );
       } catch (err) {
         console.warn(
           "[payments/verify] socket emit booking:paid failed:",
-          err?.message || err,
+          err?.message || err
         );
       }
 

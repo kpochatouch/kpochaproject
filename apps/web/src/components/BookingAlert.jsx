@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   getProBookings,
   acceptBooking,
+  cancelBookingByPro,
   registerSocketHandler,
 } from "../lib/api";
 import { Link } from "react-router-dom";
@@ -39,15 +40,16 @@ export default function BookingAlert({
 
       // STRICT actionable: scheduled + paid
       const actionable = (Array.isArray(data) ? data : []).filter(
-        (b) => b.status === "scheduled" && b.paymentStatus === "paid",
+        (b) => b.status === "scheduled" && b.paymentStatus === "paid"
       );
 
       const lastAtMs = Number(localStorage.getItem(STORAGE_KEY) || 0);
 
       const norm = actionable.map((b) => ({
         ...b,
+        // backend truth: ring window starts when payment is confirmed
         _createdMs: new Date(
-          b.createdAt || b.updatedAt || Date.now(),
+          b.ringingStartedAt || b.updatedAt || b.createdAt || Date.now()
         ).getTime(),
       }));
 
@@ -116,6 +118,19 @@ export default function BookingAlert({
     setQueue((q) => q.slice(1));
   }
 
+  async function onDecline(id) {
+    const reason = window.prompt("Reason (optional):", "") || "";
+    setBusy(true);
+    try {
+      await cancelBookingByPro(id, { reason });
+      setQueue((q) => q.slice(1));
+    } catch {
+      alert("Could not decline booking. Please try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const current = queue.length ? queue[0] : null;
 
   const svcName = useMemo(() => {
@@ -182,6 +197,14 @@ export default function BookingAlert({
           title={canAccept ? "Accept booking" : "Payment not confirmed yet"}
         >
           {busy ? "Working…" : "Accept"}
+        </button>
+        <button
+          disabled={busy}
+          onClick={() => onDecline(current._id)}
+          className="rounded-lg border border-amber-700 text-amber-300 px-3 py-1.5 text-sm hover:bg-amber-950/40 disabled:opacity-40"
+          title="Decline (refund client)"
+        >
+          {busy ? "Working…" : "Decline"}
         </button>
 
         <Link

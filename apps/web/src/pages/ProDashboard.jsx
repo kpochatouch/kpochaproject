@@ -71,7 +71,6 @@ export default function ProDashboard() {
       "completed",
       "pending_payment",
       "cancelled",
-      "declined",
     ]) {
       c[s] = items.filter((b) => b.status === s).length;
     }
@@ -130,8 +129,8 @@ export default function ProDashboard() {
                 status: "accepted",
                 acceptedAt: new Date().toISOString(),
               }
-            : b,
-        ),
+            : b
+        )
       );
       await acceptBooking(id);
       flashOK("Booking accepted.");
@@ -150,7 +149,7 @@ export default function ProDashboard() {
       if (askNote) {
         const note = window.prompt(
           "Optional: add a brief note about this completion (e.g. client did not click complete, but job is done). Leave blank to continue.",
-          "",
+          ""
         );
         if (note && note.trim()) {
           // backend accepts completionNote or note; either works
@@ -174,8 +173,8 @@ export default function ProDashboard() {
                     : {}),
                 },
               }
-            : b,
-        ),
+            : b
+        )
       );
 
       await completeBooking(id, payload);
@@ -186,7 +185,7 @@ export default function ProDashboard() {
       setErr(
         msg === "client_must_complete_first"
           ? "Client must mark completed first. If they don’t respond, you can complete after the fallback time."
-          : msg || "Could not complete booking.",
+          : msg || "Could not complete booking."
       );
       load();
     }
@@ -211,7 +210,6 @@ export default function ProDashboard() {
               Pending payment ({counts.pending_payment})
             </option>
             <option value="cancelled">Cancelled ({counts.cancelled})</option>
-            <option value="declined">Declined ({counts.declined})</option>
           </select>
           <label className="text-sm inline-flex items-center gap-1">
             <input
@@ -263,12 +261,12 @@ export default function ProDashboard() {
               b.status === "scheduled"
                 ? "sky"
                 : b.status === "accepted"
-                  ? "emerald"
-                  : b.status === "completed"
-                    ? "emerald"
-                    : b.status === "cancelled" || b.status === "declined"
-                      ? "amber"
-                      : "amber";
+                ? "emerald"
+                : b.status === "completed"
+                ? "emerald"
+                : b.status === "cancelled"
+                ? "amber"
+                : "amber";
 
             const canAccept =
               b.paymentStatus === "paid" && b.status === "scheduled";
@@ -289,10 +287,10 @@ export default function ProDashboard() {
               b.meta?.completedBy === "client"
                 ? "client"
                 : b.meta?.completedBy === "pro"
-                  ? "professional"
-                  : b.meta?.completedBy === "admin"
-                    ? "admin"
-                    : null;
+                ? "professional"
+                : b.meta?.completedBy === "admin"
+                ? "admin"
+                : null;
 
             return (
               <div
@@ -403,7 +401,7 @@ export default function ProDashboard() {
                           await cancelBookingByPro(b._id, { reason });
                           flashOK("Booking cancelled (client refunded).");
                           setItems((prev) =>
-                            prev.filter((x) => x._id !== b._id),
+                            prev.filter((x) => x._id !== b._id)
                           );
                         } catch (e) {
                           console.error(e);
@@ -419,7 +417,8 @@ export default function ProDashboard() {
                   ) : null}
 
                   {/* If unpaid or other states, show the hint */}
-                  {b.paymentStatus !== "paid" && b.status === "scheduled" ? (
+                  {b.paymentStatus !== "paid" &&
+                  b.status === "pending_payment" ? (
                     <span
                       className="rounded-lg border border-zinc-800 text-zinc-500 px-3 py-1.5 text-sm"
                       title="You can accept only after payment is confirmed"

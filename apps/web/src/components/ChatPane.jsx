@@ -175,7 +175,7 @@ export default function ChatPane({
         // reconcile optimistic message by clientId
         if (n.clientId) {
           const idx = prev.findIndex(
-            (x) => x.clientId && x.clientId === n.clientId,
+            (x) => x.clientId && x.clientId === n.clientId
           );
           if (idx !== -1) {
             const copy = [...prev];
@@ -205,7 +205,7 @@ export default function ChatPane({
         // avoid dupes
         if (
           prev.some(
-            (x) => x.id === n.id || (n.clientId && x.clientId === n.clientId),
+            (x) => x.id === n.id || (n.clientId && x.clientId === n.clientId)
           )
         ) {
           return prev;
@@ -306,7 +306,7 @@ export default function ChatPane({
       {
         method: "POST",
         body: form,
-      },
+      }
     );
 
     if (!res.ok) throw new Error("cloudinary_upload_failed");
@@ -335,8 +335,8 @@ export default function ChatPane({
         type: file.type.startsWith("image/")
           ? "image"
           : file.type.startsWith("video/")
-            ? "video"
-            : "file",
+          ? "video"
+          : "file",
         name: file.name,
         size: file.size,
       };
@@ -388,7 +388,7 @@ export default function ChatPane({
           const currentRank = order.indexOf(m.status || "pending");
           if (currentRank >= sentRank) return m;
           return { ...m, status: "sent" };
-        }),
+        })
       );
     } catch (err) {
       console.error("upload failed", err);
@@ -462,15 +462,15 @@ export default function ChatPane({
           const currentRank = order.indexOf(m.status || "pending");
           if (currentRank >= sentRank) return m;
           return { ...m, status: "sent" };
-        }),
+        })
       );
     } catch (e) {
       console.error("voice message upload failed", e);
       alert("Voice upload failed");
       setMsgs((prev) =>
         prev.map((m) =>
-          m.clientId === clientId ? { ...m, status: "failed" } : m,
-        ),
+          m.clientId === clientId ? { ...m, status: "failed" } : m
+        )
       );
     } finally {
       setUploading(false);
@@ -542,7 +542,7 @@ export default function ChatPane({
         const currentRank = order.indexOf(m.status || "pending");
         if (currentRank >= sentRank) return m;
         return { ...m, status: "sent" };
-      }),
+      })
     );
 
     setText("");
@@ -636,7 +636,7 @@ export default function ChatPane({
       const updated = data?.message || data;
       if (updated) {
         setMsgs((prev) =>
-          prev.map((m) => (m.id === id ? { ...m, ...updated } : m)),
+          prev.map((m) => (m.id === id ? { ...m, ...updated } : m))
         );
       }
     } catch (e) {
@@ -653,7 +653,7 @@ export default function ChatPane({
       const updated = data?.message || data;
       if (updated) {
         setMsgs((prev) =>
-          prev.map((m) => (m.id === id ? { ...m, ...updated } : m)),
+          prev.map((m) => (m.id === id ? { ...m, ...updated } : m))
         );
       }
     } catch (e) {
@@ -678,7 +678,7 @@ export default function ChatPane({
     const id = menu.msg.id;
     setSelectMode(true);
     setSelectedIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
     );
     closeMenu();
   }
@@ -709,7 +709,7 @@ export default function ChatPane({
       const updated = data?.message || data;
       if (updated) {
         setMsgs((prev) =>
-          prev.map((m) => (m.id === id ? { ...m, ...updated } : m)),
+          prev.map((m) => (m.id === id ? { ...m, ...updated } : m))
         );
       }
     } catch (e) {
@@ -720,7 +720,7 @@ export default function ChatPane({
   function toggleSelectedForClick(id) {
     if (!selectMode) return;
     setSelectedIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
     );
   }
 

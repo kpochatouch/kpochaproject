@@ -253,7 +253,7 @@ router.post("/bookings", requireAuth, async (req, res) => {
     } catch (notifyErr) {
       console.warn(
         "[bookings:create] notify pro failed:",
-        notifyErr?.message || notifyErr,
+        notifyErr?.message || notifyErr
       );
     }
 
@@ -281,7 +281,7 @@ router.post("/bookings", requireAuth, async (req, res) => {
     } catch (e) {
       console.warn(
         "[bookings:create] ensure booking thread failed:",
-        e?.message || e,
+        e?.message || e
       );
     }
 
@@ -418,8 +418,8 @@ router.post("/bookings/instant", requireAuth, async (req, res) => {
             typeof coords.lng !== "undefined"
               ? Number(coords.lng)
               : typeof coords.lon !== "undefined"
-                ? Number(coords.lon)
-                : NaN;
+              ? Number(coords.lon)
+              : NaN;
           if (!Number.isFinite(latNum) || !Number.isFinite(lngNum))
             return undefined;
           return { lat: latNum, lng: lngNum };
@@ -459,7 +459,7 @@ router.post("/bookings/instant", requireAuth, async (req, res) => {
     } catch (notifyErr) {
       console.warn(
         "[bookings:instant] notify pro failed:",
-        notifyErr?.message || notifyErr,
+        notifyErr?.message || notifyErr
       );
     }
 
@@ -485,7 +485,7 @@ router.post("/bookings/instant", requireAuth, async (req, res) => {
     } catch (e) {
       console.warn(
         "[bookings:instant] ensure booking thread failed:",
-        e?.message || e,
+        e?.message || e
       );
     }
 
@@ -635,9 +635,13 @@ router.put("/bookings/:id/cancel", requireAuth, async (req, res) => {
 
         const body =
           feeAppliedKobo > 0
-            ? `${base}. Cancel fee applied: ₦${(feeAppliedKobo / 100).toFixed(2)}. ` +
+            ? `${base}. Cancel fee applied: ₦${(feeAppliedKobo / 100).toFixed(
+                2
+              )}. ` +
               (b.proOwnerUid
-                ? `You received compensation: ₦${(proCompKobo / 100).toFixed(2)} (added to pending).`
+                ? `You received compensation: ₦${(proCompKobo / 100).toFixed(
+                    2
+                  )} (added to pending).`
                 : `Compensation could not be credited (missing proOwnerUid).`) +
               reasonTxt
             : `${base}. No cancellation fee applied.` + reasonTxt;
@@ -662,7 +666,7 @@ router.put("/bookings/:id/cancel", requireAuth, async (req, res) => {
     } catch (notifyErr) {
       console.warn(
         "[bookings:cancel] notify pro failed:",
-        notifyErr?.message || notifyErr,
+        notifyErr?.message || notifyErr
       );
     }
 
@@ -745,7 +749,7 @@ router.put("/bookings/:id/accept", requireAuth, async (req, res) => {
     if (b.proOwnerUid !== req.user.uid)
       return res.status(403).json({ error: "Forbidden" });
 
-    if (!["scheduled", "pending_payment"].includes(b.status)) {
+    if (b.status !== "scheduled") {
       return res
         .status(400)
         .json({ error: `Cannot accept when status is ${b.status}` });
@@ -780,7 +784,7 @@ router.put("/bookings/:id/accept", requireAuth, async (req, res) => {
     } catch (err) {
       console.warn(
         "[bookings:accept] socket emit failed:",
-        err?.message || err,
+        err?.message || err
       );
     }
     // --- end socket block ---
@@ -807,7 +811,7 @@ router.put("/bookings/:id/accept", requireAuth, async (req, res) => {
     } catch (e) {
       console.warn(
         "[bookings:accept] ensure booking thread failed:",
-        e?.message || e,
+        e?.message || e
       );
     }
 
@@ -833,7 +837,7 @@ router.put("/bookings/:id/accept", requireAuth, async (req, res) => {
     } catch (notifyErr) {
       console.warn(
         "[bookings:accept] notify client failed:",
-        notifyErr?.message || notifyErr,
+        notifyErr?.message || notifyErr
       );
     }
 
@@ -931,7 +935,7 @@ router.put("/bookings/:id/complete", requireAuth, async (req, res) => {
     } catch (e) {
       console.error(
         "[bookings:complete] creditProPendingForBooking failed:",
-        e?.message || e,
+        e?.message || e
       );
     }
 
@@ -940,7 +944,7 @@ router.put("/bookings/:id/complete", requireAuth, async (req, res) => {
       const updatedPro = await Pro.findOneAndUpdate(
         { ownerUid: b.proOwnerUid },
         { $inc: { "metrics.jobsCompleted": 1 } },
-        { new: true },
+        { new: true }
       )
         .lean()
         .catch(() => null);
@@ -966,13 +970,13 @@ router.put("/bookings/:id/complete", requireAuth, async (req, res) => {
           .catch(() => null);
         if (redisClient && prof?.username) {
           await redisClient.del(
-            `public:profile:${String(prof.username).toLowerCase()}`,
+            `public:profile:${String(prof.username).toLowerCase()}`
           );
         }
       } catch (err) {
         console.warn(
           "[public/profile] invalidate after booking completion failed:",
-          err?.message || err,
+          err?.message || err
         );
       }
 
@@ -986,14 +990,14 @@ router.put("/bookings/:id/complete", requireAuth, async (req, res) => {
       } catch (err) {
         console.warn(
           "[public/profile] socket emit after booking complete failed:",
-          err?.message || err,
+          err?.message || err
         );
       }
     } catch (err) {
       // non-fatal: log and continue returning booking to client
       console.warn(
         "[bookings:complete] post-complete update failed:",
-        err?.message || err,
+        err?.message || err
       );
     }
 
@@ -1083,7 +1087,7 @@ router.put("/bookings/:id/complete", requireAuth, async (req, res) => {
     } catch (notifyErr) {
       console.warn(
         "[bookings:complete] notify failed:",
-        notifyErr?.message || notifyErr,
+        notifyErr?.message || notifyErr
       );
     }
 

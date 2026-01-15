@@ -32,10 +32,17 @@ export default function WalletPage() {
 
   // settings (best-effort)
   const [settings, setSettings] = useState(null);
+
   const feePct = useMemo(
     () => Number(settings?.payouts?.instantCashoutFeePercent ?? 3),
-    [settings],
+    [settings]
   );
+
+  const holdDays = useMemo(() => {
+    const d = Number(settings?.payouts?.instantCashoutHoldDays ?? 3);
+    return Number.isFinite(d) && d > 0 ? d : 3;
+  }, [settings]);
+
   const autoReleaseOn = !!settings?.payouts?.enableAutoRelease;
 
   // modals
@@ -108,7 +115,7 @@ export default function WalletPage() {
     }
     if (naira > max) {
       return alert(
-        `Insufficient funds. You can withdraw at most ₦${max.toLocaleString()} from Available.`,
+        `Insufficient funds. You can withdraw at most ₦${max.toLocaleString()} from Available.`
       );
     }
 
@@ -239,16 +246,27 @@ export default function WalletPage() {
               {(proBookings || [])
                 .filter(
                   (b) =>
-                    b?.status === "completed" && b?.paymentStatus === "paid",
+                    b?.status === "completed" && b?.paymentStatus === "paid"
                 )
                 .sort(
                   (a, b) =>
                     new Date(b.completedAt || b.updatedAt || 0) -
-                    new Date(a.completedAt || a.updatedAt || 0),
+                    new Date(a.completedAt || a.updatedAt || 0)
                 )
                 .map((b) => {
                   const already = b?.meta?.instantCashout === true;
                   const busy = !!cashoutBusy[b._id];
+                  // eligibility: holdDays after completion (backend truth)
+                  const completedAtMs = b?.completedAt
+                    ? new Date(b.completedAt).getTime()
+                    : 0;
+
+                  const ageDays = completedAtMs
+                    ? (Date.now() - completedAtMs) / (1000 * 60 * 60 * 24)
+                    : 0;
+
+                  const eligible = ageDays >= holdDays;
+                  const daysLeft = Math.max(0, Math.ceil(holdDays - ageDays));
 
                   return (
                     <div
@@ -277,12 +295,22 @@ export default function WalletPage() {
                           </span>
                         ) : (
                           <button
-                            disabled={busy}
+                            disabled={busy || !eligible}
                             onClick={() => cashoutBooking(b)}
                             className="rounded-lg bg-gold text-black px-4 py-2 font-semibold disabled:opacity-50"
-                            title={`Cashout (Pending → Available) fee ${feePct}%`}
+                            title={
+                              eligible
+                                ? `Cashout (Pending → Available) fee ${feePct}%`
+                                : `Instant cashout available after ${holdDays} day(s) from completion. (${daysLeft} day${
+                                    daysLeft === 1 ? "" : "s"
+                                  } left)`
+                            }
                           >
-                            {busy ? "Processing…" : "Cashout now"}
+                            {busy
+                              ? "Processing…"
+                              : eligible
+                              ? "Cashout now"
+                              : `Available in ${daysLeft}d`}
                           </button>
                         )}
                       </div>
@@ -291,7 +319,7 @@ export default function WalletPage() {
                 })}
 
               {!(proBookings || []).some(
-                (b) => b?.status === "completed" && b?.paymentStatus === "paid",
+                (b) => b?.status === "completed" && b?.paymentStatus === "paid"
               ) && (
                 <div className="p-6 text-zinc-400 text-sm">
                   No completed paid bookings yet.
@@ -346,15 +374,15 @@ export default function WalletPage() {
                     t.direction === "credit"
                       ? "text-green-400"
                       : t.direction === "debit"
-                        ? "text-red-400"
-                        : "text-zinc-300"
+                      ? "text-red-400"
+                      : "text-zinc-300"
                   } font-semibold`}
                 >
                   {t.direction === "credit"
                     ? "+"
                     : t.direction === "debit"
-                      ? "−"
-                      : ""}{" "}
+                    ? "−"
+                    : ""}{" "}
                   {fmt(t.amountKobo)}
                 </div>
               </div>

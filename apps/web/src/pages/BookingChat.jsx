@@ -26,7 +26,7 @@ export default function BookingChat() {
   // ?call=audio | ?call=video | null
   const startCallType = useMemo(
     () => new URLSearchParams(location.search).get("call"),
-    [location.search],
+    [location.search]
   );
 
   const { me } = useMe();
@@ -52,7 +52,7 @@ export default function BookingChat() {
   // booking chat room id (for messages)
   const room = useMemo(
     () => (bookingId ? `booking:${bookingId}` : null),
-    [bookingId],
+    [bookingId]
   );
 
   // ---- Load booking meta (for badge + figuring out peerUid) ----
@@ -66,7 +66,7 @@ export default function BookingChat() {
       try {
         setLoadingBooking(true);
         const { data } = await api.get(
-          `/api/bookings/${encodeURIComponent(bookingId)}`,
+          `/api/bookings/${encodeURIComponent(bookingId)}`
         );
         if (!alive) return;
         setBooking(data || null);
@@ -86,7 +86,7 @@ export default function BookingChat() {
       booking?.service?.serviceName ||
       booking?.serviceName ||
       "Selected service",
-    [booking],
+    [booking]
   );
 
   const priceText = useMemo(() => {
@@ -99,7 +99,7 @@ export default function BookingChat() {
 
   const areaText = useMemo(
     () => booking?.lga || booking?.state || "",
-    [booking],
+    [booking]
   );
 
   // 🔎 figure out who the *other* person is for this booking
@@ -140,13 +140,14 @@ export default function BookingChat() {
     try {
       const s = connectSocket();
 
-      // join the booking room on connect (for chat)
-      s.emit("join:booking", { bookingId, who: myLabel });
+      // join first, then mark read ONLY after join ack confirms room set on server
+      s.emit("join:booking", { bookingId, who: myLabel }, (ack) => {
+        console.log("[BookingChat] join:booking ack =", ack);
 
-      // after join, mark the booking chat as read
-      // (chat:read uses socket.data.room if room isn't passed)
-      s.emit("chat:read", {}, (ack) => {
-        console.log("booking chat:read ack =", ack);
+        // now safe: socket.data.room is set on server
+        s.emit("chat:read", { room: `booking:${bookingId}` }, (ack2) => {
+          console.log("[BookingChat] chat:read ack =", ack2);
+        });
       });
 
       return s;
@@ -155,17 +156,18 @@ export default function BookingChat() {
     }
   }, [room, bookingId, myLabel]);
 
-  // Clean up socket on unmount
+  // Clean up booking room only (DO NOT disconnect shared socket)
   useEffect(() => {
     return () => {
       try {
-        if (socket && room) {
-          socket.emit("room:leave", { room });
+        if (socket && bookingId) {
+          // leave the booking room via the same name the server used
+          socket.emit("room:leave", { room: `booking:${bookingId}` });
         }
-        socket?.disconnect();
+        // IMPORTANT: do NOT disconnect here — socket is a shared singleton
       } catch {}
     };
-  }, [socket, room]);
+  }, [socket, bookingId]);
 
   // Listen only for call status → so caller's sheet closes properly
   useEffect(() => {
@@ -188,7 +190,7 @@ export default function BookingChat() {
 
         if (
           ["ended", "cancelled", "declined", "missed", "failed"].includes(
-            status,
+            status
           )
         ) {
           return { ...prev, open: false };
@@ -203,7 +205,7 @@ export default function BookingChat() {
     } catch (e) {
       console.warn(
         "[BookingChat] attach call status listener failed:",
-        e?.message || e,
+        e?.message || e
       );
     }
 

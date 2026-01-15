@@ -30,9 +30,10 @@ function formatWhen(iso) {
 
 const VALID_SECTIONS = [
   "all",
+  "pending_payment",
+  "scheduled",
   "accepted",
   "completed",
-  "pending_payment",
   "cancelled",
 ];
 
@@ -56,8 +57,8 @@ export default function ClientDashboard() {
       const list = Array.isArray(data)
         ? data
         : Array.isArray(data?.items)
-          ? data.items
-          : [];
+        ? data.items
+        : [];
       setItems(list);
     } catch (e) {
       console.error(e);
@@ -84,10 +85,11 @@ export default function ClientDashboard() {
   const counts = useMemo(() => {
     const c = {
       all: items.length,
+      pending_payment: 0,
+      scheduled: 0,
       accepted: 0,
       completed: 0,
       cancelled: 0,
-      pending_payment: 0,
     };
     for (const b of items) {
       if (b.status && c[b.status] !== undefined) c[b.status] += 1;
@@ -189,6 +191,15 @@ export default function ClientDashboard() {
           All ({counts.all})
         </NavBadge>
         <NavBadge
+          id="scheduled"
+          tone="zinc"
+          active={activeSection === "scheduled"}
+          onClick={() => goSection("scheduled")}
+        >
+          Scheduled ({counts.scheduled})
+        </NavBadge>
+
+        <NavBadge
           id="accepted"
           tone="emerald"
           active={activeSection === "accepted"}
@@ -196,6 +207,7 @@ export default function ClientDashboard() {
         >
           Accepted ({counts.accepted})
         </NavBadge>
+
         <NavBadge
           id="completed"
           tone="sky"

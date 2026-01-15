@@ -30,6 +30,8 @@ import {
   cancelBooking,
   getSettings,
   getClientReviews,
+  registerSocketHandler,
+  joinBookingRoom,
 } from "../lib/api";
 import PaymentMethodPicker from "../components/PaymentMethodPicker.jsx";
 
@@ -58,7 +60,7 @@ function formatWhen(iso) {
 /* -------- Paystack loader (same idea as BookService) -------- */
 function usePaystackReady() {
   const [ready, setReady] = useState(
-    typeof window !== "undefined" && !!window.PaystackPop,
+    typeof window !== "undefined" && !!window.PaystackPop
   );
 
   useEffect(() => {
@@ -96,7 +98,7 @@ export default function BookingDetails() {
   // Ring/calling UX
   const [ringSeconds, setRingSeconds] = useState(null); // from /api/settings
   const [ringElapsed, setRingElapsed] = useState(0); // seconds passed while scheduled
-  const [autoCancelled, setAutoCancelled] = useState(false); // prevent double calls
+  // (removed) client-side auto-cancel; backend cron owns this
 
   // ⭐ NEW: client reputation state
   const [clientReputation, setClientReputation] = useState(null);
@@ -106,7 +108,7 @@ export default function BookingDetails() {
   // derived (supports new snapshot + legacy fields)
   const svcName = useMemo(
     () => booking?.service?.serviceName || booking?.serviceName || "Service",
-    [booking],
+    [booking]
   );
 
   const priceKobo = useMemo(
@@ -114,17 +116,17 @@ export default function BookingDetails() {
       Number.isFinite(Number(booking?.amountKobo))
         ? Number(booking.amountKobo)
         : Number(booking?.service?.priceKobo) || 0,
-    [booking],
+    [booking]
   );
 
   const isClient = useMemo(
     () => !!me && booking && me.uid === booking.clientUid,
-    [me, booking],
+    [me, booking]
   );
 
   const isProOwner = useMemo(
     () => !!me && booking && me.uid === booking.proOwnerUid,
-    [me, booking],
+    [me, booking]
   );
 
   // Load client reputation (pro side only)
@@ -172,16 +174,15 @@ export default function BookingDetails() {
     () =>
       isProOwner &&
       booking?.paymentStatus === "paid" &&
-      (booking?.status === "scheduled" ||
-        booking?.status === "pending_payment"),
-    [isProOwner, booking],
+      booking?.status === "scheduled",
+    [isProOwner, booking]
   );
 
   // Either client OR pro can complete when status is "accepted"
   const canComplete = useMemo(
     () =>
       !!booking && booking.status === "accepted" && (isClient || isProOwner),
-    [booking, isClient, isProOwner],
+    [booking, isClient, isProOwner]
   );
 
   const canClientPay = useMemo(
@@ -190,7 +191,7 @@ export default function BookingDetails() {
       booking?.paymentStatus !== "paid" &&
       (booking?.status === "pending_payment" ||
         booking?.status === "scheduled"),
-    [isClient, booking],
+    [isClient, booking]
   );
 
   // Name: safe to show to both parties (no phone exposed)
@@ -200,7 +201,7 @@ export default function BookingDetails() {
       booking?.client?.name ||
       booking?.clientProfile?.fullName ||
       "",
-    [booking],
+    [booking]
   );
 
   // Who can see client contact details card?
@@ -280,7 +281,7 @@ export default function BookingDetails() {
         if (!found) {
           try {
             const { data } = await api.get(
-              `/api/bookings/${encodeURIComponent(id)}`,
+              `/api/bookings/${encodeURIComponent(id)}`
             );
             found = data || found;
           } catch {}
@@ -291,7 +292,6 @@ export default function BookingDetails() {
           setErr("Booking not found or you do not have permission to view it.");
         } else {
           setBooking(found);
-          setAutoCancelled(false); // reset when we load a booking
         }
       } catch {
         if (alive) setErr("Unable to load booking.");
@@ -324,50 +324,80 @@ export default function BookingDetails() {
     };
   }, []);
 
-  // Auto-cancel helper used by timeout
-  async function autoCancelAfterTimeout() {
-    if (!booking) return;
-    setBusy(true);
-    try {
-      const updated = await cancelBooking(booking._id);
-      setBooking(updated);
-      // redirect is handled by the cancelled/refunded effect below
-    } catch (e) {
-      console.error(
-        "auto-timeout cancel booking error:",
-        e?.response?.data || e?.message || e,
-      );
-      // silently fail – user can still cancel manually
-    } finally {
-      setBusy(false);
-    }
-  }
+  // ✅ Socket: instant update when booking is accepted (no redirect)
+  useEffect(() => {
+    if (!booking?._id || !me?.uid) return;
 
-  // Ring timer: runs while booking is scheduled + paid, and viewer is the client.
-  // Also triggers auto-cancel when elapsed >= ringSeconds.
+    // Join booking:<id> room so booking-scoped events reach this page
+    joinBookingRoom(booking._id, me.uid).catch(() => {});
+
+    const offAccepted = registerSocketHandler("booking:accepted", async (p) => {
+      const bid = String(p?.bookingId || "");
+      if (bid !== String(booking._id)) return;
+
+      // 1) instant UI flip (chat button appears immediately)
+      setBooking((b) =>
+        b
+          ? { ...b, status: "accepted", acceptedAt: new Date().toISOString() }
+          : b
+      );
+
+      setRingElapsed(0);
+
+      // 2) then fetch backend truth (best-effort)
+      try {
+        const { data: fresh } = await api.get(
+          `/api/bookings/${encodeURIComponent(booking._id)}`
+        );
+        if (fresh) setBooking(fresh);
+      } catch {
+        // ignore
+      }
+    });
+
+    return () => offAccepted?.();
+  }, [booking?._id, me?.uid]);
+
+  // Ring timer + auto-refresh while scheduled+paid (so client sees accept instantly)
   useEffect(() => {
     if (!booking || !me) return;
     if (me.uid !== booking.clientUid) return;
     if (booking.paymentStatus !== "paid") return;
     if (booking.status !== "scheduled") return;
 
-    setRingElapsed(0);
-    setAutoCancelled(false);
-    const start = Date.now();
+    const startedAt = booking.ringingStartedAt
+      ? new Date(booking.ringingStartedAt).getTime()
+      : Date.now();
 
-    const intervalId = setInterval(() => {
-      const elapsed = Math.floor((Date.now() - start) / 1000);
+    // 1) 1s ring elapsed timer (UI only)
+    const ringTimer = setInterval(() => {
+      const elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
       setRingElapsed(elapsed);
-
-      if (!autoCancelled && ringSeconds && elapsed >= ringSeconds) {
-        setAutoCancelled(true);
-        void autoCancelAfterTimeout();
-      }
     }, 1000);
 
-    return () => clearInterval(intervalId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [booking, me, ringSeconds]);
+    // 2) Poll booking status every 3s while ringing (stop automatically when accepted)
+    const pollTimer = setInterval(async () => {
+      try {
+        const { data: fresh } = await api.get(
+          `/api/bookings/${encodeURIComponent(booking._id)}`
+        );
+        if (fresh) setBooking(fresh);
+      } catch {
+        // ignore polling errors (best-effort)
+      }
+    }, 3000);
+
+    return () => {
+      clearInterval(ringTimer);
+      clearInterval(pollTimer);
+    };
+  }, [
+    booking?._id,
+    booking?.status,
+    booking?.paymentStatus,
+    me?.uid,
+    booking?.clientUid,
+  ]);
 
   // If booking is cancelled/refunded for the client, send them back to browse
   useEffect(() => {
@@ -380,7 +410,7 @@ export default function BookingDetails() {
       booking.status === "cancelled"
     ) {
       alert(
-        "We’re sorry, this service request has been cancelled.\n\nYou can now choose another professional.",
+        "We’re sorry, this service request has been cancelled.\n\nYou can now choose another professional."
       );
       navigate("/browse", { replace: true });
     }
@@ -409,11 +439,11 @@ export default function BookingDetails() {
 
       if (isClient) {
         alert(
-          "Thank you for confirming. Please remember to leave a review for your professional.",
+          "Thank you for confirming. Please remember to leave a review for your professional."
         );
       } else if (isProOwner) {
         alert(
-          "Job marked as completed. You can now leave a review for this client.",
+          "Job marked as completed. You can now leave a review for this client."
         );
       } else {
         alert("Booking completed.");
@@ -428,7 +458,7 @@ export default function BookingDetails() {
   async function onClientCancelNow() {
     if (!booking) return;
     const sure = window.confirm(
-      "Do you want to cancel this booking now? If the pro has not accepted yet, your payment will be refunded according to our rules.",
+      "Do you want to cancel this booking now? If the pro has not accepted yet, your payment will be refunded according to our rules."
     );
     if (!sure) return;
 
@@ -440,7 +470,7 @@ export default function BookingDetails() {
     } catch (e) {
       console.error(
         "cancel booking error:",
-        e?.response?.data || e?.message || e,
+        e?.response?.data || e?.message || e
       );
       alert("Could not cancel booking. Please try again.");
     } finally {
@@ -465,7 +495,7 @@ export default function BookingDetails() {
     // 1) Check Paystack SDK
     if (!window.PaystackPop || typeof window.PaystackPop.setup !== "function") {
       alert(
-        "Paystack library not loaded yet. Please wait a moment or refresh and try again.",
+        "Paystack library not loaded yet. Please wait a moment or refresh and try again."
       );
       return;
     }
@@ -547,7 +577,7 @@ export default function BookingDetails() {
                 // ✅ reload booking from server (single source of truth)
                 try {
                   const { data: fresh } = await api.get(
-                    `/api/bookings/${encodeURIComponent(booking._id)}`,
+                    `/api/bookings/${encodeURIComponent(booking._id)}`
                   );
                   setBooking(fresh || booking);
                 } catch {
@@ -562,7 +592,7 @@ export default function BookingDetails() {
                               ? "scheduled"
                               : b.status,
                         }
-                      : b,
+                      : b
                   );
                 }
                 alert("Payment successful.");
@@ -589,7 +619,7 @@ export default function BookingDetails() {
       console.error("[BookingDetails] PaystackPop.setup FAILED:", err);
       setBusy(false);
       alert(
-        "Could not start card payment. See console for PaystackPop.setup error.",
+        "Could not start card payment. See console for PaystackPop.setup error."
       );
     }
   }
@@ -612,7 +642,7 @@ export default function BookingDetails() {
                 paymentStatus: "paid",
                 status: b.status === "pending_payment" ? "scheduled" : b.status,
               }
-            : b,
+            : b
         );
       }
       alert("Wallet payment successful.");
@@ -621,7 +651,7 @@ export default function BookingDetails() {
       alert(
         e?.response?.data?.message ||
           e?.response?.data?.error ||
-          "Wallet payment failed. Please try again or choose card.",
+          "Wallet payment failed. Please try again or choose card."
       );
     } finally {
       setBusy(false);
@@ -826,8 +856,8 @@ export default function BookingDetails() {
                   {busy
                     ? "Processing…"
                     : payMethod === "wallet"
-                      ? "Pay from Wallet"
-                      : "Pay with Card"}
+                    ? "Pay from Wallet"
+                    : "Pay with Card"}
                 </button>
                 {payMethod === "card" && !paystackReady && (
                   <p className="text-xs text-zinc-500 mt-1">
@@ -894,7 +924,7 @@ export default function BookingDetails() {
               )}
 
               <Link
-                to={me?.isPro ? "/pro" : "/browse"}
+                to={me?.isPro ? "/pro-dashboard" : "/browse"}
                 className="px-4 py-2 rounded-lg border border-zinc-800"
               >
                 Back

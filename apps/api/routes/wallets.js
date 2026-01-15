@@ -11,6 +11,8 @@ import {
   holdFundsInEscrowForBooking,
   // Option A escrow: for pay-booking we must NOT credit pro pending here anymore
 } from "../services/walletService.js";
+import { createNotification } from "../services/notificationService.js";
+import { getIO } from "../sockets/index.js";
 
 /* ----------------------------- helpers ----------------------------- */
 const isPosInt = (n) => Number.isInteger(n) && n > 0;
@@ -25,7 +27,7 @@ async function verifyPinForUid(uid, pin) {
   if (!appDoc?.withdrawPinHash) return { ok: false, code: "no_pin" };
   const ok = await bcrypt.compare(
     String(pin || ""),
-    String(appDoc.withdrawPinHash || ""),
+    String(appDoc.withdrawPinHash || "")
   );
   return { ok, code: ok ? "ok" : "invalid_pin" };
 }
@@ -135,7 +137,7 @@ export function withAuth(requireAuth, requireAdmin) {
               ownerUid: req.user.uid,
             },
           }),
-        },
+        }
       );
       const data = await psResp.json();
       if (!psResp.ok || !data?.status || !data?.data?.authorization_url) {
@@ -154,7 +156,7 @@ export function withAuth(requireAuth, requireAdmin) {
                 "meta.status": "failed",
                 "meta.error": data?.message || "init_failed",
               },
-            },
+            }
           );
         } catch {}
 
@@ -188,8 +190,10 @@ export function withAuth(requireAuth, requireAdmin) {
 
       // Verify on Paystack
       const vResp = await fetch(
-        `https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`,
-        { headers: { Authorization: `Bearer ${PAYSTACK_SECRET_KEY}` } },
+        `https://api.paystack.co/transaction/verify/${encodeURIComponent(
+          reference
+        )}`,
+        { headers: { Authorization: `Bearer ${PAYSTACK_SECRET_KEY}` } }
       );
       const verify = await vResp.json();
       if (!vResp.ok || !verify?.status) {
@@ -227,7 +231,7 @@ export function withAuth(requireAuth, requireAdmin) {
           const after = await Wallet.findOneAndUpdate(
             { ownerUid: req.user.uid },
             { $inc: { availableKobo: paidKobo } },
-            { new: true, upsert: true, setDefaultsOnInsert: true },
+            { new: true, upsert: true, setDefaultsOnInsert: true }
           );
 
           // 2) Write the ledger tx (protected by unique index)
@@ -366,7 +370,7 @@ export function withAuth(requireAuth, requireAdmin) {
         console.error("[wallet/platform] error:", e?.message || e);
         return res.status(500).json({ error: "platform_wallet_failed" });
       }
-    },
+    }
   );
 
   async function getPlatformRecipientCode() {
@@ -402,7 +406,7 @@ export function withAuth(requireAuth, requireAdmin) {
         await SettingsModel.updateOne(
           {},
           { $set: { "payouts.platformRecipientCode": recipientCode } },
-          { upsert: true },
+          { upsert: true }
         );
 
         return res.json({ ok: true, recipientCode });
@@ -410,7 +414,7 @@ export function withAuth(requireAuth, requireAdmin) {
         console.error("[wallet/platform/recipient] error:", e?.message || e);
         return res.status(500).json({ error: "set_platform_recipient_failed" });
       }
-    },
+    }
   );
 
   /**
@@ -446,7 +450,7 @@ export function withAuth(requireAuth, requireAdmin) {
         const w = await Wallet.findOneAndUpdate(
           { ownerUid: PLATFORM_UID, availableKobo: { $gte: amt } },
           { $inc: { availableKobo: -amt } },
-          { new: true, upsert: true, setDefaultsOnInsert: true },
+          { new: true, upsert: true, setDefaultsOnInsert: true }
         );
         if (!w)
           return res
@@ -485,7 +489,7 @@ export function withAuth(requireAuth, requireAdmin) {
           const afterRefund = await Wallet.findOneAndUpdate(
             { ownerUid: PLATFORM_UID },
             { $inc: { availableKobo: amt } },
-            { new: true },
+            { new: true }
           );
 
           await WalletTx.create({
@@ -530,7 +534,7 @@ export function withAuth(requireAuth, requireAdmin) {
         console.error("[wallet/platform/withdraw] error:", e?.message || e);
         return res.status(500).json({ error: "platform_withdraw_failed" });
       }
-    },
+    }
   );
 
   /** POST /api/wallet/withdraw
@@ -560,7 +564,7 @@ export function withAuth(requireAuth, requireAdmin) {
       const w = await Wallet.findOneAndUpdate(
         { ownerUid: req.user.uid, availableKobo: { $gte: amt } },
         { $inc: { availableKobo: -amt } },
-        { new: true, upsert: true, setDefaultsOnInsert: true },
+        { new: true, upsert: true, setDefaultsOnInsert: true }
       );
       if (!w) return res.status(400).json({ error: "insufficient_available" });
 
@@ -593,7 +597,7 @@ export function withAuth(requireAuth, requireAdmin) {
             bank_code: bank.code,
             currency: "NGN",
           }),
-        },
+        }
       );
       const recData = await createRecipient.json();
       if (!recData.status) {
@@ -604,7 +608,7 @@ export function withAuth(requireAuth, requireAdmin) {
           const afterRefund = await Wallet.findOneAndUpdate(
             { ownerUid: req.user.uid },
             { $inc: { availableKobo: amt } },
-            { new: true },
+            { new: true }
           );
           await WalletTx.create({
             ownerUid: req.user.uid,
@@ -645,7 +649,7 @@ export function withAuth(requireAuth, requireAdmin) {
           const afterRefund = await Wallet.findOneAndUpdate(
             { ownerUid: req.user.uid },
             { $inc: { availableKobo: amt } },
-            { new: true },
+            { new: true }
           );
           await WalletTx.create({
             ownerUid: req.user.uid,
@@ -702,7 +706,7 @@ export function withAuth(requireAuth, requireAdmin) {
         const after = await Wallet.findOneAndUpdate(
           { ownerUid: uid, pendingKobo: { $gte: amt } },
           { $inc: { pendingKobo: -amt, availableKobo: amt } },
-          { new: true },
+          { new: true }
         );
 
         if (!after) return res.json({ ok: true, releasedKobo: 0 });
@@ -722,7 +726,7 @@ export function withAuth(requireAuth, requireAdmin) {
         console.error("[wallet/release] error:", e);
         res.status(500).json({ error: "release_failed" });
       }
-    },
+    }
   );
 
   /**
@@ -752,9 +756,11 @@ export function withAuth(requireAuth, requireAdmin) {
         return res.status(403).json({ error: "not_your_booking" });
       }
 
+      booking.meta = booking.meta || {};
+
       // 🔒 Guard: prevent mixing payment methods
       const requested = String(
-        booking?.meta?.paymentMethodRequested || "",
+        booking.meta.paymentMethodRequested || ""
       ).toLowerCase();
       if (requested === "card") {
         return res.status(400).json({
@@ -764,9 +770,36 @@ export function withAuth(requireAuth, requireAdmin) {
         });
       }
 
-      // Already paid?
+      // Already paid? (idempotent return) — but still re-emit booking:paid so pro alert is instant on retries
       if (booking.paymentStatus === "paid") {
-        return res.json({ ok: true, alreadyPaid: true });
+        try {
+          const io = getIO();
+          if (io) {
+            const payload = {
+              bookingId: booking._id.toString(),
+              status: booking.status,
+              paymentStatus: booking.paymentStatus,
+              proOwnerUid: booking.proOwnerUid,
+              clientUid: booking.clientUid,
+              paymentMethod: booking?.meta?.paymentMethodUsed || "wallet",
+            };
+
+            if (booking.proOwnerUid)
+              io.to(`user:${booking.proOwnerUid}`).emit(
+                "booking:paid",
+                payload
+              );
+            if (booking.clientUid)
+              io.to(`user:${booking.clientUid}`).emit("booking:paid", payload);
+            io.to(`booking:${booking._id.toString()}`).emit(
+              "booking:paid",
+              payload
+            );
+          }
+        } catch {}
+
+        // keep response idempotent
+        return res.json({ ok: true, alreadyPaid: true, booking });
       }
 
       const amountKobo = Math.floor(Number(booking.amountKobo || 0));
@@ -785,7 +818,6 @@ export function withAuth(requireAuth, requireAdmin) {
       booking.paystackReference = `WALLET-${Date.now()}`;
 
       // Record which method actually paid
-      booking.meta = booking.meta || {};
       booking.meta.paymentMethodUsed = "wallet";
       booking.meta.paymentMethodRequested =
         booking.meta.paymentMethodRequested || "wallet";
@@ -796,6 +828,69 @@ export function withAuth(requireAuth, requireAdmin) {
       }
 
       await booking.save();
+
+      // ✅ Notify pro ONLY after wallet payment succeeds (idempotent)
+      try {
+        if (!booking.meta.notifiedProOnPaid) {
+          if (booking.proOwnerUid) {
+            await createNotification({
+              toUid: booking.proOwnerUid,
+              fromUid: booking.clientUid || null,
+              type: "booking_paid",
+              title: "New paid booking",
+              body: "A client has paid. Please open the app to accept the booking.",
+              data: {
+                bookingId: booking._id.toString(),
+                status: booking.status,
+                paymentStatus: booking.paymentStatus,
+                paymentMethod: "wallet",
+              },
+            });
+          }
+          booking.meta.notifiedProOnPaid = true;
+          await booking.save(); // persist idempotency flag
+          // 🔔 Realtime: match /payments/verify so pro alert is instant (wallet payment)
+          try {
+            const io = getIO();
+            if (io) {
+              const payload = {
+                bookingId: booking._id.toString(),
+                status: booking.status,
+                paymentStatus: booking.paymentStatus,
+                proOwnerUid: booking.proOwnerUid,
+                clientUid: booking.clientUid,
+                paymentMethod: "wallet",
+              };
+
+              if (booking.proOwnerUid)
+                io.to(`user:${booking.proOwnerUid}`).emit(
+                  "booking:paid",
+                  payload
+                );
+              if (booking.clientUid)
+                io.to(`user:${booking.clientUid}`).emit(
+                  "booking:paid",
+                  payload
+                );
+
+              io.to(`booking:${booking._id.toString()}`).emit(
+                "booking:paid",
+                payload
+              );
+            }
+          } catch (err) {
+            console.warn(
+              "[wallet/pay-booking] socket emit booking:paid failed:",
+              err?.message || err
+            );
+          }
+        }
+      } catch (e) {
+        console.warn(
+          "[wallet/pay-booking] notify pro failed:",
+          e?.message || e
+        );
+      }
 
       // Option A escrow: do NOT credit pro pending on payment.
       // Pro pending is credited only when booking is marked COMPLETED (in bookings.js).

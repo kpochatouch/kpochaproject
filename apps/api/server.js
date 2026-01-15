@@ -54,6 +54,7 @@ import activityRoutes from "./routes/activity.js";
 import chatRoutes from "./routes/chat.js";
 import callRoutes from "./routes/call.js";
 import webrtcRoutes from "./routes/webrtc.js";
+import { getIO } from "./sockets/index.js";
 
 dotenv.config();
 
@@ -1947,6 +1948,17 @@ async function handlePaystackEvent(event) {
       const booking = await Booking.findOne({ paystackReference: ref });
       if (!booking) return console.warn("[paystack] no booking for ref:", ref);
 
+      // ✅ Idempotency guard for repeated Paystack webhooks
+      booking.meta = booking.meta || {};
+
+      if (booking.paymentStatus === "paid" && booking.meta.notifiedProOnPaid) {
+        console.log(
+          "[paystack] duplicate charge.success ignored:",
+          booking._id.toString()
+        );
+        return;
+      }
+
       if (
         amount &&
         booking.amountKobo &&
@@ -1980,6 +1992,60 @@ async function handlePaystackEvent(event) {
         console.error(
           "[paystack] ❌ escrow funding failed for booking:",
           booking._id.toString(),
+          e?.message || e
+        );
+      }
+
+      // ✅ Notify pro ONLY after payment is confirmed (idempotent)
+      try {
+        if (!booking.meta.notifiedProOnPaid) {
+          if (booking.proOwnerUid) {
+            await createNotification({
+              toUid: booking.proOwnerUid,
+              fromUid: booking.clientUid || null,
+              type: "booking_paid",
+              title: "New paid booking",
+              body: "A client has paid. Please accept or decline in the app.",
+              data: {
+                bookingId: booking._id.toString(),
+                status: booking.status,
+                paymentStatus: booking.paymentStatus,
+                source: "paystack_webhook",
+              },
+            });
+          }
+
+          booking.meta.notifiedProOnPaid = true;
+          await booking.save();
+        }
+      } catch (e) {
+        console.warn("[paystack] notify pro failed:", e?.message || e);
+      }
+
+      // 🔔 Realtime: match /payments/verify so pro alert is instant even on webhook-only success
+      try {
+        const io = getIO();
+        if (io) {
+          const payload = {
+            bookingId: booking._id.toString(),
+            status: booking.status,
+            paymentStatus: booking.paymentStatus,
+            proOwnerUid: booking.proOwnerUid,
+            clientUid: booking.clientUid,
+          };
+
+          if (booking.proOwnerUid)
+            io.to(`user:${booking.proOwnerUid}`).emit("booking:paid", payload);
+          if (booking.clientUid)
+            io.to(`user:${booking.clientUid}`).emit("booking:paid", payload);
+          io.to(`booking:${booking._id.toString()}`).emit(
+            "booking:paid",
+            payload
+          );
+        }
+      } catch (e) {
+        console.warn(
+          "[paystack] socket emit booking:paid failed:",
           e?.message || e
         );
       }

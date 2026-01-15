@@ -4,7 +4,7 @@ import { api } from "../lib/api";
 
 function usePaystackScript() {
   const [ready, setReady] = useState(
-    typeof window !== "undefined" && !!window.PaystackPop,
+    typeof window !== "undefined" && !!window.PaystackPop
   );
 
   useEffect(() => {
@@ -39,12 +39,29 @@ export default function ClientWallet() {
   const paystackReady = usePaystackScript();
 
   // ---------- helpers ----------
-  const fmtNaira = (k) =>
-    `₦${Math.floor((Number(k) || 0) / 100).toLocaleString()}`;
   const refreshWallet = async () => {
     const { data } = await api.get("/api/wallet/client/me");
-    setCreditsKobo(Number(data?.creditsKobo || 0));
-    setTxns(Array.isArray(data?.transactions) ? data.transactions : []);
+
+    // New shape: { wallet, transactions }
+    const w = data?.wallet || data || {};
+
+    // Prefer "availableKobo" for client credits in the unified wallet model.
+    // Fall back to legacy "creditsKobo" if your endpoint still uses it.
+    const credits = Number.isFinite(Number(w?.availableKobo))
+      ? Number(w.availableKobo)
+      : 0;
+
+    const legacyCredits = Number(w?.creditsKobo || data?.creditsKobo || 0);
+
+    setCreditsKobo(credits || legacyCredits);
+
+    const list = Array.isArray(data?.transactions)
+      ? data.transactions
+      : Array.isArray(w?.transactions)
+      ? w.transactions
+      : [];
+
+    setTxns(list);
   };
 
   // ---------- initial load ----------
