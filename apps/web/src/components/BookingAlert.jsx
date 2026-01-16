@@ -6,7 +6,7 @@ import {
   cancelBookingByPro,
   registerSocketHandler,
 } from "../lib/api";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 export default function BookingAlert({
   pollMs = 20000,
@@ -28,7 +28,7 @@ export default function BookingAlert({
   useEffect(() => {
     if (!playSound) return;
     if (!audioRef.current) {
-      const a = new Audio(soundSrc || "/chime.mp3");
+      const a = new Audio(soundSrc || "/sound/chime.mp3");
       a.preload = "auto";
       audioRef.current = a;
     }
@@ -102,11 +102,14 @@ export default function BookingAlert({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pollMs, playSound]);
 
+  const navigate = useNavigate();
+
   async function onAccept(id) {
     setBusy(true);
     try {
       await acceptBooking(id);
       setQueue((q) => q.slice(1));
+      navigate(`/bookings/${id}`); // ✅ forced booking context
     } catch {
       alert("Could not accept booking. Ensure payment is 'paid'.");
     } finally {

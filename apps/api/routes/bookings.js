@@ -929,6 +929,29 @@ router.put("/bookings/:id/complete", requireAuth, async (req, res) => {
 
     await b.save();
 
+    // ✅ Socket: notify both client + pro that booking is completed
+    try {
+      const io = getIO();
+      const payload = {
+        bookingId: b._id.toString(),
+        status: b.status, // "completed"
+        paymentStatus: b.paymentStatus,
+        completedAt: b.completedAt,
+        completedBy: b.meta?.completedBy || null,
+      };
+
+      if (b.clientUid)
+        io.to(`user:${b.clientUid}`).emit("booking:completed", payload);
+      if (b.proOwnerUid)
+        io.to(`user:${b.proOwnerUid}`).emit("booking:completed", payload);
+      io.to(`booking:${b._id.toString()}`).emit("booking:completed", payload);
+    } catch (err) {
+      console.warn(
+        "[bookings:complete] socket emit failed:",
+        err?.message || err
+      );
+    }
+
     // ✅ move escrow → pro pending AFTER completion (true escrow)
     try {
       await creditProPendingForBooking(b, { reason: "completed" });

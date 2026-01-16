@@ -17,9 +17,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
+import { useMe } from "../context/MeContext.jsx";
 import {
   api,
-  getMe,
   getMyBookings,
   getProBookings,
   acceptBooking,
@@ -32,6 +32,7 @@ import {
   getClientReviews,
   registerSocketHandler,
   joinBookingRoom,
+  getBookingUiLabel,
 } from "../lib/api";
 import PaymentMethodPicker from "../components/PaymentMethodPicker.jsx";
 
@@ -86,7 +87,7 @@ export default function BookingDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
 
-  const [me, setMe] = useState(null);
+  const { me, loading: meLoading } = useMe();
   const [booking, setBooking] = useState(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
@@ -219,19 +220,45 @@ export default function BookingDetails() {
     return false;
   }, [booking, isClient, isProOwner]);
 
+  const stage = useMemo(() => {
+    if (!booking) return "loading";
+
+    if (booking.paymentStatus === "refunded" || booking.status === "cancelled")
+      return "cancelled";
+
+    if (booking.paymentStatus !== "paid") return "pay"; // pay first
+
+    if (booking.status === "scheduled") return "waiting"; // paid, waiting pro
+
+    if (booking.status === "accepted") return "in_progress";
+
+    if (booking.status === "completed") return "done";
+
+    return "waiting";
+  }, [booking]);
+
   // Chat/Call visibility:
   // - Before accept: nobody sees it
   // - After accept/completed: both sides can initiate call/chat
   const showChatButton = useMemo(() => {
     if (!booking) return false;
-    if (booking.status !== "accepted" && booking.status !== "completed")
-      return false;
+    if (!isClient && !isProOwner) return false;
 
-    if (isProOwner) return true;
-    if (isClient) return true;
+    // allow chat/call only during job
+    if (booking.status === "accepted") return true;
+
+    // allow short grace window after completion (e.g., 10 mins)
+    if (booking.status === "completed") {
+      const graceMs = 60 * 60 * 1000; // 1 hour
+      const completedAtMs = booking.completedAt
+        ? new Date(booking.completedAt).getTime()
+        : 0;
+      if (!completedAtMs) return false;
+      return Date.now() - completedAtMs < graceMs;
+    }
 
     return false;
-  }, [booking, isProOwner, isClient]);
+  }, [booking, isClient, isProOwner]);
 
   // Pro ID used for review links (client -> pro)
   const proIdForReview = useMemo(() => {
@@ -247,16 +274,13 @@ export default function BookingDetails() {
 
   // Load viewer + booking
   useEffect(() => {
+    if (meLoading) return;
     let alive = true;
 
     (async () => {
       try {
         setLoading(true);
         setErr("");
-
-        const viewer = await getMe().catch(() => null);
-        if (!alive) return;
-        setMe(viewer);
 
         let found = null;
 
@@ -268,7 +292,7 @@ export default function BookingDetails() {
         } catch {}
 
         // 2) Pro list (if pro)
-        if (!found && viewer?.isPro) {
+        if (!found && me?.isPro) {
           try {
             const proItems = await getProBookings();
             found =
@@ -303,7 +327,7 @@ export default function BookingDetails() {
     return () => {
       alive = false;
     };
-  }, [id]);
+  }, [id, me?.isPro]);
 
   // Load ringTimeoutSeconds from settings once
   useEffect(() => {
@@ -326,14 +350,14 @@ export default function BookingDetails() {
 
   // ✅ Socket: instant update when booking is accepted (no redirect)
   useEffect(() => {
-    if (!booking?._id || !me?.uid) return;
+    if (!id || !me?.uid) return;
 
     // Join booking:<id> room so booking-scoped events reach this page
-    joinBookingRoom(booking._id, me.uid).catch(() => {});
+    joinBookingRoom(id, me.uid).catch(() => {});
 
     const offAccepted = registerSocketHandler("booking:accepted", async (p) => {
       const bid = String(p?.bookingId || "");
-      if (bid !== String(booking._id)) return;
+      if (bid !== String(id)) return;
 
       // 1) instant UI flip (chat button appears immediately)
       setBooking((b) =>
@@ -347,7 +371,7 @@ export default function BookingDetails() {
       // 2) then fetch backend truth (best-effort)
       try {
         const { data: fresh } = await api.get(
-          `/api/bookings/${encodeURIComponent(booking._id)}`
+          `/api/bookings/${encodeURIComponent(id)}`
         );
         if (fresh) setBooking(fresh);
       } catch {
@@ -356,7 +380,42 @@ export default function BookingDetails() {
     });
 
     return () => offAccepted?.();
-  }, [booking?._id, me?.uid]);
+  }, [id, me?.uid]);
+
+  // ✅ Socket: instant update when booking is completed
+  useEffect(() => {
+    if (!id || !me?.uid) return;
+
+    const offCompleted = registerSocketHandler(
+      "booking:completed",
+      async (p) => {
+        const bid = String(p?.bookingId || "");
+        if (bid !== String(id)) return;
+
+        // instant UI flip
+        setBooking((b) =>
+          b
+            ? {
+                ...b,
+                status: "completed",
+                completedAt:
+                  p?.completedAt || b?.completedAt || new Date().toISOString(),
+              }
+            : b
+        );
+
+        // then fetch backend truth (best-effort)
+        try {
+          const { data: fresh } = await api.get(
+            `/api/bookings/${encodeURIComponent(id)}`
+          );
+          if (fresh) setBooking(fresh);
+        } catch {}
+      }
+    );
+
+    return () => offCompleted?.();
+  }, [id, me?.uid]);
 
   // Ring timer + auto-refresh while scheduled+paid (so client sees accept instantly)
   useEffect(() => {
@@ -671,42 +730,48 @@ export default function BookingDetails() {
           <div className="flex items-center justify-between mb-4">
             <h1 className="text-2xl font-semibold">Booking Details</h1>
             <div className="flex items-center gap-2">
-              <Badge
-                tone={booking?.paymentStatus === "paid" ? "emerald" : "amber"}
-              >
-                {booking?.paymentStatus || "unpaid"}
-              </Badge>
-              <Badge tone={statusTone(booking?.status)}>
-                {booking?.status}
+              <Badge tone={statusTone(booking?.status, booking?.paymentStatus)}>
+                {getBookingUiLabel(booking)}
               </Badge>
             </div>
           </div>
 
-          {/* STATUS TIMELINE */}
-          <div className="mb-4 text-sm text-zinc-400">
-            <div>Progress:</div>
-            <div className="flex items-center gap-2 mt-1">
-              <Step
-                label="Pending Payment"
-                active={booking?.status === "pending_payment"}
-              />
-              <Line />
-              <Step
-                label="Scheduled / Ringing"
-                active={booking?.status === "scheduled"}
-              />
-              <Line />
-              <Step label="Accepted" active={booking?.status === "accepted"} />
-              <Line />
-              <Step
-                label="Completed"
-                active={booking?.status === "completed"}
-              />
-              <Line />
-              <Step
-                label="Cancelled"
-                active={booking?.status === "cancelled"}
-              />
+          <div className="mb-4 rounded-xl border border-zinc-800 bg-black/30 p-4">
+            <div className="text-sm text-zinc-400">What’s happening</div>
+
+            {stage === "pay" && (
+              <div className="mt-1 text-lg font-semibold">
+                Please complete payment to continue.
+              </div>
+            )}
+
+            {stage === "waiting" && (
+              <div className="mt-1 text-lg font-semibold">
+                Payment confirmed. Waiting for the professional to accept…
+              </div>
+            )}
+
+            {stage === "in_progress" && (
+              <div className="mt-1 text-lg font-semibold">
+                Booking accepted. You can now chat or call.
+              </div>
+            )}
+
+            {stage === "done" && (
+              <div className="mt-1 text-lg font-semibold">
+                Job completed. Thank you!
+              </div>
+            )}
+
+            {stage === "cancelled" && (
+              <div className="mt-1 text-lg font-semibold">
+                This booking was cancelled.
+              </div>
+            )}
+
+            {/* small technical line (optional but helpful) */}
+            <div className="mt-2 text-xs text-zinc-500">
+              status: {booking?.status} • payment: {booking?.paymentStatus}
             </div>
           </div>
 
@@ -822,19 +887,18 @@ export default function BookingDetails() {
           )}
 
           {/* CALLING / RINGING PHASE */}
-          {booking?.paymentStatus === "paid" &&
-            booking?.status === "scheduled" && (
-              <CallingPanel
-                booking={booking}
-                ringSeconds={ringSeconds}
-                ringElapsed={ringElapsed}
-                onCancel={isClient ? onClientCancelNow : null}
-              />
-            )}
+          {stage === "waiting" && (
+            <CallingPanel
+              booking={booking}
+              ringSeconds={ringSeconds}
+              ringElapsed={ringElapsed}
+              onCancel={isClient ? onClientCancelNow : null}
+            />
+          )}
 
           {/* Actions */}
           <div className="flex flex-col gap-3">
-            {canClientPay && (
+            {stage === "pay" && canClientPay && (
               <div className="rounded-xl border border-zinc-800 bg-black/30 p-3 space-y-3">
                 <div className="text-sm font-medium">Choose payment method</div>
                 <PaymentMethodPicker
@@ -913,7 +977,23 @@ export default function BookingDetails() {
                   </Link>
                 )}
 
-              {/* Chat / Call button – only after accept/completed, for both sides */}
+              {/* Support contact (after completion) */}
+              {booking?.status === "completed" &&
+                me?.uid &&
+                (me.uid === booking.clientUid ||
+                  me.uid === booking.proOwnerUid) && (
+                  <a
+                    href={buildSupportMailto({
+                      bookingId: booking._id,
+                      serviceName: svcName,
+                    })}
+                    className="px-4 py-2 rounded-lg border border-amber-700 text-amber-300 text-sm hover:bg-amber-950/40"
+                  >
+                    Contact Support (kpochaout@gmail.com)
+                  </a>
+                )}
+
+              {/* Chat / Call button – only during accepted OR short grace after completed */}
               {showChatButton && booking?._id && (
                 <Link
                   to={`/bookings/${booking._id}/chat`}
@@ -968,11 +1048,14 @@ function Badge({ children, tone = "zinc" }) {
   );
 }
 
-function statusTone(s) {
-  if (s === "accepted" || s === "completed") return "emerald";
-  if (s === "scheduled" || s === "pending_payment") return "sky";
-  if (s === "cancelled") return "amber";
-  return "amber";
+function statusTone(status, paymentStatus) {
+  if (paymentStatus === "refunded") return "amber";
+  if (status === "completed") return "emerald";
+  if (status === "accepted") return "emerald";
+  if (status === "scheduled") return paymentStatus === "paid" ? "sky" : "amber";
+  if (status === "pending_payment") return "amber";
+  if (status === "cancelled") return "amber";
+  return "zinc";
 }
 
 function Step({ label, active }) {
@@ -989,6 +1072,20 @@ function Step({ label, active }) {
 
 function Line() {
   return <div className="flex-1 h-px bg-zinc-700" />;
+}
+
+function buildSupportMailto({ bookingId, serviceName }) {
+  const subject = `Kpocha Touch Support — Booking ${bookingId}`;
+  const body = `Hello Kpocha Touch Support,
+
+Booking ID: ${bookingId}
+Service: ${serviceName}
+
+Explain your issue here...`;
+
+  return `mailto:kpochaout@gmail.com?subject=${encodeURIComponent(
+    subject
+  )}&body=${encodeURIComponent(body)}`;
 }
 
 function CallingPanel({ booking, ringSeconds, ringElapsed, onCancel }) {
