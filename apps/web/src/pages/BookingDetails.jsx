@@ -179,12 +179,29 @@ export default function BookingDetails() {
     [isProOwner, booking]
   );
 
-  // Either client OR pro can complete when status is "accepted"
-  const canComplete = useMemo(
-    () =>
-      !!booking && booking.status === "accepted" && (isClient || isProOwner),
-    [booking, isClient, isProOwner]
+  // Completion policy:
+  // - Client can complete anytime while accepted
+  // - Pro can "request completion" anytime while accepted (no completion yet)
+  // - Pro can force-complete only after fallback window (2h)
+  const canClientComplete = useMemo(
+    () => !!booking && booking.status === "accepted" && isClient,
+    [booking, isClient]
   );
+
+  const canProRequestCompletion = useMemo(
+    () => !!booking && booking.status === "accepted" && isProOwner,
+    [booking, isProOwner]
+  );
+
+  const proCanForceComplete = useMemo(() => {
+    if (!booking || booking.status !== "accepted" || !isProOwner) return false;
+    const acceptedAtMs = booking.acceptedAt
+      ? new Date(booking.acceptedAt).getTime()
+      : 0;
+    if (!acceptedAtMs) return false;
+    const fallbackMs = 2 * 60 * 60 * 1000; // 2 hours (v1 constant)
+    return Date.now() - acceptedAtMs >= fallbackMs;
+  }, [booking, isProOwner]);
 
   const canClientPay = useMemo(
     () =>
@@ -493,22 +510,37 @@ export default function BookingDetails() {
     if (!booking) return;
     setBusy(true);
     try {
-      const updated = await completeBooking(booking._id);
-      setBooking(updated);
+      const res = await completeBooking(booking._id);
+
+      // Our backend now returns { ok:true, action:"requested_client_completion" } when pro clicks early
+      if (res?.action === "requested_client_completion") {
+        alert("Client has been notified to complete the booking.");
+        // keep booking as accepted; optionally refresh from backend truth
+        try {
+          const { data: fresh } = await api.get(
+            `/api/bookings/${encodeURIComponent(booking._id)}`
+          );
+          if (fresh) setBooking(fresh);
+        } catch {}
+        return;
+      }
+
+      // Normal completion returns { ok:true, booking: ... } (or booking directly depending on api wrapper)
+      const updated = res?.booking || res;
+      if (updated) setBooking(updated);
 
       if (isClient) {
         alert(
           "Thank you for confirming. Please remember to leave a review for your professional."
         );
       } else if (isProOwner) {
-        alert(
-          "Job marked as completed. You can now leave a review for this client."
-        );
+        alert("Booking completed. You can now leave a review for this client.");
       } else {
         alert("Booking completed.");
       }
-    } catch {
-      alert("Could not complete booking.");
+    } catch (e) {
+      const msg = e?.response?.data?.message || e?.response?.data?.error;
+      alert(msg || "Could not complete booking.");
     } finally {
       setBusy(false);
     }
@@ -943,13 +975,35 @@ export default function BookingDetails() {
                 </button>
               )}
 
-              {canComplete && (
+              {canClientComplete && (
                 <button
                   onClick={onComplete}
                   disabled={busy}
                   className="rounded-lg border border-sky-700 text-sky-300 px-4 py-2 hover:bg-sky-950/40 disabled:opacity-40"
                 >
                   {busy ? "Working…" : "Mark Completed"}
+                </button>
+              )}
+
+              {canProRequestCompletion && !proCanForceComplete && (
+                <button
+                  onClick={onComplete}
+                  disabled={busy}
+                  className="rounded-lg border border-amber-700 text-amber-300 px-4 py-2 hover:bg-amber-950/40 disabled:opacity-40"
+                  title="Request the client to confirm completion"
+                >
+                  {busy ? "Working…" : "Request Completion"}
+                </button>
+              )}
+
+              {canProRequestCompletion && proCanForceComplete && (
+                <button
+                  onClick={onComplete}
+                  disabled={busy}
+                  className="rounded-lg border border-sky-700 text-sky-300 px-4 py-2 hover:bg-sky-950/40 disabled:opacity-40"
+                  title="Force complete (fallback after 2 hours)"
+                >
+                  {busy ? "Working…" : "Force Complete"}
                 </button>
               )}
 

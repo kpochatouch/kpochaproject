@@ -34,6 +34,48 @@ export default function BookingAlert({
     }
   }, [playSound, soundSrc]);
 
+  // 🔓 Unlock audio on first user gesture (mobile autoplay policy)
+  useEffect(() => {
+    if (!playSound) return;
+
+    function unlock() {
+      try {
+        if (!audioRef.current) return;
+
+        // play a tiny silent tick then pause — this unlocks audio on mobile
+        audioRef.current.volume = 0;
+        const p = audioRef.current.play();
+        if (p && typeof p.then === "function") {
+          p.then(() => {
+            audioRef.current.pause();
+            audioRef.current.currentTime = 0;
+            audioRef.current.volume = 1;
+          }).catch(() => {
+            // keep trying on next gesture
+          });
+        } else {
+          audioRef.current.pause();
+          audioRef.current.currentTime = 0;
+          audioRef.current.volume = 1;
+        }
+
+        window.removeEventListener("pointerdown", unlock);
+        window.removeEventListener("touchstart", unlock);
+        window.removeEventListener("keydown", unlock);
+      } catch {}
+    }
+
+    window.addEventListener("pointerdown", unlock, { once: true });
+    window.addEventListener("touchstart", unlock, { once: true });
+    window.addEventListener("keydown", unlock, { once: true });
+
+    return () => {
+      window.removeEventListener("pointerdown", unlock);
+      window.removeEventListener("touchstart", unlock);
+      window.removeEventListener("keydown", unlock);
+    };
+  }, [playSound]);
+
   async function refreshAndEnqueue() {
     try {
       const data = await getProBookings();

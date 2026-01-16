@@ -157,28 +157,16 @@ export default function ProDashboard() {
         }
       }
 
-      // optimistic UI: mark as completed
-      setItems((prev) =>
-        prev.map((b) =>
-          b._id === id
-            ? {
-                ...b,
-                status: "completed",
-                completedAt: new Date().toISOString(),
-                meta: {
-                  ...(b.meta || {}),
-                  completedBy: "pro", // frontend hint (backend is source of truth)
-                  ...(payload.completionNote
-                    ? { completionNote: payload.completionNote }
-                    : {}),
-                },
-              }
-            : b
-        )
-      );
+      const res = await completeBooking(id, payload);
 
-      await completeBooking(id, payload);
+      if (res?.action === "requested_client_completion") {
+        flashOK("Client notified to complete the booking.");
+        load();
+        return;
+      }
+
       flashOK("Booking completed.");
+      load();
     } catch (e) {
       console.error(e);
       const msg = e?.response?.data?.message || e?.response?.data?.error;

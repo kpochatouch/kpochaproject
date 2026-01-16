@@ -1,7 +1,7 @@
 // apps/web/src/pages/BookingChat.jsx
-import { useParams, useLocation } from "react-router-dom";
+import { useParams, useLocation, useNavigate, Link } from "react-router-dom";
 import { useEffect, useMemo, useState } from "react";
-import { api, connectSocket, initiateCall } from "../lib/api";
+import { api, connectSocket, initiateCall, completeBooking } from "../lib/api";
 import { useMe } from "../context/MeContext.jsx";
 import ChatPane from "../components/ChatPane";
 import CallSheet from "../components/CallSheet";
@@ -22,8 +22,9 @@ function formatMoney(kobo = 0) {
 export default function BookingChat() {
   const { bookingId } = useParams();
   const location = useLocation();
+  const navigate = useNavigate();
 
-  // ?call=audio | ?call=video | null
+  // Optional: auto-start call via URL (?call=audio or ?call=video)
   const startCallType = useMemo(
     () => new URLSearchParams(location.search).get("call"),
     [location.search]
@@ -49,7 +50,28 @@ export default function BookingChat() {
   const [booking, setBooking] = useState(null);
   const [loadingBooking, setLoadingBooking] = useState(true);
 
-  // booking chat room id (for messages)
+  const [busy, setBusy] = useState(false);
+
+  const isClient = useMemo(() => {
+    if (!booking || !myUid) return false;
+    return String(myUid) === String(booking.clientUid);
+  }, [booking, myUid]);
+
+  const isProOwner = useMemo(() => {
+    if (!booking || !myUid) return false;
+    return String(myUid) === String(booking.proOwnerUid);
+  }, [booking, myUid]);
+
+  const proCanForceComplete = useMemo(() => {
+    if (!booking || booking.status !== "accepted" || !isProOwner) return false;
+    const acceptedAtMs = booking.acceptedAt
+      ? new Date(booking.acceptedAt).getTime()
+      : 0;
+    if (!acceptedAtMs) return false;
+    return Date.now() - acceptedAtMs >= 2 * 60 * 60 * 1000; // 2h
+  }, [booking, isProOwner]);
+
+  // Booking Chat room for this booking
   const room = useMemo(
     () => (bookingId ? `booking:${bookingId}` : null),
     [bookingId]
@@ -81,6 +103,18 @@ export default function BookingChat() {
     };
   }, [bookingId]);
 
+  // ✅ Auto-close chat if booking is already completed (or becomes completed via refresh)
+  useEffect(() => {
+    if (!bookingId) return;
+    if (booking?.status !== "completed") return;
+
+    // close call sheet if open
+    setCallState((prev) => ({ ...prev, open: false }));
+
+    // leave chat immediately
+    navigate(`/bookings/${bookingId}`, { replace: true });
+  }, [booking?.status, bookingId, navigate]);
+
   const svcName = useMemo(
     () =>
       booking?.service?.serviceName ||
@@ -102,7 +136,7 @@ export default function BookingChat() {
     [booking]
   );
 
-  // 🔎 figure out who the *other* person is for this booking
+  // Determine the other participant (client ↔ professional)
   const peerUid = useMemo(() => {
     if (!booking || !myUid) return null;
 
@@ -216,6 +250,29 @@ export default function BookingChat() {
     };
   }, [socket]);
 
+  // ✅ Auto-close chat immediately when socket announces booking completion
+  useEffect(() => {
+    if (!socket || !bookingId) return;
+
+    const handleCompleted = (p) => {
+      const bid = String(p?.bookingId || "");
+      if (bid !== String(bookingId)) return;
+
+      setCallState((prev) => ({ ...prev, open: false }));
+      navigate(`/bookings/${bookingId}`, { replace: true });
+    };
+
+    try {
+      socket.on("booking:completed", handleCompleted);
+    } catch {}
+
+    return () => {
+      try {
+        socket.off("booking:completed", handleCompleted);
+      } catch {}
+    };
+  }, [socket, bookingId, navigate]);
+
   // 🔥 Auto-start call when URL has ?call=audio or ?call=video
   useEffect(() => {
     if (!startCallType) return; // no call param → do nothing
@@ -279,9 +336,40 @@ export default function BookingChat() {
         callType: ack.callType || nextType,
         role: "caller",
       });
+
+      // remove ?call=... so it won't auto-start again on refresh/back
+      try {
+        navigate(`/bookings/${bookingId}/chat`, { replace: true });
+      } catch {}
     } catch (e) {
       console.error("[BookingChat] start call failed:", e);
       alert("Could not start call. Please try again.");
+    }
+  }
+
+  async function onComplete() {
+    if (!bookingId) return;
+    setBusy(true);
+    try {
+      const res = await completeBooking(bookingId);
+
+      if (res?.action === "requested_client_completion") {
+        alert("Client has been notified to complete the booking.");
+        return;
+      }
+
+      // completion succeeded: redirect will happen via socket / booking status effect
+      try {
+        const { data: fresh } = await api.get(
+          `/api/bookings/${encodeURIComponent(bookingId)}`
+        );
+        if (fresh) setBooking(fresh);
+      } catch {}
+    } catch (e) {
+      const msg = e?.response?.data?.message || e?.response?.data?.error;
+      alert(msg || "Could not complete booking.");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -298,8 +386,16 @@ export default function BookingChat() {
     <div className="max-w-4xl mx-auto p-4 space-y-3">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          {/* Mobile back button */}
-          <MobileBackButton fallback="/my-bookings" />
+          {/* Mobile back button goes back to booking details */}
+          <MobileBackButton fallback={`/bookings/${bookingId}`} />
+
+          {/* Desktop-visible back link */}
+          <Link
+            to={`/bookings/${bookingId}`}
+            className="hidden sm:inline-flex px-3 py-1.5 rounded-lg border border-zinc-800 text-sm hover:bg-zinc-900"
+          >
+            ← Booking Details
+          </Link>
 
           <div>
             <h1 className="text-lg font-semibold">Booking Chat</h1>
@@ -310,6 +406,46 @@ export default function BookingChat() {
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Completion buttons (only while accepted) */}
+          {booking?.status === "accepted" && isClient && (
+            <button
+              onClick={onComplete}
+              disabled={busy}
+              className="px-3 py-2 rounded-lg border border-sky-700 text-sky-300 text-sm hover:bg-sky-950/40 disabled:opacity-40"
+              type="button"
+            >
+              {busy ? "Working…" : "Mark Completed"}
+            </button>
+          )}
+
+          {booking?.status === "accepted" &&
+            isProOwner &&
+            !proCanForceComplete && (
+              <button
+                onClick={onComplete}
+                disabled={busy}
+                className="px-3 py-2 rounded-lg border border-amber-700 text-amber-300 text-sm hover:bg-amber-950/40 disabled:opacity-40"
+                type="button"
+                title="Request the client to confirm completion"
+              >
+                {busy ? "Working…" : "Request Completion"}
+              </button>
+            )}
+
+          {booking?.status === "accepted" &&
+            isProOwner &&
+            proCanForceComplete && (
+              <button
+                onClick={onComplete}
+                disabled={busy}
+                className="px-3 py-2 rounded-lg border border-sky-700 text-sky-300 text-sm hover:bg-sky-950/40 disabled:opacity-40"
+                type="button"
+                title="Force complete (fallback after 2 hours)"
+              >
+                {busy ? "Working…" : "Force Complete"}
+              </button>
+            )}
+
           {/* Voice / audio call */}
           <button
             onClick={() => handleStartCall("audio")}

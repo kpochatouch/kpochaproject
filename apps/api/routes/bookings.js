@@ -872,6 +872,13 @@ router.put("/bookings/:id/complete", requireAuth, async (req, res) => {
       return res.status(403).json({ error: "Forbidden" });
     }
 
+    // ✅ completion/request is only valid from ACCEPTED state
+    if (b.status !== "accepted") {
+      return res
+        .status(400)
+        .json({ error: `Cannot complete when status is ${b.status}` });
+    }
+
     // ✅ RULE: Client completes. Pro can only complete after fallback window.
     if (isProOwner && !isAdmin && !isClient) {
       const hours = await getCompletionProFallbackHours(); // usually 2
@@ -890,20 +897,57 @@ router.put("/bookings/:id/complete", requireAuth, async (req, res) => {
       const elapsedMs = Date.now() - acceptedAt;
 
       if (elapsedMs < waitMs) {
+        // ✅ V1 policy: pro cannot complete yet, but pro CAN request client completion.
+        // Return 200 OK so FE can show "Client notified" instead of treating as error.
         const waitSeconds = Math.max(0, Math.ceil((waitMs - elapsedMs) / 1000));
-        return res.status(403).json({
-          error: "client_must_complete_first",
-          message: `Client should mark this completed. If they don't respond, you can complete after ${hours} hour(s).`,
+
+        // Anti-spam cooldown (optional but recommended)
+        b.meta = b.meta || {};
+        const lastReqAtMs = b.meta.proRequestedCompletionAt
+          ? new Date(b.meta.proRequestedCompletionAt).getTime()
+          : 0;
+
+        const cooldownMs = 10 * 60 * 1000; // 10 minutes
+        const nowMs = Date.now();
+        const canSend = !lastReqAtMs || nowMs - lastReqAtMs >= cooldownMs;
+
+        if (canSend && b.clientUid) {
+          try {
+            await createNotification({
+              toUid: b.clientUid,
+              fromUid: b.proOwnerUid || null,
+              type: "booking_complete_requested",
+              title: "Please complete your booking",
+              body: "Your professional says the job is done. Please mark the booking as completed in the app.",
+              data: {
+                bookingId: b._id.toString(),
+                status: b.status,
+                paymentStatus: b.paymentStatus,
+              },
+            });
+
+            b.meta.proRequestedCompletionAt = new Date();
+            b.meta.proRequestedCompletionCount =
+              Number(b.meta.proRequestedCompletionCount || 0) + 1;
+
+            await b.save();
+          } catch (e) {
+            console.warn(
+              "[bookings:complete] pro request reminder notify failed:",
+              e?.message || e
+            );
+            // still return ok so UI doesn't break
+          }
+        }
+
+        return res.json({
+          ok: true,
+          action: "requested_client_completion",
           waitSeconds,
+          message:
+            "Client has been notified to complete the booking. If they don't respond, you can force-complete after the fallback window.",
         });
       }
-    }
-
-    // Only allow completion from ACCEPTED state
-    if (b.status !== "accepted") {
-      return res
-        .status(400)
-        .json({ error: `Cannot complete when status is ${b.status}` });
     }
 
     if (b.paymentStatus !== "paid") {
