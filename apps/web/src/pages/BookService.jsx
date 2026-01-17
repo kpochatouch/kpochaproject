@@ -3,28 +3,9 @@
 // Assumes: user is logged in, client register done, service + price came from Browse.
 
 import { useParams, useLocation, useNavigate, Link } from "react-router-dom";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { getAuth, onAuthStateChanged } from "firebase/auth";
-
-function usePaystackReady() {
-  const [ready, setReady] = useState(!!window.PaystackPop);
-  useEffect(() => {
-    if (window.PaystackPop) {
-      setReady(true);
-      return;
-    }
-    const id = "paystack-inline-sdk";
-    if (document.getElementById(id)) return;
-    const s = document.createElement("script");
-    s.id = id;
-    s.src = "https://js.paystack.co/v1/inline.js";
-    s.async = true;
-    s.onload = () => setReady(!!window.PaystackPop);
-    document.body.appendChild(s);
-  }, []);
-  return ready;
-}
 
 // helper: get firebase id token, waiting briefly if auth not yet ready
 async function getIdTokenOrNull(timeoutMs = 5000) {
@@ -79,7 +60,6 @@ export default function BookService() {
   const { barberId } = useParams();
   const nav = useNavigate();
   const location = useLocation();
-  const paystackReady = usePaystackReady();
 
   // carried from Browse / BarberCard
   const carry = location.state || {};
@@ -206,7 +186,6 @@ export default function BookService() {
 
     return () => {
       alive = false;
-      clearTimeout(okTimer.current);
       if (typeof unsub === "function") unsub();
     };
   }, [barberId]);
@@ -235,102 +214,6 @@ export default function BookService() {
             : barber.services[0]?.price || 0
         )
       : 0;
-
-  async function startPaystackInline(booking, idToken = null) {
-    if (!window.PaystackPop || typeof window.PaystackPop.setup !== "function") {
-      throw new Error("paystack_not_ready");
-    }
-    const email = me?.email || "customer@example.com";
-
-    return new Promise((resolve, reject) => {
-      const handler = window.PaystackPop.setup({
-        key: String(import.meta.env.VITE_PAYSTACK_PUBLIC_KEY || ""),
-        email,
-        amount: Number(booking.amountKobo),
-        ref: "BOOKING-" + booking._id,
-        metadata: {
-          custom_fields: [
-            {
-              display_name: "Service",
-              variable_name: "service",
-              value: serviceName,
-            },
-            {
-              display_name: "Address",
-              variable_name: "address",
-              value: address.trim(),
-            },
-            coords
-              ? {
-                  display_name: "GPS",
-                  variable_name: "gps",
-                  value: `${coords.lat},${coords.lng}`,
-                }
-              : null,
-          ].filter(Boolean),
-        },
-
-        // NOTE: plain function; async work inside
-        callback: function (res) {
-          (async () => {
-            try {
-              const headers = idToken
-                ? { Authorization: `Bearer ${idToken}` }
-                : {};
-
-              // optional: verify immediately
-              await api.post(
-                "/api/payments/verify",
-                { bookingId: booking._id, reference: res.reference },
-                { headers }
-              );
-
-              // save info for PaymentConfirm.jsx
-              sessionStorage.setItem(
-                "pay_ref",
-                JSON.stringify({
-                  bookingId: booking._id,
-                  reference: res.reference,
-                })
-              );
-
-              // go to payment confirm page (not booking details)
-              nav(
-                `/payment/confirm?bookingId=${
-                  booking._id
-                }&reference=${encodeURIComponent(res.reference)}`
-              );
-
-              resolve();
-            } catch (e) {
-              console.error(
-                "verify payment error:",
-                e?.response?.data || e?.message || e
-              );
-              reject(e);
-            }
-          })();
-        },
-
-        onClose: function () {
-          reject(new Error("pay_cancelled"));
-        },
-      });
-
-      handler.openIframe();
-    });
-  }
-
-  async function startPaystackRedirect(booking) {
-    // fallback if inline fails
-    const { data } = await api.post("/api/payments/init", {
-      bookingId: booking._id,
-      amountKobo: booking.amountKobo,
-      email: me?.email || "customer@example.com",
-    });
-    if (!data?.authorization_url) throw new Error("paystack_init_failed");
-    window.location.href = data.authorization_url;
-  }
 
   async function handleBook() {
     setErr("");
