@@ -75,7 +75,7 @@ export async function createCall({
     : [
         { uid: callerUid, role: "caller" },
         ...Array.from(
-          new Set(Array.isArray(receiverUids) ? receiverUids : []),
+          new Set(Array.isArray(receiverUids) ? receiverUids : [])
         ).map((u) => ({
           uid: u,
           role: "receiver",
@@ -108,6 +108,24 @@ export async function createCall({
     throw err;
   }
 
+  // ✅ Normalize caller identity so receiver UI never shows "Unknown caller"
+  // We accept different meta shapes from different callers (DM vs booking)
+  const callerName =
+    meta?.fromName ||
+    meta?.callerName ||
+    meta?.fromLabel ||
+    meta?.displayName ||
+    meta?.name ||
+    null;
+
+  const callerAvatar =
+    meta?.fromAvatar ||
+    meta?.callerAvatar ||
+    meta?.avatarUrl ||
+    meta?.photoUrl ||
+    meta?.photoURL ||
+    null;
+
   const payload = {
     id: String(call._id),
     callId: call.callId,
@@ -133,6 +151,23 @@ export async function createCall({
       emitToUser(uid, "call:incoming", {
         ...payload,
         toUid: uid,
+
+        // ✅ top-level compatibility (some UIs read these directly)
+        fromUid: callerUid,
+        callerName: callerName || String(callerUid),
+        callerAvatar: callerAvatar || "",
+
+        // ✅ meta compatibility (your App.jsx reads meta.fromName/meta.callerName)
+        meta: {
+          ...(payload.meta || {}),
+          fromUid: callerUid,
+          fromName: callerName || String(callerUid),
+          fromAvatar: callerAvatar || "",
+
+          callerUid,
+          callerName: callerName || String(callerUid),
+          callerAvatar: callerAvatar || "",
+        },
       });
 
       // create app notification (best-effort)
@@ -147,7 +182,7 @@ export async function createCall({
       } catch (e) {
         console.warn(
           "[callService] createNotification(call_incoming) failed:",
-          e?.message || e,
+          e?.message || e
         );
       }
     }
@@ -186,7 +221,7 @@ export async function updateCallStatus(callId, updates = {}) {
   const doc = await CallRecord.findOneAndUpdate(
     { callId },
     { $set: set },
-    { new: true },
+    { new: true }
   );
   if (!doc) throw new Error("call_not_found");
 
@@ -255,7 +290,7 @@ export async function acceptCall(callId, accepterUid) {
   // emit updates
   emitToRoom(call.room, "call:accepted", payload);
   (call.participants || []).forEach((p) =>
-    emitToUser(p.uid, "call:accepted", payload),
+    emitToUser(p.uid, "call:accepted", payload)
   );
 
   return call;
@@ -311,7 +346,7 @@ export async function declineCall(callId, declinerUid, reason = "declined") {
 
   emitToRoom(call.room, "call:declined", payload);
   (call.participants || []).forEach((p) =>
-    emitToUser(p.uid, "call:declined", payload),
+    emitToUser(p.uid, "call:declined", payload)
   );
 
   return call;
@@ -353,7 +388,7 @@ export async function cancelCall(callId, cancelledByUid = null) {
 
   emitToRoom(call.room, "call:cancelled", payload);
   (call.participants || []).forEach((p) =>
-    emitToUser(p.uid, "call:cancelled", payload),
+    emitToUser(p.uid, "call:cancelled", payload)
   );
 
   return call;
@@ -368,7 +403,7 @@ export async function cancelCall(callId, cancelledByUid = null) {
 export async function endCall(
   callId,
   endedStatus = "ended",
-  endedByUid = null,
+  endedByUid = null
 ) {
   if (!callId) throw new Error("callId required");
 
@@ -396,7 +431,7 @@ export async function endCall(
 
   emitToRoom(call.room, "call:ended", payload);
   (call.participants || []).forEach((p) =>
-    emitToUser(p.uid, "call:ended", payload),
+    emitToUser(p.uid, "call:ended", payload)
   );
 
   // If endedStatus indicates missed and no one answered, create missed notifications
@@ -424,7 +459,7 @@ export async function endCall(
       } catch (e) {
         console.warn(
           "[callService] createNotification(call_missed) failed:",
-          e?.message || e,
+          e?.message || e
         );
       }
     }

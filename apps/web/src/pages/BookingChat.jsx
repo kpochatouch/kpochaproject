@@ -36,7 +36,12 @@ export default function BookingChat() {
   const myUid =
     me?.uid || me?.ownerUid || me?._id || me?.id || me?.userId || null;
 
-  const myLabel = me?.displayName || me?.fullName || me?.email || myUid || "me";
+  const myLabel =
+  me?.displayName ||
+  me?.fullName ||
+  me?.email ||
+  (myUid ? `User ${String(myUid).slice(0, 6)}…` : "Unknown");
+
 
   // 🔔 call state for this page (caller only)
   const [callState, setCallState] = useState({

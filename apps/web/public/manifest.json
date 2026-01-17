@@ -4,6 +4,12 @@
   "description": "Connecting you to trusted professionals nationwide",
   "start_url": "/",
   "scope": "/",
+
+  "launch_handler": {
+    "client_mode": "navigate-existing"
+  },
+  "handle_links": "preferred",
+
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#111827",

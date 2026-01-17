@@ -34,7 +34,6 @@ const Signup = lazy(() => import("./pages/Signup.jsx"));
 const BecomePro = lazy(() => import("./pages/BecomePro.jsx"));
 const ProDashboard = lazy(() => import("./pages/ProDashboard.jsx"));
 const Admin = lazy(() => import("./pages/Admin.jsx"));
-const LeaveReview = lazy(() => import("./pages/LeaveReview.jsx"));
 const Settings = lazy(() => import("./pages/Settings.jsx"));
 const ClientSettings = lazy(() => import("./pages/ClientSettings.jsx"));
 const AdminDecline = lazy(() => import("./pages/AdminDecline.jsx"));
@@ -51,6 +50,8 @@ const PostDetail = lazy(() => import("./pages/PostDetail.jsx"));
 const PublicProfile = lazy(() => import("./pages/PublicProfile.jsx"));
 const ForYou = lazy(() => import("./pages/ForYou.jsx"));
 const Inbox = lazy(() => import("./pages/Inbox.jsx"));
+const LeaveReview = lazy(() => import("./pages/LeaveReview.jsx"));
+const LeaveClientReview = lazy(() => import("./pages/LeaveClientReview.jsx"));
 
 /* ---------- Chatbase hook ---------- */
 function useChatbase(enabled) {
@@ -198,11 +199,11 @@ export default function App() {
       if (!payload) return;
       if (
         ["ended", "missed", "cancelled", "declined", "failed"].includes(
-          payload.status,
+          payload.status
         )
       ) {
         setIncomingCall((prev) =>
-          prev && prev.callId === payload.callId ? null : prev,
+          prev && prev.callId === payload.callId ? null : prev
         );
       }
     });
@@ -267,7 +268,6 @@ export default function App() {
             <Route path="/" element={<Home />} />
             <Route path="/browse" element={<Browse />} />
             <Route path="/post/:id" element={<PostDetail />} />
-
             <Route
               path="/for-you"
               element={
@@ -284,19 +284,15 @@ export default function App() {
                 </RequireAuth>
               }
             />
-
             <Route path="/login" element={<Login />} />
-
             <Route path="/signup" element={<Signup />} />
             <Route path="/legal" element={<Legal />} />
             <Route path="/legal/*" element={<Legal />} />
             <Route path="/profile/:username" element={<PublicProfile />} />
             <Route path="/apply/thanks" element={<ApplyThanks />} />
             <Route path="/payment/confirm" element={<PaymentConfirm />} />
-
             {/* Entry to “Find a Pro” flow */}
             <Route path="/find" element={<FindProSmart />} />
-
             {/* Booking page must be authenticated */}
             <Route
               path="/book/:barberId"
@@ -306,7 +302,6 @@ export default function App() {
                 </RequireAuth>
               }
             />
-
             {/* Auth-required core pages */}
             <Route
               path="/compose"
@@ -316,7 +311,6 @@ export default function App() {
                 </RequireAuth>
               }
             />
-
             <Route
               path="/bookings/:id"
               element={
@@ -325,7 +319,6 @@ export default function App() {
                 </RequireAuth>
               }
             />
-
             <Route
               path="/bookings/:bookingId/chat"
               element={
@@ -334,7 +327,6 @@ export default function App() {
                 </RequireAuth>
               }
             />
-
             {/* Review Pages */}
             <Route
               path="/review/:proId"
@@ -348,11 +340,10 @@ export default function App() {
               path="/review-client/:clientUid"
               element={
                 <RequireAuth>
-                  <LeaveReview />
+                  <LeaveClientReview />
                 </RequireAuth>
               }
             />
-
             <Route
               path="/profile"
               element={
@@ -361,7 +352,6 @@ export default function App() {
                 </RequireAuth>
               }
             />
-
             <Route
               path="/wallet"
               element={
@@ -370,7 +360,6 @@ export default function App() {
                 </RequireAuth>
               }
             />
-
             <Route
               path="/my-bookings"
               element={
@@ -379,7 +368,6 @@ export default function App() {
                 </RequireAuth>
               }
             />
-
             <Route
               path="/settings"
               element={
@@ -388,7 +376,6 @@ export default function App() {
                 </RequireAuth>
               }
             />
-
             <Route
               path="/become"
               element={
@@ -397,7 +384,6 @@ export default function App() {
                 </RequireAuth>
               }
             />
-
             <Route
               path="/aws-liveness"
               element={
@@ -406,7 +392,6 @@ export default function App() {
                 </RequireAuth>
               }
             />
-
             <Route
               path="/client/register"
               element={
@@ -415,13 +400,11 @@ export default function App() {
                 </RequireAuth>
               }
             />
-
             {/* legacy /register → client register */}
             <Route
               path="/register"
               element={<Navigate to="/client/register" replace />}
             />
-
             <Route
               path="/deactivate"
               element={
@@ -430,7 +413,6 @@ export default function App() {
                 </RequireAuth>
               }
             />
-
             <Route
               path="/chat"
               element={
@@ -439,7 +421,6 @@ export default function App() {
                 </RequireAuth>
               }
             />
-
             {/* Inbox (message list) */}
             <Route
               path="/inbox"
@@ -449,7 +430,6 @@ export default function App() {
                 </RequireAuth>
               }
             />
-
             {/* Role-based dashboards */}
             <Route
               path="/pro-dashboard"
@@ -459,7 +439,6 @@ export default function App() {
                 </RequireRole>
               }
             />
-
             <Route
               path="/admin"
               element={
@@ -468,7 +447,6 @@ export default function App() {
                 </RequireRole>
               }
             />
-
             <Route
               path="/admin/decline/:id"
               element={
@@ -477,7 +455,6 @@ export default function App() {
                 </RequireRole>
               }
             />
-
             <Route
               path="/risk-logs"
               element={
@@ -486,7 +463,6 @@ export default function App() {
                 </RequireRole>
               }
             />
-
             {/* Catch-all */}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
