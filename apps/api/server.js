@@ -46,6 +46,7 @@ import awsLivenessRoutes from "./routes/awsLiveness.js";
 import redis from "./redis.js";
 import postStatsRouter from "./routes/postStats.js";
 import followRoutes from "./routes/follow.js";
+import reviewsRouter from "./routes/reviews.js";
 // correct (exact filename in your repo)
 import notificationsRoutes from "./routes/notifications.js";
 import matcherRouter from "./routes/matcher.js";
@@ -1207,6 +1208,7 @@ app.use("/api/posts", (req, res, next) => {
 
 app.use("/api", postsRouter);
 app.use("/api", followRoutes);
+app.use("/api", reviewsRouter({ requireAuth }));
 app.use("/api", commentsRouter);
 app.use("/api", paymentsRouter({ requireAuth }));
 app.use("/api", postStatsRouter);
