@@ -206,6 +206,14 @@ router.post("/bookings", requireAuth, async (req, res) => {
       proOwnerUid = pro?.ownerUid || null;
     } catch {}
 
+    // ❌ Prevent booking yourself
+    if (proOwnerUid && String(proOwnerUid) === String(req.user.uid)) {
+      return res.status(400).json({
+        error: "cannot_book_self",
+        message: "You can’t book yourself. Please choose another professional.",
+      });
+    }
+
     const b = await Booking.create({
       clientUid: req.user.uid,
       clientEmail: req.user.email || "",
@@ -344,6 +352,14 @@ router.post("/bookings/instant", requireAuth, async (req, res) => {
       return res.status(400).json({ error: "invalid_proId" });
     }
     const proOwnerUid = proDoc?.ownerUid || null;
+
+    // ❌ Prevent booking yourself
+    if (proOwnerUid && String(proOwnerUid) === String(req.user.uid)) {
+      return res.status(400).json({
+        error: "cannot_book_self",
+        message: "You can’t book yourself. Please choose another professional.",
+      });
+    }
 
     // Normalize and default region
     const normalizedLga = toUpper(lga || proDoc?.lga || "");

@@ -137,7 +137,7 @@ export default function BookService() {
           // client profile may be absent for some users — that's okay
           console.info(
             "[book] no client profile (ok)",
-            innerErr?.response?.data || innerErr?.message || innerErr,
+            innerErr?.response?.data || innerErr?.message || innerErr
           );
         }
 
@@ -162,13 +162,13 @@ export default function BookService() {
               }
             },
             () => {},
-            { enableHighAccuracy: true, timeout: 10000 },
+            { enableHighAccuracy: true, timeout: 10000 }
           );
         }
       } catch (err) {
         console.error(
           "[book] protected fetch error:",
-          err?.response?.data || err?.message || err,
+          err?.response?.data || err?.message || err
         );
         if (alive) setErr("Could not load booking.");
       }
@@ -229,12 +229,12 @@ export default function BookService() {
     typeof carriedAmount !== "undefined"
       ? Number(carriedAmount)
       : Array.isArray(barber?.services) && barber.services.length
-        ? Number(
-            typeof barber.services[0] === "string"
-              ? 0
-              : barber.services[0]?.price || 0,
-          )
-        : 0;
+      ? Number(
+          typeof barber.services[0] === "string"
+            ? 0
+            : barber.services[0]?.price || 0
+        )
+      : 0;
 
   async function startPaystackInline(booking, idToken = null) {
     if (!window.PaystackPop || typeof window.PaystackPop.setup !== "function") {
@@ -282,7 +282,7 @@ export default function BookService() {
               await api.post(
                 "/api/payments/verify",
                 { bookingId: booking._id, reference: res.reference },
-                { headers },
+                { headers }
               );
 
               // save info for PaymentConfirm.jsx
@@ -291,21 +291,21 @@ export default function BookService() {
                 JSON.stringify({
                   bookingId: booking._id,
                   reference: res.reference,
-                }),
+                })
               );
 
               // go to payment confirm page (not booking details)
               nav(
-                `/payment/confirm?bookingId=${booking._id}&reference=${encodeURIComponent(
-                  res.reference,
-                )}`,
+                `/payment/confirm?bookingId=${
+                  booking._id
+                }&reference=${encodeURIComponent(res.reference)}`
               );
 
               resolve();
             } catch (e) {
               console.error(
                 "verify payment error:",
-                e?.response?.data || e?.message || e,
+                e?.response?.data || e?.message || e
               );
               reject(e);
             }
@@ -338,9 +338,20 @@ export default function BookService() {
       nav(`/login?next=/book/${barberId}`);
       return;
     }
+
+    // ❌ Prevent booking yourself (UX guard)
+    if (
+      me?.uid &&
+      barber?.ownerUid &&
+      String(me.uid) === String(barber.ownerUid)
+    ) {
+      setErr("You can’t book yourself. Please choose another professional.");
+      return;
+    }
+
     if (!client?.fullName || !client?.phone) {
       setErr(
-        "Update your client profile (name + phone + address) before booking.",
+        "Update your client profile (name + phone + address) before booking."
       );
       return;
     }
@@ -417,11 +428,11 @@ export default function BookService() {
           if (!avail?.ok) {
             if (avail?.reason === "NO_PRO_AVAILABLE") {
               setErr(
-                "No professional is currently available around this location.",
+                "No professional is currently available around this location."
               );
             } else {
               setErr(
-                "Could not confirm availability. Please try again in a moment.",
+                "Could not confirm availability. Please try again in a moment."
               );
             }
             return; // stop here, do not create booking
@@ -432,7 +443,7 @@ export default function BookService() {
         } catch (e) {
           console.error(
             "[availability] check failed:",
-            e?.response?.data || e?.message || e,
+            e?.response?.data || e?.message || e
           );
           // Fail-soft: you can either block or allow booking when availability fails.
           // I'll allow booking but you can choose to block if you prefer.
@@ -461,7 +472,7 @@ export default function BookService() {
       return;
     } catch (e) {
       console.error("handleBook error:", e?.response?.data || e?.message || e);
-      const serverMsg = e?.response?.data?.error || e?.response?.data?.message;
+      const serverMsg = e?.response?.data?.message || e?.response?.data?.error;
       setErr(serverMsg || "Booking failed. Please try again.");
     } finally {
       setBusy(false);
