@@ -14,8 +14,6 @@ import http from "http";
 import { fileURLToPath } from "url";
 import cron from "node-cron";
 
-import { sweepMatches } from "./workers/assignWorker.js";
-
 // Models & core routers
 import { Application, Pro, proToBarber } from "./models.js";
 import bookingsRouter from "./routes/bookings.js";
@@ -49,7 +47,6 @@ import followRoutes from "./routes/follow.js";
 import reviewsRouter from "./routes/reviews.js";
 // correct (exact filename in your repo)
 import notificationsRoutes from "./routes/notifications.js";
-import matcherRouter from "./routes/matcher.js";
 import { createNotification } from "./services/notificationService.js";
 import activityRoutes from "./routes/activity.js";
 import chatRoutes from "./routes/chat.js";
@@ -1148,10 +1145,6 @@ app.use("/api/bookings", requireAuth, async (req, _res, next) => {
 /* ------------------- Routers ------------------- */
 app.use("/api", bookingsRouter);
 
-// after other app.use("/api", ...) lines (or alongside them)
-app.use("/api", matcherRouter);
-console.log("[api] ✅ Matcher routes mounted");
-
 // wallet write guard (ONLY protect pro-only wallet actions)
 // ✅ client is allowed to: POST /wallet/pay-booking
 // ✅ client is allowed to: GET /wallet/topup/* and GET /wallet/client/me
@@ -2066,17 +2059,6 @@ async function handlePaystackEvent(event) {
 
 /* ------------------- Start ------------------- */
 await initSchedulers();
-
-// optional: clean up stale instant-match entries in Redis
-if (redis) {
-  setInterval(() => {
-    sweepMatches().catch((e) =>
-      console.error("[sweepMatches] err:", e?.message || e)
-    );
-  }, 30_000);
-} else {
-  console.warn("[sweepMatches] Redis not configured — sweep disabled");
-}
 
 try {
   const { default: attachSockets } = await import("./sockets/index.js");
