@@ -1,6 +1,6 @@
 // apps/web/src/pages/ClientWallet.jsx
 import { useEffect, useState } from "react";
-import { api } from "../lib/api";
+import { api, fmtNairaFromKobo } from "../lib/api";
 
 function usePaystackScript() {
   const [ready, setReady] = useState(
@@ -64,7 +64,9 @@ export default function ClientWallet() {
 
         try {
           await refreshWallet();
-        } catch {}
+        } catch (e) {
+          setErr(e?.response?.data?.error || "Failed to load wallet data.");
+        }
       } catch {
         if (alive) setErr("Failed to load wallet.");
       } finally {
@@ -242,7 +244,7 @@ export default function ClientWallet() {
           <section className="grid sm:grid-cols-3 gap-4 mt-6">
             <Card title="Credits (usable for bookings)">
               <div className="text-2xl font-semibold">
-                {fmtNaira(creditsKobo)}
+                ₦{fmtNairaFromKobo(creditsKobo)}
               </div>
             </Card>
 
@@ -286,7 +288,11 @@ export default function ClientWallet() {
                 <ul className="divide-y divide-zinc-800">
                   {txns.map((t, i) => (
                     <li
-                      key={t.id || t._id || `${t.ts || t.createdAt || ""}-${t.amountKobo || 0}-${i}`}
+                      key={
+                        t.id ||
+                        t._id ||
+                        `${t.ts || t.createdAt || ""}-${t.amountKobo || 0}-${i}`
+                      }
                       className="px-4 py-3 flex items-center justify-between"
                     >
                       <div>
@@ -294,10 +300,14 @@ export default function ClientWallet() {
                           {t.type || "entry"}
                         </div>
                         <div className="text-xs text-zinc-500">
-                          {(t.ts || t.createdAt) ? new Date(t.ts || t.createdAt).toLocaleString() : ""}
+                          {t.ts || t.createdAt
+                            ? new Date(t.ts || t.createdAt).toLocaleString()
+                            : ""}
                         </div>
                       </div>
-                      <div className="font-mono">{fmtNaira(t.amountKobo)}</div>
+                      <div className="font-mono">
+                        ₦{fmtNairaFromKobo(t.amountKobo)}
+                      </div>
                     </li>
                   ))}
                 </ul>
