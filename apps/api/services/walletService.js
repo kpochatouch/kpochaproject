@@ -6,7 +6,6 @@ import { Pro } from "../models.js";
 import { createNotification } from "./notificationService.js";
 
 const ESCROW_UID = "__ESCROW__";
-const PAYSTACK_UID = "__PAYSTACK__";
 const PLATFORM_UID = "__PLATFORM__";
 
 /** Ensure a wallet exists for a uid. */
@@ -15,7 +14,7 @@ export async function getOrCreateWallet(ownerUid) {
   const w = await Wallet.findOneAndUpdate(
     { ownerUid },
     { $setOnInsert: { ownerUid } },
-    { new: true, upsert: true, setDefaultsOnInsert: true },
+    { new: true, upsert: true, setDefaultsOnInsert: true }
   );
   return w;
 }
@@ -37,7 +36,7 @@ async function transferAvailableToAvailable(
   toUid,
   amountKobo,
   meta = {},
-  types = {},
+  types = {}
 ) {
   const amt = Math.floor(Number(amountKobo || 0));
   if (!amt || amt <= 0) throw new Error("amount_invalid");
@@ -45,69 +44,68 @@ async function transferAvailableToAvailable(
   const session = await mongoose.startSession();
   let out = null;
 
-  await session.withTransaction(async () => {
-    // ensure wallets exist in txn
-    await Wallet.updateOne(
-      { ownerUid: fromUid },
-      { $setOnInsert: { ownerUid: fromUid } },
-      { upsert: true, session },
-    );
-    await Wallet.updateOne(
-      { ownerUid: toUid },
-      { $setOnInsert: { ownerUid: toUid } },
-      { upsert: true, session },
-    );
+  try {
+    await session.withTransaction(async () => {
+      // ensure wallets exist in txn
+      await Wallet.updateOne(
+        { ownerUid: fromUid },
+        { $setOnInsert: { ownerUid: fromUid } },
+        { upsert: true, session }
+      );
+      await Wallet.updateOne(
+        { ownerUid: toUid },
+        { $setOnInsert: { ownerUid: toUid } },
+        { upsert: true, session }
+      );
 
-    // debit with guard
-    const fromAfter = await Wallet.findOneAndUpdate(
-      { ownerUid: fromUid, availableKobo: { $gte: amt } },
-      { $inc: { availableKobo: -amt } },
-      { new: true, session },
-    );
-    if (!fromAfter) throw new Error("insufficient_funds");
+      // debit with guard
+      const fromAfter = await Wallet.findOneAndUpdate(
+        { ownerUid: fromUid, availableKobo: { $gte: amt } },
+        { $inc: { availableKobo: -amt } },
+        { new: true, session }
+      );
+      if (!fromAfter) throw new Error("insufficient_funds");
 
-    const toAfter = await Wallet.findOneAndUpdate(
-      { ownerUid: toUid },
-      { $inc: { availableKobo: amt } },
-      { new: true, session },
-    );
+      const toAfter = await Wallet.findOneAndUpdate(
+        { ownerUid: toUid },
+        { $inc: { availableKobo: amt } },
+        { new: true, session }
+      );
 
-    const debitType = types.debitType || "transfer_debit";
-    const creditType = types.creditType || "transfer_credit";
+      const debitType = types.debitType || "transfer_debit";
+      const creditType = types.creditType || "transfer_credit";
 
-    await WalletTx.create(
-      [
-        {
-          ownerUid: fromUid,
-          type: debitType,
-          direction: "debit",
-          amountKobo: amt,
-          balancePendingKobo: Number(fromAfter.pendingKobo || 0),
-          balanceAvailableKobo: Number(fromAfter.availableKobo || 0),
-          meta,
-        },
-        {
-          ownerUid: toUid,
-          type: creditType,
-          direction: "credit",
-          amountKobo: amt,
-          balancePendingKobo: Number(toAfter.pendingKobo || 0),
-          balanceAvailableKobo: Number(toAfter.availableKobo || 0),
-          meta,
-        },
-      ],
-      { session },
-    );
+      await WalletTx.create(
+        [
+          {
+            ownerUid: fromUid,
+            type: debitType,
+            direction: "debit",
+            amountKobo: amt,
+            balancePendingKobo: Number(fromAfter.pendingKobo || 0),
+            balanceAvailableKobo: Number(fromAfter.availableKobo || 0),
+            meta,
+          },
+          {
+            ownerUid: toUid,
+            type: creditType,
+            direction: "credit",
+            amountKobo: amt,
+            balancePendingKobo: Number(toAfter.pendingKobo || 0),
+            balanceAvailableKobo: Number(toAfter.availableKobo || 0),
+            meta,
+          },
+        ],
+        { session }
+      );
 
-    out = { ok: true, amt, fromAfter, toAfter };
-  });
+      out = { ok: true, amt, fromAfter, toAfter };
+    });
+  } finally {
+    session.endSession();
+  }
 
-  session.endSession();
   return out;
-}
-
-async function ensurePaystackWallet() {
-  return getOrCreateWallet(PAYSTACK_UID);
 }
 
 async function ensurePlatformWallet() {
@@ -123,7 +121,7 @@ async function ensurePlatformWallet() {
  */
 export async function fundEscrowFromPaystackForBooking(
   booking,
-  { reference = null } = {},
+  { reference = null } = {}
 ) {
   const bookingId = asStrId(booking);
   if (!bookingId) throw new Error("booking_id_missing");
@@ -132,57 +130,80 @@ export async function fundEscrowFromPaystackForBooking(
   if (!amountKobo || amountKobo <= 0) throw new Error("amount_invalid");
 
   await ensureEscrowWallet();
-  await ensurePaystackWallet();
 
-  // ✅ Idempotency: if escrow already funded for this booking, do nothing.
+  // ✅ Idempotency: only fund escrow once per booking
   const already = await WalletTx.findOne({
     ownerUid: ESCROW_UID,
-    type: "escrow_hold_in",
+    type: "escrow_hold_in_card",
     "meta.bookingId": bookingId,
   }).lean();
+
   if (already) return { ok: true, alreadyEscrowed: true };
 
-  // ✅ If inflow exists but escrow is NOT funded, we must still attempt the transfer.
-  // Otherwise a partial failure can leave booking "paid" but escrow empty forever.
-  const inflowExists = await WalletTx.findOne({
-    ownerUid: PAYSTACK_UID,
-    type: "paystack_inflow",
-    "meta.bookingId": bookingId,
-  }).lean();
+  // ✅ Credit escrow + ledger INSIDE ONE transaction
+  const session = await mongoose.startSession();
+  let escrowAfter = null;
 
-  // 1) Credit PAYSTACK wallet (represents money received) — only once
-  if (!inflowExists) {
-    const payAfter = await Wallet.findOneAndUpdate(
-      { ownerUid: PAYSTACK_UID },
-      { $inc: { availableKobo: amountKobo } },
-      { new: true, upsert: true, setDefaultsOnInsert: true },
-    );
+  try {
+    await session.withTransaction(async () => {
+      // ensure escrow wallet exists inside txn
+      await Wallet.updateOne(
+        { ownerUid: ESCROW_UID },
+        { $setOnInsert: { ownerUid: ESCROW_UID } },
+        { upsert: true, session }
+      );
 
-    await WalletTx.create({
-      ownerUid: PAYSTACK_UID,
-      type: "paystack_inflow",
-      direction: "credit",
-      amountKobo,
-      reference: reference || null, // ✅ indexed field
-      balancePendingKobo: Number(payAfter.pendingKobo || 0),
-      balanceAvailableKobo: Number(payAfter.availableKobo || 0),
-      meta: { bookingId, reference: reference || null },
+      // credit escrow.available
+      escrowAfter = await Wallet.findOneAndUpdate(
+        { ownerUid: ESCROW_UID },
+        { $inc: { availableKobo: amountKobo } },
+        { new: true, upsert: true, setDefaultsOnInsert: true, session }
+      );
+
+      // ✅ ADD THIS LINE RIGHT HERE
+      if (!escrowAfter) throw new Error("escrow_wallet_missing_after_update");
+
+      // ledger (idempotency is enforced by your unique index)
+      await WalletTx.create(
+        [
+          {
+            ownerUid: ESCROW_UID,
+            type: "escrow_hold_in_card",
+            direction: "credit",
+            amountKobo,
+            reference: reference || null,
+            balancePendingKobo: Number(escrowAfter.pendingKobo || 0),
+            balanceAvailableKobo: Number(escrowAfter.availableKobo || 0),
+            meta: {
+              bookingId,
+              gateway: "paystack",
+              reference: reference || null,
+              reason: "card_paystack_hold",
+            },
+          },
+        ],
+        { session }
+      );
     });
+  } finally {
+    session.endSession();
   }
 
-  // 2) Transfer PAYSTACK -> ESCROW (uses your atomic ledger transfer)
-  return transferAvailableToAvailable(
-    PAYSTACK_UID,
-    ESCROW_UID,
-    amountKobo,
-    {
-      bookingId,
-      escrow: true,
-      reason: "card_paystack_hold",
-      reference: reference || null,
-    },
-    { debitType: "paystack_to_escrow_out", creditType: "escrow_hold_in" },
-  );
+  // ✅ ADD THIS BLOCK RIGHT HERE (after WalletTx.create, before return)
+  try {
+    await Booking.updateOne(
+      { _id: bookingId }, // bookingId is already a string of the ObjectId
+      {
+        $set: {
+          "meta.escrowFunded": true,
+          "meta.escrowFundedAt": new Date(),
+          "meta.escrowReference": reference || null,
+        },
+      }
+    );
+  } catch {}
+
+  return { ok: true, amountKobo, escrowAfter };
 }
 
 export async function holdFundsInEscrowForBooking(booking) {
@@ -206,14 +227,14 @@ export async function holdFundsInEscrowForBooking(booking) {
     ESCROW_UID,
     booking.amountKobo,
     { bookingId, escrow: true, reason: "booking_hold" },
-    { debitType: "booking_hold", creditType: "escrow_hold_in" },
+    { debitType: "booking_hold", creditType: "escrow_hold_in_wallet" }
   );
 }
 
 export async function refundEscrowToClientForBooking(
   booking,
   refundAmountKobo,
-  meta = {},
+  meta = {}
 ) {
   const bookingId = asStrId(booking);
   if (!bookingId) throw new Error("booking_id_missing");
@@ -234,7 +255,7 @@ export async function refundEscrowToClientForBooking(
     booking.clientUid,
     refundAmountKobo,
     { bookingId, escrow: true, ...meta },
-    { debitType: "escrow_refund_out", creditType: "booking_refund_wallet" },
+    { debitType: "escrow_refund_out", creditType: "booking_refund_wallet" }
   );
 }
 
@@ -296,7 +317,7 @@ async function getClientCancelFeePercentAfterAccept() {
   if (fresh() && _cache.cancelFeePct != null) return _cache.cancelFeePct;
   const s = await readSettingsDoc();
   const fromSettings = Number(
-    s?.bookingRules?.clientCancelFeePercentAfterAccept,
+    s?.bookingRules?.clientCancelFeePercentAfterAccept
   );
   const envPct = envNumber("CLIENT_CANCEL_FEE_AFTER_ACCEPT_PCT", 3);
   const pct = Number.isFinite(fromSettings) ? fromSettings : envPct;
@@ -398,109 +419,113 @@ export async function creditProPendingForBooking(booking, meta = {}) {
   const session = await mongoose.startSession();
   let result = null;
 
-  await session.withTransaction(async () => {
-    // Ensure wallets exist
-    await Wallet.updateOne(
-      { ownerUid: ESCROW_UID },
-      { $setOnInsert: { ownerUid: ESCROW_UID } },
-      { upsert: true, session },
-    );
-    await Wallet.updateOne(
-      { ownerUid },
-      { $setOnInsert: { ownerUid } },
-      { upsert: true, session },
-    );
-    await Wallet.updateOne(
-      { ownerUid: PLATFORM_UID },
-      { $setOnInsert: { ownerUid: PLATFORM_UID } },
-      { upsert: true, session },
-    );
+  try {
+    await session.withTransaction(async () => {
+      // Ensure wallets exist
+      await Wallet.updateOne(
+        { ownerUid: ESCROW_UID },
+        { $setOnInsert: { ownerUid: ESCROW_UID } },
+        { upsert: true, session }
+      );
+      await Wallet.updateOne(
+        { ownerUid },
+        { $setOnInsert: { ownerUid } },
+        { upsert: true, session }
+      );
+      await Wallet.updateOne(
+        { ownerUid: PLATFORM_UID },
+        { $setOnInsert: { ownerUid: PLATFORM_UID } },
+        { upsert: true, session }
+      );
 
-    // Debit escrow.available for BOTH pro + platform in one go (guard)
-    const totalOut = proShareKobo + platformShareKobo;
+      // Debit escrow.available for BOTH pro + platform in one go (guard)
+      const totalOut = proShareKobo + platformShareKobo;
 
-    const escrowAfter = await Wallet.findOneAndUpdate(
-      { ownerUid: ESCROW_UID, availableKobo: { $gte: totalOut } },
-      { $inc: { availableKobo: -totalOut } },
-      { new: true, session },
-    );
-    if (!escrowAfter) throw new Error("escrow_insufficient");
+      const escrowAfter = await Wallet.findOneAndUpdate(
+        { ownerUid: ESCROW_UID, availableKobo: { $gte: totalOut } },
+        { $inc: { availableKobo: -totalOut } },
+        { new: true, session }
+      );
+      if (!escrowAfter) throw new Error("escrow_insufficient");
 
-    // Credit pro.pending + earned
-    const proAfter = await Wallet.findOneAndUpdate(
-      { ownerUid },
-      { $inc: { pendingKobo: proShareKobo, earnedKobo: proShareKobo } },
-      { new: true, session },
-    );
+      // Credit pro.pending + earned
+      const proAfter = await Wallet.findOneAndUpdate(
+        { ownerUid },
+        { $inc: { pendingKobo: proShareKobo, earnedKobo: proShareKobo } },
+        { new: true, session }
+      );
 
-    // Credit platform.available
-    const platformAfter = await Wallet.findOneAndUpdate(
-      { ownerUid: PLATFORM_UID },
-      { $inc: { availableKobo: platformShareKobo } },
-      { new: true, session },
-    );
+      // Credit platform.available
+      const platformAfter = await Wallet.findOneAndUpdate(
+        { ownerUid: PLATFORM_UID },
+        { $inc: { availableKobo: platformShareKobo } },
+        { new: true, session }
+      );
 
-    // Ledger: escrow out + pro funded + platform commission
-    await WalletTx.create(
-      [
-        // --- pro ---
-        {
-          ownerUid: ESCROW_UID,
-          type: "escrow_release_to_pro",
-          direction: "debit",
-          amountKobo: proShareKobo,
-          balancePendingKobo: Number(escrowAfter.pendingKobo || 0),
-          balanceAvailableKobo: Number(escrowAfter.availableKobo || 0),
-          meta: { bookingId: bookingIdStr, proPct, ...meta },
-        },
-        {
-          ownerUid,
-          type: "booking_fund",
-          direction: "credit",
-          amountKobo: proShareKobo,
-          balancePendingKobo: Number(proAfter.pendingKobo || 0),
-          balanceAvailableKobo: Number(proAfter.availableKobo || 0),
-          meta: { bookingId: bookingIdStr, proPct, ...meta },
-        },
+      // Ledger: escrow out + pro funded + platform commission
+      await WalletTx.create(
+        [
+          // --- pro ---
+          {
+            ownerUid: ESCROW_UID,
+            type: "escrow_release_to_pro",
+            direction: "debit",
+            amountKobo: proShareKobo,
+            balancePendingKobo: Number(escrowAfter.pendingKobo || 0),
+            balanceAvailableKobo: Number(escrowAfter.availableKobo || 0),
+            meta: { bookingId: bookingIdStr, proPct, ...meta },
+          },
+          {
+            ownerUid,
+            type: "booking_fund",
+            direction: "credit",
+            amountKobo: proShareKobo,
+            balancePendingKobo: Number(proAfter.pendingKobo || 0),
+            balanceAvailableKobo: Number(proAfter.availableKobo || 0),
+            meta: { bookingId: bookingIdStr, proPct, ...meta },
+          },
 
-        // --- platform ---
-        ...(platformShareKobo > 0
-          ? [
-              {
-                ownerUid: ESCROW_UID,
-                type: "escrow_release_to_platform",
-                direction: "debit",
-                amountKobo: platformShareKobo,
-                balancePendingKobo: Number(escrowAfter.pendingKobo || 0),
-                balanceAvailableKobo: Number(escrowAfter.availableKobo || 0),
-                meta: { bookingId: bookingIdStr, platformPct, ...meta },
-              },
-              {
-                ownerUid: PLATFORM_UID,
-                type: "platform_commission",
-                direction: "credit",
-                amountKobo: platformShareKobo,
-                balancePendingKobo: Number(platformAfter.pendingKobo || 0),
-                balanceAvailableKobo: Number(platformAfter.availableKobo || 0),
-                meta: { bookingId: bookingIdStr, platformPct, ...meta },
-              },
-            ]
-          : []),
-      ],
-      { session },
-    );
+          // --- platform ---
+          ...(platformShareKobo > 0
+            ? [
+                {
+                  ownerUid: ESCROW_UID,
+                  type: "escrow_release_to_platform",
+                  direction: "debit",
+                  amountKobo: platformShareKobo,
+                  balancePendingKobo: Number(escrowAfter.pendingKobo || 0),
+                  balanceAvailableKobo: Number(escrowAfter.availableKobo || 0),
+                  meta: { bookingId: bookingIdStr, platformPct, ...meta },
+                },
+                {
+                  ownerUid: PLATFORM_UID,
+                  type: "platform_commission",
+                  direction: "credit",
+                  amountKobo: platformShareKobo,
+                  balancePendingKobo: Number(platformAfter.pendingKobo || 0),
+                  balanceAvailableKobo: Number(
+                    platformAfter.availableKobo || 0
+                  ),
+                  meta: { bookingId: bookingIdStr, platformPct, ...meta },
+                },
+              ]
+            : []),
+        ],
+        { session }
+      );
 
-    result = {
-      ok: true,
-      wallet: proAfter,
-      proPct,
-      platformPct,
-      creditedKobo: proShareKobo,
-      platformCreditedKobo: platformShareKobo,
-    };
-  });
-
-  session.endSession();
+      result = {
+        ok: true,
+        wallet: proAfter,
+        proPct,
+        platformPct,
+        creditedKobo: proShareKobo,
+        platformCreditedKobo: platformShareKobo,
+      };
+    });
+  } finally {
+    session.endSession();
+  }
 
   // (optional notification)
   try {
@@ -528,7 +553,7 @@ export async function creditProPendingForBooking(booking, meta = {}) {
 export async function releasePendingToAvailable(
   ownerUid,
   amountKobo = null,
-  meta = {},
+  meta = {}
 ) {
   if (!ownerUid) throw new Error("ownerUid_required");
 
@@ -545,7 +570,7 @@ export async function releasePendingToAvailable(
   const after = await Wallet.findOneAndUpdate(
     { ownerUid, pendingKobo: { $gte: amt } },
     { $inc: { pendingKobo: -amt, availableKobo: amt } },
-    { new: true },
+    { new: true }
   );
   if (!after) throw new Error("insufficient_pending");
 
@@ -575,7 +600,7 @@ export async function withdrawAvailable(ownerUid, amountKobo, meta = {}) {
   const after = await Wallet.findOneAndUpdate(
     { ownerUid, availableKobo: { $gte: amt } },
     { $inc: { availableKobo: -amt, withdrawnKobo: amt } },
-    { new: true },
+    { new: true }
   );
   if (!after) throw new Error("insufficient_available");
 
@@ -613,89 +638,92 @@ export async function withdrawPendingWithFee(ownerUid, amountKobo, meta = {}) {
   const session = await mongoose.startSession();
   let out = null;
 
-  await session.withTransaction(async () => {
-    // 1) Guard + move Pro: pending -> available (net)
-    const proAfter = await Wallet.findOneAndUpdate(
-      { ownerUid, pendingKobo: { $gte: amt } },
-      {
-        $inc: {
-          pendingKobo: -amt,
-          availableKobo: net, // ✅ only the net hits the pro available
+  try {
+    await session.withTransaction(async () => {
+      // 1) Guard + move Pro: pending -> available (net)
+      const proAfter = await Wallet.findOneAndUpdate(
+        { ownerUid, pendingKobo: { $gte: amt } },
+        {
+          $inc: {
+            pendingKobo: -amt,
+            availableKobo: net, // ✅ only the net hits the pro available
+          },
         },
-      },
-      { new: true, session },
-    );
-    if (!proAfter) throw new Error("insufficient_pending");
-
-    // 2) Credit Platform wallet with fee
-    let platformAfter = null;
-    if (fee > 0) {
-      platformAfter = await Wallet.findOneAndUpdate(
-        { ownerUid: PLATFORM_UID },
-        { $inc: { availableKobo: fee } },
-        { new: true, upsert: true, setDefaultsOnInsert: true, session },
+        { new: true, session }
       );
-    }
+      if (!proAfter) throw new Error("insufficient_pending");
 
-    // 3) Ledger entries
-    const txs = [];
+      // 2) Credit Platform wallet with fee
+      let platformAfter = null;
+      if (fee > 0) {
+        platformAfter = await Wallet.findOneAndUpdate(
+          { ownerUid: PLATFORM_UID },
+          { $inc: { availableKobo: fee } },
+          { new: true, upsert: true, setDefaultsOnInsert: true, session }
+        );
+      }
 
-    // Pro: we debited full pending (amt)
-    txs.push({
-      ownerUid,
-      type: "withdraw_pending",
-      direction: "debit",
-      amountKobo: amt,
-      balancePendingKobo: Number(proAfter.pendingKobo || 0),
-      balanceAvailableKobo: Number(proAfter.availableKobo || 0),
-      meta: { ...meta, feeKobo: fee, feePct, netKobo: net },
-    });
+      // 3) Ledger entries
+      const txs = [];
 
-    // Pro: net credit to available
-    if (net > 0) {
+      // Pro: we debited full pending (amt)
       txs.push({
         ownerUid,
-        type: "credit_available",
-        direction: "credit",
-        amountKobo: net,
+        type: "withdraw_pending",
+        direction: "debit",
+        amountKobo: amt,
         balancePendingKobo: Number(proAfter.pendingKobo || 0),
         balanceAvailableKobo: Number(proAfter.availableKobo || 0),
-        meta: { ...meta, source: "withdraw_pending" },
+        meta: { ...meta, feeKobo: fee, feePct, netKobo: net },
       });
-    }
 
-    // Platform: fee income
-    if (fee > 0) {
-      txs.push({
-        ownerUid: PLATFORM_UID,
-        type: "instant_cashout_fee",
-        direction: "credit",
-        amountKobo: fee,
-        balancePendingKobo: Number(platformAfter?.pendingKobo || 0),
-        balanceAvailableKobo: Number(platformAfter?.availableKobo || 0),
-        meta: {
-          ...meta,
-          fromUid: ownerUid,
-          source: "withdraw_pending",
-          feePct,
-        },
-      });
-    }
+      // Pro: net credit to available
+      if (net > 0) {
+        txs.push({
+          ownerUid,
+          type: "credit_available",
+          direction: "credit",
+          amountKobo: net,
+          balancePendingKobo: Number(proAfter.pendingKobo || 0),
+          balanceAvailableKobo: Number(proAfter.availableKobo || 0),
+          meta: { ...meta, source: "withdraw_pending" },
+        });
+      }
 
-    await WalletTx.create(txs, { session });
+      // Platform: fee income
+      if (fee > 0) {
+        txs.push({
+          ownerUid: PLATFORM_UID,
+          type: "instant_cashout_fee",
+          direction: "credit",
+          amountKobo: fee,
+          balancePendingKobo: Number(platformAfter?.pendingKobo || 0),
+          balanceAvailableKobo: Number(platformAfter?.availableKobo || 0),
+          meta: {
+            ...meta,
+            fromUid: ownerUid,
+            source: "withdraw_pending",
+            feePct,
+          },
+        });
+      }
 
-    out = {
-      ok: true,
-      debitedPendingKobo: amt,
-      feeKobo: fee,
-      feePct,
-      creditedAvailableKobo: net,
-      wallet: proAfter,
-      platformCreditedKobo: fee,
-    };
-  });
+      await WalletTx.create(txs, { session });
 
-  session.endSession();
+      out = {
+        ok: true,
+        debitedPendingKobo: amt,
+        feeKobo: fee,
+        feePct,
+        creditedAvailableKobo: net,
+        wallet: proAfter,
+        platformCreditedKobo: fee,
+      };
+    });
+  } finally {
+    session.endSession();
+  }
+
   return out;
 }
 
@@ -710,7 +738,7 @@ export async function withdrawPendingWithFee(ownerUid, amountKobo, meta = {}) {
  */
 export async function releasePendingToAvailableForBooking(
   bookingOrId,
-  meta = {},
+  meta = {}
 ) {
   // 1) Resolve booking
   const booking =
@@ -740,7 +768,7 @@ export async function releasePendingToAvailableForBooking(
   if (!creditedKobo || creditedKobo <= 0) {
     await Booking.updateOne(
       { _id: booking._id },
-      { $set: { payoutReleased: true } },
+      { $set: { payoutReleased: true } }
     );
     return { ok: true, nothingToRelease: true };
   }
@@ -754,7 +782,7 @@ export async function releasePendingToAvailableForBooking(
   // 5) Mark booking as released
   await Booking.updateOne(
     { _id: booking._id },
-    { $set: { payoutReleased: true } },
+    { $set: { payoutReleased: true } }
   );
 
   return { ok: true, ...rel };
@@ -829,6 +857,7 @@ export async function cancelBookingAndRefund(bookingOrId, options = {}) {
   // 4) Update booking document
   booking.status = "cancelled";
   booking.cancelledAt = new Date();
+  booking.payoutReleased = true; // ✅ prevent release attempts on cancelled booking
 
   // 5) Refund client from ESCROW -> client wallet (idempotent)
   let walletRefunded = false;
@@ -871,7 +900,7 @@ export async function cancelBookingAndRefund(bookingOrId, options = {}) {
             "meta.bookingId": bookingIdStr,
           },
           null,
-          { session },
+          { session }
         ).lean();
 
         if (platformAlready2) return;
@@ -881,18 +910,18 @@ export async function cancelBookingAndRefund(bookingOrId, options = {}) {
         await Wallet.updateOne(
           { ownerUid: ESCROW_UID },
           { $setOnInsert: { ownerUid: ESCROW_UID } },
-          { upsert: true, session },
+          { upsert: true, session }
         );
         await Wallet.updateOne(
           { ownerUid: PLATFORM_UID },
           { $setOnInsert: { ownerUid: PLATFORM_UID } },
-          { upsert: true, session },
+          { upsert: true, session }
         );
 
         const escrowAfter = await Wallet.findOneAndUpdate(
           { ownerUid: ESCROW_UID, availableKobo: { $gte: platformFeeKobo } },
           { $inc: { availableKobo: -platformFeeKobo } },
-          { new: true, session },
+          { new: true, session }
         );
         if (!escrowAfter)
           throw new Error("escrow_insufficient_for_cancel_fee_platform");
@@ -900,7 +929,7 @@ export async function cancelBookingAndRefund(bookingOrId, options = {}) {
         const platformAfter = await Wallet.findOneAndUpdate(
           { ownerUid: PLATFORM_UID },
           { $inc: { availableKobo: platformFeeKobo } },
-          { new: true, session },
+          { new: true, session }
         );
 
         await WalletTx.create(
@@ -934,7 +963,7 @@ export async function cancelBookingAndRefund(bookingOrId, options = {}) {
               },
             },
           ],
-          { session },
+          { session }
         );
       });
       session.endSession();
@@ -960,14 +989,14 @@ export async function cancelBookingAndRefund(bookingOrId, options = {}) {
               "meta.bookingId": bookingIdStr,
             },
             null,
-            { session },
+            { session }
           ).lean();
           if (proAlready2) return;
 
           const escrowAfter = await Wallet.findOneAndUpdate(
             { ownerUid: ESCROW_UID, availableKobo: { $gte: proCompKobo } },
             { $inc: { availableKobo: -proCompKobo } },
-            { new: true, session },
+            { new: true, session }
           );
           if (!escrowAfter)
             throw new Error("escrow_insufficient_for_cancel_fee");
@@ -975,7 +1004,7 @@ export async function cancelBookingAndRefund(bookingOrId, options = {}) {
           const proAfter = await Wallet.findOneAndUpdate(
             { ownerUid: proUid },
             { $inc: { pendingKobo: proCompKobo, earnedKobo: proCompKobo } },
-            { new: true, upsert: true, setDefaultsOnInsert: true, session },
+            { new: true, upsert: true, setDefaultsOnInsert: true, session }
           );
 
           await WalletTx.create(
@@ -1009,7 +1038,7 @@ export async function cancelBookingAndRefund(bookingOrId, options = {}) {
                 },
               },
             ],
-            { session },
+            { session }
           );
         });
         session.endSession();

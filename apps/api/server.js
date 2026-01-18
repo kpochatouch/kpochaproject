@@ -1986,6 +1986,7 @@ async function handlePaystackEvent(event) {
       // ✅ IMPORTANT: fund escrow ledger for card payments (idempotent)
       try {
         await fundEscrowFromPaystackForBooking(booking, { reference: ref });
+
         console.log(
           "[paystack] ✅ escrow funded for booking:",
           booking._id.toString()

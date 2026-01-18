@@ -42,25 +42,12 @@ export default function ClientWallet() {
   const refreshWallet = async () => {
     const { data } = await api.get("/api/wallet/client/me");
 
-    // New shape: { wallet, transactions }
-    const w = data?.wallet || data || {};
+    // Backend truth for this endpoint:
+    // { creditsKobo: number, transactions: [{ id, type, direction, amountKobo, ts, meta }] }
+    const credits = Math.floor(Number(data?.creditsKobo || 0));
+    setCreditsKobo(Number.isFinite(credits) ? credits : 0);
 
-    // Prefer "availableKobo" for client credits in the unified wallet model.
-    // Fall back to legacy "creditsKobo" if your endpoint still uses it.
-    const credits = Number.isFinite(Number(w?.availableKobo))
-      ? Number(w.availableKobo)
-      : 0;
-
-    const legacyCredits = Number(w?.creditsKobo || data?.creditsKobo || 0);
-
-    setCreditsKobo(credits || legacyCredits);
-
-    const list = Array.isArray(data?.transactions)
-      ? data.transactions
-      : Array.isArray(w?.transactions)
-      ? w.transactions
-      : [];
-
+    const list = Array.isArray(data?.transactions) ? data.transactions : [];
     setTxns(list);
   };
 
@@ -299,7 +286,7 @@ export default function ClientWallet() {
                 <ul className="divide-y divide-zinc-800">
                   {txns.map((t, i) => (
                     <li
-                      key={t.id || `${t.ts || ""}-${t.amountKobo || 0}-${i}`}
+                      key={t.id || t._id || `${t.ts || t.createdAt || ""}-${t.amountKobo || 0}-${i}`}
                       className="px-4 py-3 flex items-center justify-between"
                     >
                       <div>
@@ -307,7 +294,7 @@ export default function ClientWallet() {
                           {t.type || "entry"}
                         </div>
                         <div className="text-xs text-zinc-500">
-                          {t.ts ? new Date(t.ts).toLocaleString() : ""}
+                          {(t.ts || t.createdAt) ? new Date(t.ts || t.createdAt).toLocaleString() : ""}
                         </div>
                       </div>
                       <div className="font-mono">{fmtNaira(t.amountKobo)}</div>

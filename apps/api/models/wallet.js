@@ -14,7 +14,7 @@ const WalletSchema = new mongoose.Schema(
     withdrawnKobo: { type: Number, default: 0, min: 0 },
     earnedKobo: { type: Number, default: 0, min: 0 },
   },
-  { timestamps: true },
+  { timestamps: true }
 );
 
 // (Optional) convenient alias used by FE in some places.
@@ -50,7 +50,7 @@ const WalletTxSchema = new mongoose.Schema(
     // anything helpful (bookingId, paystack payload, etc.)
     meta: { type: mongoose.Schema.Types.Mixed, default: {} },
   },
-  { timestamps: true },
+  { timestamps: true }
 );
 
 // One-time booking-scoped idempotency (bulletproof under concurrency)
@@ -62,14 +62,15 @@ WalletTxSchema.index(
       type: {
         $in: [
           "booking_fund",
-          "escrow_hold_in",
+          "escrow_hold_in_card",
+          "escrow_hold_in_wallet",
           "platform_cancel_fee_in",
           "cancel_fee_compensation",
         ],
       },
       "meta.bookingId": { $exists: true, $type: "string" },
     },
-  },
+  }
 );
 
 // helpful index for recent history per user
@@ -79,7 +80,7 @@ WalletTxSchema.index({ ownerUid: 1, createdAt: -1 });
 // (Only applies when reference is present, mainly topup_credit)
 WalletTxSchema.index(
   { ownerUid: 1, type: 1, reference: 1 },
-  { unique: true, partialFilterExpression: { reference: { $type: "string" } } },
+  { unique: true, partialFilterExpression: { reference: { $type: "string" } } }
 );
 
 /**
@@ -100,7 +101,7 @@ const WalletTopupIntentSchema = new mongoose.Schema(
     meta: { type: mongoose.Schema.Types.Mixed, default: {} }, // any provider payload
     verifiedAt: { type: Date, default: null },
   },
-  { timestamps: true },
+  { timestamps: true }
 );
 
 export const Wallet =
@@ -137,7 +138,7 @@ export async function ensureWalletIndexes() {
   try {
     await WalletTopupIntent.collection.createIndex(
       { reference: 1 },
-      { unique: true },
+      { unique: true }
     );
   } catch (e) {
     // ignore
@@ -157,7 +158,7 @@ export async function ensureWalletIndexes() {
       {
         unique: true,
         partialFilterExpression: { reference: { $type: "string" } },
-      },
+      }
     );
   } catch (e) {
     // ignore
@@ -173,14 +174,15 @@ export async function ensureWalletIndexes() {
           type: {
             $in: [
               "booking_fund",
-              "escrow_hold_in",
+              "escrow_hold_in_card",
+              "escrow_hold_in_wallet",
               "platform_cancel_fee_in",
               "cancel_fee_compensation",
             ],
           },
           "meta.bookingId": { $exists: true, $type: "string" },
         },
-      },
+      }
     );
   } catch (e) {
     // ignore

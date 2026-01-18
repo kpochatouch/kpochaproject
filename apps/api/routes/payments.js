@@ -203,8 +203,31 @@ export default function paymentsRouter({ requireAuth }) {
         return res.status(400).json({ error: "session_expired" });
       }
 
-      // idempotent
+      // idempotent — but still repair escrow if it was missed earlier
       if (sess.usedAt) {
+        try {
+          const booking = await Booking.findById(sess.bookingId);
+          if (booking) {
+            // ensure booking has ringingStartedAt (optional repair)
+            if (booking.paymentStatus === "paid" && !booking.ringingStartedAt) {
+              booking.ringingStartedAt = new Date();
+              await booking.save();
+            }
+
+            // repair escrow (idempotent)
+            if (booking.paymentStatus === "paid") {
+              await fundEscrowFromPaystackForBooking(booking, {
+                reference: sess.reference,
+              });
+            }
+          }
+        } catch (e) {
+          console.warn(
+            "[payments/confirm] (alreadyConfirmed) repair failed:",
+            e?.message || e
+          );
+        }
+
         return res.json({
           ok: true,
           status: "success",
@@ -427,9 +450,20 @@ export default function paymentsRouter({ requireAuth }) {
         booking.paymentStatus === "paid" &&
         booking.paystackReference === reference
       ) {
+        // ✅ repair missing ringingStartedAt (idempotent)
         if (!booking.ringingStartedAt) {
           booking.ringingStartedAt = new Date();
           await booking.save();
+        }
+
+        // ✅ CRITICAL: repair escrow if it was missed earlier (idempotent)
+        try {
+          await fundEscrowFromPaystackForBooking(booking, { reference });
+        } catch (e) {
+          console.error(
+            "[payments/verify] (alreadyPaid) fundEscrowFromPaystackForBooking failed:",
+            e?.message || e
+          );
         }
 
         // ✅ Always re-emit booking:paid (idempotent) so pro alert is still instant on retries

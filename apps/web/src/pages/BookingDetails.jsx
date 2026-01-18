@@ -555,15 +555,16 @@ export default function BookingDetails() {
 
     setBusy(true);
     try {
-      const updated = await cancelBooking(booking._id);
-      setBooking(updated);
-      // redirect is handled by the cancelled/refunded effect above
+      await cancelBooking(booking._id);
+      alert("Booking cancelled. Your payment will be refunded.");
+      navigate("/browse", { replace: true });
     } catch (e) {
       console.error(
         "cancel booking error:",
         e?.response?.data || e?.message || e
       );
       alert("Could not cancel booking. Please try again.");
+      navigate("/browse", { replace: true }); // escape hatch (prevents stuck UI)
     } finally {
       setBusy(false);
     }

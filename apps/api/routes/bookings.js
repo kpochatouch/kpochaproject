@@ -9,9 +9,11 @@ import Thread from "../models/Thread.js";
 import redisClient from "../redis.js";
 import { getIO } from "../sockets/index.js";
 import { ClientProfile } from "../models/Profile.js";
-import { cancelBookingAndRefund } from "../services/walletService.js";
+import {
+  cancelBookingAndRefund,
+  creditProPendingForBooking,
+} from "../services/walletService.js";
 import { createNotification } from "../services/notificationService.js";
-import { creditProPendingForBooking } from "../services/walletService.js";
 
 const router = express.Router();
 
@@ -162,6 +164,68 @@ async function resolveClientName(uid, fallbackName = "") {
   } catch (err) {
     console.warn("[bookings] resolveClientName failed:", err?.message || err);
     return "";
+  }
+}
+
+// ---- Booking reconciliation (works even if cron never runs) ----
+const RING_TIMEOUT_FALLBACK_SECONDS = 120;
+
+async function getRingTimeoutSeconds() {
+  try {
+    const Settings = mongoose.models.Settings;
+    if (!Settings) return RING_TIMEOUT_FALLBACK_SECONDS;
+    const s = await Settings.findOne().lean();
+    const secs = Number(s?.bookingRules?.ringTimeoutSeconds);
+    return Number.isFinite(secs) && secs > 0
+      ? secs
+      : RING_TIMEOUT_FALLBACK_SECONDS;
+  } catch {
+    return RING_TIMEOUT_FALLBACK_SECONDS;
+  }
+}
+
+/**
+ * Reconcile a booking on-demand:
+ * - If paid + scheduled + ringingStartedAt exists and timeout passed => cancel + refund now
+ * Safe to call multiple times because cancelBookingAndRefund is idempotent in your code.
+ */
+async function reconcileBookingState(b) {
+  if (!b) return b;
+
+  // only ring-timeout logic for "paid + scheduled"
+  if (b.status !== "scheduled") return b;
+  if (b.paymentStatus !== "paid") return b;
+
+  // If pro accepted/declined etc, don't touch
+  if (b.acceptedAt || b.status === "accepted" || b.status === "declined")
+    return b;
+
+  const startedAtMs = b.ringingStartedAt
+    ? new Date(b.ringingStartedAt).getTime()
+    : 0;
+  if (!startedAtMs) return b; // cannot timeout without a start timestamp
+
+  const ringSecs = await getRingTimeoutSeconds();
+  const deadlineMs = startedAtMs + ringSecs * 1000;
+
+  if (Date.now() < deadlineMs) return b;
+
+  // Past deadline => cancel+refund (idempotent)
+  try {
+    await cancelBookingAndRefund(b, {
+      cancelledBy: "system",
+      reason: "ring_timeout",
+    });
+  } catch (e) {
+    console.warn("[reconcile] ring-timeout cancel failed:", e?.message || e);
+  }
+
+  // Reload latest truth
+  try {
+    const fresh = await Booking.findById(b._id);
+    return fresh || b;
+  } catch {
+    return b;
   }
 }
 
@@ -553,18 +617,17 @@ router.put("/bookings/:id/reference", requireAuth, async (req, res) => {
 /** Client: my bookings (list) */
 router.get("/bookings/me", requireAuth, async (req, res) => {
   try {
-    const items = await Booking.find({ clientUid: req.user.uid })
-      .sort({ createdAt: -1 })
-      .lean();
-    // Client can see their own private contact (full)
-    const sanitized = items.map((b) => ({
-      ...b,
-      clientContactPrivate: b.clientContactPrivate || {
-        phone: "",
-        address: b.addressText || "",
-      },
-    }));
-    res.json(sanitized);
+    const docs = await Booking.find({ clientUid: req.user.uid }).sort({
+      createdAt: -1,
+    });
+
+    const out = [];
+    for (const b of docs) {
+      const fixed = await reconcileBookingState(b);
+      out.push(sanitizeBookingFor(req, fixed));
+    }
+
+    res.json(out);
   } catch (err) {
     console.error("[bookings:me] error:", err);
     res.status(500).json({ error: "Failed to load bookings" });
@@ -574,11 +637,17 @@ router.get("/bookings/me", requireAuth, async (req, res) => {
 /** Pro: bookings assigned to me (owner) */
 router.get("/bookings/pro/me", requireAuth, async (req, res) => {
   try {
-    const items = await Booking.find({ proOwnerUid: req.user.uid })
-      .sort({ createdAt: -1 })
-      .lean();
-    const sanitized = items.map((b) => sanitizeBookingFor(req, b));
-    res.json(sanitized);
+    const docs = await Booking.find({ proOwnerUid: req.user.uid }).sort({
+      createdAt: -1,
+    });
+
+    const out = [];
+    for (const b of docs) {
+      const fixed = await reconcileBookingState(b);
+      out.push(sanitizeBookingFor(req, fixed));
+    }
+
+    res.json(out);
   } catch (err) {
     console.error("[bookings:pro:me] error:", err);
     res.status(500).json({ error: "Failed to load pro bookings" });
@@ -592,7 +661,8 @@ router.get("/bookings/:id", requireAuth, async (req, res) => {
     if (!/^[0-9a-fA-F]{24}$/.test(id)) {
       return res.status(400).json({ error: "invalid_id" });
     }
-    const b = await Booking.findById(id);
+
+    let b = await Booking.findById(id);
     if (!b) return res.status(404).json({ error: "not_found" });
 
     const isAdmin = isAdminReq(req);
@@ -602,6 +672,9 @@ router.get("/bookings/:id", requireAuth, async (req, res) => {
     if (!isAdmin && !isClient && !isProOwner) {
       return res.status(403).json({ error: "Forbidden" });
     }
+
+    // ✅ On-demand reconciliation (ring-timeout auto-cancel/refund)
+    b = await reconcileBookingState(b);
 
     return res.json(sanitizeBookingFor(req, b));
   } catch (err) {
@@ -1014,10 +1087,20 @@ router.put("/bookings/:id/complete", requireAuth, async (req, res) => {
 
     // ✅ move escrow → pro pending AFTER completion (true escrow)
     try {
-      await creditProPendingForBooking(b, { reason: "completed" });
+      console.log(
+        "[complete] creditProPendingForBooking start",
+        b._id.toString(),
+        b.status,
+        b.paymentStatus
+      );
+      const r = await creditProPendingForBooking(b, { reason: "completed" });
+      console.log("[complete] creditProPendingForBooking ok", r);
     } catch (e) {
       console.error(
-        "[bookings:complete] creditProPendingForBooking failed:",
+        "[complete] creditProPendingForBooking failed",
+        b._id.toString(),
+        b.status,
+        b.paymentStatus,
         e?.message || e
       );
     }
