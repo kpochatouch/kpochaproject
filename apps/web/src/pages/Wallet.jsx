@@ -1,5 +1,6 @@
 // apps/web/src/pages/Wallet.jsx
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import ClientWalletLinkButton from "../components/ClientWalletLinkButton.jsx";
 import {
   api,
@@ -19,6 +20,7 @@ import {
 export default function WalletPage() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
+  const navigate = useNavigate();
 
   const [me, setMe] = useState(null);
   const [meHasPin, setMeHasPin] = useState(false);
@@ -140,9 +142,14 @@ export default function WalletPage() {
         if (code === "insufficient_available") {
           return alert("Insufficient funds in Available.");
         }
-        if (code === "no_payout_account") {
-          return alert("Add your payout (bank) account first.");
+                if (code === "no_payout_account") {
+          const go = confirm(
+            "You need to add your payout (bank) details before you can withdraw.\n\nGo to Settings → Payments now?"
+          );
+          if (go) navigate("/settings#payments");
+          return;
         }
+
 
         // fallback
         return alert(code || "Withdrawal failed. Please try again.");

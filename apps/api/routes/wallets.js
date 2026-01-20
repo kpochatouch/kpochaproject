@@ -553,11 +553,52 @@ export function withAuth(requireAuth, requireAdmin) {
       const PAYSTACK_SECRET_KEY = requirePaystackKey(res);
       if (!PAYSTACK_SECRET_KEY) return;
 
-      // Get user's payout account (MUST be checked before reserving funds)
-      const appDoc = await Application.findOne({ uid: req.user.uid }).lean();
-      const bank = appDoc?.payoutBank || {};
+      // Get user's payout account (Application.payoutBank) — migrate from pro profile if missing
+      let appDoc = await Application.findOne({ uid: req.user.uid }).lean();
+      let bank = appDoc?.payoutBank || {};
+
       if (!bank.accountNumber || !bank.code) {
-        return res.status(400).json({ error: "no_payout_account" });
+        // 🔁 Backward-compat: some users saved bank in /api/pros/me only (proData.bank)
+        try {
+          const pro = await mongoose.models.Pro?.findOne({
+            uid: req.user.uid,
+          }).lean();
+          const pb = pro?.bank || {};
+          const migrated = {
+            accountNumber: String(pb.accountNumber || "").trim(),
+            code: String(pb.bankCode || pb.code || "").trim(),
+            name: String(pb.bankName || "").trim(),
+            accountName: String(pb.accountName || "").trim(),
+          };
+
+          if (
+            migrated.accountNumber &&
+            migrated.code &&
+            migrated.name &&
+            migrated.accountName
+          ) {
+            await Application.updateOne(
+              { uid: req.user.uid },
+              {
+                $set: {
+                  "payoutBank.accountNumber": migrated.accountNumber,
+                  "payoutBank.code": migrated.code,
+                  "payoutBank.name": migrated.name,
+                  "payoutBank.accountName": migrated.accountName,
+                },
+              },
+              { upsert: true },
+            );
+            appDoc = await Application.findOne({ uid: req.user.uid }).lean();
+            bank = appDoc?.payoutBank || {};
+          }
+        } catch {
+          // ignore migration errors and fall through
+        }
+
+        if (!bank.accountNumber || !bank.code) {
+          return res.status(400).json({ error: "no_payout_account" });
+        }
       }
 
       // ✅ Reserve funds AFTER prerequisites to prevent "stuck" deductions

@@ -112,6 +112,7 @@ export default function SettingsPage() {
 
   // bank
   const [bankName, setBankName] = useState("");
+  const [bankCode, setBankCode] = useState("");
   const [accountName, setAccountName] = useState("");
   const [accountNumber, setAccountNumber] = useState("");
   const [bvn, setBvn] = useState("");
@@ -489,6 +490,7 @@ export default function SettingsPage() {
 
           const bk = proData?.bank || {};
           setBankName(bk.bankName || "");
+          setBankCode(String(bk.bankCode || bk.code || "").trim());
           setAccountName(bk.accountName || "");
           setAccountNumber(String(bk.accountNumber || ""));
           setBvn(String(bk.bvn || ""));
@@ -601,10 +603,11 @@ export default function SettingsPage() {
     () =>
       hasPro &&
       !!bankName &&
+      !!bankCode &&
       !!accountName &&
       digitsOnly(accountNumber).length === 10 &&
       digitsOnly(bvn).length === 11,
-    [hasPro, bankName, accountName, accountNumber, bvn],
+    [hasPro, bankName, bankCode, accountName, accountNumber, bvn],
   );
 
   const profileUrl = useMemo(() => {
@@ -906,6 +909,7 @@ export default function SettingsPage() {
       const payload = {
         bank: {
           bankName,
+          bankCode: String(bankCode || "").trim(),
           accountName,
           accountNumber: digitsOnly(accountNumber).slice(0, 10),
           bvn: digitsOnly(bvn).slice(0, 11),
@@ -920,6 +924,14 @@ export default function SettingsPage() {
       }
 
       const { data } = await api.put("/api/pros/me", payload);
+      // ✅ This is the real payout account used by /api/wallet/withdraw (Application.payoutBank)
+      await api.put("/api/payout/me", {
+        accountNumber: digitsOnly(accountNumber).slice(0, 10),
+        bankCode: String(bankCode || "").trim(),
+        bankName: bankName,
+        accountName: accountName,
+      });
+
       setAppDoc(data?.item || { ...appDoc, ...payload });
       flashOK("Payment details saved.");
     } catch (e) {
@@ -942,15 +954,16 @@ export default function SettingsPage() {
       setSavingBank(false);
     }
   }, [
-    canSaveBank,
-    savingBank,
-    appDoc,
-    bankName,
-    accountName,
-    accountNumber,
-    bvn,
-    hasPro,
-  ]);
+  canSaveBank,
+  savingBank,
+  appDoc,
+  bankName,
+  bankCode,
+  accountName,
+  accountNumber,
+  bvn,
+  hasPro,
+]);
 
   /* ---------- UI ---------- */
   return (
@@ -1616,6 +1629,13 @@ export default function SettingsPage() {
                   label="Bank Name"
                   value={bankName}
                   onChange={(e) => setBankName(e.target.value)}
+                  required
+                  disabled={!hasPro}
+                />
+                <Input
+                  label="Bank Code (Paystack)"
+                  value={bankCode}
+                  onChange={(e) => setBankCode(e.target.value)}
                   required
                   disabled={!hasPro}
                 />
