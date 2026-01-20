@@ -60,17 +60,28 @@ export default function paymentsRouter({ requireAuth }) {
         return res.status(403).json({ error: "not_your_booking" });
       }
 
-      // 🔒 Guard: prevent mixing payment methods
-      const requested = String(
-        booking?.meta?.paymentMethodRequested || ""
-      ).toLowerCase();
-      if (requested === "wallet") {
+      // 🔒 Guard: prevent mixing payment methods AFTER payment is already completed
+      booking.meta = booking.meta || {};
+      const used = String(booking.meta.paymentMethodUsed || "").toLowerCase();
+
+      // If already paid, don't allow init again
+      if (booking.paymentStatus === "paid") {
         return res.status(400).json({
-          error: "wallet_only_booking",
-          message:
-            "This booking was created for wallet payment. Please pay from wallet.",
+          error: "already_paid",
+          message: "This booking is already paid.",
         });
       }
+
+      // If payment method was already used/locked (rare), respect it
+      if (used && used !== "card") {
+        return res.status(400).json({
+          error: "payment_method_locked",
+          message: `This booking is locked to ${used} payment.`,
+        });
+      }
+
+      // Client is choosing card now
+      booking.meta.paymentMethodRequested = "card";
 
       // ✅ Always bill the real booking amount (never trust client body)
       const amountKobo = Math.floor(Number(booking.amountKobo || 0));
@@ -150,7 +161,7 @@ export default function paymentsRouter({ requireAuth }) {
               ],
             },
           }),
-        }
+        },
       );
 
       const initJson = await initResp.json();
@@ -224,7 +235,7 @@ export default function paymentsRouter({ requireAuth }) {
         } catch (e) {
           console.warn(
             "[payments/confirm] (alreadyConfirmed) repair failed:",
-            e?.message || e
+            e?.message || e,
           );
         }
 
@@ -250,14 +261,14 @@ export default function paymentsRouter({ requireAuth }) {
       // Verify Paystack using server-stored reference (NOT from client)
       const r = await fetch(
         `https://api.paystack.co/transaction/verify/${encodeURIComponent(
-          sess.reference
+          sess.reference,
         )}`,
         {
           headers: {
             Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
             "Content-Type": "application/json",
           },
-        }
+        },
       );
       const verify = await r.json();
 
@@ -303,7 +314,7 @@ export default function paymentsRouter({ requireAuth }) {
       } catch (e) {
         console.error(
           "[payments/confirm] fundEscrowFromPaystackForBooking failed:",
-          e?.message || e
+          e?.message || e,
         );
         // fail-soft to avoid trapping users after Paystack success
       }
@@ -352,7 +363,7 @@ export default function paymentsRouter({ requireAuth }) {
             io.to(`user:${booking.clientUid}`).emit("booking:paid", payload);
           io.to(`booking:${booking._id.toString()}`).emit(
             "booking:paid",
-            payload
+            payload,
           );
         }
       } catch {}
@@ -387,14 +398,14 @@ export default function paymentsRouter({ requireAuth }) {
 
       const r = await fetch(
         `https://api.paystack.co/transaction/verify/${encodeURIComponent(
-          reference
+          reference,
         )}`,
         {
           headers: {
             Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
             "Content-Type": "application/json",
           },
-        }
+        },
       );
 
       const verify = await r.json();
@@ -423,16 +434,21 @@ export default function paymentsRouter({ requireAuth }) {
         return res.status(403).json({ error: "not_your_booking" });
       }
 
-      // 🔒 Guard: prevent mixing payment methods
-      const requested = String(
-        booking?.meta?.paymentMethodRequested || ""
-      ).toLowerCase();
-      if (requested === "wallet") {
+      // 🔒 Guard: prevent mixing payment methods AFTER payment is already completed
+      booking.meta = booking.meta || {};
+      const used = String(booking.meta.paymentMethodUsed || "").toLowerCase();
+
+      // If already paid by wallet, do NOT allow card verification for same booking
+      if (booking.paymentStatus === "paid" && used === "wallet") {
         return res.status(400).json({
-          error: "wallet_only_booking",
-          message:
-            "This booking was created for wallet payment. Please pay from wallet.",
+          error: "already_paid_by_wallet",
+          message: "This booking was already paid with wallet.",
         });
+      }
+
+      // If unpaid, allow card verify and treat this as choosing card now
+      if (booking.paymentStatus !== "paid") {
+        booking.meta.paymentMethodRequested = "card";
       }
 
       // ✅ Use server-stored reference as canonical (prevents client sending a random reference)
@@ -462,7 +478,7 @@ export default function paymentsRouter({ requireAuth }) {
         } catch (e) {
           console.error(
             "[payments/verify] (alreadyPaid) fundEscrowFromPaystackForBooking failed:",
-            e?.message || e
+            e?.message || e,
           );
         }
 
@@ -481,13 +497,13 @@ export default function paymentsRouter({ requireAuth }) {
             if (booking.proOwnerUid)
               io.to(`user:${booking.proOwnerUid}`).emit(
                 "booking:paid",
-                payload
+                payload,
               );
             if (booking.clientUid)
               io.to(`user:${booking.clientUid}`).emit("booking:paid", payload);
             io.to(`booking:${booking._id.toString()}`).emit(
               "booking:paid",
-              payload
+              payload,
             );
           }
         } catch {}
@@ -530,7 +546,7 @@ export default function paymentsRouter({ requireAuth }) {
       } catch (e) {
         console.error(
           "[payments/verify] fundEscrowFromPaystackForBooking failed:",
-          e?.message || e
+          e?.message || e,
         );
         // Decide your policy:
         // - If you want to be strict: return 500 and treat payment as not finalized
@@ -588,12 +604,12 @@ export default function paymentsRouter({ requireAuth }) {
 
         io.to(`booking:${booking._id.toString()}`).emit(
           "booking:paid",
-          payload
+          payload,
         );
       } catch (err) {
         console.warn(
           "[payments/verify] socket emit booking:paid failed:",
-          err?.message || err
+          err?.message || err,
         );
       }
 
@@ -601,6 +617,42 @@ export default function paymentsRouter({ requireAuth }) {
     } catch (e) {
       console.error("[payments/verify] error:", e);
       return res.status(500).json({ error: "verify_failed" });
+    }
+  });
+
+  /**
+   * GET /api/payments/last-success
+   * - Used by the PWA to recover user back to the correct booking after a provider redirect
+   * - Returns the most recent confirmed payment session for this user (recent window only)
+   */
+  router.get("/payments/last-success", requireAuth, async (req, res) => {
+    try {
+      const sess = await PaymentSession.findOne({
+        clientUid: String(req.user.uid),
+        usedAt: { $ne: null },
+      })
+        .sort({ usedAt: -1 })
+        .lean();
+
+      if (!sess) return res.json({ ok: true, bookingId: null });
+
+      // Only treat very recent confirmations as "resume" signals
+      const usedAtMs = new Date(sess.usedAt).getTime();
+      const ageMs = Date.now() - usedAtMs;
+      const maxMs = 30 * 60 * 1000; // 30 minutes
+
+      if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > maxMs) {
+        return res.json({ ok: true, bookingId: null });
+      }
+
+      return res.json({
+        ok: true,
+        bookingId: String(sess.bookingId),
+        usedAt: sess.usedAt,
+      });
+    } catch (e) {
+      console.error("[payments/last-success] error:", e?.message || e);
+      return res.status(500).json({ error: "last_success_failed" });
     }
   });
 

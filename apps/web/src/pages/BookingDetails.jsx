@@ -35,6 +35,7 @@ import {
   getBookingUiLabel,
 } from "../lib/api";
 import PaymentMethodPicker from "../components/PaymentMethodPicker.jsx";
+import ClientWalletLinkButton from "../components/ClientWalletLinkButton.jsx";
 
 /* -------- shared helpers -------- */
 function formatMoney(kobo = 0) {
@@ -61,7 +62,7 @@ function formatWhen(iso) {
 /* -------- Paystack loader (same idea as BookService) -------- */
 function usePaystackReady() {
   const [ready, setReady] = useState(
-    typeof window !== "undefined" && !!window.PaystackPop
+    typeof window !== "undefined" && !!window.PaystackPop,
   );
 
   useEffect(() => {
@@ -106,10 +107,14 @@ export default function BookingDetails() {
   const [clientReputationLoading, setClientReputationLoading] = useState(false);
   const [clientReputationErr, setClientReputationErr] = useState("");
 
+  // Wallet balance (client) — used to guide "top up" UX
+  const [clientCreditsKobo, setClientCreditsKobo] = useState(null);
+  const [clientCreditsErr, setClientCreditsErr] = useState("");
+
   // derived (supports new snapshot + legacy fields)
   const svcName = useMemo(
     () => booking?.service?.serviceName || booking?.serviceName || "Service",
-    [booking]
+    [booking],
   );
 
   const priceKobo = useMemo(
@@ -117,17 +122,17 @@ export default function BookingDetails() {
       Number.isFinite(Number(booking?.amountKobo))
         ? Number(booking.amountKobo)
         : Number(booking?.service?.priceKobo) || 0,
-    [booking]
+    [booking],
   );
 
   const isClient = useMemo(
     () => !!me && booking && me.uid === booking.clientUid,
-    [me, booking]
+    [me, booking],
   );
 
   const isProOwner = useMemo(
     () => !!me && booking && me.uid === booking.proOwnerUid,
-    [me, booking]
+    [me, booking],
   );
 
   // Load client reputation (pro side only)
@@ -176,7 +181,7 @@ export default function BookingDetails() {
       isProOwner &&
       booking?.paymentStatus === "paid" &&
       booking?.status === "scheduled",
-    [isProOwner, booking]
+    [isProOwner, booking],
   );
 
   // Completion policy:
@@ -185,12 +190,12 @@ export default function BookingDetails() {
   // - Pro can force-complete only after fallback window (2h)
   const canClientComplete = useMemo(
     () => !!booking && booking.status === "accepted" && isClient,
-    [booking, isClient]
+    [booking, isClient],
   );
 
   const canProRequestCompletion = useMemo(
     () => !!booking && booking.status === "accepted" && isProOwner,
-    [booking, isProOwner]
+    [booking, isProOwner],
   );
 
   const proCanForceComplete = useMemo(() => {
@@ -209,8 +214,14 @@ export default function BookingDetails() {
       booking?.paymentStatus !== "paid" &&
       (booking?.status === "pending_payment" ||
         booking?.status === "scheduled"),
-    [isClient, booking]
+    [isClient, booking],
   );
+
+  const walletInsufficient = useMemo(() => {
+    if (!booking) return false;
+    if (clientCreditsKobo == null) return false; // unknown: don't block
+    return Number(clientCreditsKobo) < Number(priceKobo || 0);
+  }, [clientCreditsKobo, booking, priceKobo]);
 
   // Name: safe to show to both parties (no phone exposed)
   const clientDisplayName = useMemo(
@@ -219,7 +230,7 @@ export default function BookingDetails() {
       booking?.client?.name ||
       booking?.clientProfile?.fullName ||
       "",
-    [booking]
+    [booking],
   );
 
   // Who can see client contact details card?
@@ -253,6 +264,32 @@ export default function BookingDetails() {
 
     return "waiting";
   }, [booking]);
+
+  // Load client wallet balance when we are at payment stage
+  useEffect(() => {
+    if (!booking || !me) return;
+    if (me.uid !== booking.clientUid) return;
+    if (stage !== "pay") return;
+
+    let alive = true;
+
+    (async () => {
+      try {
+        setClientCreditsErr("");
+        const { data } = await api.get("/api/wallet/client/me");
+        if (!alive) return;
+        setClientCreditsKobo(Number(data?.creditsKobo || 0));
+      } catch (e) {
+        if (!alive) return;
+        setClientCreditsErr("Could not load wallet balance.");
+        setClientCreditsKobo(null);
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [booking?._id, me?.uid, stage]);
 
   // Chat/Call visibility:
   // - Before accept: nobody sees it
@@ -322,7 +359,7 @@ export default function BookingDetails() {
         if (!found) {
           try {
             const { data } = await api.get(
-              `/api/bookings/${encodeURIComponent(id)}`
+              `/api/bookings/${encodeURIComponent(id)}`,
             );
             found = data || found;
           } catch {}
@@ -380,7 +417,7 @@ export default function BookingDetails() {
       setBooking((b) =>
         b
           ? { ...b, status: "accepted", acceptedAt: new Date().toISOString() }
-          : b
+          : b,
       );
 
       setRingElapsed(0);
@@ -388,7 +425,7 @@ export default function BookingDetails() {
       // 2) then fetch backend truth (best-effort)
       try {
         const { data: fresh } = await api.get(
-          `/api/bookings/${encodeURIComponent(id)}`
+          `/api/bookings/${encodeURIComponent(id)}`,
         );
         if (fresh) setBooking(fresh);
       } catch {
@@ -418,17 +455,17 @@ export default function BookingDetails() {
                 completedAt:
                   p?.completedAt || b?.completedAt || new Date().toISOString(),
               }
-            : b
+            : b,
         );
 
         // then fetch backend truth (best-effort)
         try {
           const { data: fresh } = await api.get(
-            `/api/bookings/${encodeURIComponent(id)}`
+            `/api/bookings/${encodeURIComponent(id)}`,
           );
           if (fresh) setBooking(fresh);
         } catch {}
-      }
+      },
     );
 
     return () => offCompleted?.();
@@ -452,20 +489,19 @@ export default function BookingDetails() {
     }, 1000);
 
     // 2) Poll booking status while ringing (fallback only; sockets should update instantly)
-// Pause polling when tab is hidden
-const pollTimer = setInterval(async () => {
-  try {
-    if (typeof document !== "undefined" && document.hidden) return;
+    // Pause polling when tab is hidden
+    const pollTimer = setInterval(async () => {
+      try {
+        if (typeof document !== "undefined" && document.hidden) return;
 
-    const { data: fresh } = await api.get(
-      `/api/bookings/${encodeURIComponent(booking._id)}`
-    );
-    if (fresh) setBooking(fresh);
-  } catch {
-    // ignore polling errors (best-effort)
-  }
-}, 15000); // 15 seconds
-
+        const { data: fresh } = await api.get(
+          `/api/bookings/${encodeURIComponent(booking._id)}`,
+        );
+        if (fresh) setBooking(fresh);
+      } catch {
+        // ignore polling errors (best-effort)
+      }
+    }, 15000); // 15 seconds
 
     return () => {
       clearInterval(ringTimer);
@@ -490,7 +526,7 @@ const pollTimer = setInterval(async () => {
       booking.status === "cancelled"
     ) {
       alert(
-        "We’re sorry, this service request has been cancelled.\n\nYou can now choose another professional."
+        "We’re sorry, this service request has been cancelled.\n\nYou can now choose another professional.",
       );
       navigate("/browse", { replace: true });
     }
@@ -522,7 +558,7 @@ const pollTimer = setInterval(async () => {
         // keep booking as accepted; optionally refresh from backend truth
         try {
           const { data: fresh } = await api.get(
-            `/api/bookings/${encodeURIComponent(booking._id)}`
+            `/api/bookings/${encodeURIComponent(booking._id)}`,
           );
           if (fresh) setBooking(fresh);
         } catch {}
@@ -535,7 +571,7 @@ const pollTimer = setInterval(async () => {
 
       if (isClient) {
         alert(
-          "Thank you for confirming. Please remember to leave a review for your professional."
+          "Thank you for confirming. Please remember to leave a review for your professional.",
         );
       } else if (isProOwner) {
         alert("Booking completed. You can now leave a review for this client.");
@@ -553,7 +589,7 @@ const pollTimer = setInterval(async () => {
   async function onClientCancelNow() {
     if (!booking) return;
     const sure = window.confirm(
-      "Do you want to cancel this booking now? If the pro has not accepted yet, your payment will be refunded according to our rules."
+      "Do you want to cancel this booking now? If the pro has not accepted yet, your payment will be refunded according to our rules.",
     );
     if (!sure) return;
 
@@ -565,7 +601,7 @@ const pollTimer = setInterval(async () => {
     } catch (e) {
       console.error(
         "cancel booking error:",
-        e?.response?.data || e?.message || e
+        e?.response?.data || e?.message || e,
       );
       alert("Could not cancel booking. Please try again.");
       navigate("/browse", { replace: true }); // escape hatch (prevents stuck UI)
@@ -591,7 +627,7 @@ const pollTimer = setInterval(async () => {
     // 1) Check Paystack SDK
     if (!window.PaystackPop || typeof window.PaystackPop.setup !== "function") {
       alert(
-        "Paystack library not loaded yet. Please wait a moment or refresh and try again."
+        "Paystack library not loaded yet. Please wait a moment or refresh and try again.",
       );
       return;
     }
@@ -673,7 +709,7 @@ const pollTimer = setInterval(async () => {
                 // ✅ reload booking from server (single source of truth)
                 try {
                   const { data: fresh } = await api.get(
-                    `/api/bookings/${encodeURIComponent(booking._id)}`
+                    `/api/bookings/${encodeURIComponent(booking._id)}`,
                   );
                   setBooking(fresh || booking);
                 } catch {
@@ -688,7 +724,7 @@ const pollTimer = setInterval(async () => {
                               ? "scheduled"
                               : b.status,
                         }
-                      : b
+                      : b,
                   );
                 }
                 alert("Payment successful.");
@@ -715,7 +751,7 @@ const pollTimer = setInterval(async () => {
       console.error("[BookingDetails] PaystackPop.setup FAILED:", err);
       setBusy(false);
       alert(
-        "Could not start card payment. See console for PaystackPop.setup error."
+        "Could not start card payment. See console for PaystackPop.setup error.",
       );
     }
   }
@@ -738,7 +774,7 @@ const pollTimer = setInterval(async () => {
                 paymentStatus: "paid",
                 status: b.status === "pending_payment" ? "scheduled" : b.status,
               }
-            : b
+            : b,
         );
       }
       alert("Wallet payment successful.");
@@ -747,7 +783,7 @@ const pollTimer = setInterval(async () => {
       alert(
         e?.response?.data?.message ||
           e?.response?.data?.error ||
-          "Wallet payment failed. Please try again or choose card."
+          "Wallet payment failed. Please try again or choose card.",
       );
     } finally {
       setBusy(false);
@@ -765,7 +801,18 @@ const pollTimer = setInterval(async () => {
       ) : (
         <>
           <div className="flex items-center justify-between mb-4">
-            <h1 className="text-2xl font-semibold">Booking Details</h1>
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl font-semibold">Booking Details</h1>
+
+              {/* Pro who is acting as CLIENT can quickly confirm refunds/credits */}
+              {me?.isPro && isClient && (
+                <ClientWalletLinkButton
+                  label="Client Wallet"
+                  className="px-3 py-1.5 rounded border border-zinc-800 text-sm hover:bg-zinc-900"
+                />
+              )}
+            </div>
+
             <div className="flex items-center gap-2">
               <Badge tone={statusTone(booking?.status, booking?.paymentStatus)}>
                 {getBookingUiLabel(booking)}
@@ -945,20 +992,43 @@ const pollTimer = setInterval(async () => {
                   methods={["wallet", "card"]}
                   context={{ bookingId: booking?._id }}
                 />
+                {payMethod === "wallet" && walletInsufficient && (
+                  <div className="rounded-lg border border-amber-800 bg-amber-900/20 px-3 py-2 text-sm text-amber-200">
+                    Not enough wallet balance for this booking. Please top up
+                    your wallet.
+                    <div className="mt-2">
+                      <ClientWalletLinkButton
+                        label="Top up wallet"
+                        className="inline-flex px-3 py-1.5 rounded bg-gold text-black text-sm font-semibold"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {clientCreditsErr && (
+                  <div className="text-xs text-zinc-500">
+                    {clientCreditsErr}
+                  </div>
+                )}
+
                 <button
                   onClick={
                     payMethod === "wallet"
                       ? onClientPayWithWallet
                       : onClientPayNow
                   }
-                  disabled={busy || (payMethod === "card" && !paystackReady)}
+                  disabled={
+                    busy ||
+                    (payMethod === "card" && !paystackReady) ||
+                    (payMethod === "wallet" && walletInsufficient)
+                  }
                   className="rounded-lg bg-gold text-black px-4 py-2 font-semibold disabled:opacity-50"
                 >
                   {busy
                     ? "Processing…"
                     : payMethod === "wallet"
-                    ? "Pay from Wallet"
-                    : "Pay with Card"}
+                      ? "Pay from Wallet"
+                      : "Pay with Card"}
                 </button>
                 {payMethod === "card" && !paystackReady && (
                   <p className="text-xs text-zinc-500 mt-1">
@@ -1143,7 +1213,7 @@ Service: ${serviceName}
 Explain your issue here...`;
 
   return `mailto:kpochaout@gmail.com?subject=${encodeURIComponent(
-    subject
+    subject,
   )}&body=${encodeURIComponent(body)}`;
 }
 

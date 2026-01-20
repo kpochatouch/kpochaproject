@@ -18,6 +18,7 @@ import RequireAuth from "./components/RequireAuth.jsx";
 import RouteLoader from "./components/RouteLoader.jsx";
 import { useMe } from "./context/MeContext.jsx";
 import BookingAlert from "./components/BookingAlert.jsx";
+import usePostPaymentRecovery from "./hooks/usePostPaymentRecovery";
 
 // ---------- pages (lazy) ----------
 const Home = lazy(() => import("./pages/Home.jsx"));
@@ -168,6 +169,7 @@ export default function App() {
   const navigate = useNavigate();
 
   const { me } = useMe();
+  usePostPaymentRecovery(me);
   const [incomingCall, setIncomingCall] = useState(null);
 
   const myLabel =

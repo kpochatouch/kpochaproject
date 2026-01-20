@@ -1,5 +1,6 @@
 // apps/web/src/pages/Wallet.jsx
 import { useEffect, useMemo, useState } from "react";
+import ClientWalletLinkButton from "../components/ClientWalletLinkButton.jsx";
 import {
   api,
   getProBookings,
@@ -35,7 +36,7 @@ export default function WalletPage() {
 
   const feePct = useMemo(
     () => Number(settings?.payouts?.instantCashoutFeePercent ?? 3),
-    [settings]
+    [settings],
   );
 
   const holdDays = useMemo(() => {
@@ -115,7 +116,7 @@ export default function WalletPage() {
     }
     if (naira > max) {
       return alert(
-        `Insufficient funds. You can withdraw at most ₦${max.toLocaleString()} from Available.`
+        `Insufficient funds. You can withdraw at most ₦${max.toLocaleString()} from Available.`,
       );
     }
 
@@ -176,6 +177,14 @@ export default function WalletPage() {
     <div className="max-w-5xl mx-auto px-4 py-10">
       <div className="flex items-center gap-3">
         <h2 className="text-2xl font-semibold">Wallet</h2>
+
+        {/* Pro can also be a client: allow viewing refunds/credits */}
+        {me?.isPro && (
+          <ClientWalletLinkButton
+            label="View Client Wallet"
+            className="px-3 py-1.5 rounded bg-black border border-zinc-800 text-sm hover:bg-zinc-900"
+          />
+        )}
 
         <button
           onClick={() =>
@@ -246,12 +255,12 @@ export default function WalletPage() {
               {(proBookings || [])
                 .filter(
                   (b) =>
-                    b?.status === "completed" && b?.paymentStatus === "paid"
+                    b?.status === "completed" && b?.paymentStatus === "paid",
                 )
                 .sort(
                   (a, b) =>
                     new Date(b.completedAt || b.updatedAt || 0) -
-                    new Date(a.completedAt || a.updatedAt || 0)
+                    new Date(a.completedAt || a.updatedAt || 0),
                 )
                 .map((b) => {
                   const already = b?.meta?.instantCashout === true;
@@ -309,8 +318,8 @@ export default function WalletPage() {
                             {busy
                               ? "Processing…"
                               : eligible
-                              ? "Cashout now"
-                              : `Available in ${daysLeft}d`}
+                                ? "Cashout now"
+                                : `Available in ${daysLeft}d`}
                           </button>
                         )}
                       </div>
@@ -319,7 +328,7 @@ export default function WalletPage() {
                 })}
 
               {!(proBookings || []).some(
-                (b) => b?.status === "completed" && b?.paymentStatus === "paid"
+                (b) => b?.status === "completed" && b?.paymentStatus === "paid",
               ) && (
                 <div className="p-6 text-zinc-400 text-sm">
                   No completed paid bookings yet.
@@ -374,15 +383,15 @@ export default function WalletPage() {
                     t.direction === "credit"
                       ? "text-green-400"
                       : t.direction === "debit"
-                      ? "text-red-400"
-                      : "text-zinc-300"
+                        ? "text-red-400"
+                        : "text-zinc-300"
                   } font-semibold`}
                 >
                   {t.direction === "credit"
                     ? "+"
                     : t.direction === "debit"
-                    ? "−"
-                    : ""}{" "}
+                      ? "−"
+                      : ""}{" "}
                   {fmt(t.amountKobo)}
                 </div>
               </div>

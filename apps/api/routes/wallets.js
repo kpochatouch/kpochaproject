@@ -27,7 +27,7 @@ async function verifyPinForUid(uid, pin) {
   if (!appDoc?.withdrawPinHash) return { ok: false, code: "no_pin" };
   const ok = await bcrypt.compare(
     String(pin || ""),
-    String(appDoc.withdrawPinHash || "")
+    String(appDoc.withdrawPinHash || ""),
   );
   return { ok, code: ok ? "ok" : "invalid_pin" };
 }
@@ -137,7 +137,7 @@ export function withAuth(requireAuth, requireAdmin) {
               ownerUid: req.user.uid,
             },
           }),
-        }
+        },
       );
       const data = await psResp.json();
       if (!psResp.ok || !data?.status || !data?.data?.authorization_url) {
@@ -156,7 +156,7 @@ export function withAuth(requireAuth, requireAdmin) {
                 "meta.status": "failed",
                 "meta.error": data?.message || "init_failed",
               },
-            }
+            },
           );
         } catch {}
 
@@ -191,9 +191,9 @@ export function withAuth(requireAuth, requireAdmin) {
       // Verify on Paystack
       const vResp = await fetch(
         `https://api.paystack.co/transaction/verify/${encodeURIComponent(
-          reference
+          reference,
         )}`,
-        { headers: { Authorization: `Bearer ${PAYSTACK_SECRET_KEY}` } }
+        { headers: { Authorization: `Bearer ${PAYSTACK_SECRET_KEY}` } },
       );
       const verify = await vResp.json();
       if (!vResp.ok || !verify?.status) {
@@ -231,7 +231,7 @@ export function withAuth(requireAuth, requireAdmin) {
           const after = await Wallet.findOneAndUpdate(
             { ownerUid: req.user.uid },
             { $inc: { availableKobo: paidKobo } },
-            { new: true, upsert: true, setDefaultsOnInsert: true }
+            { new: true, upsert: true, setDefaultsOnInsert: true },
           );
 
           // 2) Write the ledger tx (protected by unique index)
@@ -370,7 +370,7 @@ export function withAuth(requireAuth, requireAdmin) {
         console.error("[wallet/platform] error:", e?.message || e);
         return res.status(500).json({ error: "platform_wallet_failed" });
       }
-    }
+    },
   );
 
   async function getPlatformRecipientCode() {
@@ -406,7 +406,7 @@ export function withAuth(requireAuth, requireAdmin) {
         await SettingsModel.updateOne(
           {},
           { $set: { "payouts.platformRecipientCode": recipientCode } },
-          { upsert: true }
+          { upsert: true },
         );
 
         return res.json({ ok: true, recipientCode });
@@ -414,7 +414,7 @@ export function withAuth(requireAuth, requireAdmin) {
         console.error("[wallet/platform/recipient] error:", e?.message || e);
         return res.status(500).json({ error: "set_platform_recipient_failed" });
       }
-    }
+    },
   );
 
   /**
@@ -450,7 +450,7 @@ export function withAuth(requireAuth, requireAdmin) {
         const w = await Wallet.findOneAndUpdate(
           { ownerUid: PLATFORM_UID, availableKobo: { $gte: amt } },
           { $inc: { availableKobo: -amt } },
-          { new: true, upsert: true, setDefaultsOnInsert: true }
+          { new: true, upsert: true, setDefaultsOnInsert: true },
         );
         if (!w)
           return res
@@ -489,7 +489,7 @@ export function withAuth(requireAuth, requireAdmin) {
           const afterRefund = await Wallet.findOneAndUpdate(
             { ownerUid: PLATFORM_UID },
             { $inc: { availableKobo: amt } },
-            { new: true }
+            { new: true },
           );
 
           await WalletTx.create({
@@ -534,7 +534,7 @@ export function withAuth(requireAuth, requireAdmin) {
         console.error("[wallet/platform/withdraw] error:", e?.message || e);
         return res.status(500).json({ error: "platform_withdraw_failed" });
       }
-    }
+    },
   );
 
   /** POST /api/wallet/withdraw
@@ -564,7 +564,7 @@ export function withAuth(requireAuth, requireAdmin) {
       const w = await Wallet.findOneAndUpdate(
         { ownerUid: req.user.uid, availableKobo: { $gte: amt } },
         { $inc: { availableKobo: -amt } },
-        { new: true, upsert: true, setDefaultsOnInsert: true }
+        { new: true, upsert: true, setDefaultsOnInsert: true },
       );
       if (!w) return res.status(400).json({ error: "insufficient_available" });
 
@@ -597,7 +597,7 @@ export function withAuth(requireAuth, requireAdmin) {
             bank_code: bank.code,
             currency: "NGN",
           }),
-        }
+        },
       );
       const recData = await createRecipient.json();
       if (!recData.status) {
@@ -608,7 +608,7 @@ export function withAuth(requireAuth, requireAdmin) {
           const afterRefund = await Wallet.findOneAndUpdate(
             { ownerUid: req.user.uid },
             { $inc: { availableKobo: amt } },
-            { new: true }
+            { new: true },
           );
           await WalletTx.create({
             ownerUid: req.user.uid,
@@ -649,7 +649,7 @@ export function withAuth(requireAuth, requireAdmin) {
           const afterRefund = await Wallet.findOneAndUpdate(
             { ownerUid: req.user.uid },
             { $inc: { availableKobo: amt } },
-            { new: true }
+            { new: true },
           );
           await WalletTx.create({
             ownerUid: req.user.uid,
@@ -706,7 +706,7 @@ export function withAuth(requireAuth, requireAdmin) {
         const after = await Wallet.findOneAndUpdate(
           { ownerUid: uid, pendingKobo: { $gte: amt } },
           { $inc: { pendingKobo: -amt, availableKobo: amt } },
-          { new: true }
+          { new: true },
         );
 
         if (!after) return res.json({ ok: true, releasedKobo: 0 });
@@ -726,7 +726,7 @@ export function withAuth(requireAuth, requireAdmin) {
         console.error("[wallet/release] error:", e);
         res.status(500).json({ error: "release_failed" });
       }
-    }
+    },
   );
 
   /**
@@ -758,16 +758,23 @@ export function withAuth(requireAuth, requireAdmin) {
 
       booking.meta = booking.meta || {};
 
-      // 🔒 Guard: prevent mixing payment methods
-      const requested = String(
-        booking.meta.paymentMethodRequested || ""
-      ).toLowerCase();
-      if (requested === "card") {
+      // 🔒 Guard: prevent mixing payment methods AFTER payment has actually started/finished.
+      // If the booking is still unpaid, allow wallet payment even if "card" was initially requested.
+      // This fixes "card selected" error after expiry/refund when user wants wallet.
+      const used = String(booking.meta?.paymentMethodUsed || "").toLowerCase();
+
+      // If already paid with card, do not allow wallet on same booking.
+      if (booking.paymentStatus === "paid" && used === "card") {
         return res.status(400).json({
-          error: "card_only_booking",
-          message:
-            "This booking was created for card payment. Please pay with card.",
+          error: "already_paid_by_card",
+          message: "This booking was already paid with card.",
         });
+      }
+
+      // If booking is unpaid, allow wallet and treat this as choosing wallet now.
+      if (booking.paymentStatus !== "paid") {
+        booking.meta = booking.meta || {};
+        booking.meta.paymentMethodRequested = "wallet";
       }
 
       // Already paid? (idempotent return) — but still re-emit booking:paid so pro alert is instant on retries
@@ -787,13 +794,13 @@ export function withAuth(requireAuth, requireAdmin) {
             if (booking.proOwnerUid)
               io.to(`user:${booking.proOwnerUid}`).emit(
                 "booking:paid",
-                payload
+                payload,
               );
             if (booking.clientUid)
               io.to(`user:${booking.clientUid}`).emit("booking:paid", payload);
             io.to(`booking:${booking._id.toString()}`).emit(
               "booking:paid",
-              payload
+              payload,
             );
           }
         } catch {}
@@ -865,30 +872,30 @@ export function withAuth(requireAuth, requireAdmin) {
               if (booking.proOwnerUid)
                 io.to(`user:${booking.proOwnerUid}`).emit(
                   "booking:paid",
-                  payload
+                  payload,
                 );
               if (booking.clientUid)
                 io.to(`user:${booking.clientUid}`).emit(
                   "booking:paid",
-                  payload
+                  payload,
                 );
 
               io.to(`booking:${booking._id.toString()}`).emit(
                 "booking:paid",
-                payload
+                payload,
               );
             }
           } catch (err) {
             console.warn(
               "[wallet/pay-booking] socket emit booking:paid failed:",
-              err?.message || err
+              err?.message || err,
             );
           }
         }
       } catch (e) {
         console.warn(
           "[wallet/pay-booking] notify pro failed:",
-          e?.message || e
+          e?.message || e,
         );
       }
 

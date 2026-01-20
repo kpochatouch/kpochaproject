@@ -1,3 +1,4 @@
+// apps/api/models/PaymentSession.js
 import mongoose from "mongoose";
 
 const PaymentSessionSchema = new mongoose.Schema(
@@ -18,7 +19,7 @@ const PaymentSessionSchema = new mongoose.Schema(
 
     usedAt: { type: Date, default: null },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 PaymentSessionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 }); // auto-clean
