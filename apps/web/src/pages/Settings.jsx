@@ -925,12 +925,15 @@ export default function SettingsPage() {
 
       const { data } = await api.put("/api/pros/me", payload);
       // ✅ This is the real payout account used by /api/wallet/withdraw (Application.payoutBank)
-      await api.put("/api/payout/me", {
+      const payRes = await api.put("/api/payout/me", {
         accountNumber: digitsOnly(accountNumber).slice(0, 10),
         bankCode: String(bankCode || "").trim(),
-        bankName: bankName,
-        accountName: accountName,
+        bankName: String(bankName || "").trim(),
+        accountName: String(accountName || "").trim(),
       });
+
+      // ✅ if this is null, your payout save didn't actually persist
+      console.log("[payout/me] saved:", payRes?.data);
 
       setAppDoc(data?.item || { ...appDoc, ...payload });
       flashOK("Payment details saved.");
@@ -954,16 +957,16 @@ export default function SettingsPage() {
       setSavingBank(false);
     }
   }, [
-  canSaveBank,
-  savingBank,
-  appDoc,
-  bankName,
-  bankCode,
-  accountName,
-  accountNumber,
-  bvn,
-  hasPro,
-]);
+    canSaveBank,
+    savingBank,
+    appDoc,
+    bankName,
+    bankCode,
+    accountName,
+    accountNumber,
+    bvn,
+    hasPro,
+  ]);
 
   /* ---------- UI ---------- */
   return (

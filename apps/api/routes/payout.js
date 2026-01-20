@@ -43,6 +43,16 @@ export default function payoutRoutes({ requireAuth, Application }) {
     }
   });
 
+  // ✅ Debug: confirm what withdraw sees (Application.payoutBank)
+  router.get("/payout/me", requireAuth, async (req, res) => {
+    try {
+      const doc = await Application.findOne({ uid: req.user.uid }).lean();
+      return res.json({ ok: true, payoutBank: doc?.payoutBank || null });
+    } catch (e) {
+      return res.status(500).json({ error: "server_error" });
+    }
+  });
+
   // ----------------------------
   // 2) Pro instant cashout (Pending -> Available) for a specific booking
   //    - True escrow: pro gets pending ONLY after COMPLETED (already in bookings.js)
