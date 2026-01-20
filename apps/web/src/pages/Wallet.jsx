@@ -181,11 +181,11 @@ export default function WalletPage() {
         {/* Pro can also be a client: allow viewing refunds/credits */}
         {me?.isPro && (
           <ClientWalletLinkButton
+            to="/pro/client-wallet"
             label="View Client Wallet"
             className="px-3 py-1.5 rounded bg-black border border-zinc-800 text-sm hover:bg-zinc-900"
           />
         )}
-
         <button
           onClick={() =>
             setPinModal({ open: true, mode: meHasPin ? "reset" : "set" })

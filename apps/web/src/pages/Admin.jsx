@@ -357,6 +357,25 @@ export default function Admin() {
   const money = (kobo = 0) =>
     `₦${(Math.floor(Number(kobo || 0)) / 100).toLocaleString()}`;
 
+  // ✅ ADD THIS RIGHT AFTER money()
+  function prettyAdminWalletError(json) {
+    const raw =
+      json?.details ||
+      json?.message ||
+      json?.error ||
+      "Request failed. Please try again.";
+
+    // Paystack starter tier restriction
+    if (
+      json?.error === "platform_transfer_failed" &&
+      String(raw).toLowerCase().includes("starter business")
+    ) {
+      return "Paystack is blocking payouts for Starter businesses. To withdraw to bank, upgrade/verify your Paystack business (KYC) or rely on Paystack settlements to your payout account.";
+    }
+
+    return raw;
+  }
+
   const loadAdminWallet = useCallback(async () => {
     setWError("");
     setWOk("");
@@ -433,9 +452,7 @@ export default function Admin() {
       });
       const json = await res.json();
       if (!res.ok || !json?.ok) {
-        throw new Error(
-          json?.message || json?.error || "platform_withdraw_failed",
-        );
+        throw new Error(prettyAdminWalletError(json));
       }
 
       setWOk("Platform withdrawal sent to Paystack.");

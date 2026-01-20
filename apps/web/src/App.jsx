@@ -201,11 +201,11 @@ export default function App() {
       if (!payload) return;
       if (
         ["ended", "missed", "cancelled", "declined", "failed"].includes(
-          payload.status
+          payload.status,
         )
       ) {
         setIncomingCall((prev) =>
-          prev && prev.callId === payload.callId ? null : prev
+          prev && prev.callId === payload.callId ? null : prev,
         );
       }
     });
@@ -359,6 +359,16 @@ export default function App() {
               element={
                 <RequireAuth>
                   <WalletSmart />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/pro/client-wallet"
+              element={
+                <RequireAuth>
+                  <RequireRole role="pro">
+                    <ClientWallet />
+                  </RequireRole>
                 </RequireAuth>
               }
             />

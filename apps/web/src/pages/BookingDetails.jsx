@@ -807,12 +807,12 @@ export default function BookingDetails() {
               {/* Pro who is acting as CLIENT can quickly confirm refunds/credits */}
               {me?.isPro && isClient && (
                 <ClientWalletLinkButton
+                  to="/pro/client-wallet"
                   label="Client Wallet"
                   className="px-3 py-1.5 rounded border border-zinc-800 text-sm hover:bg-zinc-900"
                 />
               )}
             </div>
-
             <div className="flex items-center gap-2">
               <Badge tone={statusTone(booking?.status, booking?.paymentStatus)}>
                 {getBookingUiLabel(booking)}

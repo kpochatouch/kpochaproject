@@ -222,7 +222,7 @@ export default function ClientWallet() {
   return (
     <div className="max-w-5xl mx-auto px-4 py-10">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Wallet</h1>
+        <h1 className="text-2xl font-semibold">Client Wallet</h1>
         {!me?.isPro && (
           <span className="text-xs text-zinc-400">
             This is your <b>client</b> wallet (credits &amp; refunds). No
