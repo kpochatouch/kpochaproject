@@ -14,7 +14,7 @@ export async function getOrCreateWallet(ownerUid) {
   const w = await Wallet.findOneAndUpdate(
     { ownerUid },
     { $setOnInsert: { ownerUid } },
-    { new: true, upsert: true, setDefaultsOnInsert: true }
+    { new: true, upsert: true, setDefaultsOnInsert: true },
   );
   return w;
 }
@@ -36,7 +36,7 @@ async function transferAvailableToAvailable(
   toUid,
   amountKobo,
   meta = {},
-  types = {}
+  types = {},
 ) {
   const amt = Math.floor(Number(amountKobo || 0));
   if (!amt || amt <= 0) throw new Error("amount_invalid");
@@ -50,32 +50,32 @@ async function transferAvailableToAvailable(
       await Wallet.updateOne(
         { ownerUid: fromUid },
         { $setOnInsert: { ownerUid: fromUid } },
-        { upsert: true, session }
+        { upsert: true, session },
       );
       await Wallet.updateOne(
         { ownerUid: toUid },
         { $setOnInsert: { ownerUid: toUid } },
-        { upsert: true, session }
+        { upsert: true, session },
       );
 
       // debit with guard
       const fromAfter = await Wallet.findOneAndUpdate(
         { ownerUid: fromUid, availableKobo: { $gte: amt } },
         { $inc: { availableKobo: -amt } },
-        { new: true, session }
+        { new: true, session },
       );
       if (!fromAfter) throw new Error("insufficient_funds");
 
       const toAfter = await Wallet.findOneAndUpdate(
         { ownerUid: toUid },
         { $inc: { availableKobo: amt } },
-        { new: true, session }
+        { new: true, session },
       );
 
       const debitType = types.debitType || "transfer_debit";
       const creditType = types.creditType || "transfer_credit";
 
-      await WalletTx.create(
+      await WalletTx.insertMany(
         [
           {
             ownerUid: fromUid,
@@ -96,7 +96,7 @@ async function transferAvailableToAvailable(
             meta,
           },
         ],
-        { session }
+        { session, ordered: true },
       );
 
       out = { ok: true, amt, fromAfter, toAfter };
@@ -121,7 +121,7 @@ async function ensurePlatformWallet() {
  */
 export async function fundEscrowFromPaystackForBooking(
   booking,
-  { reference = null } = {}
+  { reference = null } = {},
 ) {
   const bookingId = asStrId(booking);
   if (!bookingId) throw new Error("booking_id_missing");
@@ -150,21 +150,18 @@ export async function fundEscrowFromPaystackForBooking(
       await Wallet.updateOne(
         { ownerUid: ESCROW_UID },
         { $setOnInsert: { ownerUid: ESCROW_UID } },
-        { upsert: true, session }
+        { upsert: true, session },
       );
 
       // credit escrow.available
       escrowAfter = await Wallet.findOneAndUpdate(
         { ownerUid: ESCROW_UID },
         { $inc: { availableKobo: amountKobo } },
-        { new: true, upsert: true, setDefaultsOnInsert: true, session }
+        { new: true, upsert: true, setDefaultsOnInsert: true, session },
       );
-
-      // ✅ ADD THIS LINE RIGHT HERE
       if (!escrowAfter) throw new Error("escrow_wallet_missing_after_update");
 
-      // ledger (idempotency is enforced by your unique index)
-      await WalletTx.create(
+      await WalletTx.insertMany(
         [
           {
             ownerUid: ESCROW_UID,
@@ -182,14 +179,13 @@ export async function fundEscrowFromPaystackForBooking(
             },
           },
         ],
-        { session }
+        { session, ordered: true },
       );
     });
   } finally {
     session.endSession();
   }
 
-  // ✅ ADD THIS BLOCK RIGHT HERE (after WalletTx.create, before return)
   try {
     await Booking.updateOne(
       { _id: bookingId }, // bookingId is already a string of the ObjectId
@@ -199,7 +195,7 @@ export async function fundEscrowFromPaystackForBooking(
           "meta.escrowFundedAt": new Date(),
           "meta.escrowReference": reference || null,
         },
-      }
+      },
     );
   } catch {}
 
@@ -227,14 +223,14 @@ export async function holdFundsInEscrowForBooking(booking) {
     ESCROW_UID,
     booking.amountKobo,
     { bookingId, escrow: true, reason: "booking_hold" },
-    { debitType: "booking_hold", creditType: "escrow_hold_in_wallet" }
+    { debitType: "booking_hold", creditType: "escrow_hold_in_wallet" },
   );
 }
 
 export async function refundEscrowToClientForBooking(
   booking,
   refundAmountKobo,
-  meta = {}
+  meta = {},
 ) {
   const bookingId = asStrId(booking);
   if (!bookingId) throw new Error("booking_id_missing");
@@ -255,7 +251,7 @@ export async function refundEscrowToClientForBooking(
     booking.clientUid,
     refundAmountKobo,
     { bookingId, escrow: true, ...meta },
-    { debitType: "escrow_refund_out", creditType: "booking_refund_wallet" }
+    { debitType: "escrow_refund_out", creditType: "booking_refund_wallet" },
   );
 }
 
@@ -317,7 +313,7 @@ async function getClientCancelFeePercentAfterAccept() {
   if (fresh() && _cache.cancelFeePct != null) return _cache.cancelFeePct;
   const s = await readSettingsDoc();
   const fromSettings = Number(
-    s?.bookingRules?.clientCancelFeePercentAfterAccept
+    s?.bookingRules?.clientCancelFeePercentAfterAccept,
   );
   const envPct = envNumber("CLIENT_CANCEL_FEE_AFTER_ACCEPT_PCT", 3);
   const pct = Number.isFinite(fromSettings) ? fromSettings : envPct;
@@ -425,17 +421,17 @@ export async function creditProPendingForBooking(booking, meta = {}) {
       await Wallet.updateOne(
         { ownerUid: ESCROW_UID },
         { $setOnInsert: { ownerUid: ESCROW_UID } },
-        { upsert: true, session }
+        { upsert: true, session },
       );
       await Wallet.updateOne(
         { ownerUid },
         { $setOnInsert: { ownerUid } },
-        { upsert: true, session }
+        { upsert: true, session },
       );
       await Wallet.updateOne(
         { ownerUid: PLATFORM_UID },
         { $setOnInsert: { ownerUid: PLATFORM_UID } },
-        { upsert: true, session }
+        { upsert: true, session },
       );
 
       // Debit escrow.available for BOTH pro + platform in one go (guard)
@@ -444,7 +440,7 @@ export async function creditProPendingForBooking(booking, meta = {}) {
       const escrowAfter = await Wallet.findOneAndUpdate(
         { ownerUid: ESCROW_UID, availableKobo: { $gte: totalOut } },
         { $inc: { availableKobo: -totalOut } },
-        { new: true, session }
+        { new: true, session },
       );
       if (!escrowAfter) throw new Error("escrow_insufficient");
 
@@ -452,18 +448,18 @@ export async function creditProPendingForBooking(booking, meta = {}) {
       const proAfter = await Wallet.findOneAndUpdate(
         { ownerUid },
         { $inc: { pendingKobo: proShareKobo, earnedKobo: proShareKobo } },
-        { new: true, session }
+        { new: true, session },
       );
 
       // Credit platform.available
       const platformAfter = await Wallet.findOneAndUpdate(
         { ownerUid: PLATFORM_UID },
         { $inc: { availableKobo: platformShareKobo } },
-        { new: true, session }
+        { new: true, session },
       );
 
       // Ledger: escrow out + pro funded + platform commission
-      await WalletTx.create(
+      await WalletTx.insertMany(
         [
           // --- pro ---
           {
@@ -504,14 +500,14 @@ export async function creditProPendingForBooking(booking, meta = {}) {
                   amountKobo: platformShareKobo,
                   balancePendingKobo: Number(platformAfter.pendingKobo || 0),
                   balanceAvailableKobo: Number(
-                    platformAfter.availableKobo || 0
+                    platformAfter.availableKobo || 0,
                   ),
                   meta: { bookingId: bookingIdStr, platformPct, ...meta },
                 },
               ]
             : []),
         ],
-        { session }
+        { session, ordered: true },
       );
 
       result = {
@@ -530,12 +526,12 @@ export async function creditProPendingForBooking(booking, meta = {}) {
   // (optional notification)
   try {
     await createNotification({
-      ownerUid,
+      toUid: ownerUid,
+      fromUid: null,
       type: "booking_fund",
-      data: {
-        bookingId: bookingIdStr,
-        message: "Job completed. Funds moved from escrow to pending balance.",
-      },
+      title: "Funds moved to Pending",
+      body: "Job completed. Funds moved from escrow to pending balance.",
+      data: { bookingId: bookingIdStr },
     });
   } catch {}
 
@@ -553,7 +549,7 @@ export async function creditProPendingForBooking(booking, meta = {}) {
 export async function releasePendingToAvailable(
   ownerUid,
   amountKobo = null,
-  meta = {}
+  meta = {},
 ) {
   if (!ownerUid) throw new Error("ownerUid_required");
 
@@ -570,7 +566,7 @@ export async function releasePendingToAvailable(
   const after = await Wallet.findOneAndUpdate(
     { ownerUid, pendingKobo: { $gte: amt } },
     { $inc: { pendingKobo: -amt, availableKobo: amt } },
-    { new: true }
+    { new: true },
   );
   if (!after) throw new Error("insufficient_pending");
 
@@ -600,7 +596,7 @@ export async function withdrawAvailable(ownerUid, amountKobo, meta = {}) {
   const after = await Wallet.findOneAndUpdate(
     { ownerUid, availableKobo: { $gte: amt } },
     { $inc: { availableKobo: -amt, withdrawnKobo: amt } },
-    { new: true }
+    { new: true },
   );
   if (!after) throw new Error("insufficient_available");
 
@@ -649,7 +645,7 @@ export async function withdrawPendingWithFee(ownerUid, amountKobo, meta = {}) {
             availableKobo: net, // ✅ only the net hits the pro available
           },
         },
-        { new: true, session }
+        { new: true, session },
       );
       if (!proAfter) throw new Error("insufficient_pending");
 
@@ -659,7 +655,7 @@ export async function withdrawPendingWithFee(ownerUid, amountKobo, meta = {}) {
         platformAfter = await Wallet.findOneAndUpdate(
           { ownerUid: PLATFORM_UID },
           { $inc: { availableKobo: fee } },
-          { new: true, upsert: true, setDefaultsOnInsert: true, session }
+          { new: true, upsert: true, setDefaultsOnInsert: true, session },
         );
       }
 
@@ -708,7 +704,7 @@ export async function withdrawPendingWithFee(ownerUid, amountKobo, meta = {}) {
         });
       }
 
-      await WalletTx.create(txs, { session });
+      await WalletTx.insertMany(txs, { session, ordered: true });
 
       out = {
         ok: true,
@@ -738,7 +734,7 @@ export async function withdrawPendingWithFee(ownerUid, amountKobo, meta = {}) {
  */
 export async function releasePendingToAvailableForBooking(
   bookingOrId,
-  meta = {}
+  meta = {},
 ) {
   // 1) Resolve booking
   const booking =
@@ -768,7 +764,7 @@ export async function releasePendingToAvailableForBooking(
   if (!creditedKobo || creditedKobo <= 0) {
     await Booking.updateOne(
       { _id: booking._id },
-      { $set: { payoutReleased: true } }
+      { $set: { payoutReleased: true } },
     );
     return { ok: true, nothingToRelease: true };
   }
@@ -782,7 +778,7 @@ export async function releasePendingToAvailableForBooking(
   // 5) Mark booking as released
   await Booking.updateOne(
     { _id: booking._id },
-    { $set: { payoutReleased: true } }
+    { $set: { payoutReleased: true } },
   );
 
   return { ok: true, ...rel };
@@ -900,7 +896,7 @@ export async function cancelBookingAndRefund(bookingOrId, options = {}) {
             "meta.bookingId": bookingIdStr,
           },
           null,
-          { session }
+          { session },
         ).lean();
 
         if (platformAlready2) return;
@@ -910,18 +906,18 @@ export async function cancelBookingAndRefund(bookingOrId, options = {}) {
         await Wallet.updateOne(
           { ownerUid: ESCROW_UID },
           { $setOnInsert: { ownerUid: ESCROW_UID } },
-          { upsert: true, session }
+          { upsert: true, session },
         );
         await Wallet.updateOne(
           { ownerUid: PLATFORM_UID },
           { $setOnInsert: { ownerUid: PLATFORM_UID } },
-          { upsert: true, session }
+          { upsert: true, session },
         );
 
         const escrowAfter = await Wallet.findOneAndUpdate(
           { ownerUid: ESCROW_UID, availableKobo: { $gte: platformFeeKobo } },
           { $inc: { availableKobo: -platformFeeKobo } },
-          { new: true, session }
+          { new: true, session },
         );
         if (!escrowAfter)
           throw new Error("escrow_insufficient_for_cancel_fee_platform");
@@ -929,10 +925,10 @@ export async function cancelBookingAndRefund(bookingOrId, options = {}) {
         const platformAfter = await Wallet.findOneAndUpdate(
           { ownerUid: PLATFORM_UID },
           { $inc: { availableKobo: platformFeeKobo } },
-          { new: true, session }
+          { new: true, session },
         );
 
-        await WalletTx.create(
+        await WalletTx.insertMany(
           [
             {
               ownerUid: ESCROW_UID,
@@ -963,7 +959,7 @@ export async function cancelBookingAndRefund(bookingOrId, options = {}) {
               },
             },
           ],
-          { session }
+          { session, ordered: true },
         );
       });
       session.endSession();
@@ -989,14 +985,14 @@ export async function cancelBookingAndRefund(bookingOrId, options = {}) {
               "meta.bookingId": bookingIdStr,
             },
             null,
-            { session }
+            { session },
           ).lean();
           if (proAlready2) return;
 
           const escrowAfter = await Wallet.findOneAndUpdate(
             { ownerUid: ESCROW_UID, availableKobo: { $gte: proCompKobo } },
             { $inc: { availableKobo: -proCompKobo } },
-            { new: true, session }
+            { new: true, session },
           );
           if (!escrowAfter)
             throw new Error("escrow_insufficient_for_cancel_fee");
@@ -1004,10 +1000,10 @@ export async function cancelBookingAndRefund(bookingOrId, options = {}) {
           const proAfter = await Wallet.findOneAndUpdate(
             { ownerUid: proUid },
             { $inc: { pendingKobo: proCompKobo, earnedKobo: proCompKobo } },
-            { new: true, upsert: true, setDefaultsOnInsert: true, session }
+            { new: true, upsert: true, setDefaultsOnInsert: true, session },
           );
 
-          await WalletTx.create(
+          await WalletTx.insertMany(
             [
               {
                 ownerUid: ESCROW_UID,
@@ -1038,7 +1034,7 @@ export async function cancelBookingAndRefund(bookingOrId, options = {}) {
                 },
               },
             ],
-            { session }
+            { session, ordered: true },
           );
         });
         session.endSession();

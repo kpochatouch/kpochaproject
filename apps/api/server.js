@@ -104,7 +104,7 @@ try {
   } catch (e2) {
     console.error(
       "[auth] ❌ Firebase Admin failed to initialize:",
-      e2?.message || e2
+      e2?.message || e2,
     );
     process.exit(1);
   }
@@ -128,11 +128,11 @@ async function fixWalletCollectionOnce() {
     try {
       const renameRes = await col.updateMany(
         { userUid: { $exists: true } },
-        { $rename: { userUid: "ownerUid" } }
+        { $rename: { userUid: "ownerUid" } },
       );
       if (renameRes?.modifiedCount) {
         console.log(
-          `[wallets] 🔧 Renamed userUid → ownerUid for ${renameRes.modifiedCount} docs`
+          `[wallets] 🔧 Renamed userUid → ownerUid for ${renameRes.modifiedCount} docs`,
         );
       }
     } catch {}
@@ -150,7 +150,7 @@ async function fixWalletCollectionOnce() {
       try {
         await col.createIndex(
           { ownerUid: 1 },
-          { unique: true, name: "ownerUid_1" }
+          { unique: true, name: "ownerUid_1" },
         );
         console.log("[wallets] ✅ Ensured unique index ownerUid_1");
       } catch (e) {
@@ -168,7 +168,7 @@ async function fixWalletCollectionOnce() {
       });
       if (del?.deletedCount) {
         console.log(
-          `[wallets] 🧹 Removed ${del.deletedCount} invalid wallet docs`
+          `[wallets] 🧹 Removed ${del.deletedCount} invalid wallet docs`,
         );
       }
     } catch {}
@@ -183,7 +183,7 @@ const CommissionSplitSchema = new mongoose.Schema(
     platform: { type: Number, default: 25 },
     pro: { type: Number, default: 75 },
   },
-  { _id: false }
+  { _id: false },
 );
 const PayoutsSchema = new mongoose.Schema(
   {
@@ -195,7 +195,7 @@ const PayoutsSchema = new mongoose.Schema(
     autoReleaseCron: { type: String, default: "0 2 * * *" },
     platformRecipientCode: { type: String, default: "" },
   },
-  { _id: false }
+  { _id: false },
 );
 const BookingRulesSchema = new mongoose.Schema(
   {
@@ -214,7 +214,7 @@ const BookingRulesSchema = new mongoose.Schema(
     completionReminderToPro: { type: Boolean, default: true },
     completionReminderToClient: { type: Boolean, default: false },
   },
-  { _id: false }
+  { _id: false },
 );
 
 const MaintenanceSchema = new mongoose.Schema(
@@ -222,14 +222,14 @@ const MaintenanceSchema = new mongoose.Schema(
     isMaintenanceMode: { type: Boolean, default: false },
     message: { type: String, default: "We’ll be back shortly." },
   },
-  { _id: false }
+  { _id: false },
 );
 const NotificationsSchema = new mongoose.Schema(
   {
     emailEnabled: { type: Boolean, default: false },
     smsEnabled: { type: Boolean, default: false },
   },
-  { _id: false }
+  { _id: false },
 );
 
 const SettingsSchema = new mongoose.Schema(
@@ -244,14 +244,14 @@ const SettingsSchema = new mongoose.Schema(
     withdrawals: {
       type: new mongoose.Schema(
         { requireApproval: { type: Boolean, default: true } },
-        { _id: false }
+        { _id: false },
       ),
     },
     security: { allowedOrigins: { type: [String], default: [] } },
     webhooks: { paystack: { secret: { type: String, default: "" } } },
     updatedBy: { type: String, default: "system" },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 const Settings =
   mongoose.models.Settings || mongoose.model("Settings", SettingsSchema);
@@ -295,12 +295,13 @@ async function initSchedulers() {
   CRON_TASKS.forEach((t) => t.stop());
   CRON_TASKS = [];
 
-  const s = await loadSettings();
+  const s = await loadSettings({ force: true });
 
   /* 1️⃣ Auto-release completed bookings after releaseDays */
   if (s?.payouts?.enableAutoRelease && s?.payouts?.autoReleaseCron) {
     const t = cron.schedule(s.payouts.autoReleaseCron, async () => {
       const started = Date.now();
+      const s = await loadSettings({ force: true });
       try {
         const releaseDays = s.payouts.releaseDays ?? 7;
         const cutoff = new Date(Date.now() - releaseDays * 24 * 60 * 60 * 1000);
@@ -329,15 +330,15 @@ async function initSchedulers() {
             console.error(
               "[scheduler] release error for booking",
               b._id?.toString?.(),
-              e?.message || e
+              e?.message || e,
             );
           }
         }
 
         console.log(
           `[scheduler] Auto-release ran in ${Math.round(
-            (Date.now() - started) / 1000
-          )}s. Processed=${toRelease.length}, ok=${ok}, fail=${fail}`
+            (Date.now() - started) / 1000,
+          )}s. Processed=${toRelease.length}, ok=${ok}, fail=${fail}`,
         );
       } catch (err) {
         console.error("[scheduler] Auto-release error:", err.message);
@@ -350,6 +351,7 @@ async function initSchedulers() {
   if (s?.bookingRules?.ringTimeoutSeconds) {
     const t = cron.schedule("*/1 * * * *", async () => {
       try {
+        const s = await loadSettings({ force: true });
         const timeoutMs = (s.bookingRules.ringTimeoutSeconds || 120) * 1000;
         const cutoff = new Date(Date.now() - timeoutMs);
 
@@ -358,7 +360,7 @@ async function initSchedulers() {
           status: "scheduled",
           paymentStatus: "paid",
           acceptedAt: { $in: [null, undefined] },
-          ringingStartedAt: { $exists: true, $lte: cutoff },
+          ringingStartedAt: { $type: "date", $lte: cutoff },
         }).limit(200);
 
         // fallback for old bookings that don't have ringingStartedAt yet
@@ -384,13 +386,13 @@ async function initSchedulers() {
             console.log(
               "[scheduler] auto-cancelled ringing booking via helper",
               b._id.toString(),
-              refundInfo ? `refund=${refundInfo?.refundAmountKobo}` : ""
+              refundInfo ? `refund=${refundInfo?.refundAmountKobo}` : "",
             );
           } catch (e) {
             console.error(
               "[scheduler] ring-timeout cancelBookingAndRefund error:",
               b._id?.toString?.(),
-              e?.message || e
+              e?.message || e,
             );
           }
         }
@@ -403,90 +405,94 @@ async function initSchedulers() {
 
   /* 3️⃣ Auto-remind on accepted-but-not-completed bookings */
   {
-    const rules = s?.bookingRules || {};
-    const hours = rules.completionReminderHours ?? 2; // wait before first reminder
-    const maxRepeat = rules.completionReminderRepeat ?? 1; // how many times max
-    const remindPro = rules.completionReminderToPro ?? true;
-    const remindClient = rules.completionReminderToClient ?? false;
+    // keep the scheduler registered, but re-check settings every run
+    const t = cron.schedule("*/10 * * * *", async () => {
+      try {
+        const s = await loadSettings({ force: true });
+        const rules = s?.bookingRules || {};
 
-    const remindersEnabled =
-      (remindPro || remindClient) && hours > 0 && maxRepeat > 0;
+        const hours = rules.completionReminderHours ?? 2; // wait before first reminder
+        const maxRepeat = rules.completionReminderRepeat ?? 1; // how many times max
+        const remindPro = rules.completionReminderToPro ?? true;
+        const remindClient = rules.completionReminderToClient ?? false;
 
-    if (remindersEnabled) {
-      const t = cron.schedule("*/10 * * * *", async () => {
-        try {
-          const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000);
+        // if reminders are disabled by settings, do nothing
+        const remindersEnabled =
+          (remindPro || remindClient) && hours > 0 && maxRepeat > 0;
 
-          const due = await Booking.find({
-            status: "accepted",
-            paymentStatus: "paid",
-            acceptedAt: { $lte: cutoff },
-            completedAt: { $exists: false },
-          }).limit(200);
+        if (!remindersEnabled) return;
 
-          for (const b of due) {
-            try {
-              b.meta = b.meta || {};
-              const count = b.meta.completionReminderCount || 0;
+        const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000);
 
-              if (count >= maxRepeat) continue;
+        const due = await Booking.find({
+          status: "accepted",
+          paymentStatus: "paid",
+          acceptedAt: { $lte: cutoff },
+          completedAt: { $exists: false },
+        }).limit(200);
 
-              // 👉 Notify Pro
-              if (remindPro && b.proOwnerUid) {
-                await createNotification({
-                  toUid: b.proOwnerUid,
-                  fromUid: b.clientUid || null,
-                  type: "booking_completion_reminder",
-                  title: "Reminder: Complete Booking",
-                  body: "This booking has been pending completion. Please confirm with the client.",
-                  data: {
-                    bookingId: b._id.toString(),
-                    role: "pro",
-                  },
-                });
-              }
+        for (const b of due) {
+          try {
+            b.meta = b.meta || {};
+            const count = b.meta.completionReminderCount || 0;
 
-              // 👉 Notify Client
-              if (remindClient && b.clientUid) {
-                await createNotification({
-                  toUid: b.clientUid,
-                  fromUid: b.proOwnerUid || null,
-                  type: "booking_completion_reminder",
-                  title: "Reminder: Please Complete Booking",
-                  body: "Your service appears completed. Please mark the booking as completed in the app.",
-                  data: {
-                    bookingId: b._id.toString(),
-                    role: "client",
-                  },
-                });
-              }
+            if (count >= maxRepeat) continue;
 
-              // Track reminders
-              b.meta.completionReminderCount = count + 1;
-              b.meta.lastReminderAt = new Date();
-              await b.save();
-
-              console.log(
-                "[scheduler] completion reminder sent for booking",
-                b._id.toString()
-              );
-            } catch (e) {
-              console.error(
-                "[scheduler] completion-reminder item error:",
-                e?.message || e
-              );
+            // 👉 Notify Pro
+            if (remindPro && b.proOwnerUid) {
+              await createNotification({
+                toUid: b.proOwnerUid,
+                fromUid: b.clientUid || null,
+                type: "booking_completion_reminder",
+                title: "Reminder: Complete Booking",
+                body: "This booking has been pending completion. Please confirm with the client.",
+                data: {
+                  bookingId: b._id.toString(),
+                  role: "pro",
+                },
+              });
             }
-          }
-        } catch (err) {
-          console.error(
-            "[scheduler] completion reminder error:",
-            err?.message || err
-          );
-        }
-      });
 
-      CRON_TASKS.push(t);
-    }
+            // 👉 Notify Client
+            if (remindClient && b.clientUid) {
+              await createNotification({
+                toUid: b.clientUid,
+                fromUid: b.proOwnerUid || null,
+                type: "booking_completion_reminder",
+                title: "Reminder: Please Complete Booking",
+                body: "Your service appears completed. Please mark the booking as completed in the app.",
+                data: {
+                  bookingId: b._id.toString(),
+                  role: "client",
+                },
+              });
+            }
+
+            // Track reminders
+            b.meta.completionReminderCount = count + 1;
+            b.meta.lastReminderAt = new Date();
+            await b.save();
+
+            console.log(
+              "[scheduler] completion reminder sent for booking",
+              b._id.toString(),
+            );
+          } catch (e) {
+            console.error(
+              "[scheduler] completion-reminder item error:",
+              e?.message || e,
+            );
+          }
+        }
+      } catch (err) {
+        console.error(
+          "[scheduler] completion reminder error:",
+          err?.message || err,
+        );
+      }
+    });
+
+    CRON_TASKS.push(t);
   }
 
   /* 4️⃣ (Placeholder) No-show sweeper */
@@ -495,7 +501,7 @@ async function initSchedulers() {
       try {
         const strikeLimit = s.bookingRules.noShowStrikeLimit ?? 2;
         console.log(
-          `[scheduler] No-show sweep ran. Strike limit: ${strikeLimit}`
+          `[scheduler] No-show sweep ran. Strike limit: ${strikeLimit}`,
         );
         // TODO: implement actual no-show penalties
       } catch (err) {
@@ -583,14 +589,14 @@ app.post(
 
       const event = JSON.parse(req.body.toString());
       handlePaystackEvent(event).catch((err) =>
-        console.error("[paystack] handler error:", err)
+        console.error("[paystack] handler error:", err),
       );
       res.sendStatus(200);
     } catch (err) {
       console.error("[paystack] webhook processing error:", err);
       res.sendStatus(400);
     }
-  }
+  },
 );
 
 // JSON after webhooks
@@ -623,7 +629,7 @@ app.use((req, res, next) => {
 
     res.setHeader(
       "Set-Cookie",
-      `anonId=${encodeURIComponent(anonId)}; ${cookieFlags}`
+      `anonId=${encodeURIComponent(anonId)}; ${cookieFlags}`,
     );
   }
 
@@ -720,7 +726,7 @@ async function getVerifiedClientIdentity(uid) {
           identity: 1,
           photoUrl: 1,
         },
-      }
+      },
     );
     if (!p) return { fullName: "", phone: "", photoUrl: "" };
 
@@ -777,7 +783,7 @@ app.get("/api/me", requireAuth, async (req, res) => {
             lga: 1,
             updatedAt: 1,
           },
-        }
+        },
       );
     } catch {}
 
@@ -859,13 +865,13 @@ app.get("/api/me", requireAuth, async (req, res) => {
             photoUrl: photoUrl || "",
           }
         : profileDoc?.proId
-        ? {
-            id: profileDoc.proId.toString(),
-            name: displayName,
-            status: profileDoc.proStatus || "approved",
-            photoUrl,
-          }
-        : null,
+          ? {
+              id: profileDoc.proId.toString(),
+              name: displayName,
+              status: profileDoc.proStatus || "approved",
+              photoUrl,
+            }
+          : null,
     };
 
     // make sure we never leak ownerUid
@@ -898,7 +904,7 @@ async function wasLivenessToday(uid) {
     const col = mongoose.connection.db.collection("profiles");
     const doc = await col.findOne(
       { uid },
-      { projection: { livenessVerifiedAt: 1 } }
+      { projection: { livenessVerifiedAt: 1 } },
     );
     if (!doc?.livenessVerifiedAt) return false;
     return isSameDay(doc.livenessVerifiedAt, new Date());
@@ -914,7 +920,7 @@ async function rememberLivenessToday(uid) {
     await col.updateOne(
       { uid },
       { $set: { livenessVerifiedAt: new Date() } },
-      { upsert: true }
+      { upsert: true },
     );
   } catch (e) {
     console.warn("[liveness:remember] skipped:", e?.message || e);
@@ -1061,7 +1067,7 @@ app.put("/api/pros/me", requireAuth, async (req, res) => {
     const updated = await Pro.findOneAndUpdate(
       { ownerUid: uid },
       { $set: proSet },
-      { new: true }
+      { new: true },
     ).lean();
 
     // 🔁 Sync same non-empty values back to profiles (two-way, last edit wins)
@@ -1090,7 +1096,7 @@ app.put("/api/pros/me", requireAuth, async (req, res) => {
 
       if (body.availability && Array.isArray(body.availability.statesCovered)) {
         toSet.statesCovered = body.availability.statesCovered.map((s) =>
-          s.toString().toUpperCase()
+          s.toString().toUpperCase(),
         );
       }
 
@@ -1103,7 +1109,7 @@ app.put("/api/pros/me", requireAuth, async (req, res) => {
     } catch (syncErr) {
       console.warn(
         "[/api/pros/me PUT] profiles sync skipped:",
-        syncErr?.message || syncErr
+        syncErr?.message || syncErr,
       );
     }
 
@@ -1175,7 +1181,7 @@ app.use("/api", profileRouter);
 // (GET /api/posts/... stays PUBLIC)
 app.use("/api/posts", (req, res, next) => {
   const needsAuthForWrite = ["POST", "PUT", "PATCH", "DELETE"].includes(
-    req.method
+    req.method,
   );
 
   if (!needsAuthForWrite) {
@@ -1240,9 +1246,8 @@ try {
 
 // optional availability
 try {
-  const { default: availabilityRouter } = await import(
-    "./routes/availability.js"
-  ).catch(() => ({ default: null }));
+  const { default: availabilityRouter } =
+    await import("./routes/availability.js").catch(() => ({ default: null }));
   if (availabilityRouter) {
     app.use("/api", availabilityRouter);
     console.log("[api] ✅ Availability routes mounted");
@@ -1282,7 +1287,7 @@ async function saveSettingsAndRestart(req, res) {
   try {
     const doc = await updateSettings(req.body || {}, req.user?.uid || "admin");
     await restartSchedulers().catch((e) =>
-      console.warn("[settings] restart warn:", e?.message || e)
+      console.warn("[settings] restart warn:", e?.message || e),
     );
     res.json(doc);
   } catch (err) {
@@ -1295,7 +1300,32 @@ app.put(
   "/api/settings/admin",
   requireAuth,
   requireAdmin,
-  saveSettingsAndRestart
+  saveSettingsAndRestart,
+);
+
+app.post(
+  "/api/admin/release-booking/:bookingId",
+  requireAuth,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const bookingId = String(req.params.bookingId || "").trim();
+      if (!bookingId)
+        return res.status(400).json({ error: "missing_booking_id" });
+
+      const result = await releasePendingToAvailableForBooking(bookingId, {
+        reason: "admin_manual_release",
+        adminUid: req.user?.uid || null,
+      });
+
+      return res.json({ ok: true, ...result });
+    } catch (e) {
+      return res.status(500).json({
+        ok: false,
+        error: e?.message || "manual_release_failed",
+      });
+    }
+  },
 );
 
 /* ------------------- Pros Admin ------------------- */
@@ -1386,10 +1416,10 @@ app.post(
 
       // coords
       const lat = Number(
-        appDoc?.business?.lat ?? appDoc?.identity?.lat ?? appDoc?.lat
+        appDoc?.business?.lat ?? appDoc?.identity?.lat ?? appDoc?.lat,
       );
       const lon = Number(
-        appDoc?.business?.lon ?? appDoc?.identity?.lon ?? appDoc?.lon
+        appDoc?.business?.lon ?? appDoc?.identity?.lon ?? appDoc?.lon,
       );
       const hasCoords = Number.isFinite(lat) && Number.isFinite(lon);
 
@@ -1439,7 +1469,7 @@ app.post(
                   visible: typeof s.visible === "boolean" ? s.visible : true,
                   description: s.description || "",
                   durationMins: toKpochaNumber(s.durationMins || 0),
-                }
+                },
           )
           .filter((s) => s.name);
       }
@@ -1520,7 +1550,7 @@ app.post(
       const pro = await Pro.findOneAndUpdate(
         { ownerUid },
         { $set: base },
-        { new: true, upsert: true }
+        { new: true, upsert: true },
       );
 
       try {
@@ -1538,7 +1568,7 @@ app.post(
               ...(pro.photoUrl ? { photoUrl: pro.photoUrl } : {}),
             },
           },
-          { upsert: true }
+          { upsert: true },
         );
       } catch (e) {
         console.warn("[approve:profile flag] skipped", e?.message || e);
@@ -1557,7 +1587,7 @@ app.post(
       console.error("[pros/approve]", err?.message || err);
       res.status(500).json({ error: "approve_failed" });
     }
-  }
+  },
 );
 
 /** Admin: view single application */
@@ -1577,7 +1607,7 @@ app.get(
       console.error("[applications:admin:view]", e?.message || e);
       res.status(500).json({ error: "failed" });
     }
-  }
+  },
 );
 
 /*
@@ -1599,7 +1629,7 @@ app.delete("/api/dev/reset", requireAuth, requireAdmin, async (_req, res) => {
 
 /* ------------------- Health ------------------- */
 app.get("/api/health", (_req, res) =>
-  res.json({ ok: true, time: new Date().toISOString() })
+  res.json({ ok: true, time: new Date().toISOString() }),
 );
 
 /* ------------------- Barbers ------------------- */
@@ -1735,11 +1765,11 @@ app.get(
     } catch (e) {
       console.error(
         "[/api/pros/:id/contact-for-booking] error:",
-        e?.message || e
+        e?.message || e,
       );
       return res.status(500).json({ error: "failed" });
     }
-  }
+  },
 );
 
 /* ------------------- Barbers Nearby ------------------- */
@@ -1749,10 +1779,10 @@ async function reverseGeocode(lat, lon) {
   if (!GEOAPIFY_KEY) return null;
   const r = await fetch(
     `https://api.geoapify.com/v1/geocode/reverse?lat=${encodeURIComponent(
-      lat
+      lat,
     )}&lon=${encodeURIComponent(lon)}&apiKey=${encodeURIComponent(
-      GEOAPIFY_KEY
-    )}`
+      GEOAPIFY_KEY,
+    )}`,
   );
   if (!r.ok) return null;
   const j = await r.json();
@@ -1776,10 +1806,10 @@ app.get("/api/geo/rev", async (req, res) => {
     }
     const r = await fetch(
       `https://api.geoapify.com/v1/geocode/reverse?lat=${encodeURIComponent(
-        lat
+        lat,
       )}&lon=${encodeURIComponent(lon)}&apiKey=${encodeURIComponent(
-        GEOAPIFY_KEY
-      )}`
+        GEOAPIFY_KEY,
+      )}`,
     );
     if (!r.ok) return res.status(502).json({ error: "geo_provider_failed" });
     const j = await r.json();
@@ -1799,7 +1829,7 @@ app.get("/api/barbers/nearby", async (req, res) => {
     const lon = Number(req.query.lon);
     const radiusKm = Math.max(
       1,
-      Math.min(200, Number(req.query.radiusKm || 25))
+      Math.min(200, Number(req.query.radiusKm || 25)),
     );
     if (!Number.isFinite(lat) || !Number.isFinite(lon))
       return res.status(400).json({ error: "lat & lon required" });
@@ -1919,7 +1949,7 @@ app.post("/api/applications", requireAuth, async (req, res) => {
     const doc = await Application.findOneAndUpdate(
       { uid: req.user.uid },
       { $set: setDoc },
-      { new: true, upsert: true }
+      { new: true, upsert: true },
     );
 
     return res.json({ ok: true, id: doc._id.toString(), status: doc.status });
@@ -1949,7 +1979,7 @@ async function handlePaystackEvent(event) {
       if (booking.paymentStatus === "paid" && booking.meta.notifiedProOnPaid) {
         console.log(
           "[paystack] duplicate charge.success ignored:",
-          booking._id.toString()
+          booking._id.toString(),
         );
         return;
       }
@@ -1964,7 +1994,7 @@ async function handlePaystackEvent(event) {
           ref,
           amount,
           "vs",
-          booking.amountKobo
+          booking.amountKobo,
         );
       }
 
@@ -1982,13 +2012,13 @@ async function handlePaystackEvent(event) {
 
         console.log(
           "[paystack] ✅ escrow funded for booking:",
-          booking._id.toString()
+          booking._id.toString(),
         );
       } catch (e) {
         console.error(
           "[paystack] ❌ escrow funding failed for booking:",
           booking._id.toString(),
-          e?.message || e
+          e?.message || e,
         );
       }
 
@@ -2036,20 +2066,20 @@ async function handlePaystackEvent(event) {
             io.to(`user:${booking.clientUid}`).emit("booking:paid", payload);
           io.to(`booking:${booking._id.toString()}`).emit(
             "booking:paid",
-            payload
+            payload,
           );
         }
       } catch (e) {
         console.warn(
           "[paystack] socket emit booking:paid failed:",
-          e?.message || e
+          e?.message || e,
         );
       }
 
       // ✅ Option A: do NOT credit pro pending on payment anymore
       console.log(
         "[paystack] ✅ booking paid (escrow held):",
-        booking._id.toString()
+        booking._id.toString(),
       );
     } catch (err) {
       console.error("[paystack] update booking error:", err);

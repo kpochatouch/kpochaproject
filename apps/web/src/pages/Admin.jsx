@@ -22,11 +22,19 @@ export default function Admin() {
   const [tab, setTab] = useState(initialTab);
 
   // ---------- Shared helpers ----------
-  const token = useMemo(() => localStorage.getItem("token") || "", []);
-  const authHeaders = useCallback(
-    () => (token ? { Authorization: `Bearer ${token}` } : {}),
-    [token],
-  );
+  const [token, setToken] = useState(() => localStorage.getItem("token") || "");
+
+  useEffect(() => {
+    const sync = () => setToken(localStorage.getItem("token") || "");
+    sync();
+    window.addEventListener("storage", sync);
+    return () => window.removeEventListener("storage", sync);
+  }, []);
+
+  const authHeaders = useCallback(() => {
+    const live = localStorage.getItem("token") || token || "";
+    return live ? { Authorization: `Bearer ${live}` } : {};
+  }, [token]);
 
   function switchTab(next) {
     setTab(next);
@@ -160,7 +168,7 @@ export default function Admin() {
         : 75,
     };
 
-    // Payouts
+    // Payouts (match backend schema)
     s.payouts = {
       ...(s.payouts || {}),
       releaseDays: Number.isFinite(Number(s?.payouts?.releaseDays))
@@ -171,8 +179,57 @@ export default function Admin() {
       )
         ? Number(s.payouts.instantCashoutFeePercent)
         : 3,
+      instantCashoutHoldDays: Number.isFinite(
+        Number(s?.payouts?.instantCashoutHoldDays),
+      )
+        ? Number(s.payouts.instantCashoutHoldDays)
+        : 3,
       enableAutoRelease: !!s?.payouts?.enableAutoRelease,
       autoReleaseCron: (s?.payouts?.autoReleaseCron || "0 2 * * *").trim(),
+      platformRecipientCode: String(
+        s?.payouts?.platformRecipientCode || "",
+      ).trim(),
+    };
+
+    // Booking Rules (match backend + your schedulers)
+    s.bookingRules = {
+      ...(s.bookingRules || {}),
+
+      ringTimeoutSeconds: Number.isFinite(
+        Number(s?.bookingRules?.ringTimeoutSeconds),
+      )
+        ? Number(s.bookingRules.ringTimeoutSeconds)
+        : 120,
+
+      clientCancelFeePercentAfterAccept: Number.isFinite(
+        Number(s?.bookingRules?.clientCancelFeePercentAfterAccept),
+      )
+        ? Number(s.bookingRules.clientCancelFeePercentAfterAccept)
+        : 3,
+
+      completionReminderHours: Number.isFinite(
+        Number(s?.bookingRules?.completionReminderHours),
+      )
+        ? Number(s.bookingRules.completionReminderHours)
+        : 2,
+
+      completionReminderRepeat: Number.isFinite(
+        Number(s?.bookingRules?.completionReminderRepeat),
+      )
+        ? Number(s.bookingRules.completionReminderRepeat)
+        : 1,
+
+      completionReminderToPro: !!s?.bookingRules?.completionReminderToPro,
+      completionReminderToClient: !!s?.bookingRules?.completionReminderToClient,
+
+      // keep no-show settings since you want to leave it
+      enableNoShowSweep: !!s?.bookingRules?.enableNoShowSweep,
+      noShowSweepCron: (s?.bookingRules?.noShowSweepCron || "0 3 * * *").trim(),
+      noShowStrikeLimit: Number.isFinite(
+        Number(s?.bookingRules?.noShowStrikeLimit),
+      )
+        ? Number(s.bookingRules.noShowStrikeLimit)
+        : 2,
     };
 
     // Withdrawals
@@ -673,6 +730,184 @@ export default function Admin() {
                     </code>{" "}
                     = 02:00 daily.
                   </p>
+                </Card>
+
+                {/* Booking Rules */}
+                <Card title="Booking Rules">
+                  <div className="grid md:grid-cols-2 gap-3">
+                    <Input
+                      label="Ring timeout (seconds)"
+                      type="number"
+                      value={settings?.bookingRules?.ringTimeoutSeconds ?? 120}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          bookingRules: {
+                            ...(settings.bookingRules || {}),
+                            ringTimeoutSeconds: Number(e.target.value),
+                          },
+                        })
+                      }
+                    />
+
+                    <Input
+                      label="Client cancel fee % (after accept)"
+                      type="number"
+                      value={
+                        settings?.bookingRules
+                          ?.clientCancelFeePercentAfterAccept ?? 3
+                      }
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          bookingRules: {
+                            ...(settings.bookingRules || {}),
+                            clientCancelFeePercentAfterAccept: Number(
+                              e.target.value,
+                            ),
+                          },
+                        })
+                      }
+                    />
+                  </div>
+
+                  <div className="grid md:grid-cols-2 gap-3">
+                    <Input
+                      label="Completion reminder after (hours)"
+                      type="number"
+                      value={
+                        settings?.bookingRules?.completionReminderHours ?? 2
+                      }
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          bookingRules: {
+                            ...(settings.bookingRules || {}),
+                            completionReminderHours: Number(e.target.value),
+                          },
+                        })
+                      }
+                    />
+
+                    <Input
+                      label="Completion reminder repeat (max times)"
+                      type="number"
+                      value={
+                        settings?.bookingRules?.completionReminderRepeat ?? 1
+                      }
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          bookingRules: {
+                            ...(settings.bookingRules || {}),
+                            completionReminderRepeat: Number(e.target.value),
+                          },
+                        })
+                      }
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <input
+                      id="completionReminderToPro"
+                      type="checkbox"
+                      checked={
+                        !!settings?.bookingRules?.completionReminderToPro
+                      }
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          bookingRules: {
+                            ...(settings.bookingRules || {}),
+                            completionReminderToPro: e.target.checked,
+                          },
+                        })
+                      }
+                    />
+                    <label
+                      htmlFor="completionReminderToPro"
+                      className="text-sm"
+                    >
+                      Send reminder to Pro
+                    </label>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <input
+                      id="completionReminderToClient"
+                      type="checkbox"
+                      checked={
+                        !!settings?.bookingRules?.completionReminderToClient
+                      }
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          bookingRules: {
+                            ...(settings.bookingRules || {}),
+                            completionReminderToClient: e.target.checked,
+                          },
+                        })
+                      }
+                    />
+                    <label
+                      htmlFor="completionReminderToClient"
+                      className="text-sm"
+                    >
+                      Send reminder to Client
+                    </label>
+                  </div>
+
+                  <div className="mt-2 flex items-center gap-2">
+                    <input
+                      id="enableNoShowSweep"
+                      type="checkbox"
+                      checked={!!settings?.bookingRules?.enableNoShowSweep}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          bookingRules: {
+                            ...(settings.bookingRules || {}),
+                            enableNoShowSweep: e.target.checked,
+                          },
+                        })
+                      }
+                    />
+                    <label htmlFor="enableNoShowSweep" className="text-sm">
+                      Enable no-show sweep (placeholder)
+                    </label>
+                  </div>
+
+                  <Input
+                    label="No-show sweep CRON (server time)"
+                    placeholder="0 3 * * *"
+                    value={
+                      settings?.bookingRules?.noShowSweepCron || "0 3 * * *"
+                    }
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        bookingRules: {
+                          ...(settings.bookingRules || {}),
+                          noShowSweepCron: e.target.value,
+                        },
+                      })
+                    }
+                  />
+
+                  <Input
+                    label="No-show strike limit"
+                    type="number"
+                    value={settings?.bookingRules?.noShowStrikeLimit ?? 2}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        bookingRules: {
+                          ...(settings.bookingRules || {}),
+                          noShowStrikeLimit: Number(e.target.value),
+                        },
+                      })
+                    }
+                  />
                 </Card>
 
                 {/* Withdrawals */}
