@@ -451,17 +451,21 @@ export default function BookingDetails() {
       setRingElapsed(elapsed);
     }, 1000);
 
-    // 2) Poll booking status every 3s while ringing (stop automatically when accepted)
-    const pollTimer = setInterval(async () => {
-      try {
-        const { data: fresh } = await api.get(
-          `/api/bookings/${encodeURIComponent(booking._id)}`
-        );
-        if (fresh) setBooking(fresh);
-      } catch {
-        // ignore polling errors (best-effort)
-      }
-    }, 3000);
+    // 2) Poll booking status while ringing (fallback only; sockets should update instantly)
+// Pause polling when tab is hidden
+const pollTimer = setInterval(async () => {
+  try {
+    if (typeof document !== "undefined" && document.hidden) return;
+
+    const { data: fresh } = await api.get(
+      `/api/bookings/${encodeURIComponent(booking._id)}`
+    );
+    if (fresh) setBooking(fresh);
+  } catch {
+    // ignore polling errors (best-effort)
+  }
+}, 15000); // 15 seconds
+
 
     return () => {
       clearInterval(ringTimer);

@@ -109,11 +109,19 @@ export default function ProDashboard() {
     load();
   }, []);
 
+  // auto-refresh effect
   useEffect(() => {
     clearInterval(timerRef.current);
+
+    const tick = async () => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      await load();
+    };
+
     if (autoRefresh) {
-      timerRef.current = setInterval(load, 30000);
+      timerRef.current = setInterval(tick, 120000); // 2 minutes
     }
+
     return () => clearInterval(timerRef.current);
   }, [autoRefresh]);
 
@@ -129,8 +137,8 @@ export default function ProDashboard() {
                 status: "accepted",
                 acceptedAt: new Date().toISOString(),
               }
-            : b
-        )
+            : b,
+        ),
       );
       await acceptBooking(id);
       flashOK("Booking accepted.");
@@ -149,7 +157,7 @@ export default function ProDashboard() {
       if (askNote) {
         const note = window.prompt(
           "Optional: add a brief note about this completion (e.g. client did not click complete, but job is done). Leave blank to continue.",
-          ""
+          "",
         );
         if (note && note.trim()) {
           // backend accepts completionNote or note; either works
@@ -173,7 +181,7 @@ export default function ProDashboard() {
       setErr(
         msg === "client_must_complete_first"
           ? "Client must mark completed first. If they don’t respond, you can complete after the fallback time."
-          : msg || "Could not complete booking."
+          : msg || "Could not complete booking.",
       );
       load();
     }
@@ -249,12 +257,12 @@ export default function ProDashboard() {
               b.status === "scheduled"
                 ? "sky"
                 : b.status === "accepted"
-                ? "emerald"
-                : b.status === "completed"
-                ? "emerald"
-                : b.status === "cancelled"
-                ? "amber"
-                : "amber";
+                  ? "emerald"
+                  : b.status === "completed"
+                    ? "emerald"
+                    : b.status === "cancelled"
+                      ? "amber"
+                      : "amber";
 
             const canAccept =
               b.paymentStatus === "paid" && b.status === "scheduled";
@@ -275,10 +283,10 @@ export default function ProDashboard() {
               b.meta?.completedBy === "client"
                 ? "client"
                 : b.meta?.completedBy === "pro"
-                ? "professional"
-                : b.meta?.completedBy === "admin"
-                ? "admin"
-                : null;
+                  ? "professional"
+                  : b.meta?.completedBy === "admin"
+                    ? "admin"
+                    : null;
 
             return (
               <div
@@ -389,7 +397,7 @@ export default function ProDashboard() {
                           await cancelBookingByPro(b._id, { reason });
                           flashOK("Booking cancelled (client refunded).");
                           setItems((prev) =>
-                            prev.filter((x) => x._id !== b._id)
+                            prev.filter((x) => x._id !== b._id),
                           );
                         } catch (e) {
                           console.error(e);
