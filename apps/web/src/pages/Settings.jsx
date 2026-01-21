@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import { ensureClientProfile } from "../lib/api";
+import { useToast } from "../components/Toast.jsx";
 import NgGeoPicker from "../components/NgGeoPicker.jsx";
 import ServicePicker from "../components/ServicePicker.jsx";
 
@@ -66,6 +67,10 @@ function takeSettingsDraft() {
 
 export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
+  const { success, error, info } = useToast();
+
+  // step-by-step view (like BookingDetails “wrapped”)
+  const [step, setStep] = useState("general"); // "general" | "pro" | "payments" | "advanced"
 
   // main docs
   const [me, setMe] = useState(null);
@@ -155,6 +160,7 @@ export default function SettingsPage() {
 
   // ui helpers
   const [lightboxUrl, setLightboxUrl] = useState("");
+
   const okTimerRef = useRef(null);
   const errTimerRef = useRef(null);
 
@@ -165,10 +171,19 @@ export default function SettingsPage() {
     clearTimeout(okTimerRef.current);
     clearTimeout(errTimerRef.current);
   }
+
   function flashOK(msg) {
-    setOk(msg);
+    setOk(msg); // on-page backup
+    success(msg, { playSound: true }); // toast
     clearTimeout(okTimerRef.current);
     okTimerRef.current = setTimeout(() => setOk(""), 2500);
+  }
+
+  function flashErr(msg) {
+    setErr(msg); // on-page backup
+    error(msg, { playSound: true }); // toast
+    clearTimeout(errTimerRef.current);
+    errTimerRef.current = setTimeout(() => setErr(""), 6000);
   }
 
   /* ---------- states list ---------- */
@@ -557,11 +572,12 @@ export default function SettingsPage() {
           // localStorage.removeItem("kpocha:settingsDraft");
         }
       } catch {
-        if (alive) setErr("Failed to load your profile.");
+        if (alive) flashErr("Failed to load your profile.");
       } finally {
         if (alive) setLoading(false);
       }
     })();
+
     return () => {
       alive = false;
       clearTimeout(okTimerRef.current);
@@ -649,7 +665,7 @@ export default function SettingsPage() {
       }
       setShowLivenessNotice(true);
     } catch {
-      setErr(
+      flashErr(
         "Face verification is required before you can save these changes.",
       );
     }
@@ -672,7 +688,7 @@ export default function SettingsPage() {
         trimmedUsername && trimmedUsername !== prevUsername;
 
       if (usernameChanged && !canEditUsername) {
-        setErr(
+        flashErr(
           "You can only change your username once every 3 months. (Adjustable in code to 6 months.)",
         );
         setSavingProfile(false);
@@ -756,7 +772,7 @@ export default function SettingsPage() {
         });
         await startAwsLivenessFlow();
       } else {
-        setErr(e?.response?.data?.error || "Failed to save profile.");
+        flashErr(e?.response?.data?.error || "Failed to save profile.");
       }
     } finally {
       setSavingProfile(false);
@@ -781,7 +797,7 @@ export default function SettingsPage() {
     if (!canSavePro || savingPro) return;
     clearMsg();
     if (!hasPro) {
-      setErr("No professional profile exists yet. Please apply first.");
+      flashErr("No professional profile exists yet. Please apply first.");
       return;
     }
     setSavingPro(true);
@@ -868,9 +884,7 @@ export default function SettingsPage() {
         });
         await startAwsLivenessFlow();
       } else {
-        setErr(
-          e?.response?.data?.error || "Failed to save professional details.",
-        );
+        flashErr(e?.response?.data?.error || "Failed to save professional details.");
       }
     } finally {
       setSavingPro(false);
@@ -901,7 +915,7 @@ export default function SettingsPage() {
     if (!canSaveBank || savingBank) return;
     clearMsg();
     if (!hasPro) {
-      setErr("No professional profile exists yet. Please apply first.");
+      flashErr("No professional profile exists yet. Please apply first.");
       return;
     }
     setSavingBank(true);
@@ -951,7 +965,7 @@ export default function SettingsPage() {
         });
         await startAwsLivenessFlow();
       } else {
-        setErr(e?.response?.data?.error || "Failed to save payment details.");
+        flashErr(e?.response?.data?.error || "Failed to save payment details.");
       }
     } finally {
       setSavingBank(false);
@@ -970,18 +984,20 @@ export default function SettingsPage() {
 
   /* ---------- UI ---------- */
   return (
-    <div className="max-w-5xl mx-auto px-4 py-8">
-      <div className="flex items-baseline justify-between">
+    <div className="max-w-3xl mx-auto px-4 py-10">
+      {/* Header (like BookingDetails) */}
+      <div className="flex items-center justify-between mb-4">
         <div>
-          <h1 className="text-2xl font-semibold mb-1">Settings</h1>
-          <p className="text-zinc-400">
-            Manage your profile, bio, and professional details.
+          <h1 className="text-2xl font-semibold">Settings</h1>
+          <p className="text-sm text-zinc-400">
+            Update your profile, professional details, and payments.
           </p>
         </div>
+
         {me?.isAdmin && (
           <Link
             to="/admin?tab=settings"
-            className="text-sm px-3 py-1.5 rounded-lg border border-zinc-700 hover:bg-zinc-900"
+            className="px-3 py-1.5 rounded border border-zinc-800 text-sm hover:bg-zinc-900"
             title="Open system settings"
           >
             System Settings →
@@ -989,53 +1005,67 @@ export default function SettingsPage() {
         )}
       </div>
 
+      {/* Step tabs (one section at a time) */}
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <StepTab
+          label="General"
+          active={step === "general"}
+          onClick={() => setStep("general")}
+        />
+        <StepTab
+          label="Professional"
+          active={step === "pro"}
+          onClick={() => setStep("pro")}
+        />
+        <StepTab
+          label="Payments"
+          active={step === "payments"}
+          onClick={() => setStep("payments")}
+        />
+        <StepTab
+          label="Advanced"
+          active={step === "advanced"}
+          onClick={() => setStep("advanced")}
+        />
+      </div>
+
+      {/* Optional: keep old boxes or remove later */}
       {err && (
-        <div className="mt-4 rounded border border-red-800 bg-red-900/40 text-red-100 px-3 py-2">
+        <div className="mb-4 rounded border border-red-800 bg-red-900/40 text-red-100 px-3 py-2">
           {err}
         </div>
       )}
+
       {ok && (
-        <div className="mt-4 rounded border border-green-800 bg-green-900/30 text-green-100 px-3 py-2">
+        <div className="mb-4 rounded border border-green-800 bg-green-900/30 text-green-100 px-3 py-2">
           {ok}
         </div>
       )}
+
       {showLivenessNotice && (
-        <div className="mt-4 rounded border border-amber-700 bg-amber-900/30 text-amber-100 px-3 py-2 text-sm">
+        <div className="mb-4 rounded border border-amber-700 bg-amber-900/30 text-amber-100 px-3 py-2 text-sm">
           Please complete face verification in the popup, then click “Save”
           again.
         </div>
       )}
 
       {loading ? (
-        <div className="mt-6">Loading…</div>
+        <div className="text-zinc-400">Loading…</div>
       ) : (
-        <div className="mt-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <aside className="lg:col-span-1">
-            <div className="rounded-lg border border-zinc-800 divide-y divide-zinc-800">
-              <SectionLink title="General" href="#general" />
-              <SectionLink title="Professional Profile" href="#pro" />
-              <SectionLink title="Payments" href="#payments" />
-              {me?.isAdmin && <SectionLink title="Admin" href="#admin" />}
-              <SectionLink title="Advanced" href="#advanced" />
+        <div className="space-y-4">
+          {!appDoc && (
+            <div className="rounded-lg border border-yellow-700 bg-yellow-900/20 text-yellow-200 px-4 py-3">
+              You don’t have a professional profile yet.{" "}
+              <Link to="/become" className="underline text-gold">
+                Apply here
+              </Link>
+              .
             </div>
-          </aside>
+          )}
 
-          <div className="lg:col-span-2 space-y-8">
-            {!appDoc && (
-              <div className="rounded-lg border border-yellow-700 bg-yellow-900/20 text-yellow-200 px-4 py-3">
-                You don’t have a professional profile yet.{" "}
-                <Link to="/become" className="underline text-gold">
-                  Apply here
-                </Link>
-                .
-              </div>
-            )}
-
-            {/* General */}
-            <section
-              id="general"
-              className="rounded-lg border border-zinc-800 p-4"
-            >
+          {/* GENERAL */}
+          {step === "general" && (
+            <section className="rounded-xl border border-zinc-800 p-4 bg-black/30">
               <h2 className="text-lg font-semibold mb-3">General</h2>
 
               <div className="flex items-center gap-4 mb-3">
@@ -1140,9 +1170,11 @@ export default function SettingsPage() {
                 </button>
               </div>
             </section>
+          )}
 
-            {/* Pro */}
-            <section id="pro" className="rounded-lg border border-zinc-800 p-4">
+          {/* PROFESSIONAL */}
+          {step === "pro" && (
+            <section className="rounded-xl border border-zinc-800 p-4 bg-black/30">
               <h2 className="text-lg font-semibold mb-3">
                 Professional Profile
               </h2>
@@ -1236,12 +1268,13 @@ export default function SettingsPage() {
                 )}
               </div>
 
-              {/* Services & Pricing from BecomePro */}
+              {/* Services & Pricing */}
               <div className="mt-6">
                 <Label>Services & Pricing</Label>
                 <p className="text-xs text-zinc-500 mb-2">
                   Add at least one service. Price/promo optional.
                 </p>
+
                 <div className="space-y-3">
                   {servicesDetailed.map((row, i) => {
                     const isOther = row.id === "other";
@@ -1284,6 +1317,7 @@ export default function SettingsPage() {
                               </p>
                             )}
                           </div>
+
                           <div>
                             <Label>Price (₦)</Label>
                             <input
@@ -1302,6 +1336,7 @@ export default function SettingsPage() {
                               placeholder="e.g. 15,000"
                             />
                           </div>
+
                           <div className="flex gap-2 items-start">
                             <input
                               className="flex-1 bg-black border border-zinc-800 rounded-lg px-3 py-2"
@@ -1340,6 +1375,7 @@ export default function SettingsPage() {
                     );
                   })}
                 </div>
+
                 <button
                   type="button"
                   className="mt-2 text-xs text-gold underline"
@@ -1361,7 +1397,7 @@ export default function SettingsPage() {
                 </button>
               </div>
 
-              {/* Business info with proper conditional */}
+              {/* Business */}
               <div className="mt-6">
                 <Label>Business Information</Label>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-2">
@@ -1399,6 +1435,7 @@ export default function SettingsPage() {
                         disabled={!hasPro}
                       />
                     </div>
+
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
                       <UploadRow
                         label="Photo (outside)"
@@ -1446,7 +1483,7 @@ export default function SettingsPage() {
                 </div>
               </div>
 
-              {/* availability */}
+              {/* Availability */}
               <div className="mt-6">
                 <Label>Work Availability</Label>
                 <div className="grid grid-cols-4 sm:grid-cols-7 gap-2 text-sm text-zinc-200 mt-2">
@@ -1467,6 +1504,7 @@ export default function SettingsPage() {
                     </label>
                   ))}
                 </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
                   <Input
                     label="Start time"
@@ -1502,6 +1540,7 @@ export default function SettingsPage() {
                     disabled={!hasPro}
                   />
                 </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
                   <Select
                     label="Home service?"
@@ -1529,6 +1568,7 @@ export default function SettingsPage() {
                     />
                   )}
                 </div>
+
                 <div className="mt-4 space-y-2">
                   <label className="flex items-center gap-2 text-sm">
                     <input
@@ -1539,6 +1579,7 @@ export default function SettingsPage() {
                     />
                     Offer services nationwide (Nigeria)
                   </label>
+
                   {!nationwide && (
                     <div className="text-sm">
                       <Label>States you cover</Label>
@@ -1560,7 +1601,7 @@ export default function SettingsPage() {
                 </div>
               </div>
 
-              {/* work photos */}
+              {/* Work Photos */}
               <div className="mt-6">
                 <Label>Work Photos</Label>
                 {workPhotos.map((u, idx) => (
@@ -1620,13 +1661,13 @@ export default function SettingsPage() {
                 </button>
               </div>
             </section>
+          )}
 
-            {/* Payments */}
-            <section
-              id="payments"
-              className="rounded-lg border border-zinc-800 p-4"
-            >
+          {/* PAYMENTS */}
+          {step === "payments" && (
+            <section className="rounded-xl border border-zinc-800 p-4 bg-black/30">
               <h2 className="text-lg font-semibold mb-3">Payments</h2>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <Input
                   label="Bank Name"
@@ -1668,9 +1709,11 @@ export default function SettingsPage() {
                   disabled={!hasPro}
                 />
               </div>
+
               <p className="text-xs text-zinc-500 mt-2">
                 Account number must be 10 digits. BVN must be 11 digits.
               </p>
+
               <div className="flex justify-end mt-4">
                 <button
                   disabled={!canSaveBank || savingBank}
@@ -1681,42 +1724,41 @@ export default function SettingsPage() {
                 </button>
               </div>
             </section>
+          )}
 
-            {me?.isAdmin && (
-              <section
-                id="admin"
-                className="rounded-lg border border-zinc-800 p-4"
-              >
-                <h2 className="text-lg font-semibold mb-3">Admin</h2>
-                <p className="text-sm text-zinc-400">
-                  Configure platform rules in{" "}
-                  <Link className="underline" to="/admin?tab=settings">
-                    System Settings
+          {/* ADVANCED */}
+          {step === "advanced" && (
+            <div className="space-y-4">
+              {me?.isAdmin && (
+                <section className="rounded-xl border border-zinc-800 p-4 bg-black/30">
+                  <h2 className="text-lg font-semibold mb-3">Admin</h2>
+                  <p className="text-sm text-zinc-400">
+                    Configure platform rules in{" "}
+                    <Link className="underline" to="/admin?tab=settings">
+                      System Settings
+                    </Link>
+                    .
+                  </p>
+                </section>
+              )}
+
+              <section className="rounded-xl border border-zinc-800 p-4 bg-black/30">
+                <h2 className="text-lg font-semibold mb-3">Advanced</h2>
+                <div className="flex flex-col gap-2">
+                  <Link
+                    to="/deactivate"
+                    className="inline-flex items-center justify-center rounded-lg border border-red-800 text-red-300 px-4 py-2 hover:bg-red-900/20"
+                  >
+                    Deactivate Account
                   </Link>
-                  .
-                </p>
-              </section>
-            )}
-
-            <section
-              id="advanced"
-              className="rounded-lg border border-zinc-800 p-4"
-            >
-              <h2 className="text-lg font-semibold mb-3">Advanced</h2>
-              <div className="flex flex-col gap-2">
-                <Link
-                  to="/deactivate"
-                  className="inline-flex items-center justify-center rounded-lg border border-red-800 text-red-300 px-4 py-2 hover:bg-red-900/20"
-                >
-                  Deactivate Account
-                </Link>
-                <div className="text-xs text-zinc-500">
-                  This won’t delete your data immediately. You’ll submit a
-                  request and our team will review it.
+                  <div className="text-xs text-zinc-500">
+                    This won’t delete your data immediately. You’ll submit a
+                    request and our team will review it.
+                  </div>
                 </div>
-              </div>
-            </section>
-          </div>
+              </section>
+            </div>
+          )}
         </div>
       )}
 
@@ -1871,5 +1913,21 @@ function ImageLightbox({ src, onClose }) {
         />
       </div>
     </div>
+  );
+}
+
+function StepTab({ label, active, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`px-3 py-1.5 rounded-full text-sm border ${
+        active
+          ? "bg-gold text-black border-gold"
+          : "bg-zinc-900/30 text-zinc-300 border-zinc-800 hover:bg-zinc-900"
+      }`}
+    >
+      {label}
+    </button>
   );
 }

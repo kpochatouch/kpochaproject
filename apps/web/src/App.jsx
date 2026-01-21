@@ -10,6 +10,7 @@ import {
 import { api, registerSocketHandler } from "./lib/api";
 import CallSheet from "./components/CallSheet.jsx";
 import InstallPWAButton from "./components/InstallPWAButton.jsx";
+import { ToastProvider } from "./components/Toast.jsx";
 
 import Navbar from "./components/Navbar.jsx";
 import Footer from "./components/Footer.jsx";
@@ -251,258 +252,259 @@ export default function App() {
   }, []);
 
   const hideChrome = location.pathname.startsWith("/aws-liveness");
-
   return (
-    <div className="min-h-screen flex flex-col bg-black text-white">
-      {/* global click → custom event used by menus/overlays */}
-      <ClickOutsideLayer />
+    <ToastProvider>
+      <div className="min-h-screen flex flex-col bg-black text-white">
+        {/* global click → custom event used by menus/overlays */}
+        <ClickOutsideLayer />
 
-      {!hideChrome && <Navbar />}
+        {!hideChrome && <Navbar />}
 
-      {!hideChrome && me?.isPro && (
-        <BookingAlert pollMs={15000} playSound={true} />
-      )}
+        {!hideChrome && me?.isPro && (
+          <BookingAlert pollMs={15000} playSound={true} />
+        )}
 
-      <main className={hideChrome ? "flex-1 bg-black" : "flex-1"}>
-        <Suspense fallback={<RouteLoader full />}>
-          <Routes>
-            {/* Public routes */}
-            <Route path="/" element={<Home />} />
-            <Route path="/browse" element={<Browse />} />
-            <Route path="/post/:id" element={<PostDetail />} />
-            <Route
-              path="/for-you"
-              element={
-                <RequireAuth>
-                  <ForYou />
-                </RequireAuth>
-              }
-            />
-            <Route
-              path="/for-you/:id"
-              element={
-                <RequireAuth>
-                  <ForYou />
-                </RequireAuth>
-              }
-            />
-            <Route path="/login" element={<Login />} />
-            <Route path="/signup" element={<Signup />} />
-            <Route path="/legal" element={<Legal />} />
-            <Route path="/legal/*" element={<Legal />} />
-            <Route path="/profile/:username" element={<PublicProfile />} />
-            <Route path="/apply/thanks" element={<ApplyThanks />} />
-            <Route path="/payment/confirm" element={<PaymentConfirm />} />
-            {/* Entry to “Find a Pro” flow */}
-            <Route path="/find" element={<FindProSmart />} />
-            {/* Booking page must be authenticated */}
-            <Route
-              path="/book/:barberId"
-              element={
-                <RequireAuth>
-                  <BookService />
-                </RequireAuth>
-              }
-            />
-            {/* Auth-required core pages */}
-            <Route
-              path="/compose"
-              element={
-                <RequireAuth>
-                  <Compose />
-                </RequireAuth>
-              }
-            />
-            <Route
-              path="/bookings/:id"
-              element={
-                <RequireAuth>
-                  <BookingDetails />
-                </RequireAuth>
-              }
-            />
-            <Route
-              path="/bookings/:bookingId/chat"
-              element={
-                <RequireAuth>
-                  <BookingChat />
-                </RequireAuth>
-              }
-            />
-            {/* Review Pages */}
-            <Route
-              path="/review/:proId"
-              element={
-                <RequireAuth>
-                  <LeaveReview />
-                </RequireAuth>
-              }
-            />
-            <Route
-              path="/review-client/:clientUid"
-              element={
-                <RequireAuth>
-                  <LeaveClientReview />
-                </RequireAuth>
-              }
-            />
-            <Route
-              path="/profile"
-              element={
-                <RequireAuth>
-                  <Profile />
-                </RequireAuth>
-              }
-            />
-            <Route
-              path="/wallet"
-              element={
-                <RequireAuth>
-                  <WalletSmart />
-                </RequireAuth>
-              }
-            />
-            <Route
-              path="/pro/client-wallet"
-              element={
-                <RequireAuth>
+        <main className={hideChrome ? "flex-1 bg-black" : "flex-1"}>
+          <Suspense fallback={<RouteLoader full />}>
+            <Routes>
+              {/* Public routes */}
+              <Route path="/" element={<Home />} />
+              <Route path="/browse" element={<Browse />} />
+              <Route path="/post/:id" element={<PostDetail />} />
+              <Route
+                path="/for-you"
+                element={
+                  <RequireAuth>
+                    <ForYou />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/for-you/:id"
+                element={
+                  <RequireAuth>
+                    <ForYou />
+                  </RequireAuth>
+                }
+              />
+              <Route path="/login" element={<Login />} />
+              <Route path="/signup" element={<Signup />} />
+              <Route path="/legal" element={<Legal />} />
+              <Route path="/legal/*" element={<Legal />} />
+              <Route path="/profile/:username" element={<PublicProfile />} />
+              <Route path="/apply/thanks" element={<ApplyThanks />} />
+              <Route path="/payment/confirm" element={<PaymentConfirm />} />
+              {/* Entry to “Find a Pro” flow */}
+              <Route path="/find" element={<FindProSmart />} />
+              {/* Booking page must be authenticated */}
+              <Route
+                path="/book/:barberId"
+                element={
+                  <RequireAuth>
+                    <BookService />
+                  </RequireAuth>
+                }
+              />
+              {/* Auth-required core pages */}
+              <Route
+                path="/compose"
+                element={
+                  <RequireAuth>
+                    <Compose />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/bookings/:id"
+                element={
+                  <RequireAuth>
+                    <BookingDetails />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/bookings/:bookingId/chat"
+                element={
+                  <RequireAuth>
+                    <BookingChat />
+                  </RequireAuth>
+                }
+              />
+              {/* Review Pages */}
+              <Route
+                path="/review/:proId"
+                element={
+                  <RequireAuth>
+                    <LeaveReview />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/review-client/:clientUid"
+                element={
+                  <RequireAuth>
+                    <LeaveClientReview />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/profile"
+                element={
+                  <RequireAuth>
+                    <Profile />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/wallet"
+                element={
+                  <RequireAuth>
+                    <WalletSmart />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/pro/client-wallet"
+                element={
+                  <RequireAuth>
+                    <RequireRole role="pro">
+                      <ClientWallet />
+                    </RequireRole>
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/my-bookings"
+                element={
+                  <RequireAuth>
+                    <ClientDashboard />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/settings"
+                element={
+                  <RequireAuth>
+                    <SettingsSmart />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/become"
+                element={
+                  <RequireAuth>
+                    <BecomePro />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/aws-liveness"
+                element={
+                  <RequireAuth>
+                    <AwsLiveness />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/client/register"
+                element={
+                  <RequireAuth>
+                    <ClientRegister />
+                  </RequireAuth>
+                }
+              />
+              {/* legacy /register → client register */}
+              <Route
+                path="/register"
+                element={<Navigate to="/client/register" replace />}
+              />
+              <Route
+                path="/deactivate"
+                element={
+                  <RequireAuth>
+                    <DeactivateAccount />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/chat"
+                element={
+                  <RequireAuth>
+                    <Chat />
+                  </RequireAuth>
+                }
+              />
+              {/* Inbox (message list) */}
+              <Route
+                path="/inbox"
+                element={
+                  <RequireAuth>
+                    <Inbox />
+                  </RequireAuth>
+                }
+              />
+              {/* Role-based dashboards */}
+              <Route
+                path="/pro-dashboard"
+                element={
                   <RequireRole role="pro">
-                    <ClientWallet />
+                    <ProDashboard />
                   </RequireRole>
-                </RequireAuth>
-              }
-            />
-            <Route
-              path="/my-bookings"
-              element={
-                <RequireAuth>
-                  <ClientDashboard />
-                </RequireAuth>
-              }
-            />
-            <Route
-              path="/settings"
-              element={
-                <RequireAuth>
-                  <SettingsSmart />
-                </RequireAuth>
-              }
-            />
-            <Route
-              path="/become"
-              element={
-                <RequireAuth>
-                  <BecomePro />
-                </RequireAuth>
-              }
-            />
-            <Route
-              path="/aws-liveness"
-              element={
-                <RequireAuth>
-                  <AwsLiveness />
-                </RequireAuth>
-              }
-            />
-            <Route
-              path="/client/register"
-              element={
-                <RequireAuth>
-                  <ClientRegister />
-                </RequireAuth>
-              }
-            />
-            {/* legacy /register → client register */}
-            <Route
-              path="/register"
-              element={<Navigate to="/client/register" replace />}
-            />
-            <Route
-              path="/deactivate"
-              element={
-                <RequireAuth>
-                  <DeactivateAccount />
-                </RequireAuth>
-              }
-            />
-            <Route
-              path="/chat"
-              element={
-                <RequireAuth>
-                  <Chat />
-                </RequireAuth>
-              }
-            />
-            {/* Inbox (message list) */}
-            <Route
-              path="/inbox"
-              element={
-                <RequireAuth>
-                  <Inbox />
-                </RequireAuth>
-              }
-            />
-            {/* Role-based dashboards */}
-            <Route
-              path="/pro-dashboard"
-              element={
-                <RequireRole role="pro">
-                  <ProDashboard />
-                </RequireRole>
-              }
-            />
-            <Route
-              path="/admin"
-              element={
-                <RequireRole role="admin">
-                  <Admin />
-                </RequireRole>
-              }
-            />
-            <Route
-              path="/admin/decline/:id"
-              element={
-                <RequireRole role="admin">
-                  <AdminDecline />
-                </RequireRole>
-              }
-            />
-            <Route
-              path="/risk-logs"
-              element={
-                <RequireRole role="admin">
-                  <RiskLogs />
-                </RequireRole>
-              }
-            />
-            {/* Catch-all */}
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </Suspense>
-      </main>
+                }
+              />
+              <Route
+                path="/admin"
+                element={
+                  <RequireRole role="admin">
+                    <Admin />
+                  </RequireRole>
+                }
+              />
+              <Route
+                path="/admin/decline/:id"
+                element={
+                  <RequireRole role="admin">
+                    <AdminDecline />
+                  </RequireRole>
+                }
+              />
+              <Route
+                path="/risk-logs"
+                element={
+                  <RequireRole role="admin">
+                    <RiskLogs />
+                  </RequireRole>
+                }
+              />
+              {/* Catch-all */}
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </Suspense>
+        </main>
 
-      {!hideChrome && <Footer />}
-      <CallSheet
-        role="receiver"
-        room={incomingCall?.room || null}
-        callId={incomingCall?.callId || null}
-        callType={incomingCall?.callType || "audio"}
-        me={myLabel}
-        // 🔥 show real caller identity from meta put there by Chat.jsx
-        peerName={
-          incomingCall?.meta?.fromName || incomingCall?.meta?.callerName || ""
-        }
-        peerAvatar={
-          incomingCall?.meta?.fromAvatar ||
-          incomingCall?.meta?.callerAvatar ||
-          ""
-        }
-        // 🔔 allow call summary bubble for DM chat if chatRoom passed
-        chatRoom={incomingCall?.meta?.chatRoom || null}
-        open={Boolean(incomingCall?.open && incomingCall?.room)}
-        onClose={() => setIncomingCall(null)}
-      />
-      <InstallPWAButton />
-    </div>
+        {!hideChrome && <Footer />}
+        <CallSheet
+          role="receiver"
+          room={incomingCall?.room || null}
+          callId={incomingCall?.callId || null}
+          callType={incomingCall?.callType || "audio"}
+          me={myLabel}
+          // 🔥 show real caller identity from meta put there by Chat.jsx
+          peerName={
+            incomingCall?.meta?.fromName || incomingCall?.meta?.callerName || ""
+          }
+          peerAvatar={
+            incomingCall?.meta?.fromAvatar ||
+            incomingCall?.meta?.callerAvatar ||
+            ""
+          }
+          // 🔔 allow call summary bubble for DM chat if chatRoom passed
+          chatRoom={incomingCall?.meta?.chatRoom || null}
+          open={Boolean(incomingCall?.open && incomingCall?.room)}
+          onClose={() => setIncomingCall(null)}
+        />
+        <InstallPWAButton />
+      </div>
+    </ToastProvider>
   );
 }

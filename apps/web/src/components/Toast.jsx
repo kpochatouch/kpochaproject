@@ -1,0 +1,141 @@
+// apps/web/src/components/Toast.jsx
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+
+const ToastCtx = createContext(null);
+
+export function ToastProvider({ children }) {
+  const [items, setItems] = useState([]);
+  const audioOkRef = useRef(null);
+  const audioErrRef = useRef(null);
+
+  // Optional sounds (put files in /public/sounds)
+  useEffect(() => {
+    try {
+      audioOkRef.current = new Audio("/sounds/ok.mp3");
+      audioErrRef.current = new Audio("/sounds/error.mp3");
+      audioOkRef.current.volume = 0.4;
+      audioErrRef.current.volume = 0.5;
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const dismiss = useCallback((id) => {
+    setItems((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  const push = useCallback(
+    (t) => {
+      const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const toast = {
+        id,
+        tone: t.tone || "info",
+        title: t.title || "",
+        msg: t.msg || "",
+        ttl: t.ttl ?? 3500,
+      };
+
+      setItems((prev) => [...prev, toast]);
+
+      // Best-effort sound (browser may block until user gesture)
+      try {
+        if (t.playSound) {
+          if (toast.tone === "success")
+            audioOkRef.current?.play?.().catch(() => {});
+          if (toast.tone === "error")
+            audioErrRef.current?.play?.().catch(() => {});
+        }
+      } catch {}
+
+      // put this near your refs
+      const timersRef = useRef(new Map());
+
+      // inside push(), replace the setTimeout line with:
+      if (toast.ttl > 0) {
+        const tm = setTimeout(() => {
+          timersRef.current.delete(id);
+          dismiss(id);
+        }, toast.ttl);
+        timersRef.current.set(id, tm);
+      }
+
+      // and add this cleanup effect anywhere in the provider:
+      useEffect(() => {
+        return () => {
+          for (const tm of timersRef.current.values()) clearTimeout(tm);
+          timersRef.current.clear();
+        };
+      }, []);
+
+      return id;
+    },
+    [dismiss],
+  );
+
+  const api = useMemo(
+    () => ({
+      toast: push,
+      success: (msg, opts = {}) => push({ tone: "success", msg, ...opts }),
+      error: (msg, opts = {}) => push({ tone: "error", msg, ...opts }),
+      info: (msg, opts = {}) => push({ tone: "info", msg, ...opts }),
+    }),
+    [push],
+  );
+
+  return (
+    <ToastCtx.Provider value={api}>
+      {children}
+
+      {/* Toast stack */}
+      <div className="fixed z-[9999] right-4 top-4 w-[min(420px,calc(100vw-2rem))] space-y-2">
+        {items.map((t) => (
+          <ToastItem key={t.id} toast={t} onClose={() => dismiss(t.id)} />
+        ))}
+      </div>
+    </ToastCtx.Provider>
+  );
+}
+
+export function useToast() {
+  const v = useContext(ToastCtx);
+  if (!v) throw new Error("useToast must be used inside <ToastProvider>");
+  return v;
+}
+
+function ToastItem({ toast, onClose }) {
+  const tone = toast.tone || "info";
+  const styles = {
+    info: "border-zinc-700 bg-zinc-950 text-zinc-100",
+    success: "border-emerald-700 bg-emerald-950/40 text-emerald-100",
+    error: "border-red-700 bg-red-950/40 text-red-100",
+  };
+
+  return (
+    <div
+      className={`rounded-xl border shadow-lg backdrop-blur px-4 py-3 ${styles[tone] || styles.info}`}
+    >
+      <div className="flex items-start gap-3">
+        <div className="flex-1">
+          {toast.title ? (
+            <div className="text-sm font-semibold">{toast.title}</div>
+          ) : null}
+          <div className="text-sm">{toast.msg}</div>
+        </div>
+        <button
+          onClick={onClose}
+          className="text-xs opacity-70 hover:opacity-100"
+        >
+          ✕
+        </button>
+      </div>
+    </div>
+  );
+}
