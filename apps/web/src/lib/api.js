@@ -1129,6 +1129,23 @@ export async function resetWithdrawPin(currentPin, newPin) {
   return data;
 }
 
+/* Banks (NG) */
+export async function listBanksNG() {
+  const { data } = await api.get("/api/banks/ng");
+  return data?.items || [];
+}
+
+/* Payout bank (canonical: Application.payoutBank) */
+export async function getPayoutBankMe() {
+  const { data } = await api.get("/api/payout/me");
+  return data; // { ok, payoutBank }
+}
+
+export async function savePayoutBank({ accountNumber, bankCode }) {
+  const { data } = await api.put("/api/payout/me", { accountNumber, bankCode });
+  return data; // { ok, payoutBank }
+}
+
 /* Settings */
 export async function getSettings() {
   const { data } = await api.get("/api/settings");

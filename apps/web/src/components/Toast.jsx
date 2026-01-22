@@ -16,13 +16,17 @@ export function ToastProvider({ children }) {
   const audioOkRef = useRef(null);
   const audioErrRef = useRef(null);
 
-  // Optional sounds (put files in /public/sounds)
+  // Optional sounds (your files are in /public/sound)
   useEffect(() => {
     try {
-      audioOkRef.current = new Audio("/sounds/ok.mp3");
-      audioErrRef.current = new Audio("/sounds/error.mp3");
-      audioOkRef.current.volume = 0.4;
-      audioErrRef.current.volume = 0.5;
+      audioOkRef.current = new Audio("/sound/ok.mp3");
+      audioErrRef.current = new Audio("/sound/error.mp3");
+
+      audioOkRef.current.preload = "auto";
+      audioErrRef.current.preload = "auto";
+
+      audioOkRef.current.volume = 0.5;
+      audioErrRef.current.volume = 0.7;
     } catch {
       // ignore
     }
@@ -48,10 +52,14 @@ export function ToastProvider({ children }) {
       // Best-effort sound (browser may block until user gesture)
       try {
         if (t.playSound) {
-          if (toast.tone === "success")
-            audioOkRef.current?.play?.().catch(() => {});
-          if (toast.tone === "error")
-            audioErrRef.current?.play?.().catch(() => {});
+          if (toast.tone === "success" && audioOkRef.current) {
+            audioOkRef.current.currentTime = 0;
+            audioOkRef.current.play().catch(() => {});
+          }
+          if (toast.tone === "error" && audioErrRef.current) {
+            audioErrRef.current.currentTime = 0;
+            audioErrRef.current.play().catch(() => {});
+          }
         }
       } catch {}
 

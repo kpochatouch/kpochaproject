@@ -1,12 +1,7 @@
 // apps/web/src/pages/BecomePro.jsx
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  api,
-  getClientProfile,
-  updateClientProfile,
-  ensureClientProfile,
-} from "../lib/api";
+import { api, ensureClientProfile, listBanksNG } from "../lib/api";
 import NgGeoPicker from "../components/NgGeoPicker.jsx";
 import ServicePicker from "../components/ServicePicker.jsx";
 
@@ -101,6 +96,14 @@ export default function BecomePro() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
 
+  // step-by-step UI (like Settings)
+  const [step, setStep] = useState("identity");
+  // identity | services | business | availability | verification | payout | portfolio | agreements
+
+  // payout banks dropdown
+  const [banks, setBanks] = useState([]); // [{ name, code }]
+  const [loadingBanks, setLoadingBanks] = useState(false);
+
   // we keep these so we know what user already has
   const [me, setMe] = useState(null);
   const [clientProfile, setClientProfile] = useState(null);
@@ -180,6 +183,7 @@ export default function BecomePro() {
 
   // ===== Bank
   const [bank, setBank] = useState({
+    bankCode: "",
     bankName: "",
     accountName: "",
     accountNumber: "",
@@ -215,6 +219,19 @@ export default function BecomePro() {
           api.get("/api/pros/me").catch(() => null),
           api.get("/api/geo/ng"),
         ]);
+
+        // ✅ load banks list (best-effort)
+        (async () => {
+          try {
+            setLoadingBanks(true);
+            const items = await listBanksNG();
+            setBanks(Array.isArray(items) ? items : []);
+          } catch {
+            setBanks([]);
+          } finally {
+            setLoadingBanks(false);
+          }
+        })();
 
         if (!alive) return;
 
@@ -470,7 +487,7 @@ export default function BecomePro() {
     if (!verification.idType) m.push("ID type");
     if (!verification.idUrl) m.push("Government ID image");
 
-    if (!bank.bankName) m.push("Bank name");
+    if (!bank.bankCode) m.push("Bank (select)");
     if (!bank.accountName) m.push("Account name");
     if (!bank.accountNumber) m.push("Account number");
     if (!bank.bvn) m.push("BVN");
@@ -490,7 +507,7 @@ export default function BecomePro() {
     servicesDetailed,
     verification.idType,
     verification.idUrl,
-    bank.bankName,
+    bank.bankCode,
     bank.accountName,
     bank.accountNumber,
     bank.bvn,
@@ -596,6 +613,50 @@ export default function BecomePro() {
       </h2>
       {msg && <div className="mb-4 text-sm text-red-400">{msg}</div>}
 
+      {/* Step tabs */}
+      <div className="flex flex-wrap gap-2 mb-5">
+        <StepTab
+          label="Identity"
+          active={step === "identity"}
+          onClick={() => setStep("identity")}
+        />
+        <StepTab
+          label="Services"
+          active={step === "services"}
+          onClick={() => setStep("services")}
+        />
+        <StepTab
+          label="Business"
+          active={step === "business"}
+          onClick={() => setStep("business")}
+        />
+        <StepTab
+          label="Availability"
+          active={step === "availability"}
+          onClick={() => setStep("availability")}
+        />
+        <StepTab
+          label="Verification"
+          active={step === "verification"}
+          onClick={() => setStep("verification")}
+        />
+        <StepTab
+          label="Payout"
+          active={step === "payout"}
+          onClick={() => setStep("payout")}
+        />
+        <StepTab
+          label="Portfolio"
+          active={step === "portfolio"}
+          onClick={() => setStep("portfolio")}
+        />
+        <StepTab
+          label="Agreements"
+          active={step === "agreements"}
+          onClick={() => setStep("agreements")}
+        />
+      </div>
+
       {missing.length > 0 && (
         <div className="mb-4 border border-yellow-500/50 rounded-lg p-3 bg-black text-yellow-300">
           <div className="text-sm font-semibold mb-1">Missing:</div>
@@ -609,594 +670,651 @@ export default function BecomePro() {
 
       <form onSubmit={submit} className="space-y-8">
         {/* SECTION: Identity */}
-        <Section title="Identity & Contact">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <Input
-              label="First Name *"
-              value={identity.firstName}
-              onChange={(e) =>
-                setIdentity({ ...identity, firstName: e.target.value })
-              }
-            />
-            <Input
-              label="Middle Name"
-              value={identity.middleName}
-              onChange={(e) =>
-                setIdentity({ ...identity, middleName: e.target.value })
-              }
-            />
-            <Input
-              label="Last Name *"
-              value={identity.lastName}
-              onChange={(e) =>
-                setIdentity({ ...identity, lastName: e.target.value })
-              }
-            />
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
-            <Select
-              label="Gender *"
-              value={identity.gender}
-              onChange={(e) =>
-                setIdentity({ ...identity, gender: e.target.value })
-              }
-              options={["Male", "Female", "Other"]}
-            />
-            <Input
-              label="Date of Birth *"
-              type="date"
-              value={identity.dob}
-              onChange={(e) =>
-                setIdentity({ ...identity, dob: e.target.value })
-              }
-            />
-            <Input
-              label="Email"
-              type="email"
-              value={identity.email}
-              onChange={(e) =>
-                setIdentity({ ...identity, email: e.target.value })
-              }
-            />
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
-            <Input
-              label="Phone (optional)"
-              value={identity.phone}
-              onChange={(e) =>
-                setIdentity({ ...identity, phone: e.target.value })
-              }
-            />
-            <Input
-              label="WhatsApp (optional)"
-              value={identity.whatsapp}
-              onChange={(e) =>
-                setIdentity({ ...identity, whatsapp: e.target.value })
-              }
-            />
-            <div>
-              <Label>Profile Photo (optional)</Label>
-              <div className="flex gap-2">
-                <input
-                  className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-200"
-                  placeholder="Photo URL"
-                  value={identity.photoUrl}
-                  onChange={(e) =>
-                    setIdentity({ ...identity, photoUrl: e.target.value })
-                  }
-                />
-                <UploadButton
-                  title={widgetReady ? "Upload" : "Upload (loading…)"}
-                  onUploaded={(url) =>
-                    setIdentity({ ...identity, photoUrl: url })
-                  }
-                  widgetFactory={widgetFactory}
-                  disabled={!widgetReady || !CLOUD_NAME || !UPLOAD_PRESET}
-                />
-              </div>
-              {(!CLOUD_NAME || !UPLOAD_PRESET) && (
-                <p className="text-xs text-zinc-500 mt-1">
-                  Upload widget not configured — the URL field is the fallback.
-                </p>
-              )}
-            </div>
-          </div>
-
-          {/* State/LGA + nationwide */}
-          <div className="mt-4 space-y-3">
-            <label className="flex items-center gap-2 text-sm text-yellow-300">
-              <input
-                type="checkbox"
-                checked={professional.nationwide}
-                onChange={(e) =>
-                  setProfessional({
-                    ...professional,
-                    nationwide: e.target.checked,
-                  })
-                }
-              />
-              Offer services nationwide (Nigeria)
-            </label>
-
-            <NgGeoPicker
-              valueState={identity.state}
-              onChangeState={(st) => {
-                setIdentity({ ...identity, state: st, lga: "" });
-                if (st && !professional.nationwide) {
-                  setAvailability((p) => ({
-                    ...p,
-                    statesCovered: p.statesCovered.includes(st)
-                      ? p.statesCovered
-                      : [...p.statesCovered, st],
-                  }));
-                }
-              }}
-              valueLga={identity.lga}
-              onChangeLga={(lga) => setIdentity({ ...identity, lga })}
-              required
-              className="grid grid-cols-1 gap-3"
-            />
-
+        {step === "identity" && (
+          <Section title="Identity & Contact">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <Input
-                label="Latitude (optional)"
-                value={business.lat}
+                label="First Name *"
+                value={identity.firstName}
                 onChange={(e) =>
-                  setBusiness({ ...business, lat: e.target.value })
+                  setIdentity({ ...identity, firstName: e.target.value })
                 }
-                placeholder="e.g. 6.5244"
               />
               <Input
-                label="Longitude (optional)"
-                value={business.lon}
+                label="Middle Name"
+                value={identity.middleName}
                 onChange={(e) =>
-                  setBusiness({ ...business, lon: e.target.value })
+                  setIdentity({ ...identity, middleName: e.target.value })
                 }
-                placeholder="e.g. 3.3792"
               />
-              <div className="flex items-end">
-                <button
-                  type="button"
-                  onClick={useMyLocation}
-                  className="w-full px-3 py-2 rounded-lg border border-yellow-500 text-yellow-300 text-sm hover:bg-yellow-500/10"
-                >
-                  Use my location
-                </button>
+              <Input
+                label="Last Name *"
+                value={identity.lastName}
+                onChange={(e) =>
+                  setIdentity({ ...identity, lastName: e.target.value })
+                }
+              />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
+              <Select
+                label="Gender *"
+                value={identity.gender}
+                onChange={(e) =>
+                  setIdentity({ ...identity, gender: e.target.value })
+                }
+                options={["Male", "Female", "Other"]}
+              />
+              <Input
+                label="Date of Birth *"
+                type="date"
+                value={identity.dob}
+                onChange={(e) =>
+                  setIdentity({ ...identity, dob: e.target.value })
+                }
+              />
+              <Input
+                label="Email"
+                type="email"
+                value={identity.email}
+                onChange={(e) =>
+                  setIdentity({ ...identity, email: e.target.value })
+                }
+              />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
+              <Input
+                label="Phone (optional)"
+                value={identity.phone}
+                onChange={(e) =>
+                  setIdentity({ ...identity, phone: e.target.value })
+                }
+              />
+              <Input
+                label="WhatsApp (optional)"
+                value={identity.whatsapp}
+                onChange={(e) =>
+                  setIdentity({ ...identity, whatsapp: e.target.value })
+                }
+              />
+
+              <div>
+                <Label>Profile Photo (optional)</Label>
+                <div className="flex gap-2">
+                  <input
+                    className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-200"
+                    placeholder="Photo URL"
+                    value={identity.photoUrl}
+                    onChange={(e) =>
+                      setIdentity({ ...identity, photoUrl: e.target.value })
+                    }
+                  />
+                  <UploadButton
+                    title={widgetReady ? "Upload" : "Upload (loading…)"}
+                    onUploaded={(url) =>
+                      setIdentity({ ...identity, photoUrl: url })
+                    }
+                    widgetFactory={widgetFactory}
+                    disabled={!widgetReady || !CLOUD_NAME || !UPLOAD_PRESET}
+                  />
+                </div>
+                {(!CLOUD_NAME || !UPLOAD_PRESET) && (
+                  <p className="text-xs text-zinc-500 mt-1">
+                    Upload widget not configured — the URL field is the
+                    fallback.
+                  </p>
+                )}
               </div>
             </div>
-          </div>
-        </Section>
 
-        {/* SECTION: Services & Pricing */}
-        <Section title="Services & Pricing">
-          <p className="text-xs text-zinc-400 mb-2">
-            Add at least one service. Price and Promo Price are optional;
-            leaving price blank means ₦0 (free add-on).
-          </p>
-
-          <div className="space-y-3">
-            {servicesDetailed.map((row, i) => {
-              const isOther = row.id === "other";
-              return (
-                <div
-                  key={i}
-                  className="border border-yellow-500/40 rounded-lg p-3 bg-black"
-                >
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    <div>
-                      <Label>Service</Label>
-                      <ServicePicker
-                        value={row.id || row.name}
-                        onChange={(value, meta) =>
-                          onPickService(i, value, meta)
-                        }
-                        includeOther={true}
-                        otherText={row.otherText}
-                        onOtherText={(txt) => onOtherText(i, txt)}
-                      />
-                      {isOther && (
-                        <p className="text-xs text-zinc-500 mt-1">
-                          Please specify the custom service name above.
-                        </p>
-                      )}
-                    </div>
-
-                    <div>
-                      <Label>Price (₦) — optional</Label>
-                      <input
-                        className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-200"
-                        inputMode="decimal"
-                        placeholder="e.g. 15,000"
-                        value={row.price}
-                        onChange={(e) =>
-                          updateRow(i, { price: e.target.value })
-                        }
-                      />
-                      <p className="text-[11px] text-zinc-500 mt-1">
-                        You can type numbers with commas for clarity.
-                      </p>
-                    </div>
-
-                    <div>
-                      <Label>Promo Price (₦) — optional</Label>
-                      <input
-                        className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-200"
-                        inputMode="decimal"
-                        placeholder="e.g. 12,000"
-                        value={row.promoPrice}
-                        onChange={(e) =>
-                          updateRow(i, { promoPrice: e.target.value })
-                        }
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex justify-end mt-2">
-                    {servicesDetailed.length > 1 && (
-                      <button
-                        type="button"
-                        className="text-sm text-red-400 hover:text-red-300"
-                        onClick={() => removeRow(i)}
-                      >
-                        Remove
-                      </button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="mt-3">
-            <button
-              type="button"
-              onClick={addRow}
-              className="px-3 py-2 rounded-lg border border-yellow-500 text-yellow-300 text-sm hover:bg-yellow-500/10"
-            >
-              + Add another service
-            </button>
-          </div>
-        </Section>
-
-        {/* SECTION: Business */}
-        <Section title="Business Information">
-          <Select
-            label="Work Mode"
-            value={business.mode}
-            onChange={(e) => setBusiness({ ...business, mode: e.target.value })}
-            options={["shop", "home", "both"]}
-          />
-
-          {(business.mode === "shop" || business.mode === "both") && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
-              <Input
-                label="Business / Shop Name"
-                value={business.shopName}
-                onChange={(e) =>
-                  setBusiness({ ...business, shopName: e.target.value })
-                }
-              />
-              <Input
-                label="Business Address"
-                value={business.shopAddress}
-                onChange={(e) =>
-                  setBusiness({ ...business, shopAddress: e.target.value })
-                }
-              />
-
-              <UploadRow
-                label="Photo (outside)"
-                value={business.shopPhotoOutside}
-                onChange={(v) =>
-                  setBusiness({ ...business, shopPhotoOutside: v })
-                }
-                widgetFactory={widgetFactory}
-                widgetReady={widgetReady}
-                folder="kpocha/pro-apps/shops"
-              />
-              <UploadRow
-                label="Photo (inside)"
-                value={business.shopPhotoInside}
-                onChange={(v) =>
-                  setBusiness({ ...business, shopPhotoInside: v })
-                }
-                widgetFactory={widgetFactory}
-                widgetReady={widgetReady}
-                folder="kpocha/pro-apps/shops"
-              />
-            </div>
-          )}
-        </Section>
-
-        {/* SECTION: Work Availability */}
-        <Section title="Work Availability">
-          <Label>Working Days</Label>
-          <div className="grid grid-cols-4 sm:grid-cols-7 gap-2 text-sm text-yellow-300">
-            {Object.keys(availability.days).map((d) => (
-              <label key={d} className="flex items-center gap-2">
+            {/* State/LGA + nationwide */}
+            <div className="mt-4 space-y-3">
+              <label className="flex items-center gap-2 text-sm text-yellow-300">
                 <input
                   type="checkbox"
-                  checked={availability.days[d]}
-                  onChange={() =>
-                    setAvailability((p) => ({
-                      ...p,
-                      days: { ...p.days, [d]: !p.days[d] },
-                    }))
-                  }
-                />
-                {d}
-              </label>
-            ))}
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
-            <Input
-              label="Start time"
-              type="time"
-              value={availability.start}
-              onChange={(e) =>
-                setAvailability({ ...availability, start: e.target.value })
-              }
-            />
-            <Input
-              label="End time"
-              type="time"
-              value={availability.end}
-              onChange={(e) =>
-                setAvailability({ ...availability, end: e.target.value })
-              }
-            />
-            <Select
-              label="Emergency service?"
-              value={availability.emergency}
-              onChange={(e) =>
-                setAvailability({ ...availability, emergency: e.target.value })
-              }
-              options={["no", "yes"]}
-            />
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
-            <Select
-              label="Home service?"
-              value={availability.homeService}
-              onChange={(e) =>
-                setAvailability({
-                  ...availability,
-                  homeService: e.target.value,
-                })
-              }
-              options={["no", "yes"]}
-            />
-            {availability.homeService === "yes" && (
-              <Input
-                label="Home service starting price (₦)"
-                value={availability.homeServicePrice}
-                onChange={(e) =>
-                  setAvailability({
-                    ...availability,
-                    homeServicePrice: formatMoneyForInput(e.target.value),
-                  })
-                }
-                placeholder="e.g. 10,000"
-              />
-            )}
-          </div>
-        </Section>
-
-        {/* SECTION: Identity Verification */}
-        <Section title="Identity Verification">
-          <Select
-            label="ID Type *"
-            value={verification.idType}
-            onChange={(e) =>
-              setVerification({ ...verification, idType: e.target.value })
-            }
-            options={[
-              "National ID",
-              "Voter’s Card",
-              "Driver’s License",
-              "International Passport",
-            ]}
-          />
-
-          <UploadRow
-            label="Government ID *"
-            value={verification.idUrl}
-            onChange={(v) => setVerification({ ...verification, idUrl: v })}
-            widgetFactory={widgetFactory}
-            widgetReady={widgetReady}
-            folder="kpocha/pro-apps/ids"
-          />
-
-          <div className="mt-3">
-            <Label>Face verification (optional)</Label>
-            <div className="flex items-center gap-2 flex-wrap">
-              <button
-                type="button"
-                className="px-3 py-2 rounded-lg border border-emerald-500 text-emerald-200 text-sm hover:bg-emerald-500/10"
-                onClick={() => nav("/aws-liveness?back=/become")}
-                title="Start face verification and return to this form"
-              >
-                Start Face verification
-              </button>
-
-              {verification.selfieWithIdUrl ? (
-                <span className="text-xs text-emerald-400">Captured ✓</span>
-              ) : (
-                <span className="text-xs text-zinc-500">
-                  You can also upload a clear selfie manually.
-                </span>
-              )}
-
-              {!verification.selfieWithIdUrl && (
-                <button
-                  type="button"
-                  className="ml-2 text-xs underline text-zinc-400 hover:text-zinc-200"
-                  onClick={() => setShowManualSelfie(true)}
-                >
-                  Manual selfie URL (fallback)
-                </button>
-              )}
-            </div>
-
-            {showManualSelfie && !verification.selfieWithIdUrl && (
-              <div className="mt-2">
-                <input
-                  className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-200"
-                  placeholder="Paste selfie image URL (fallback)"
-                  value={verification.selfieWithIdUrl}
+                  checked={professional.nationwide}
                   onChange={(e) =>
-                    setVerification({
-                      ...verification,
-                      selfieWithIdUrl: e.target.value,
+                    setProfessional({
+                      ...professional,
+                      nationwide: e.target.checked,
                     })
                   }
                 />
-                <p className="text-[11px] text-zinc-500 mt-1">
-                  Use this only if camera or upload fails.
-                </p>
+                Offer services nationwide (Nigeria)
+              </label>
+
+              <NgGeoPicker
+                valueState={identity.state}
+                onChangeState={(st) => {
+                  setIdentity({ ...identity, state: st, lga: "" });
+                  if (st && !professional.nationwide) {
+                    setAvailability((p) => ({
+                      ...p,
+                      statesCovered: p.statesCovered.includes(st)
+                        ? p.statesCovered
+                        : [...p.statesCovered, st],
+                    }));
+                  }
+                }}
+                valueLga={identity.lga}
+                onChangeLga={(lga) => setIdentity({ ...identity, lga })}
+                required
+                className="grid grid-cols-1 gap-3"
+              />
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <Input
+                  label="Latitude (optional)"
+                  value={business.lat}
+                  onChange={(e) =>
+                    setBusiness({ ...business, lat: e.target.value })
+                  }
+                  placeholder="e.g. 6.5244"
+                />
+                <Input
+                  label="Longitude (optional)"
+                  value={business.lon}
+                  onChange={(e) =>
+                    setBusiness({ ...business, lon: e.target.value })
+                  }
+                  placeholder="e.g. 3.3792"
+                />
+                <div className="flex items-end">
+                  <button
+                    type="button"
+                    onClick={useMyLocation}
+                    className="w-full px-3 py-2 rounded-lg border border-yellow-500 text-yellow-300 text-sm hover:bg-yellow-500/10"
+                  >
+                    Use my location
+                  </button>
+                </div>
+              </div>
+            </div>
+          </Section>
+        )}
+
+        {/* SECTION: Services & Pricing */}
+        {step === "services" && (
+          <Section title="Services & Pricing">
+            <p className="text-xs text-zinc-400 mb-2">
+              Add at least one service. Price and Promo Price are optional;
+              leaving price blank means ₦0 (free add-on).
+            </p>
+
+            <div className="space-y-3">
+              {servicesDetailed.map((row, i) => {
+                const isOther = row.id === "other";
+                return (
+                  <div
+                    key={i}
+                    className="border border-yellow-500/40 rounded-lg p-3 bg-black"
+                  >
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <div>
+                        <Label>Service</Label>
+                        <ServicePicker
+                          value={row.id || row.name}
+                          onChange={(value, meta) =>
+                            onPickService(i, value, meta)
+                          }
+                          includeOther={true}
+                          otherText={row.otherText}
+                          onOtherText={(txt) => onOtherText(i, txt)}
+                        />
+                        {isOther && (
+                          <p className="text-xs text-zinc-500 mt-1">
+                            Please specify the custom service name above.
+                          </p>
+                        )}
+                      </div>
+
+                      <div>
+                        <Label>Price (₦) — optional</Label>
+                        <input
+                          className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-200"
+                          inputMode="decimal"
+                          placeholder="e.g. 15,000"
+                          value={row.price}
+                          onChange={(e) =>
+                            updateRow(i, { price: e.target.value })
+                          }
+                        />
+                        <p className="text-[11px] text-zinc-500 mt-1">
+                          You can type numbers with commas for clarity.
+                        </p>
+                      </div>
+
+                      <div>
+                        <Label>Promo Price (₦) — optional</Label>
+                        <input
+                          className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-200"
+                          inputMode="decimal"
+                          placeholder="e.g. 12,000"
+                          value={row.promoPrice}
+                          onChange={(e) =>
+                            updateRow(i, { promoPrice: e.target.value })
+                          }
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end mt-2">
+                      {servicesDetailed.length > 1 && (
+                        <button
+                          type="button"
+                          className="text-sm text-red-400 hover:text-red-300"
+                          onClick={() => removeRow(i)}
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="mt-3">
+              <button
+                type="button"
+                onClick={addRow}
+                className="px-3 py-2 rounded-lg border border-yellow-500 text-yellow-300 text-sm hover:bg-yellow-500/10"
+              >
+                + Add another service
+              </button>
+            </div>
+          </Section>
+        )}
+
+        {/* SECTION: Business */}
+        {step === "business" && (
+          <Section title="Business Information">
+            <Select
+              label="Work Mode"
+              value={business.mode}
+              onChange={(e) =>
+                setBusiness({ ...business, mode: e.target.value })
+              }
+              options={["shop", "home", "both"]}
+            />
+
+            {(business.mode === "shop" || business.mode === "both") && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+                <Input
+                  label="Business / Shop Name"
+                  value={business.shopName}
+                  onChange={(e) =>
+                    setBusiness({ ...business, shopName: e.target.value })
+                  }
+                />
+                <Input
+                  label="Business Address"
+                  value={business.shopAddress}
+                  onChange={(e) =>
+                    setBusiness({ ...business, shopAddress: e.target.value })
+                  }
+                />
+
+                <UploadRow
+                  label="Photo (outside)"
+                  value={business.shopPhotoOutside}
+                  onChange={(v) =>
+                    setBusiness({ ...business, shopPhotoOutside: v })
+                  }
+                  widgetFactory={widgetFactory}
+                  widgetReady={widgetReady}
+                  folder="kpocha/pro-apps/shops"
+                />
+                <UploadRow
+                  label="Photo (inside)"
+                  value={business.shopPhotoInside}
+                  onChange={(v) =>
+                    setBusiness({ ...business, shopPhotoInside: v })
+                  }
+                  widgetFactory={widgetFactory}
+                  widgetReady={widgetReady}
+                  folder="kpocha/pro-apps/shops"
+                />
               </div>
             )}
-          </div>
+          </Section>
+        )}
 
-          <div className="mt-2 hidden">
-            <Input
-              label="(Optional) Face verification video URL"
-              value={verification.faceVerificationVideoUrl}
-              onChange={(e) =>
-                setVerification({
-                  ...verification,
-                  faceVerificationVideoUrl: e.target.value,
-                })
-              }
-              placeholder="(future support)"
-            />
-          </div>
-        </Section>
+        {/* SECTION: Work Availability */}
+        {step === "availability" && (
+          <Section title="Work Availability">
+            <Label>Working Days</Label>
+            <div className="grid grid-cols-4 sm:grid-cols-7 gap-2 text-sm text-yellow-300">
+              {Object.keys(availability.days).map((d) => (
+                <label key={d} className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={availability.days[d]}
+                    onChange={() =>
+                      setAvailability((p) => ({
+                        ...p,
+                        days: { ...p.days, [d]: !p.days[d] },
+                      }))
+                    }
+                  />
+                  {d}
+                </label>
+              ))}
+            </div>
 
-        {/* SECTION: Bank Details */}
-        <Section title="Bank Details">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <Input
-              label="Bank Name *"
-              value={bank.bankName}
-              onChange={(e) => setBank({ ...bank, bankName: e.target.value })}
-            />
-            <Input
-              label="Account Name *"
-              value={bank.accountName}
-              onChange={(e) =>
-                setBank({ ...bank, accountName: e.target.value })
-              }
-            />
-            <Input
-              label="Account Number *"
-              value={bank.accountNumber}
-              onChange={(e) =>
-                setBank({ ...bank, accountNumber: e.target.value })
-              }
-              placeholder="10 digits"
-            />
-            <Input
-              label="BVN *"
-              value={bank.bvn}
-              onChange={(e) => setBank({ ...bank, bvn: e.target.value })}
-              placeholder="11 digits"
-            />
-          </div>
-          <p className="text-[11px] text-zinc-500 mt-1">
-            We’ll validate digits on submit.
-          </p>
-        </Section>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
+              <Input
+                label="Start time"
+                type="time"
+                value={availability.start}
+                onChange={(e) =>
+                  setAvailability({ ...availability, start: e.target.value })
+                }
+              />
+              <Input
+                label="End time"
+                type="time"
+                value={availability.end}
+                onChange={(e) =>
+                  setAvailability({ ...availability, end: e.target.value })
+                }
+              />
+              <Select
+                label="Emergency service?"
+                value={availability.emergency}
+                onChange={(e) =>
+                  setAvailability({
+                    ...availability,
+                    emergency: e.target.value,
+                  })
+                }
+                options={["no", "yes"]}
+              />
+            </div>
 
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
+              <Select
+                label="Home service?"
+                value={availability.homeService}
+                onChange={(e) =>
+                  setAvailability({
+                    ...availability,
+                    homeService: e.target.value,
+                  })
+                }
+                options={["no", "yes"]}
+              />
+              {availability.homeService === "yes" && (
+                <Input
+                  label="Home service starting price (₦)"
+                  value={availability.homeServicePrice}
+                  onChange={(e) =>
+                    setAvailability({
+                      ...availability,
+                      homeServicePrice: formatMoneyForInput(e.target.value),
+                    })
+                  }
+                  placeholder="e.g. 10,000"
+                />
+              )}
+            </div>
+          </Section>
+        )}
+
+        {/* SECTION: Identity Verification */}
+        {step === "verification" && (
+          <Section title="Identity Verification">
+            <Select
+              label="ID Type *"
+              value={verification.idType}
+              onChange={(e) =>
+                setVerification({ ...verification, idType: e.target.value })
+              }
+              options={[
+                "National ID",
+                "Voter’s Card",
+                "Driver’s License",
+                "International Passport",
+              ]}
+            />
+
+            <UploadRow
+              label="Government ID *"
+              value={verification.idUrl}
+              onChange={(v) => setVerification({ ...verification, idUrl: v })}
+              widgetFactory={widgetFactory}
+              widgetReady={widgetReady}
+              folder="kpocha/pro-apps/ids"
+            />
+
+            <div className="mt-3">
+              <Label>Face verification (optional)</Label>
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  className="px-3 py-2 rounded-lg border border-emerald-500 text-emerald-200 text-sm hover:bg-emerald-500/10"
+                  onClick={() => nav("/aws-liveness?back=/become")}
+                  title="Start face verification and return to this form"
+                >
+                  Start Face verification
+                </button>
+
+                {verification.selfieWithIdUrl ? (
+                  <span className="text-xs text-emerald-400">Captured ✓</span>
+                ) : (
+                  <span className="text-xs text-zinc-500">
+                    You can also upload a clear selfie manually.
+                  </span>
+                )}
+
+                {!verification.selfieWithIdUrl && (
+                  <button
+                    type="button"
+                    className="ml-2 text-xs underline text-zinc-400 hover:text-zinc-200"
+                    onClick={() => setShowManualSelfie(true)}
+                  >
+                    Manual selfie URL (fallback)
+                  </button>
+                )}
+              </div>
+
+              {showManualSelfie && !verification.selfieWithIdUrl && (
+                <div className="mt-2">
+                  <input
+                    className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-200"
+                    placeholder="Paste selfie image URL (fallback)"
+                    value={verification.selfieWithIdUrl}
+                    onChange={(e) =>
+                      setVerification({
+                        ...verification,
+                        selfieWithIdUrl: e.target.value,
+                      })
+                    }
+                  />
+                  <p className="text-[11px] text-zinc-500 mt-1">
+                    Use this only if camera or upload fails.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="mt-2 hidden">
+              <Input
+                label="(Optional) Face verification video URL"
+                value={verification.faceVerificationVideoUrl}
+                onChange={(e) =>
+                  setVerification({
+                    ...verification,
+                    faceVerificationVideoUrl: e.target.value,
+                  })
+                }
+                placeholder="(future support)"
+              />
+            </div>
+          </Section>
+        )}
+
+        {/* SECTION: Payout */}
+        {step === "payout" && (
+          <Section title="Payout (Bank) Details">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <label className="block md:col-span-3">
+                <Label>Bank *</Label>
+                <select
+                  value={bank.bankCode}
+                  onChange={(e) => {
+                    const code = e.target.value;
+                    const bn =
+                      (banks || []).find((b) => String(b.code) === String(code))
+                        ?.name || "";
+                    setBank((prev) => ({
+                      ...prev,
+                      bankCode: code,
+                      bankName: bn,
+                    }));
+                  }}
+                  disabled={loadingBanks}
+                  className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-200"
+                >
+                  <option value="">
+                    {loadingBanks ? "Loading banks..." : "Select bank..."}
+                  </option>
+                  {(banks || []).map((b) => (
+                    <option key={b.code} value={b.code}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <Input
+                label="Account Name *"
+                value={bank.accountName}
+                onChange={(e) =>
+                  setBank((p) => ({ ...p, accountName: e.target.value }))
+                }
+              />
+
+              <Input
+                label="Account Number *"
+                value={bank.accountNumber}
+                onChange={(e) =>
+                  setBank((p) => ({
+                    ...p,
+                    accountNumber: digitsOnly(e.target.value).slice(0, 10),
+                  }))
+                }
+                placeholder="10 digits"
+              />
+
+              <Input
+                label="BVN *"
+                value={bank.bvn}
+                onChange={(e) =>
+                  setBank((p) => ({
+                    ...p,
+                    bvn: digitsOnly(e.target.value).slice(0, 11),
+                  }))
+                }
+                placeholder="11 digits"
+              />
+            </div>
+
+            <p className="text-[11px] text-zinc-500 mt-2">
+              Account number must be 10 digits. BVN must be 11 digits.
+            </p>
+          </Section>
+        )}
         {/* SECTION: Social / Portfolio */}
-        <Section title="Social / Portfolio (optional)">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <Input
-              label="Instagram"
-              value={portfolio.instagram}
+        {step === "portfolio" && (
+          <Section title="Social / Portfolio (optional)">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <Input
+                label="Instagram"
+                value={portfolio.instagram}
+                onChange={(e) =>
+                  setPortfolio({ ...portfolio, instagram: e.target.value })
+                }
+              />
+              <Input
+                label="TikTok"
+                value={portfolio.tiktok}
+                onChange={(e) =>
+                  setPortfolio({ ...portfolio, tiktok: e.target.value })
+                }
+              />
+              <Input
+                label="Facebook"
+                value={portfolio.facebook}
+                onChange={(e) =>
+                  setPortfolio({ ...portfolio, facebook: e.target.value })
+                }
+              />
+              <Input
+                label="Website / Portfolio"
+                value={portfolio.website}
+                onChange={(e) =>
+                  setPortfolio({ ...portfolio, website: e.target.value })
+                }
+              />
+            </div>
+            <textarea
+              className="w-full mt-3 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-200"
+              placeholder="Testimonials / Reviews"
+              value={portfolio.testimonials}
               onChange={(e) =>
-                setPortfolio({ ...portfolio, instagram: e.target.value })
+                setPortfolio({ ...portfolio, testimonials: e.target.value })
               }
             />
-            <Input
-              label="TikTok"
-              value={portfolio.tiktok}
-              onChange={(e) =>
-                setPortfolio({ ...portfolio, tiktok: e.target.value })
-              }
-            />
-            <Input
-              label="Facebook"
-              value={portfolio.facebook}
-              onChange={(e) =>
-                setPortfolio({ ...portfolio, facebook: e.target.value })
-              }
-            />
-            <Input
-              label="Website / Portfolio"
-              value={portfolio.website}
-              onChange={(e) =>
-                setPortfolio({ ...portfolio, website: e.target.value })
-              }
-            />
-          </div>
-          <textarea
-            className="w-full mt-3 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-200"
-            placeholder="Testimonials / Reviews"
-            value={portfolio.testimonials}
-            onChange={(e) =>
-              setPortfolio({ ...portfolio, testimonials: e.target.value })
-            }
-          />
-        </Section>
+          </Section>
+        )}
 
         {/* SECTION: Agreements */}
-        <Section title="User Agreements">
-          <div className="space-y-2 text-sm text-yellow-300">
-            <Check
-              label={
-                <>
-                  I have read and agree to the{" "}
-                  <a
-                    className="underline"
-                    href="/legal#terms"
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Terms &amp; Conditions
-                  </a>
-                </>
-              }
-              checked={agreements.terms}
-              onChange={() =>
-                setAgreements({ ...agreements, terms: !agreements.terms })
-              }
-            />
-            <Check
-              label={
-                <>
-                  I have read and agree to the{" "}
-                  <a
-                    className="underline"
-                    href="/legal#privacy"
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Privacy Policy
-                  </a>
-                </>
-              }
-              checked={agreements.privacy}
-              onChange={() =>
-                setAgreements({ ...agreements, privacy: !agreements.privacy })
-              }
-            />
-          </div>
-        </Section>
+        {step === "agreements" && (
+          <Section title="User Agreements">
+            <div className="space-y-2 text-sm text-yellow-300">
+              <Check
+                label={
+                  <>
+                    I have read and agree to the{" "}
+                    <a
+                      className="underline"
+                      href="/legal#terms"
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Terms &amp; Conditions
+                    </a>
+                  </>
+                }
+                checked={agreements.terms}
+                onChange={() =>
+                  setAgreements({ ...agreements, terms: !agreements.terms })
+                }
+              />
+              <Check
+                label={
+                  <>
+                    I have read and agree to the{" "}
+                    <a
+                      className="underline"
+                      href="/legal#privacy"
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Privacy Policy
+                    </a>
+                  </>
+                }
+                checked={agreements.privacy}
+                onChange={() =>
+                  setAgreements({ ...agreements, privacy: !agreements.privacy })
+                }
+              />
+            </div>
+          </Section>
+        )}
 
         {/* SUBMIT */}
         <button
@@ -1318,5 +1436,21 @@ function UploadRow({
         </p>
       )}
     </div>
+  );
+}
+
+function StepTab({ label, active, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`px-3 py-1.5 rounded-full text-sm border ${
+        active
+          ? "bg-yellow-400 text-black border-yellow-400"
+          : "bg-black text-yellow-300 border-yellow-500/40 hover:bg-yellow-500/10"
+      }`}
+    >
+      {label}
+    </button>
   );
 }

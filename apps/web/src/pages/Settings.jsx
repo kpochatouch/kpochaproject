@@ -1,8 +1,13 @@
 // apps/web/src/pages/Settings.jsx
 import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import { Link } from "react-router-dom";
-import { api } from "../lib/api";
-import { ensureClientProfile } from "../lib/api";
+import {
+  api,
+  ensureClientProfile,
+  listBanksNG,
+  getPayoutBankMe,
+  savePayoutBank,
+} from "../lib/api";
 import { useToast } from "../components/Toast.jsx";
 import NgGeoPicker from "../components/NgGeoPicker.jsx";
 import ServicePicker from "../components/ServicePicker.jsx";
@@ -77,9 +82,6 @@ export default function SettingsPage() {
   const [client, setClient] = useState(null);
   const [appDoc, setAppDoc] = useState(null);
 
-  const [err, setErr] = useState("");
-  const [ok, setOk] = useState("");
-
   // 👇 we keep today’s liveness (if server sent it)
   const [livenessVerifiedAt, setLivenessVerifiedAt] = useState(null);
   // 👇 we show this if we just asked them to verify
@@ -120,7 +122,11 @@ export default function SettingsPage() {
   const [bankCode, setBankCode] = useState("");
   const [accountName, setAccountName] = useState("");
   const [accountNumber, setAccountNumber] = useState("");
-  const [bvn, setBvn] = useState("");
+
+  // paystack banks (for dropdown)
+  const [banks, setBanks] = useState([]); // [{ name, code }]
+  const [loadingBanks, setLoadingBanks] = useState(false);
+  const banksRef = useRef([]);
 
   // become-pro stuff we want to keep editable
   const [servicesDetailed, setServicesDetailed] = useState([
@@ -161,29 +167,16 @@ export default function SettingsPage() {
   // ui helpers
   const [lightboxUrl, setLightboxUrl] = useState("");
 
-  const okTimerRef = useRef(null);
-  const errTimerRef = useRef(null);
-
   function clearMsg() {
-    setErr("");
-    setOk("");
     setShowLivenessNotice(false);
-    clearTimeout(okTimerRef.current);
-    clearTimeout(errTimerRef.current);
   }
 
   function flashOK(msg) {
-    setOk(msg); // on-page backup
-    success(msg, { playSound: true }); // toast
-    clearTimeout(okTimerRef.current);
-    okTimerRef.current = setTimeout(() => setOk(""), 2500);
+    success(msg, { playSound: true, ttl: 2500 });
   }
 
   function flashErr(msg) {
-    setErr(msg); // on-page backup
-    error(msg, { playSound: true }); // toast
-    clearTimeout(errTimerRef.current);
-    errTimerRef.current = setTimeout(() => setErr(""), 6000);
+    error(msg, { playSound: true, ttl: 6000 });
   }
 
   /* ---------- states list ---------- */
@@ -502,13 +495,7 @@ export default function SettingsPage() {
               ? av.statesCovered
               : [],
           });
-
-          const bk = proData?.bank || {};
-          setBankName(bk.bankName || "");
-          setBankCode(String(bk.bankCode || bk.code || "").trim());
-          setAccountName(bk.accountName || "");
-          setAccountNumber(String(bk.accountNumber || ""));
-          setBvn(String(bk.bvn || ""));
+          
         } else {
           setProfileVisible(true);
           setNationwide(false);
@@ -524,6 +511,42 @@ export default function SettingsPage() {
             { id: "", name: "", price: "", promoPrice: "", otherText: "" },
           ]);
         }
+
+        // ✅ Load banks list + saved payout bank (best-effort)
+        (async () => {
+          let items = [];
+          try {
+            setLoadingBanks(true);
+            items = await listBanksNG();
+            items = Array.isArray(items) ? items : [];
+            setBanks(items);
+            banksRef.current = items;
+          } catch {
+            items = [];
+            setBanks([]);
+          } finally {
+            setLoadingBanks(false);
+          }
+
+          try {
+            const pay = await getPayoutBankMe();
+            const pb = pay?.payoutBank || null;
+            if (pb) {
+              const code = String(pb.code || "").trim();
+              setBankCode(code);
+              setAccountNumber(String(pb.accountNumber || ""));
+              setAccountName(String(pb.accountName || "")); // verified by server
+
+              // ✅ NOW derive bankName immediately from the loaded bank list
+              const bn =
+                (items || []).find((b) => String(b.code) === String(code))
+                  ?.name || "";
+              setBankName(bn);
+            }
+          } catch {
+            // ignore
+          }
+        })();
 
         // 👇 after loading from server, try to reapply any draft (user was interrupted by liveness)
         const draft = takeSettingsDraft();
@@ -563,11 +586,26 @@ export default function SettingsPage() {
               }));
             }
           } else if (draft.section === "bank") {
-            setBankName(draft.payload.bankName || "");
+            const code = String(draft.payload.bankCode || "").trim();
+
+            if (code) {
+              setBankCode(code); // ✅ restore dropdown selection
+              // also restore bank name from banks list if possible
+              const bn =
+                (banksRef.current || []).find(
+                  (b) => String(b.code) === String(code),
+                )?.name ||
+                draft.payload.bankName ||
+                "";
+              setBankName(bn);
+            } else {
+              setBankName(draft.payload.bankName || "");
+            }
+
             setAccountName(draft.payload.accountName || "");
             setAccountNumber(draft.payload.accountNumber || "");
-            setBvn(draft.payload.bvn || "");
           }
+
           // optional: clear it so we don't keep overriding
           // localStorage.removeItem("kpocha:settingsDraft");
         }
@@ -580,8 +618,6 @@ export default function SettingsPage() {
 
     return () => {
       alive = false;
-      clearTimeout(okTimerRef.current);
-      clearTimeout(errTimerRef.current);
     };
   }, []);
 
@@ -616,14 +652,8 @@ export default function SettingsPage() {
     proPhotoUrl,
   ]);
   const canSaveBank = useMemo(
-    () =>
-      hasPro &&
-      !!bankName &&
-      !!bankCode &&
-      !!accountName &&
-      digitsOnly(accountNumber).length === 10 &&
-      digitsOnly(bvn).length === 11,
-    [hasPro, bankName, bankCode, accountName, accountNumber, bvn],
+    () => hasPro && !!bankCode && digitsOnly(accountNumber).length === 10,
+    [hasPro, bankCode, accountNumber],
   );
 
   const profileUrl = useMemo(() => {
@@ -884,7 +914,9 @@ export default function SettingsPage() {
         });
         await startAwsLivenessFlow();
       } else {
-        flashErr(e?.response?.data?.error || "Failed to save professional details.");
+        flashErr(
+          e?.response?.data?.error || "Failed to save professional details.",
+        );
       }
     } finally {
       setSavingPro(false);
@@ -920,66 +952,40 @@ export default function SettingsPage() {
     }
     setSavingBank(true);
     try {
-      const payload = {
-        bank: {
-          bankName,
-          bankCode: String(bankCode || "").trim(),
-          accountName,
-          accountNumber: digitsOnly(accountNumber).slice(0, 10),
-          bvn: digitsOnly(bvn).slice(0, 11),
-        },
-        status: appDoc?.status || "submitted",
-      };
-
-      // attach one-shot liveness remember flag if present
-      const livenessProof = takeAwsLivenessProof();
-      if (livenessProof) {
-        payload.liveness = { remember: true };
-      }
-
-      const { data } = await api.put("/api/pros/me", payload);
-      // ✅ This is the real payout account used by /api/wallet/withdraw (Application.payoutBank)
-      const payRes = await api.put("/api/payout/me", {
+      const payRes = await savePayoutBank({
         accountNumber: digitsOnly(accountNumber).slice(0, 10),
         bankCode: String(bankCode || "").trim(),
-        bankName: String(bankName || "").trim(),
-        accountName: String(accountName || "").trim(),
       });
 
-      // ✅ if this is null, your payout save didn't actually persist
-      console.log("[payout/me] saved:", payRes?.data);
+      const payoutBank = payRes?.payoutBank || null;
+      const finalCode = String(payoutBank?.code || bankCode || "").trim();
 
-      setAppDoc(data?.item || { ...appDoc, ...payload });
+      if (payoutBank) {
+        setBankCode(finalCode);
+        setAccountNumber(String(payoutBank.accountNumber || ""));
+        setAccountName(String(payoutBank.accountName || ""));
+      }
+
+      // derive bank name from the current banks list
+      const bn =
+        (banks || []).find((b) => String(b.code) === String(finalCode))?.name ||
+        "";
+      setBankName(bn);
+
       flashOK("Payment details saved.");
     } catch (e) {
-      if (
-        e?.response?.status === 403 &&
-        e?.response?.data?.error === "liveness_required"
-      ) {
-        // stash bank section
-        stashSettingsDraft("bank", {
-          bankName,
-          accountName,
-          accountNumber,
-          bvn,
-        });
-        await startAwsLivenessFlow();
-      } else {
-        flashErr(e?.response?.data?.error || "Failed to save payment details.");
-      }
+      flashErr(e?.response?.data?.error || "Failed to save payment details.");
     } finally {
       setSavingBank(false);
     }
   }, [
     canSaveBank,
     savingBank,
-    appDoc,
-    bankName,
-    bankCode,
-    accountName,
-    accountNumber,
-    bvn,
     hasPro,
+    bankCode,
+    accountNumber,
+    banks,
+    accountName,
   ]);
 
   /* ---------- UI ---------- */
@@ -990,10 +996,9 @@ export default function SettingsPage() {
         <div>
           <h1 className="text-2xl font-semibold">Settings</h1>
           <p className="text-sm text-zinc-400">
-            Update your profile, professional details, and payments.
+            Update your profile, professional details, and payout.
           </p>
         </div>
-
         {me?.isAdmin && (
           <Link
             to="/admin?tab=settings"
@@ -1018,7 +1023,7 @@ export default function SettingsPage() {
           onClick={() => setStep("pro")}
         />
         <StepTab
-          label="Payments"
+          label="Payout"
           active={step === "payments"}
           onClick={() => setStep("payments")}
         />
@@ -1028,19 +1033,6 @@ export default function SettingsPage() {
           onClick={() => setStep("advanced")}
         />
       </div>
-
-      {/* Optional: keep old boxes or remove later */}
-      {err && (
-        <div className="mb-4 rounded border border-red-800 bg-red-900/40 text-red-100 px-3 py-2">
-          {err}
-        </div>
-      )}
-
-      {ok && (
-        <div className="mb-4 rounded border border-green-800 bg-green-900/30 text-green-100 px-3 py-2">
-          {ok}
-        </div>
-      )}
 
       {showLivenessNotice && (
         <div className="mb-4 rounded border border-amber-700 bg-amber-900/30 text-amber-100 px-3 py-2 text-sm">
@@ -1666,30 +1658,37 @@ export default function SettingsPage() {
           {/* PAYMENTS */}
           {step === "payments" && (
             <section className="rounded-xl border border-zinc-800 p-4 bg-black/30">
-              <h2 className="text-lg font-semibold mb-3">Payments</h2>
-
+              <h2 className="text-lg font-semibold mb-3">Payout</h2>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <Input
-                  label="Bank Name"
-                  value={bankName}
-                  onChange={(e) => setBankName(e.target.value)}
-                  required
-                  disabled={!hasPro}
-                />
-                <Input
-                  label="Bank Code (Paystack)"
-                  value={bankCode}
-                  onChange={(e) => setBankCode(e.target.value)}
-                  required
-                  disabled={!hasPro}
-                />
-                <Input
-                  label="Account Name"
-                  value={accountName}
-                  onChange={(e) => setAccountName(e.target.value)}
-                  required
-                  disabled={!hasPro}
-                />
+                {/* Bank dropdown (Paystack codes) */}
+                <label className="block sm:col-span-2">
+                  <Label>Bank *</Label>
+                  <select
+                    value={bankCode}
+                    onChange={(e) => {
+                      const code = e.target.value;
+                      setBankCode(code);
+
+                      const bn =
+                        (banks || []).find(
+                          (b) => String(b.code) === String(code),
+                        )?.name || "";
+                      setBankName(bn);
+                    }}
+                    disabled={!hasPro || loadingBanks}
+                    className="w-full bg-black border border-zinc-800 rounded-lg px-3 py-2 disabled:opacity-50"
+                  >
+                    <option value="">
+                      {loadingBanks ? "Loading banks..." : "Select bank..."}
+                    </option>
+                    {(banks || []).map((b) => (
+                      <option key={b.code} value={b.code}>
+                        {b.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
                 <Input
                   label="Account Number"
                   value={accountNumber}
@@ -1699,19 +1698,15 @@ export default function SettingsPage() {
                   required
                   disabled={!hasPro}
                 />
-                <Input
-                  label="BVN"
-                  value={bvn}
-                  onChange={(e) =>
-                    setBvn(digitsOnly(e.target.value).slice(0, 11))
-                  }
-                  required
-                  disabled={!hasPro}
+
+                <ReadOnly
+                  label="Account Name (verified)"
+                  value={accountName || "—"}
                 />
               </div>
 
               <p className="text-xs text-zinc-500 mt-2">
-                Account number must be 10 digits. BVN must be 11 digits.
+                Account number must be 10 digits.
               </p>
 
               <div className="flex justify-end mt-4">

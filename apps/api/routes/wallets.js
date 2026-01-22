@@ -539,66 +539,40 @@ export function withAuth(requireAuth, requireAdmin) {
 
   /** POST /api/wallet/withdraw
    *  - Initiates a Paystack transfer (pro cashout) from available balance.
+   *  - STRICT: Uses only Application.payoutBank as source of truth.
    */
   router.post("/wallet/withdraw", requireAuth, async (req, res) => {
     try {
       const { amountKobo, pin } = req.body || {};
       const amt = Math.floor(Number(amountKobo));
-      if (!isPosInt(amt))
+      if (!isPosInt(amt)) {
         return res.status(400).json({ error: "amount_required" });
+      }
 
       const pinRes = await verifyPinForUid(req.user.uid, pin);
-      if (!pinRes.ok) return res.status(400).json({ error: pinRes.code });
+      if (!pinRes.ok) {
+        return res.status(400).json({ error: pinRes.code });
+      }
 
       const PAYSTACK_SECRET_KEY = requirePaystackKey(res);
       if (!PAYSTACK_SECRET_KEY) return;
 
-      // Get user's payout account (Application.payoutBank) — migrate from pro profile if missing
-      let appDoc = await Application.findOne({ uid: req.user.uid }).lean();
-      let bank = appDoc?.payoutBank || {};
+      // ✅ STRICT canonical payout bank (NO migration from Pro.bank)
+      const appDoc = await Application.findOne({ uid: req.user.uid }).lean();
+      const bank = appDoc?.payoutBank || {};
 
       if (!bank.accountNumber || !bank.code) {
-        // 🔁 Backward-compat: some users saved bank in /api/pros/me only (proData.bank)
-        try {
-          const pro = await mongoose.models.Pro?.findOne({
-            uid: req.user.uid,
-          }).lean();
-          const pb = pro?.bank || {};
-          const migrated = {
-            accountNumber: String(pb.accountNumber || "").trim(),
-            code: String(pb.bankCode || pb.code || "").trim(),
-            name: String(pb.bankName || "").trim(),
-            accountName: String(pb.accountName || "").trim(),
-          };
+        return res.status(400).json({ error: "no_payout_account" });
+      }
 
-          if (
-            migrated.accountNumber &&
-            migrated.code &&
-            migrated.name &&
-            migrated.accountName
-          ) {
-            await Application.updateOne(
-              { uid: req.user.uid },
-              {
-                $set: {
-                  "payoutBank.accountNumber": migrated.accountNumber,
-                  "payoutBank.code": migrated.code,
-                  "payoutBank.name": migrated.name,
-                  "payoutBank.accountName": migrated.accountName,
-                },
-              },
-              { upsert: true },
-            );
-            appDoc = await Application.findOne({ uid: req.user.uid }).lean();
-            bank = appDoc?.payoutBank || {};
-          }
-        } catch {
-          // ignore migration errors and fall through
-        }
+      // If recipientCode is missing, we may create it (fallback),
+      // but ONLY if accountName exists (meaning verified via /api/payout/me)
+      const hasRecipientCode =
+        String(bank.recipientCode || "").trim().length > 0;
+      const hasAccountName = String(bank.accountName || "").trim().length > 0;
 
-        if (!bank.accountNumber || !bank.code) {
-          return res.status(400).json({ error: "no_payout_account" });
-        }
+      if (!hasRecipientCode && !hasAccountName) {
+        return res.status(400).json({ error: "payout_bank_not_verified" });
       }
 
       // ✅ Reserve funds AFTER prerequisites to prevent "stuck" deductions
@@ -607,7 +581,9 @@ export function withAuth(requireAuth, requireAdmin) {
         { $inc: { availableKobo: -amt } },
         { new: true, upsert: true, setDefaultsOnInsert: true },
       );
-      if (!w) return res.status(400).json({ error: "insufficient_available" });
+      if (!w) {
+        return res.status(400).json({ error: "insufficient_available" });
+      }
 
       // (optional but useful) record that we reserved funds
       try {
@@ -622,49 +598,71 @@ export function withAuth(requireAuth, requireAdmin) {
         });
       } catch {}
 
-      // Create recipient
-      const createRecipient = await fetch(
-        "https://api.paystack.co/transferrecipient",
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${PAYSTACK_SECRET_KEY}`,
-            "Content-Type": "application/json",
+      // ✅ Prefer stored recipientCode
+      let recipientCode = String(bank.recipientCode || "").trim();
+
+      if (!recipientCode) {
+        // Create recipient once (fallback)
+        const createRecipient = await fetch(
+          "https://api.paystack.co/transferrecipient",
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${PAYSTACK_SECRET_KEY}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              type: "nuban",
+              name: String(bank.accountName || "Recipient").trim(),
+              account_number: String(bank.accountNumber || "").trim(),
+              bank_code: String(bank.code || "").trim(),
+              currency: "NGN",
+            }),
           },
-          body: JSON.stringify({
-            type: "nuban",
-            name: bank.accountName || "Recipient",
-            account_number: bank.accountNumber,
-            bank_code: bank.code,
-            currency: "NGN",
-          }),
-        },
-      );
-      const recData = await createRecipient.json();
-      if (!recData.status) {
-        console.error("[paystack recipient failed]", recData);
+        );
 
-        // refund reserved funds
-        try {
-          const afterRefund = await Wallet.findOneAndUpdate(
-            { ownerUid: req.user.uid },
-            { $inc: { availableKobo: amt } },
-            { new: true },
-          );
-          await WalletTx.create({
-            ownerUid: req.user.uid,
-            type: "cashout_reserve_refund",
-            direction: "credit",
-            amountKobo: amt,
-            balancePendingKobo: Number(afterRefund?.pendingKobo || 0),
-            balanceAvailableKobo: Number(afterRefund?.availableKobo || 0),
-            meta: { stage: "recipient_create_failed", paystack: recData },
+        const recData = await createRecipient.json();
+
+        if (!createRecipient.ok || !recData?.status) {
+          console.error("[paystack recipient failed]", recData);
+
+          // refund reserved funds
+          try {
+            const afterRefund = await Wallet.findOneAndUpdate(
+              { ownerUid: req.user.uid },
+              { $inc: { availableKobo: amt } },
+              { new: true },
+            );
+
+            await WalletTx.create({
+              ownerUid: req.user.uid,
+              type: "cashout_reserve_refund",
+              direction: "credit",
+              amountKobo: amt,
+              balancePendingKobo: Number(afterRefund?.pendingKobo || 0),
+              balanceAvailableKobo: Number(afterRefund?.availableKobo || 0),
+              meta: { stage: "recipient_create_failed", paystack: recData },
+            });
+          } catch {}
+
+          return res.status(400).json({
+            error: "recipient_create_failed",
+            details: recData?.message || "recipient_failed",
           });
-        } catch {}
+        }
 
-        return res
-          .status(400)
-          .json({ error: "recipient_create_failed", details: recData.message });
+        recipientCode = String(recData?.data?.recipient_code || "").trim();
+
+        // Persist for next time
+        if (recipientCode) {
+          try {
+            await Application.updateOne(
+              { uid: req.user.uid },
+              { $set: { "payoutBank.recipientCode": recipientCode } },
+              { upsert: true },
+            );
+          } catch {}
+        }
       }
 
       // Initiate transfer
@@ -677,12 +675,14 @@ export function withAuth(requireAuth, requireAdmin) {
         body: JSON.stringify({
           source: "balance",
           amount: amt,
-          recipient: recData.data.recipient_code,
+          recipient: recipientCode,
           reason: "Kpocha Touch withdrawal",
         }),
       });
+
       const payData = await payReq.json();
-      if (!payData.status) {
+
+      if (!payReq.ok || !payData?.status) {
         console.error("[paystack transfer failed]", payData);
 
         // refund reserved funds
@@ -692,6 +692,7 @@ export function withAuth(requireAuth, requireAdmin) {
             { $inc: { availableKobo: amt } },
             { new: true },
           );
+
           await WalletTx.create({
             ownerUid: req.user.uid,
             type: "cashout_reserve_refund",
@@ -703,9 +704,10 @@ export function withAuth(requireAuth, requireAdmin) {
           });
         } catch {}
 
-        return res
-          .status(400)
-          .json({ error: "transfer_failed", details: payData.message });
+        return res.status(400).json({
+          error: "transfer_failed",
+          details: payData?.message || "transfer_failed",
+        });
       }
 
       // ✅ Paystack succeeded: finalize by moving reserved amount into withdrawnKobo
@@ -715,17 +717,17 @@ export function withAuth(requireAuth, requireAdmin) {
       await WalletTx.create({
         ownerUid: req.user.uid,
         type: "cashout_transfer",
-        direction: "neutral", // ✅ finalization only; reserve already debited
-        amountKobo: 0, // ✅ prevents “double debit” confusion
+        direction: "neutral", // finalization only; reserve already debited
+        amountKobo: 0, // prevents “double debit” confusion
         balancePendingKobo: Number(w.pendingKobo || 0),
         balanceAvailableKobo: Number(w.availableKobo || 0),
-        meta: { paystack: payData.data, reservedAmountKobo: amt },
+        meta: { paystack: payData?.data || payData, reservedAmountKobo: amt },
       });
 
-      res.json({ ok: true, transfer: payData.data });
+      return res.json({ ok: true, transfer: payData?.data || null });
     } catch (e) {
       console.error("[wallet/withdraw] error:", e);
-      res.status(500).json({ error: "withdraw_failed" });
+      return res.status(500).json({ error: "withdraw_failed" });
     }
   });
 

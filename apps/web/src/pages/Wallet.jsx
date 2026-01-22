@@ -146,7 +146,7 @@ export default function WalletPage() {
           const go = confirm(
             "You need to add your payout (bank) details before you can withdraw.\n\nGo to Settings → Payments now?"
           );
-          if (go) navigate("/settings#payments");
+          if (go) navigate("/settings");
           return;
         }
 
