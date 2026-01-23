@@ -20,6 +20,7 @@ import RouteLoader from "./components/RouteLoader.jsx";
 import { useMe } from "./context/MeContext.jsx";
 import BookingAlert from "./components/BookingAlert.jsx";
 import usePostPaymentRecovery from "./hooks/usePostPaymentRecovery";
+import { ensurePushSubscribed } from "./lib/pushClient";
 
 // ---------- pages (lazy) ----------
 const Home = lazy(() => import("./pages/Home.jsx"));
@@ -54,6 +55,7 @@ const ForYou = lazy(() => import("./pages/ForYou.jsx"));
 const Inbox = lazy(() => import("./pages/Inbox.jsx"));
 const LeaveReview = lazy(() => import("./pages/LeaveReview.jsx"));
 const LeaveClientReview = lazy(() => import("./pages/LeaveClientReview.jsx"));
+const Contact = lazy(() => import("./pages/Contact.jsx"));
 
 /* ---------- Chatbase hook ---------- */
 function useChatbase(enabled) {
@@ -170,6 +172,13 @@ export default function App() {
   const navigate = useNavigate();
 
   const { me } = useMe();
+
+  // 🔔 Subscribe this device/browser for Web Push (best-effort, no caching)
+  useEffect(() => {
+    if (!me?.uid) return;
+    ensurePushSubscribed().catch(() => {});
+  }, [me?.uid]);
+
   usePostPaymentRecovery(me);
   const [incomingCall, setIncomingCall] = useState(null);
 
@@ -293,7 +302,15 @@ export default function App() {
               <Route path="/legal/*" element={<Legal />} />
               <Route path="/profile/:username" element={<PublicProfile />} />
               <Route path="/apply/thanks" element={<ApplyThanks />} />
-              <Route path="/payment/confirm" element={<PaymentConfirm />} />
+              <Route
+                path="/contact"
+                element={
+                  <RequireAuth>
+                    <Contact />
+                  </RequireAuth>
+                }
+              />
+              <Route path="/contact" element={<Contact />} />
               {/* Entry to “Find a Pro” flow */}
               <Route path="/find" element={<FindProSmart />} />
               {/* Booking page must be authenticated */}

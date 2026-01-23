@@ -1,9 +1,11 @@
 // apps/api/services/notificationService.js
+import webpush from "web-push";
 import redisClient from "../redis.js";
 import { getIO } from "../sockets/index.js";
 import Notification from "../models/Notification.js";
 import { ClientProfile } from "../models/Profile.js";
 import { Pro } from "../models.js";
+import PushSubscription from "../models/PushSubscription.js";
 
 /**
  * Normalize input and support legacy keys
@@ -166,6 +168,49 @@ function emitToUser(uid, event, payload) {
   }
 }
 
+function ensureVapidConfigured() {
+  const pub = process.env.VAPID_PUBLIC_KEY;
+  const priv = process.env.VAPID_PRIVATE_KEY;
+  const subject = process.env.VAPID_SUBJECT || "mailto:admin@kpocha.touch";
+  if (!pub || !priv) return false;
+
+  try {
+    webpush.setVapidDetails(subject, pub, priv);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function sendWebPushToUser(uid, payload) {
+  try {
+    const ok = ensureVapidConfigured();
+    if (!ok) return { ok: false, reason: "vapid_missing" };
+
+    const subDoc = await PushSubscription.findOne({
+      ownerUid: uid,
+      disabled: { $ne: true },
+    }).lean();
+
+    if (!subDoc?.subscription) return { ok: false, reason: "no_subscription" };
+
+    await webpush.sendNotification(
+      subDoc.subscription,
+      JSON.stringify(payload),
+    );
+    return { ok: true };
+  } catch (e) {
+    // common case: subscription expired -> disable it
+    try {
+      await PushSubscription.findOneAndUpdate(
+        { ownerUid: uid },
+        { $set: { disabled: true } },
+      );
+    } catch {}
+    return { ok: false, reason: e?.message || "push_failed" };
+  }
+}
+
 /**
  * Create & persist a notification, increment unread counter, and emit socket.
  * Returns the Notification document (lean object if requested).
@@ -212,6 +257,24 @@ export async function createNotification(rawArgs = {}, { lean = false } = {}) {
     groupKey: doc.groupKey || null,
     priority: doc.priority || "default",
   });
+
+  // Best-effort Web Push (background notifications)
+  try {
+    const title = doc?.data?.title || "Kpocha Touch";
+    const body = doc?.data?.body || "";
+    await sendWebPushToUser(ownerUid, {
+      title,
+      body,
+      data: {
+        notificationId: String(doc._id),
+        type: doc.type,
+        ...doc.data,
+      },
+    });
+
+    // (optional) mark deliveredPush on success in DB
+    // You can skip this if you don’t care yet.
+  } catch {}
 
   return lean ? doc.toObject() : doc;
 }

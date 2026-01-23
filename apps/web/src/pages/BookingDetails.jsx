@@ -1111,15 +1111,14 @@ export default function BookingDetails() {
                 me?.uid &&
                 (me.uid === booking.clientUid ||
                   me.uid === booking.proOwnerUid) && (
-                  <a
-                    href={buildSupportMailto({
-                      bookingId: booking._id,
-                      serviceName: svcName,
-                    })}
+                  <Link
+                    to={`/contact?bookingId=${encodeURIComponent(
+                      booking._id,
+                    )}&serviceName=${encodeURIComponent(svcName)}`}
                     className="px-4 py-2 rounded-lg border border-amber-700 text-amber-300 text-sm hover:bg-amber-950/40"
                   >
-                    Contact Support (kpochaout@gmail.com)
-                  </a>
+                    Contact Support
+                  </Link>
                 )}
 
               {/* Chat / Call button – only during accepted OR short grace after completed */}

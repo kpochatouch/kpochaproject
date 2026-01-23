@@ -53,6 +53,7 @@ import chatRoutes from "./routes/chat.js";
 import callRoutes from "./routes/call.js";
 import webrtcRoutes from "./routes/webrtc.js";
 import { getIO } from "./sockets/index.js";
+import pushRoutes from "./routes/push.js";
 
 dotenv.config();
 
@@ -1206,6 +1207,7 @@ app.use("/api", activityRoutes);
 app.use("/api", chatRoutes({ requireAuth }));
 app.use("/api", callRoutes({ requireAuth }));
 app.use("/api", webrtcRoutes);
+app.use("/api", pushRoutes);
 
 // admin pros
 try {
