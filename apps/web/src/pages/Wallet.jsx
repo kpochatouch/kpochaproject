@@ -142,17 +142,44 @@ export default function WalletPage() {
         if (code === "insufficient_available") {
           return alert("Insufficient funds in Available.");
         }
-                if (code === "no_payout_account") {
+        if (code === "no_payout_account") {
           const go = confirm(
-            "You need to add your payout (bank) details before you can withdraw.\n\nGo to Settings → Payments now?"
+            "You need to add your payout (bank) details before you can withdraw.\n\nGo to Settings → Payments now?",
           );
           if (go) navigate("/settings");
           return;
         }
 
+        const details =
+          e?.response?.data?.details ||
+          e?.response?.data?.message ||
+          e?.response?.data?.error ||
+          "";
 
-        // fallback
-        return alert(code || "Withdrawal failed. Please try again.");
+        // ✅ hide provider/debug messages from users (no Paystack/internal details)
+        const detailsLower = String(details || "").toLowerCase();
+        const codeLower = String(code || "").toLowerCase();
+
+        // Heuristic: provider / payout portal issues
+        const looksLikeProviderDown =
+          detailsLower.includes("starter business") ||
+          detailsLower.includes("third party payout") ||
+          detailsLower.includes("payout") ||
+          detailsLower.includes("transfer") ||
+          detailsLower.includes("recipient") ||
+          detailsLower.includes("paystack") ||
+          codeLower.includes("transfer") ||
+          codeLower.includes("payout") ||
+          codeLower.includes("provider");
+
+        if (looksLikeProviderDown) {
+          return alert(
+            "The withdrawal portal is temporarily unavailable. Please try again shortly. Your wallet balance is safe.",
+          );
+        }
+
+        // fallback (generic)
+        return alert("Withdrawal failed. Please try again.");
       }
     });
   }
@@ -170,7 +197,20 @@ export default function WalletPage() {
         e?.response?.data?.error ||
         e?.message ||
         "Instant cashout failed";
-      alert(msg);
+      const m = String(msg || "").toLowerCase();
+      const looksLikeProviderDown =
+        m.includes("starter business") ||
+        m.includes("third party payout") ||
+        m.includes("paystack") ||
+        m.includes("transfer") ||
+        m.includes("payout") ||
+        m.includes("recipient");
+
+      alert(
+        looksLikeProviderDown
+          ? "Instant cashout is temporarily unavailable. Please try again shortly."
+          : msg,
+      );
     } finally {
       setCashoutBusy((m) => {
         const copy = { ...m };

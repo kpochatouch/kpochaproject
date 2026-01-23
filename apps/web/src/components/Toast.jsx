@@ -10,6 +10,7 @@ import React, {
 } from "react";
 
 const ToastCtx = createContext(null);
+const FADE_MS = 600; // fade-out duration before removal
 
 export function ToastProvider({ children }) {
   const [items, setItems] = useState([]);
@@ -18,6 +19,7 @@ export function ToastProvider({ children }) {
 
   // ✅ timers ref must live at component top-level (NOT inside push)
   const timersRef = useRef(new Map());
+  const fadeTimersRef = useRef(new Map());
 
   // Optional sounds (your files are in /public/sound)
   useEffect(() => {
@@ -42,7 +44,25 @@ export function ToastProvider({ children }) {
       clearTimeout(tm);
       timersRef.current.delete(id);
     }
-    setItems((prev) => prev.filter((t) => t.id !== id));
+
+    const ft = fadeTimersRef.current.get(id);
+    if (ft) {
+      clearTimeout(ft);
+      fadeTimersRef.current.delete(id);
+    }
+
+    // 1) mark as closing (fade out)
+    setItems((prev) =>
+      prev.map((t) => (t.id === id ? { ...t, closing: true } : t)),
+    );
+
+    // 2) after fade, remove from DOM
+    const ft2 = setTimeout(() => {
+      setItems((prev) => prev.filter((t) => t.id !== id));
+      fadeTimersRef.current.delete(id);
+    }, FADE_MS);
+
+    fadeTimersRef.current.set(id, ft2);
   }, []);
 
   // ✅ cleanup all timers on unmount
@@ -50,6 +70,8 @@ export function ToastProvider({ children }) {
     return () => {
       for (const tm of timersRef.current.values()) clearTimeout(tm);
       timersRef.current.clear();
+      for (const tm of fadeTimersRef.current.values()) clearTimeout(tm);
+      fadeTimersRef.current.clear();
     };
   }, []);
 
@@ -61,7 +83,7 @@ export function ToastProvider({ children }) {
         tone: t.tone || "info",
         title: t.title || "",
         msg: t.msg || "",
-        ttl: t.ttl ?? 3500,
+        ttl: t.ttl ?? (t.tone === "error" ? 10000 : 5000),
       };
 
       setItems((prev) => {
@@ -145,7 +167,9 @@ function ToastItem({ toast, onClose }) {
 
   return (
     <div
-      className={`rounded-xl border shadow-lg backdrop-blur px-4 py-3 ${styles[tone] || styles.info}`}
+      className={`rounded-xl border shadow-lg backdrop-blur px-4 py-3 transition-all duration-500 ${
+        toast.closing ? "opacity-0 translate-y-1" : "opacity-100 translate-y-0"
+      } ${styles[tone] || styles.info}`}
     >
       <div className="flex items-start gap-3">
         <div className="flex-1">

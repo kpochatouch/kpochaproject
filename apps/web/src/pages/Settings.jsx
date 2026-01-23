@@ -166,6 +166,8 @@ export default function SettingsPage() {
 
   // ui helpers
   const [lightboxUrl, setLightboxUrl] = useState("");
+  // ✅ baseline for "already saved" detection (disable save when no changes)
+  const profileBaselineRef = useRef(null);
 
   function clearMsg() {
     setShowLivenessNotice(false);
@@ -373,6 +375,35 @@ export default function SettingsPage() {
         setUsername(serverUsername || "");
         setUsernameLastChangedAt(lastUsernameChange || null);
 
+        // ✅ baseline snapshot (used to disable Save when nothing changed)
+        profileBaselineRef.current = {
+          displayName:
+            base.displayName ||
+            base.fullName ||
+            base?.identity?.fullName ||
+            meData?.email ||
+            "",
+          phone:
+            clientData?.phone ||
+            clientData?.identity?.phone ||
+            proData?.phone ||
+            proData?.identity?.phone ||
+            meData?.identity?.phone ||
+            "",
+          stateVal: String(st || "").toUpperCase(),
+          lga: String(lg || "").toUpperCase(),
+          avatarUrl:
+            clientData?.photoUrl ||
+            clientData?.identity?.photoUrl ||
+            proData?.photoUrl ||
+            proData?.identity?.photoUrl ||
+            meData?.photoUrl ||
+            meData?.identity?.photoUrl ||
+            "",
+          clientBio: clientData?.bio || "",
+          username: serverUsername || "",
+        };
+
         if (proData) {
           setProfileVisible(
             Boolean(
@@ -495,7 +526,6 @@ export default function SettingsPage() {
               ? av.statesCovered
               : [],
           });
-          
         } else {
           setProfileVisible(true);
           setNationwide(false);
@@ -607,7 +637,7 @@ export default function SettingsPage() {
           }
 
           // optional: clear it so we don't keep overriding
-          // localStorage.removeItem("kpocha:settingsDraft");
+          localStorage.removeItem("kpocha:settingsDraft");
         }
       } catch {
         if (alive) flashErr("Failed to load your profile.");
@@ -622,11 +652,28 @@ export default function SettingsPage() {
   }, []);
 
   /* ---------- flags ---------- */
+
+  // ✅ detect if Profile form has changed since last load/save
+  const profileDirty = useMemo(() => {
+    const b = profileBaselineRef.current;
+    if (!b) return true; // baseline not set yet, allow save
+    return (
+      (displayName || "") !== (b.displayName || "") ||
+      (phone || "") !== (b.phone || "") ||
+      (stateVal || "") !== (b.stateVal || "") ||
+      (lga || "") !== (b.lga || "") ||
+      (avatarUrl || "") !== (b.avatarUrl || "") ||
+      (clientBio || "") !== (b.clientBio || "") ||
+      (username || "") !== (b.username || "")
+    );
+  }, [displayName, phone, stateVal, lga, avatarUrl, clientBio, username]);
+
   const hasPro = !!appDoc?._id;
   const canSaveProfile = useMemo(
-    () => !!displayName && !!phone && (!!lga || !!stateVal),
-    [displayName, phone, lga, stateVal],
+    () => !!displayName && !!phone && !!stateVal && !!lga,
+    [displayName, phone, stateVal, lga],
   );
+
   const canSavePro = useMemo(() => {
     const hasAnyDetailed = servicesDetailed.some(
       (s) => (s.name || "").trim() !== "",
@@ -784,6 +831,17 @@ export default function SettingsPage() {
           /* ignore */
         }
       }
+
+      // ✅ update baseline so Save disables until next real change
+      profileBaselineRef.current = {
+        displayName,
+        phone,
+        stateVal: stateVal.toUpperCase(),
+        lga: lga.toUpperCase(),
+        avatarUrl,
+        clientBio,
+        username: trimmedUsername || "",
+      };
 
       flashOK("Profile saved.");
     } catch (e) {
@@ -1154,7 +1212,7 @@ export default function SettingsPage() {
 
               <div className="flex justify-end mt-4">
                 <button
-                  disabled={!canSaveProfile || savingProfile}
+                  disabled={!canSaveProfile || savingProfile || !profileDirty}
                   onClick={saveProfile}
                   className="px-4 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50"
                 >
