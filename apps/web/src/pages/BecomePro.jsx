@@ -1,7 +1,12 @@
 // apps/web/src/pages/BecomePro.jsx
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, ensureClientProfile, listBanksNG } from "../lib/api";
+import {
+  api,
+  ensureClientProfile,
+  listBanksNG,
+  submitProApplication,
+} from "../lib/api";
 import NgGeoPicker from "../components/NgGeoPicker.jsx";
 import ServicePicker from "../components/ServicePicker.jsx";
 
@@ -98,6 +103,39 @@ export default function BecomePro() {
 
   // step-by-step UI (like Settings)
   const [step, setStep] = useState("identity");
+  const STEPS = [
+    "identity",
+    "services",
+    "business",
+    "availability",
+    "verification",
+    "payout",
+    "portfolio",
+    "agreements",
+  ];
+
+  function stepIndexOf(s) {
+    const i = STEPS.indexOf(s);
+    return i >= 0 ? i : 0;
+  }
+
+  function goPrev() {
+    const i = stepIndexOf(step);
+    if (i > 0) setStep(STEPS[i - 1]);
+  }
+
+  function goNext() {
+    const i = stepIndexOf(step);
+    if (i < STEPS.length - 1) setStep(STEPS[i + 1]);
+  }
+
+  const isFirstStep = stepIndexOf(step) === 0;
+  const isLastStep = stepIndexOf(step) === STEPS.length - 1;
+  function goStep(nextStep) {
+    setMsg("");
+    setStep(nextStep);
+  }
+
   // identity | services | business | availability | verification | payout | portfolio | agreements
 
   // payout banks dropdown
@@ -173,13 +211,9 @@ export default function BecomePro() {
 
   // ===== Verification
   const [verification, setVerification] = useState({
-    idType: "",
-    idUrl: "",
-    selfieWithIdUrl: "",
     faceVerificationVideoUrl: "",
     livenessMetrics: {},
   });
-  const [showManualSelfie, setShowManualSelfie] = useState(false);
 
   // ===== Bank
   const [bank, setBank] = useState({
@@ -187,7 +221,6 @@ export default function BecomePro() {
     bankName: "",
     accountName: "",
     accountNumber: "",
-    bvn: "",
   });
 
   // ===== Portfolio
@@ -388,28 +421,32 @@ export default function BecomePro() {
     }
   }
 
-  /* ---------- Face verification storage ---------- */
+  /* ---------- Face verification storage (AWS liveness) ---------- */
   function checkVerificationStorage() {
     try {
-      const url = localStorage.getItem("kpocha:selfieUrl") || "";
       const metricsRaw = localStorage.getItem("kpocha:livenessMetrics");
       const videoUrl = localStorage.getItem("kpocha:livenessVideoUrl") || "";
-      if (url || videoUrl) {
+
+      const hasMetrics = !!metricsRaw;
+      const hasVideo = !!videoUrl;
+
+      if (hasMetrics || hasVideo) {
         setVerification((v) => ({
           ...v,
-          selfieWithIdUrl: url || v.selfieWithIdUrl,
           livenessMetrics: metricsRaw
             ? JSON.parse(metricsRaw)
             : v.livenessMetrics || {},
           faceVerificationVideoUrl:
             videoUrl || v.faceVerificationVideoUrl || "",
         }));
-        localStorage.removeItem("kpocha:selfieUrl");
+
+        // one-time consume
         localStorage.removeItem("kpocha:livenessMetrics");
         localStorage.removeItem("kpocha:livenessVideoUrl");
       }
     } catch {}
   }
+
   useEffect(() => {
     const onFocus = () => checkVerificationStorage();
     const onVisibility = () => {
@@ -457,45 +494,64 @@ export default function BecomePro() {
     setServicesDetailed((r) => r.filter((_, idx) => idx !== i));
   }
 
-  /* ---------- Validation ---------- */
-  const missing = useMemo(() => {
-    const m = [];
+  /* ---------- Validation (per-step) ---------- */
+  const missingByStep = useMemo(() => {
+    const out = {
+      identity: [],
+      services: [],
+      business: [],
+      availability: [],
+      verification: [],
+      payout: [],
+      portfolio: [], // optional (no required fields)
+      agreements: [],
+    };
 
-    if (!identity.firstName) m.push("First name");
-    if (!identity.lastName) m.push("Last name");
-    if (!identity.gender) m.push("Gender");
-    if (!identity.dob) m.push("Date of birth");
-    if (!identity.state) m.push("State");
+    // ---------- identity ----------
+    if (!identity.firstName) out.identity.push("First name");
+    if (!identity.lastName) out.identity.push("Last name");
+    if (!identity.gender) out.identity.push("Gender");
+    if (!identity.dob) out.identity.push("Date of birth");
+    if (!identity.state) out.identity.push("State");
     if (!professional.nationwide && !identity.lga)
-      m.push("LGA (or select Nationwide)");
+      out.identity.push("LGA (or select Nationwide)");
 
+    // ---------- services ----------
     const resolvedRows = servicesDetailed
       .map((r) => ({ ...r, resolvedName: (r.name || "").trim() }))
       .filter((r) => r.resolvedName);
-    if (resolvedRows.length === 0) m.push("At least one service");
+
+    if (resolvedRows.length === 0) out.services.push("At least one service");
 
     const seen = new Set();
     for (const r of resolvedRows) {
       const key = normName(r.resolvedName);
       if (seen.has(key)) {
-        m.push("Duplicate service names");
+        out.services.push("Duplicate service names");
         break;
       }
       seen.add(key);
     }
 
-    if (!verification.idType) m.push("ID type");
-    if (!verification.idUrl) m.push("Government ID image");
+    // ---------- business ----------
+    // currently optional (no required items) → leave empty
 
-    if (!bank.bankCode) m.push("Bank (select)");
-    if (!bank.accountName) m.push("Account name");
-    if (!bank.accountNumber) m.push("Account number");
-    if (!bank.bvn) m.push("BVN");
+    // ---------- availability ----------
+    // currently optional (no required items) → leave empty
 
-    if (!agreements.terms) m.push("Accept Terms");
-    if (!agreements.privacy) m.push("Accept Privacy Policy");
+    // ---------- verification ----------
+    // optional (AWS liveness) → leave empty
 
-    return m;
+    // ---------- payout ----------
+    if (!bank.bankCode) out.payout.push("Bank (select)");
+    if (!bank.accountName) out.payout.push("Account name");
+    if (!bank.accountNumber) out.payout.push("Account number");
+
+    // ---------- agreements ----------
+    if (!agreements.terms) out.agreements.push("Accept Terms");
+    if (!agreements.privacy) out.agreements.push("Accept Privacy Policy");
+
+    return out;
   }, [
     identity.firstName,
     identity.lastName,
@@ -505,25 +561,31 @@ export default function BecomePro() {
     identity.lga,
     professional.nationwide,
     servicesDetailed,
-    verification.idType,
-    verification.idUrl,
     bank.bankCode,
     bank.accountName,
     bank.accountNumber,
-    bank.bvn,
     agreements.terms,
     agreements.privacy,
   ]);
 
-  const canSubmit = missing.length === 0;
+  const missingAll = useMemo(() => {
+    return Object.values(missingByStep).flat();
+  }, [missingByStep]);
+
+  const missingCurrent = useMemo(() => {
+    return missingByStep?.[step] || [];
+  }, [missingByStep, step]);
+
+  const canSubmit = missingAll.length === 0;
 
   /* ---------- Submit ---------- */
   async function submit(e) {
     e.preventDefault();
     if (!canSubmit) {
-      setMsg(`Please complete: ${missing.join(", ")}`);
+      setMsg(`Please complete: ${missingAll.join(", ")}`);
       return;
     }
+
     setBusy(true);
     setMsg("");
     try {
@@ -572,14 +634,15 @@ export default function BecomePro() {
             : availability.statesCovered,
         },
         servicesDetailed: normalizedRows,
-        verification: {
-          ...verification,
-          faceVerificationVideoUrl: verification.faceVerificationVideoUrl || "",
-        },
+        ...(verification?.faceVerificationVideoUrl ||
+        (verification?.livenessMetrics &&
+          Object.keys(verification.livenessMetrics || {}).length > 0)
+          ? { verification }
+          : {}),
+
         bank: {
           ...bank,
           accountNumber: digitsOnly(bank.accountNumber).slice(0, 10),
-          bvn: digitsOnly(bank.bvn).slice(0, 11),
         },
         portfolio,
         status: "submitted",
@@ -618,50 +681,56 @@ export default function BecomePro() {
         <StepTab
           label="Identity"
           active={step === "identity"}
-          onClick={() => setStep("identity")}
+          onClick={() => goStep("identity")}
         />
         <StepTab
           label="Services"
           active={step === "services"}
-          onClick={() => setStep("services")}
+          onClick={() => goStep("services")}
         />
         <StepTab
           label="Business"
           active={step === "business"}
-          onClick={() => setStep("business")}
+          onClick={() => goStep("business")}
         />
         <StepTab
           label="Availability"
           active={step === "availability"}
-          onClick={() => setStep("availability")}
+          onClick={() => goStep("availability")}
         />
         <StepTab
-          label="Verification"
+          label="Face Verification"
           active={step === "verification"}
-          onClick={() => setStep("verification")}
+          onClick={() => goStep("verification")}
         />
+
         <StepTab
           label="Payout"
           active={step === "payout"}
-          onClick={() => setStep("payout")}
+          onClick={() => goStep("payout")}
         />
         <StepTab
           label="Portfolio"
           active={step === "portfolio"}
-          onClick={() => setStep("portfolio")}
+          onClick={() => goStep("portfolio")}
         />
         <StepTab
           label="Agreements"
           active={step === "agreements"}
-          onClick={() => setStep("agreements")}
+          onClick={() => goStep("agreements")}
         />
       </div>
-
-      {missing.length > 0 && (
+      {missingCurrent.length > 0 && (
         <div className="mb-4 border border-yellow-500/50 rounded-lg p-3 bg-black text-yellow-300">
-          <div className="text-sm font-semibold mb-1">Missing:</div>
+          <div className="text-sm font-semibold mb-1">Missing (this step):</div>
+
+          <p className="text-xs text-zinc-400 mb-2">
+            Fields marked with <strong>*</strong> are required. To proceed,
+            complete the items listed below.
+          </p>
+
           <ul className="text-sm list-disc pl-5 space-y-1">
-            {missing.map((x, i) => (
+            {missingCurrent.map((x, i) => (
               <li key={i}>{x}</li>
             ))}
           </ul>
@@ -1062,95 +1131,30 @@ export default function BecomePro() {
           </Section>
         )}
 
-        {/* SECTION: Identity Verification */}
+        {/* SECTION: Face Verification (AWS Liveness) */}
         {step === "verification" && (
-          <Section title="Identity Verification">
-            <Select
-              label="ID Type *"
-              value={verification.idType}
-              onChange={(e) =>
-                setVerification({ ...verification, idType: e.target.value })
-              }
-              options={[
-                "National ID",
-                "Voter’s Card",
-                "Driver’s License",
-                "International Passport",
-              ]}
-            />
+          <Section title="Face Verification (Optional)">
+            <p className="text-xs text-zinc-400 mb-2">
+              This is optional for now. No government ID is required.
+            </p>
 
-            <UploadRow
-              label="Government ID *"
-              value={verification.idUrl}
-              onChange={(v) => setVerification({ ...verification, idUrl: v })}
-              widgetFactory={widgetFactory}
-              widgetReady={widgetReady}
-              folder="kpocha/pro-apps/ids"
-            />
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                className="px-3 py-2 rounded-lg border border-emerald-500 text-emerald-200 text-sm hover:bg-emerald-500/10"
+                onClick={() => nav("/aws-liveness?back=/become")}
+                title="Start face verification and return to this form"
+              >
+                Start Face verification
+              </button>
 
-            <div className="mt-3">
-              <Label>Face verification (optional)</Label>
-              <div className="flex items-center gap-2 flex-wrap">
-                <button
-                  type="button"
-                  className="px-3 py-2 rounded-lg border border-emerald-500 text-emerald-200 text-sm hover:bg-emerald-500/10"
-                  onClick={() => nav("/aws-liveness?back=/become")}
-                  title="Start face verification and return to this form"
-                >
-                  Start Face verification
-                </button>
-
-                {verification.selfieWithIdUrl ? (
-                  <span className="text-xs text-emerald-400">Captured ✓</span>
-                ) : (
-                  <span className="text-xs text-zinc-500">
-                    You can also upload a clear selfie manually.
-                  </span>
-                )}
-
-                {!verification.selfieWithIdUrl && (
-                  <button
-                    type="button"
-                    className="ml-2 text-xs underline text-zinc-400 hover:text-zinc-200"
-                    onClick={() => setShowManualSelfie(true)}
-                  >
-                    Manual selfie URL (fallback)
-                  </button>
-                )}
-              </div>
-
-              {showManualSelfie && !verification.selfieWithIdUrl && (
-                <div className="mt-2">
-                  <input
-                    className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-200"
-                    placeholder="Paste selfie image URL (fallback)"
-                    value={verification.selfieWithIdUrl}
-                    onChange={(e) =>
-                      setVerification({
-                        ...verification,
-                        selfieWithIdUrl: e.target.value,
-                      })
-                    }
-                  />
-                  <p className="text-[11px] text-zinc-500 mt-1">
-                    Use this only if camera or upload fails.
-                  </p>
-                </div>
+              {verification.faceVerificationVideoUrl ? (
+                <span className="text-xs text-emerald-400">Verified ✓</span>
+              ) : (
+                <span className="text-xs text-zinc-500">
+                  Not completed yet.
+                </span>
               )}
-            </div>
-
-            <div className="mt-2 hidden">
-              <Input
-                label="(Optional) Face verification video URL"
-                value={verification.faceVerificationVideoUrl}
-                onChange={(e) =>
-                  setVerification({
-                    ...verification,
-                    faceVerificationVideoUrl: e.target.value,
-                  })
-                }
-                placeholder="(future support)"
-              />
             </div>
           </Section>
         )}
@@ -1207,22 +1211,10 @@ export default function BecomePro() {
                 }
                 placeholder="10 digits"
               />
-
-              <Input
-                label="BVN *"
-                value={bank.bvn}
-                onChange={(e) =>
-                  setBank((p) => ({
-                    ...p,
-                    bvn: digitsOnly(e.target.value).slice(0, 11),
-                  }))
-                }
-                placeholder="11 digits"
-              />
             </div>
 
             <p className="text-[11px] text-zinc-500 mt-2">
-              Account number must be 10 digits. BVN must be 11 digits.
+              Account number must be 10 digits.
             </p>
           </Section>
         )}
@@ -1316,13 +1308,42 @@ export default function BecomePro() {
           </Section>
         )}
 
-        {/* SUBMIT */}
-        <button
-          disabled={!canSubmit || busy}
-          className="w-full bg-yellow-400 text-black font-semibold rounded-lg py-2 disabled:opacity-60"
-        >
-          {busy ? "Submitting..." : "Submit Application"}
-        </button>
+        {/* NAVIGATION */}
+        <div className="flex items-center justify-between gap-3 pt-2">
+          <button
+            type="button"
+            onClick={goPrev}
+            disabled={busy || isFirstStep}
+            className="px-4 py-2 rounded-lg border border-yellow-500/50 text-yellow-300 text-sm hover:bg-yellow-500/10 disabled:opacity-50"
+          >
+            ← Prev
+          </button>
+
+          {!isLastStep ? (
+            <button
+              type="button"
+              onClick={() => {
+                if (missingCurrent.length > 0) {
+                  setMsg(`Please complete: ${missingCurrent.join(", ")}`);
+                  return;
+                }
+                goNext();
+              }}
+              disabled={busy}
+              className="px-4 py-2 rounded-lg bg-yellow-400 text-black font-semibold text-sm disabled:opacity-60"
+            >
+              Next →
+            </button>
+          ) : (
+            <button
+              type="submit"
+              disabled={!canSubmit || busy}
+              className="px-4 py-2 rounded-lg bg-yellow-400 text-black font-semibold text-sm disabled:opacity-60"
+            >
+              {busy ? "Submitting..." : "Submit Application"}
+            </button>
+          )}
+        </div>
       </form>
     </div>
   );
