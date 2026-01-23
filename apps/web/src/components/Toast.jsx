@@ -16,6 +16,9 @@ export function ToastProvider({ children }) {
   const audioOkRef = useRef(null);
   const audioErrRef = useRef(null);
 
+  // ✅ timers ref must live at component top-level (NOT inside push)
+  const timersRef = useRef(new Map());
+
   // Optional sounds (your files are in /public/sound)
   useEffect(() => {
     try {
@@ -33,7 +36,21 @@ export function ToastProvider({ children }) {
   }, []);
 
   const dismiss = useCallback((id) => {
+    // clear any timer for this toast
+    const tm = timersRef.current.get(id);
+    if (tm) {
+      clearTimeout(tm);
+      timersRef.current.delete(id);
+    }
     setItems((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  // ✅ cleanup all timers on unmount
+  useEffect(() => {
+    return () => {
+      for (const tm of timersRef.current.values()) clearTimeout(tm);
+      timersRef.current.clear();
+    };
   }, []);
 
   const push = useCallback(
@@ -47,7 +64,21 @@ export function ToastProvider({ children }) {
         ttl: t.ttl ?? 3500,
       };
 
-      setItems((prev) => [...prev, toast]);
+      setItems((prev) => {
+        const next = [];
+        for (const x of prev) {
+          const xTone = x.tone || "info";
+          if (xTone === toast.tone) {
+            const tm = timersRef.current.get(x.id);
+            if (tm) clearTimeout(tm);
+            timersRef.current.delete(x.id);
+            continue;
+          }
+          next.push(x);
+        }
+        next.push(toast);
+        return next;
+      });
 
       // Best-effort sound (browser may block until user gesture)
       try {
@@ -63,25 +94,11 @@ export function ToastProvider({ children }) {
         }
       } catch {}
 
-      // put this near your refs
-      const timersRef = useRef(new Map());
-
-      // inside push(), replace the setTimeout line with:
+      // auto-dismiss
       if (toast.ttl > 0) {
-        const tm = setTimeout(() => {
-          timersRef.current.delete(id);
-          dismiss(id);
-        }, toast.ttl);
+        const tm = setTimeout(() => dismiss(id), toast.ttl);
         timersRef.current.set(id, tm);
       }
-
-      // and add this cleanup effect anywhere in the provider:
-      useEffect(() => {
-        return () => {
-          for (const tm of timersRef.current.values()) clearTimeout(tm);
-          timersRef.current.clear();
-        };
-      }, []);
 
       return id;
     },
