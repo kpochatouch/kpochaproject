@@ -70,6 +70,11 @@ function takeSettingsDraft() {
   }
 }
 
+function isFreshDraft(d, maxAgeMs = 5 * 60 * 1000) {
+  const ts = Number(d?.ts || 0);
+  return Number.isFinite(ts) && Date.now() - ts <= maxAgeMs;
+}
+
 export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const { success, error, info } = useToast();
@@ -404,6 +409,8 @@ export default function SettingsPage() {
           username: serverUsername || "",
         };
 
+        setClientBio(clientData?.bio || "");
+
         if (proData) {
           setProfileVisible(
             Boolean(
@@ -578,9 +585,9 @@ export default function SettingsPage() {
           }
         })();
 
-        // 👇 after loading from server, try to reapply any draft (user was interrupted by liveness)
         const draft = takeSettingsDraft();
-        if (draft && draft.payload) {
+
+        if (draft && draft.payload && isFreshDraft(draft)) {
           if (draft.section === "profile") {
             setDisplayName(draft.payload.displayName || "");
             setPhone(draft.payload.phone || "");
@@ -589,7 +596,6 @@ export default function SettingsPage() {
             setAvatarUrl(draft.payload.avatarUrl || "");
             setClientBio(draft.payload.bio || "");
           } else if (draft.section === "pro") {
-            // only reapply fields we actually control here
             setProBio(draft.payload.proBio || "");
             setProPhotoUrl(draft.payload.proPhotoUrl || "");
             setProfileVisible(
@@ -617,10 +623,8 @@ export default function SettingsPage() {
             }
           } else if (draft.section === "bank") {
             const code = String(draft.payload.bankCode || "").trim();
-
             if (code) {
-              setBankCode(code); // ✅ restore dropdown selection
-              // also restore bank name from banks list if possible
+              setBankCode(code);
               const bn =
                 (banksRef.current || []).find(
                   (b) => String(b.code) === String(code),
@@ -631,12 +635,27 @@ export default function SettingsPage() {
             } else {
               setBankName(draft.payload.bankName || "");
             }
-
             setAccountName(draft.payload.accountName || "");
             setAccountNumber(draft.payload.accountNumber || "");
           }
 
-          // optional: clear it so we don't keep overriding
+          // ✅ after re-applying draft, treat it as the new baseline so Save goes faint
+
+          if (draft.section === "profile") {
+            profileBaselineRef.current = {
+              displayName: draft.payload.displayName || "",
+              phone: draft.payload.phone || "",
+              stateVal: String(draft.payload.state || "").toUpperCase(),
+              lga: String(draft.payload.lga || "").toUpperCase(),
+              avatarUrl: draft.payload.avatarUrl || "",
+              clientBio: draft.payload.bio || "",
+              username: username || "",
+            };
+          }
+
+          localStorage.removeItem("kpocha:settingsDraft");
+        } else if (draft) {
+          // ✅ stale draft — remove it so it doesn't keep dirtying the form forever
           localStorage.removeItem("kpocha:settingsDraft");
         }
       } catch {
