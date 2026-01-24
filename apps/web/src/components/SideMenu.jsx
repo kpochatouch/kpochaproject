@@ -286,7 +286,7 @@ function MenuButton({
         <img
           src={icon}
           alt=""
-          className={`w-5 h-5 object-contain ${collapsed ? "" : "shrink-0"}`}
+          className={`w-6 h-6 object-contain ${collapsed ? "" : "shrink-0"}`}
         />
       ) : (
         <span className="w-5 h-5 rounded bg-zinc-700 inline-block" />

@@ -21,6 +21,7 @@ import { useMe } from "./context/MeContext.jsx";
 import BookingAlert from "./components/BookingAlert.jsx";
 import usePostPaymentRecovery from "./hooks/usePostPaymentRecovery";
 import { ensurePushSubscribed } from "./lib/pushClient";
+import MobileTabBar from "./components/MobileTabBar.jsx";
 
 // ---------- pages (lazy) ----------
 const Home = lazy(() => import("./pages/Home.jsx"));
@@ -273,7 +274,11 @@ export default function App() {
           <BookingAlert pollMs={15000} playSound={true} />
         )}
 
-        <main className={hideChrome ? "flex-1 bg-black" : "flex-1"}>
+        <main
+          className={
+            hideChrome ? "flex-1 bg-black" : "flex-1 pb-[78px] md:pb-0"
+          }
+        >
           <Suspense fallback={<RouteLoader full />}>
             <Routes>
               {/* Public routes */}
@@ -499,7 +504,14 @@ export default function App() {
           </Suspense>
         </main>
 
-        {!hideChrome && <Footer />}
+        {!hideChrome && (
+          <>
+            <div className="hidden md:block">
+              <Footer />
+            </div>
+            <MobileTabBar me={me} />
+          </>
+        )}
         <CallSheet
           role="receiver"
           room={incomingCall?.room || null}
