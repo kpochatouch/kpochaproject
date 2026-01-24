@@ -81,7 +81,7 @@ export default function Navbar() {
     isActive ? "text-gold font-medium" : "hover:text-gold";
 
   const chipClass = (active) =>
-    `px-3 py-2 rounded-full border text-sm whitespace-nowrap ${
+    `px-3 py-2 rounded-full border text-base whitespace-nowrap ${
       active
         ? "border-gold text-gold bg-zinc-900/40"
         : "border-zinc-700 text-zinc-200 hover:border-zinc-500"
@@ -90,8 +90,8 @@ export default function Navbar() {
   return (
     <header className="border-b border-zinc-800 sticky top-0 z-40 bg-black/70 backdrop-blur md:h-[60px]">
       <div className="max-w-6xl mx-auto px-4 h-full flex items-center justify-between gap-3">
-        {/* centered on mobile, left on md+ */}
-        <Link to="/" className="flex items-center gap-2 mx-auto md:mx-0">
+        {/* desktop brand only (mobile uses the custom mobile header below) */}
+        <Link to="/browse" className="hidden md:flex items-center gap-2">
           <img
             src="/logo-kpocha.png"
             alt="Kpocha Touch"
@@ -187,23 +187,44 @@ export default function Navbar() {
         <div className="md:hidden w-full px-2 py-2 flex flex-col gap-2">
           {/* Row 1: fixed (NOT scrollable) */}
           <div className="flex items-center justify-between gap-2">
-            <Link to="/" className="flex items-center gap-2">
-              <img
-                src="/logo-kpocha.png"
-                alt="Kpocha Touch"
-                className="h-10 w-10 object-contain"
-              />
+            <Link to="/browse" className="flex items-center">
               <span className="text-gold font-semibold text-base leading-none">
                 Kpocha Touch
               </span>
             </Link>
 
             <div className="flex items-center gap-2">
+              {/* Install stays visible on mobile */}
               <InstallAppButton />
+
               {token && <NotificationBell />}
+
+              {/* Auth buttons on mobile */}
+              {token ? (
+                <button
+                  onClick={handleSignOut}
+                  className="rounded-lg border border-gold px-3 py-1 text-sm hover:bg-gold hover:text-black"
+                >
+                  Sign Out
+                </button>
+              ) : (
+                <>
+                  <NavLink
+                    to="/login"
+                    className="rounded-lg border border-gold px-3 py-1 text-sm hover:bg-gold hover:text-black"
+                  >
+                    Sign In
+                  </NavLink>
+                  <NavLink
+                    to="/signup"
+                    className="rounded-lg border border-zinc-700 px-3 py-1 text-sm hover:bg-zinc-900"
+                  >
+                    Sign Up
+                  </NavLink>
+                </>
+              )}
             </div>
           </div>
-
           {/* Row 2: scrollable chips (ALL desktop items) */}
           <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <NavLink to="/browse" className={() => chipClass(isDiscover)}>

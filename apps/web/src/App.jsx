@@ -341,9 +341,10 @@ export default function App() {
           <Suspense fallback={<RouteLoader full />}>
             <Routes>
               {/* Public routes */}
-              <Route path="/" element={<Home />} />
+              <Route path="/" element={<Navigate to="/browse" replace />} />
               <Route path="/browse" element={<Browse />} />
               <Route path="/post/:id" element={<PostDetail />} />
+              <Route path="/home" element={<Home />} />
               <Route
                 path="/for-you"
                 element={
@@ -558,7 +559,7 @@ export default function App() {
                 }
               />
               {/* Catch-all */}
-              <Route path="*" element={<Navigate to="/" replace />} />
+              <Route path="*" element={<Navigate to="/browse" replace />} />
             </Routes>
           </Suspense>
         </main>
