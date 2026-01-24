@@ -93,6 +93,40 @@ function useChatbase(enabled) {
   }, [enabled]);
 }
 
+/* ---------- Chatbase: load-on-demand (mobile) ---------- */
+function ensureChatbaseLoaded() {
+  const CHATBOT_ID = import.meta.env.VITE_CHATBASE_ID;
+  if (!CHATBOT_ID) return false;
+
+  // already loaded
+  if (document.getElementById(CHATBOT_ID)) return true;
+
+  // bootstrap chatbase queue (official-ish pattern)
+  if (!window.chatbase || window.chatbase("getState") !== "initialized") {
+    const q = (...args) => {
+      if (!window.chatbase.q) window.chatbase.q = [];
+      window.chatbase.q.push(args);
+    };
+    window.chatbase = new Proxy(q, {
+      get(target, prop) {
+        if (prop === "q") return target.q;
+        return (...args) => target(prop, ...args);
+      },
+    });
+  }
+
+  window.chatbaseConfig = { chatbotId: CHATBOT_ID };
+
+  const s = document.createElement("script");
+  s.src = "https://www.chatbase.co/embed.min.js";
+  s.id = CHATBOT_ID;
+  s.defer = true;
+  s.dataset.domain = "www.chatbase.co";
+  document.body.appendChild(s);
+
+  return true;
+}
+
 /* ---------- role guards ---------- */
 function RequireRole({ role, children }) {
   const { loading, isAdmin, isPro } = useMe();
@@ -168,11 +202,36 @@ export default function App() {
     (location.pathname.includes("/bookings/") &&
       location.pathname.endsWith("/chat"));
 
-  useChatbase(!hideChatbase);
+  const isMobile = window.matchMedia("(max-width: 768px)").matches;
+
+  // Desktop: keep chatbase as before
+  // Mobile: do NOT autoload chatbase
+  useChatbase(!hideChatbase && !isMobile);
 
   const navigate = useNavigate();
 
   const { me } = useMe();
+
+  // MobileTabBar: tap Help -> load Chatbase on demand (mobile only)
+  useEffect(() => {
+    if (!isMobile) return;
+
+    function onOpenChatbase() {
+      const ok = ensureChatbaseLoaded();
+      if (!ok) return;
+
+      // try to open if API exists; otherwise user can tap the bubble
+      setTimeout(() => {
+        try {
+          window.chatbase?.("open");
+        } catch {}
+      }, 250);
+    }
+
+    window.addEventListener("kpocha:open-chatbase", onOpenChatbase);
+    return () =>
+      window.removeEventListener("kpocha:open-chatbase", onOpenChatbase);
+  }, [isMobile]);
 
   // 🔔 Subscribe this device/browser for Web Push (best-effort, no caching)
   useEffect(() => {

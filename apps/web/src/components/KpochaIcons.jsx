@@ -117,3 +117,14 @@ export function IconAdmin(props) {
     </svg>
   );
 }
+
+export function IconHelp(props) {
+  // question mark in a circle
+  return (
+    <svg {...base(props)}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M9.5 9a2.5 2.5 0 0 1 5 0c0 2-2.5 2-2.5 4" />
+      <path d="M12 17h.01" />
+    </svg>
+  );
+}

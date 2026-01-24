@@ -6,6 +6,7 @@ import {
   IconForYou,
   IconInbox,
   IconWallet,
+  IconHelp,
 } from "./KpochaIcons.jsx";
 
 function Tab({ to, label, Icon, isActive }) {
@@ -37,6 +38,9 @@ export default function MobileTabBar({ me }) {
   const isWallet = pathname === "/wallet";
 
   const authed = !!me;
+  function openHelp() {
+    window.dispatchEvent(new Event("kpocha:open-chatbase"));
+  }
 
   return (
     <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 border-t border-zinc-800 bg-black/92 backdrop-blur">
@@ -82,6 +86,16 @@ export default function MobileTabBar({ me }) {
         ) : (
           <Tab to="/login" label="Wallet" Icon={IconWallet} isActive={false} />
         )}
+
+        <button
+          type="button"
+          onClick={openHelp}
+          className="flex flex-col items-center justify-center gap-1 px-2 py-2 min-w-[68px] text-zinc-300"
+          aria-label="Help"
+        >
+          <IconHelp className="w-7 h-7" />
+          <span className="text-[11px] leading-none">Help</span>
+        </button>
       </div>
     </nav>
   );
