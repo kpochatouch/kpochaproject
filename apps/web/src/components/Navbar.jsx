@@ -1,19 +1,31 @@
 // apps/web/src/components/Navbar.jsx
-import { Link, NavLink } from "react-router-dom";
-import { useEffect, useState, useRef } from "react";
+import { Link, NavLink, useLocation } from "react-router-dom";
+import { useEffect, useState } from "react";
 import { getAuth, onIdTokenChanged, signOut } from "firebase/auth";
 import { api } from "../lib/api";
 import NotificationBell from "./NotificationBell.jsx";
 import InstallAppButton from "./InstallAppButton.jsx";
-import { menuIcons } from "../constants/menuIcons";
 
 export default function Navbar() {
   const [me, setMe] = useState(null);
   const [token, setToken] = useState(
     () => localStorage.getItem("token") || null,
   );
-  const [open, setOpen] = useState(false);
-  const headerRef = useRef(null); // 👈 keep this
+
+  const location = useLocation();
+  const pathname = location.pathname;
+  const search = location.search || "";
+
+  const isDiscover = pathname === "/browse" && !search.includes("tab=pros");
+  const isPros = pathname === "/browse" && search.includes("tab=pros");
+  const isForYou = pathname.startsWith("/for-you");
+  const isBookings = pathname === "/my-bookings";
+  const isWallet = pathname === "/wallet";
+  const isProfile = pathname === "/profile";
+  const isSettings = pathname === "/settings";
+  const isInbox = pathname.startsWith("/inbox") || pathname.startsWith("/chat");
+  const isProDash = pathname === "/pro-dashboard";
+  const isAdminPanel = pathname === "/admin";
 
   // watch firebase auth → keep token in localStorage
   useEffect(() => {
@@ -30,22 +42,6 @@ export default function Navbar() {
     });
     return () => unsub();
   }, []);
-
-  useEffect(() => {
-    function onGlobalClick(e) {
-      if (!open) return;
-      if (!headerRef.current) return;
-
-      const target = e?.detail?.target;
-      // If click is inside header (logo, nav, toggle, mobile menu), ignore
-      if (target && headerRef.current.contains(target)) return;
-
-      setOpen(false);
-    }
-
-    window.addEventListener("global-click", onGlobalClick);
-    return () => window.removeEventListener("global-click", onGlobalClick);
-  }, [open]);
 
   // fetch /api/me when we have a token
   useEffect(() => {
@@ -84,15 +80,23 @@ export default function Navbar() {
   const navLinkClass = ({ isActive }) =>
     isActive ? "text-gold font-medium" : "hover:text-gold";
 
+  const chipClass = (active) =>
+    `px-3 py-2 rounded-full border text-sm whitespace-nowrap ${
+      active
+        ? "border-gold text-gold bg-zinc-900/40"
+        : "border-zinc-700 text-zinc-200 hover:border-zinc-500"
+    }`;
+
   return (
-    <header
-      ref={headerRef}
-      className="border-b border-zinc-800 sticky top-0 z-40 bg-black/70 backdrop-blur h-[60px]"
-    >
+    <header className="border-b border-zinc-800 sticky top-0 z-40 bg-black/70 backdrop-blur md:h-[60px]">
       <div className="max-w-6xl mx-auto px-4 h-full flex items-center justify-between gap-3">
         {/* centered on mobile, left on md+ */}
         <Link to="/" className="flex items-center gap-2 mx-auto md:mx-0">
-          <img src="/logo.svg" alt="Kpocha Touch" className="h-6 w-auto" />
+          <img
+            src="/logo-kpocha.png"
+            alt="Kpocha Touch"
+            className="h-8 w-8 object-contain"
+          />
           <span className="text-gold font-semibold text-sm sm:text-base">
             Kpocha Touch
           </span>
@@ -180,187 +184,100 @@ export default function Navbar() {
           )}
         </nav>
 
-        <div className="md:hidden flex items-center gap-2 w-full px-2">
-          {/* Primary mobile actions (ALWAYS visible) */}
+        <div className="md:hidden w-full px-2 py-2 flex flex-col gap-2">
+          {/* Row 1: fixed (NOT scrollable) */}
+          <div className="flex items-center justify-between gap-2">
+            <Link to="/" className="flex items-center gap-2">
+              <img
+                src="/logo-kpocha.png"
+                alt="Kpocha Touch"
+                className="h-10 w-10 object-contain"
+              />
+              <span className="text-gold font-semibold text-base leading-none">
+                Kpocha Touch
+              </span>
+            </Link>
 
-          <NavLink
-            to="/browse"
-            className="p-2 rounded-lg hover:bg-zinc-800"
-            aria-label="Feed"
-          >
-            <img src={menuIcons.feed} className="w-5 h-5" alt="" />
-          </NavLink>
+            <div className="flex items-center gap-2">
+              <InstallAppButton />
+              {token && <NotificationBell />}
+            </div>
+          </div>
 
-          <NavLink
-            to="/for-you"
-            className="p-2 rounded-lg hover:bg-zinc-800"
-            aria-label="For You"
-          >
-            <img src={menuIcons.foryou} className="w-5 h-5" alt="" />
-          </NavLink>
-
-          {token && (
-            <NavLink
-              to="/inbox"
-              className="p-2 rounded-lg hover:bg-zinc-800"
-              aria-label="Chat"
-            >
-              <img src={menuIcons.chat} className="w-5 h-5" alt="" />
+          {/* Row 2: scrollable chips (ALL desktop items) */}
+          <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <NavLink to="/browse" className={() => chipClass(isDiscover)}>
+              Discover
             </NavLink>
-          )}
 
-          {/* Push install + menu to the right */}
-          <div className="flex-1" />
+            <NavLink to="/browse?tab=pros" className={() => chipClass(isPros)}>
+              Browse Pros
+            </NavLink>
 
-          {/* Install App — stays visible */}
-          <InstallAppButton />
-
-          {/* Overflow menu (three dots) */}
-          <button
-            onClick={() => setOpen((o) => !o)}
-            className="inline-flex items-center justify-center rounded-lg border border-zinc-700 p-2 text-zinc-200"
-            aria-label="More"
-          >
-            {open ? (
-              <svg
-                className="h-5 w-5"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                fill="none"
-              >
-                <path d="M6 18L18 6" />
-                <path d="M6 6l12 12" />
-              </svg>
+            {token ? (
+              <NavLink to="/for-you" className={() => chipClass(isForYou)}>
+                For You
+              </NavLink>
             ) : (
-              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
-                <circle cx="12" cy="5" r="1.8" />
-                <circle cx="12" cy="12" r="1.8" />
-                <circle cx="12" cy="19" r="1.8" />
-              </svg>
-            )}
-          </button>
-        </div>
-      </div>
-      {open && (
-        <div className="md:hidden border-t border-zinc-800 bg-black/95 backdrop-blur">
-          <div className="w-full px-4 py-3 flex flex-col gap-2">
-            {token && (
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm text-zinc-400">Notifications</span>
-                <NotificationBell />
-              </div>
+              <NavLink to="/login" className={() => chipClass(false)}>
+                For You
+              </NavLink>
             )}
 
-            <NavLink
-              to="/browse"
-              onClick={() => setOpen(false)}
-              className={navLinkClass}
-            >
-              Browse
-            </NavLink>
-
-            <NavLink
-              to="/for-you"
-              onClick={() => setOpen(false)}
-              className={navLinkClass}
-            >
-              For You
-            </NavLink>
-
-            {token && (
+            {token ? (
               <NavLink
                 to="/my-bookings"
-                onClick={() => setOpen(false)}
-                className={navLinkClass}
+                className={() => chipClass(isBookings)}
               >
                 My Bookings
               </NavLink>
-            )}
+            ) : null}
 
-            {token && (
-              <NavLink
-                to="/wallet"
-                onClick={() => setOpen(false)}
-                className={navLinkClass}
-              >
+            {token ? (
+              <NavLink to="/wallet" className={() => chipClass(isWallet)}>
                 Wallet
               </NavLink>
-            )}
+            ) : null}
 
-            <NavLink
-              to="/profile"
-              onClick={() => setOpen(false)}
-              className={navLinkClass}
-            >
+            <NavLink to="/profile" className={() => chipClass(isProfile)}>
               Profile
             </NavLink>
 
-            {/* Mobile Inbox entry */}
-            {token && (
-              <NavLink
-                to="/inbox"
-                onClick={() => setOpen(false)}
-                className={navLinkClass}
-              >
-                Inbox
-              </NavLink>
-            )}
-
-            {token && (
-              <NavLink
-                to="/settings"
-                onClick={() => setOpen(false)}
-                className={navLinkClass}
-              >
+            {token ? (
+              <NavLink to="/settings" className={() => chipClass(isSettings)}>
                 Settings
               </NavLink>
-            )}
-            {!isPro && token && (
-              <NavLink
-                to="/become"
-                onClick={() => setOpen(false)}
-                className={navLinkClass}
-              >
+            ) : null}
+
+            {token ? (
+              <NavLink to="/inbox" className={() => chipClass(isInbox)}>
+                Inbox
+              </NavLink>
+            ) : null}
+
+            {!isPro && token ? (
+              <NavLink to="/become" className={() => chipClass(false)}>
                 Become a Pro
               </NavLink>
-            )}
-            {isPro && token && (
+            ) : null}
+
+            {isPro && token ? (
               <NavLink
                 to="/pro-dashboard"
-                onClick={() => setOpen(false)}
-                className={navLinkClass}
+                className={() => chipClass(isProDash)}
               >
                 Pro Dashboard
               </NavLink>
-            )}
-            {isAdmin && (
-              <NavLink
-                to="/admin"
-                onClick={() => setOpen(false)}
-                className={navLinkClass}
-              >
+            ) : null}
+
+            {isAdmin ? (
+              <NavLink to="/admin" className={() => chipClass(isAdminPanel)}>
                 Admin
               </NavLink>
-            )}
-            {token ? (
-              <button
-                onClick={handleSignOut}
-                className="mt-2 rounded-lg border border-gold px-3 py-1 hover:bg-gold hover:text-black text-left"
-              >
-                Sign Out
-              </button>
-            ) : (
-              <NavLink
-                to="/login"
-                onClick={() => setOpen(false)}
-                className="mt-2 rounded-lg border border-gold px-3 py-1 hover:bg-gold hover:text-black text-left"
-              >
-                Sign In
-              </NavLink>
-            )}
+            ) : null}
           </div>
         </div>
-      )}
+      </div>
     </header>
   );
 }
