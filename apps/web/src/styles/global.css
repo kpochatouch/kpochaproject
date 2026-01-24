@@ -63,3 +63,11 @@
 .kpo-star-glow {
   animation: kpo-star-glow 2s ease-in-out infinite alternate;
 }
+
+/* Chatbase — lift ABOVE mobile footer */
+#chatbase-bubble,
+iframe[src*="chatbase"],
+div[id*="chatbase"] {
+  bottom: 96px !important; /* sits above sticky footer */
+  right: 16px !important;
+}
