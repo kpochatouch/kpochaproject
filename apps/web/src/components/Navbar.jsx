@@ -89,149 +89,158 @@ export default function Navbar() {
       ref={headerRef}
       className="border-b border-zinc-800 sticky top-0 z-40 bg-black/70 backdrop-blur h-[60px]"
     >
-      {/* desktop */}
-      <nav className="hidden md:flex items-center gap-4">
-        <NavLink to="/browse" className={navLinkClass}>
-          Browse
-        </NavLink>
+      <div className="max-w-6xl mx-auto px-4 h-full flex items-center justify-between gap-3">
+        {/* centered on mobile, left on md+ */}
+        <Link to="/" className="flex items-center gap-2 mx-auto md:mx-0">
+          <img src="/logo.svg" alt="Kpocha Touch" className="h-6 w-auto" />
+          <span className="text-gold font-semibold text-sm sm:text-base">
+            Kpocha Touch
+          </span>
+        </Link>
 
-        <NavLink to="/for-you" className={navLinkClass}>
-          For You
-        </NavLink>
-
-        {token && (
-          <NavLink to="/my-bookings" className={navLinkClass}>
-            My Bookings
+        {/* desktop */}
+        <nav className="hidden md:flex items-center gap-4">
+          <NavLink to="/browse" className={navLinkClass}>
+            Browse
           </NavLink>
-        )}
 
-        {token && (
-          <NavLink to="/wallet" className={navLinkClass}>
-            Wallet
+          <NavLink to="/for-you" className={navLinkClass}>
+            For You
           </NavLink>
-        )}
 
-        <NavLink to="/profile" className={navLinkClass}>
-          Profile
-        </NavLink>
-
-        {token && (
-          <NavLink to="/settings" className={navLinkClass}>
-            Settings
-          </NavLink>
-        )}
-
-        {/* Inbox / Chat link (desktop) */}
-        {token && (
-          <NavLink
-            to="/inbox"
-            className={({ isActive }) =>
-              `relative ${
-                isActive ? "text-gold font-medium" : "hover:text-gold"
-              }`
-            }
-          >
-            Inbox
-          </NavLink>
-        )}
-
-        {!isPro && token && (
-          <NavLink to="/become" className={navLinkClass}>
-            Become a Pro
-          </NavLink>
-        )}
-        {isPro && token && (
-          <NavLink to="/pro-dashboard" className={navLinkClass}>
-            Pro Dashboard
-          </NavLink>
-        )}
-        {isAdmin && (
-          <NavLink to="/admin" className={navLinkClass}>
-            Admin
-          </NavLink>
-        )}
-
-        {/* notification bell + signout */}
-        {token && <NotificationBell />}
-
-        {token ? (
-          <button
-            onClick={handleSignOut}
-            className="rounded-lg border border-gold px-3 py-1 hover:bg-gold hover:text-black"
-          >
-            Sign Out
-          </button>
-        ) : (
-          <NavLink
-            to="/login"
-            className="rounded-lg border border-gold px-3 py-1 hover:bg-gold hover:text-black"
-          >
-            Sign In
-          </NavLink>
-        )}
-      </nav>
-
-      <div className="md:hidden flex items-center gap-2 w-full px-2">
-        {/* Primary mobile actions (ALWAYS visible) */}
-
-        <NavLink
-          to="/browse"
-          className="p-2 rounded-lg hover:bg-zinc-800"
-          aria-label="Feed"
-        >
-          <img src={menuIcons.feed} className="w-5 h-5" alt="" />
-        </NavLink>
-
-        <NavLink
-          to="/for-you"
-          className="p-2 rounded-lg hover:bg-zinc-800"
-          aria-label="For You"
-        >
-          <img src={menuIcons.foryou} className="w-5 h-5" alt="" />
-        </NavLink>
-
-        {token && (
-          <NavLink
-            to="/inbox"
-            className="p-2 rounded-lg hover:bg-zinc-800"
-            aria-label="Chat"
-          >
-            <img src={menuIcons.chat} className="w-5 h-5" alt="" />
-          </NavLink>
-        )}
-
-        {/* Push install + menu to the right */}
-        <div className="flex-1" />
-
-        {/* Install App — stays visible */}
-        <InstallAppButton />
-
-        {/* Overflow menu (three dots) */}
-        <button
-          onClick={() => setOpen((o) => !o)}
-          className="inline-flex items-center justify-center rounded-lg border border-zinc-700 p-2 text-zinc-200"
-          aria-label="More"
-        >
-          {open ? (
-            <svg
-              className="h-5 w-5"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              fill="none"
-            >
-              <path d="M6 18L18 6" />
-              <path d="M6 6l12 12" />
-            </svg>
-          ) : (
-            <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
-              <circle cx="12" cy="5" r="1.8" />
-              <circle cx="12" cy="12" r="1.8" />
-              <circle cx="12" cy="19" r="1.8" />
-            </svg>
+          {token && (
+            <NavLink to="/my-bookings" className={navLinkClass}>
+              My Bookings
+            </NavLink>
           )}
-        </button>
-      </div>
 
+          {token && (
+            <NavLink to="/wallet" className={navLinkClass}>
+              Wallet
+            </NavLink>
+          )}
+
+          <NavLink to="/profile" className={navLinkClass}>
+            Profile
+          </NavLink>
+
+          {token && (
+            <NavLink to="/settings" className={navLinkClass}>
+              Settings
+            </NavLink>
+          )}
+
+          {/* Inbox / Chat link (desktop) */}
+          {token && (
+            <NavLink
+              to="/inbox"
+              className={({ isActive }) =>
+                `relative ${
+                  isActive ? "text-gold font-medium" : "hover:text-gold"
+                }`
+              }
+            >
+              Inbox
+            </NavLink>
+          )}
+
+          {!isPro && token && (
+            <NavLink to="/become" className={navLinkClass}>
+              Become a Pro
+            </NavLink>
+          )}
+          {isPro && token && (
+            <NavLink to="/pro-dashboard" className={navLinkClass}>
+              Pro Dashboard
+            </NavLink>
+          )}
+          {isAdmin && (
+            <NavLink to="/admin" className={navLinkClass}>
+              Admin
+            </NavLink>
+          )}
+
+          {/* notification bell + signout */}
+          {token && <NotificationBell />}
+
+          {token ? (
+            <button
+              onClick={handleSignOut}
+              className="rounded-lg border border-gold px-3 py-1 hover:bg-gold hover:text-black"
+            >
+              Sign Out
+            </button>
+          ) : (
+            <NavLink
+              to="/login"
+              className="rounded-lg border border-gold px-3 py-1 hover:bg-gold hover:text-black"
+            >
+              Sign In
+            </NavLink>
+          )}
+        </nav>
+
+        <div className="md:hidden flex items-center gap-2 w-full px-2">
+          {/* Primary mobile actions (ALWAYS visible) */}
+
+          <NavLink
+            to="/browse"
+            className="p-2 rounded-lg hover:bg-zinc-800"
+            aria-label="Feed"
+          >
+            <img src={menuIcons.feed} className="w-5 h-5" alt="" />
+          </NavLink>
+
+          <NavLink
+            to="/for-you"
+            className="p-2 rounded-lg hover:bg-zinc-800"
+            aria-label="For You"
+          >
+            <img src={menuIcons.foryou} className="w-5 h-5" alt="" />
+          </NavLink>
+
+          {token && (
+            <NavLink
+              to="/inbox"
+              className="p-2 rounded-lg hover:bg-zinc-800"
+              aria-label="Chat"
+            >
+              <img src={menuIcons.chat} className="w-5 h-5" alt="" />
+            </NavLink>
+          )}
+
+          {/* Push install + menu to the right */}
+          <div className="flex-1" />
+
+          {/* Install App — stays visible */}
+          <InstallAppButton />
+
+          {/* Overflow menu (three dots) */}
+          <button
+            onClick={() => setOpen((o) => !o)}
+            className="inline-flex items-center justify-center rounded-lg border border-zinc-700 p-2 text-zinc-200"
+            aria-label="More"
+          >
+            {open ? (
+              <svg
+                className="h-5 w-5"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                fill="none"
+              >
+                <path d="M6 18L18 6" />
+                <path d="M6 6l12 12" />
+              </svg>
+            ) : (
+              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
+                <circle cx="12" cy="5" r="1.8" />
+                <circle cx="12" cy="12" r="1.8" />
+                <circle cx="12" cy="19" r="1.8" />
+              </svg>
+            )}
+          </button>
+        </div>
+      </div>
       {open && (
         <div className="md:hidden border-t border-zinc-800 bg-black/95 backdrop-blur">
           <div className="w-full px-4 py-3 flex flex-col gap-2">
