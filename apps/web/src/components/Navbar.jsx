@@ -183,16 +183,19 @@ export default function Navbar() {
             </NavLink>
           )}
         </nav>
-
         <div className="md:hidden w-full px-2 py-2 flex flex-col gap-2">
           {/* Row 1: fixed (NOT scrollable) */}
           <div className="flex items-center justify-between gap-2">
-            <Link to="/browse" className="flex items-center">
+            <Link to="/browse" className="flex items-center gap-2">
+              <img
+                src="/logo-kpocha.png"
+                alt="Kpocha Touch"
+                className="h-9 w-9 object-contain"
+              />
               <span className="text-gold font-semibold text-base leading-none">
                 Kpocha Touch
               </span>
             </Link>
-
             <div className="flex items-center gap-2">
               {/* Install stays visible on mobile */}
               <InstallAppButton />
@@ -214,12 +217,6 @@ export default function Navbar() {
                     className="rounded-lg border border-gold px-3 py-1 text-sm hover:bg-gold hover:text-black"
                   >
                     Sign In
-                  </NavLink>
-                  <NavLink
-                    to="/signup"
-                    className="rounded-lg border border-zinc-700 px-3 py-1 text-sm hover:bg-zinc-900"
-                  >
-                    Sign Up
                   </NavLink>
                 </>
               )}

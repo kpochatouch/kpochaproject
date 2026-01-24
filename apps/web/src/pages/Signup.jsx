@@ -18,6 +18,7 @@ export default function Signup() {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [err, setErr] = useState("");
+  const [ok, setOk] = useState("");
   const [busy, setBusy] = useState(false);
   const { user } = useAuth();
   const nav = useNavigate();
