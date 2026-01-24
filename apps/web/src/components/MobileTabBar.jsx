@@ -5,7 +5,6 @@ import {
   IconPros,
   IconForYou,
   IconInbox,
-  IconWallet,
   IconHelp,
 } from "./KpochaIcons.jsx";
 
@@ -14,13 +13,13 @@ function Tab({ to, label, Icon, isActive }) {
     <NavLink
       to={to}
       className={() =>
-        `flex flex-col items-center justify-center gap-1 px-2 py-2 min-w-[68px] ${
+        `flex flex-col items-center justify-center gap-1 px-2 py-2 min-w-[60px] ${
           isActive ? "text-gold" : "text-zinc-300"
         }`
       }
       aria-label={label}
     >
-      <Icon className="w-7 h-7" />
+      <Icon className="w-8 h-8" />
       <span className="text-[11px] leading-none">{label}</span>
     </NavLink>
   );
@@ -35,7 +34,6 @@ export default function MobileTabBar({ me }) {
   const isPros = pathname === "/browse" && search.includes("tab=pros");
   const isForYou = pathname.startsWith("/for-you");
   const isInbox = pathname.startsWith("/inbox") || pathname.startsWith("/chat");
-  const isWallet = pathname === "/wallet";
 
   const authed = !!me;
   function openHelp() {
@@ -76,24 +74,13 @@ export default function MobileTabBar({ me }) {
           <Tab to="/login" label="Inbox" Icon={IconInbox} isActive={false} />
         )}
 
-        {authed ? (
-          <Tab
-            to="/wallet"
-            label="Wallet"
-            Icon={IconWallet}
-            isActive={isWallet}
-          />
-        ) : (
-          <Tab to="/login" label="Wallet" Icon={IconWallet} isActive={false} />
-        )}
-
         <button
           type="button"
           onClick={openHelp}
-          className="flex flex-col items-center justify-center gap-1 px-2 py-2 min-w-[68px] text-zinc-300"
+          className="flex flex-col items-center justify-center gap-1 px-2 py-2 min-w-[60px] text-zinc-300"
           aria-label="Help"
         >
-          <IconHelp className="w-7 h-7" />
+          <IconHelp className="w-8 h-8" />
           <span className="text-[11px] leading-none">Help</span>
         </button>
       </div>

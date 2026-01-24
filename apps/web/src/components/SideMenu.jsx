@@ -2,7 +2,19 @@
 import { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import useNotifications from "../hooks/useNotifications"; // <- unread badge
-import { menuIcons as icons } from "../constants/menuIcons";
+import {
+  IconDiscover,
+  IconPros,
+  IconForYou,
+  IconInbox,
+  IconBookings,
+  IconWallet,
+  IconProfile,
+  IconSettings,
+  IconProDashboard,
+  IconAdmin,
+  IconHelp,
+} from "./KpochaIcons.jsx";
 
 export default function SideMenu({ me }) {
   const navigate = useNavigate();
@@ -21,6 +33,21 @@ export default function SideMenu({ me }) {
   const isFeed = pathname === "/browse" && !search.includes("tab=pros");
   const isBrowsePros = pathname === "/browse" && search.includes("tab=pros");
   const isForYou = pathname.startsWith("/for-you");
+
+  const icons = {
+    feed: IconDiscover,
+    browse: IconPros,
+    profile: IconProfile,
+    bookings: IconBookings,
+    wallet: IconWallet,
+    settings: IconSettings,
+    chat: IconInbox,
+    foryou: IconForYou,
+    pro: IconProDashboard,
+    admin: IconAdmin,
+    risk: IconAdmin, // no IconRisk yet — using Admin shield for now
+    help: IconHelp,
+  };
 
   const baseNav = [
     {
@@ -283,14 +310,14 @@ function MenuButton({
         ${collapsed ? "justify-center" : ""}`}
     >
       {icon ? (
-        <img
-          src={icon}
-          alt=""
-          className={`w-6 h-6 object-contain ${collapsed ? "" : "shrink-0"}`}
-        />
+        (() => {
+          const Icon = icon;
+          return <Icon className={`w-6 h-6 ${collapsed ? "" : "shrink-0"}`} />;
+        })()
       ) : (
         <span className="w-5 h-5 rounded bg-zinc-700 inline-block" />
       )}
+
       {!collapsed && <span className="flex-1 text-left">{label}</span>}
 
       {/* small active dot */}
