@@ -187,26 +187,40 @@ async function sendWebPushToUser(uid, payload) {
     const ok = ensureVapidConfigured();
     if (!ok) return { ok: false, reason: "vapid_missing" };
 
-    const subDoc = await PushSubscription.findOne({
+    const subs = await PushSubscription.find({
       ownerUid: uid,
       disabled: { $ne: true },
     }).lean();
 
-    if (!subDoc?.subscription) return { ok: false, reason: "no_subscription" };
+    if (!subs.length) return { ok: false, reason: "no_subscription" };
 
-    await webpush.sendNotification(
-      subDoc.subscription,
-      JSON.stringify(payload),
-    );
-    return { ok: true };
+    let sent = 0;
+    for (const subDoc of subs) {
+      try {
+        if (!subDoc?.subscription) continue;
+        await webpush.sendNotification(
+          subDoc.subscription,
+          JSON.stringify(payload),
+        );
+        sent += 1;
+      } catch (e) {
+        // disable only the failing endpoint, not the whole user
+        try {
+          await PushSubscription.findOneAndUpdate(
+            { ownerUid: uid, endpoint: subDoc.endpoint },
+            { $set: { disabled: true } },
+          );
+        } catch {}
+        // continue loop to try other devices
+      }
+    }
+
+    if (sent === 0) {
+      return { ok: false, reason: "no_successful_push" };
+    }
+
+    return { ok: true, sent };
   } catch (e) {
-    // common case: subscription expired -> disable it
-    try {
-      await PushSubscription.findOneAndUpdate(
-        { ownerUid: uid },
-        { $set: { disabled: true } },
-      );
-    } catch {}
     return { ok: false, reason: e?.message || "push_failed" };
   }
 }

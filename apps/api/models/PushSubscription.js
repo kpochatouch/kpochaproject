@@ -12,6 +12,9 @@ const PushSubscriptionSchema = new Schema(
     userAgent: { type: String, default: "" },
     // Soft disable instead of deleting (helps debugging)
     disabled: { type: Boolean, default: false, index: true },
+    endpoint: { type: String, required: true },
+    p256dh: { type: String, default: "" },
+    auth: { type: String, default: "" },
   },
   { timestamps: true },
 );
@@ -19,6 +22,11 @@ const PushSubscriptionSchema = new Schema(
 PushSubscriptionSchema.index(
   { ownerUid: 1, updatedAt: -1 },
   { name: "owner_updatedAt_idx" },
+);
+
+PushSubscriptionSchema.index(
+  { ownerUid: 1, endpoint: 1 },
+  { unique: true, name: "owner_endpoint_unique" },
 );
 
 const PushSubscription =

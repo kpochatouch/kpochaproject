@@ -28,11 +28,21 @@ router.post("/push/subscribe", requireAuth, async (req, res) => {
     if (!subscription)
       return res.status(400).json({ error: "subscription_required" });
 
+    const endpoint = subscription?.endpoint || "";
+    const p256dh = subscription?.keys?.p256dh || "";
+    const auth = subscription?.keys?.auth || "";
+
+    if (!endpoint)
+      return res.status(400).json({ error: "subscription_endpoint_required" });
+
     await PushSubscription.findOneAndUpdate(
-      { ownerUid: req.user.uid },
+      { ownerUid: req.user.uid, endpoint },
       {
         $set: {
           ownerUid: req.user.uid,
+          endpoint,
+          p256dh,
+          auth,
           subscription,
           userAgent: req.headers["user-agent"] || "",
           disabled: false,
@@ -53,10 +63,9 @@ router.post("/push/subscribe", requireAuth, async (req, res) => {
  */
 router.post("/push/unsubscribe", requireAuth, async (req, res) => {
   try {
-    await PushSubscription.findOneAndUpdate(
+    await PushSubscription.updateMany(
       { ownerUid: req.user.uid },
       { $set: { disabled: true } },
-      { new: true },
     );
     return res.json({ ok: true });
   } catch (e) {
