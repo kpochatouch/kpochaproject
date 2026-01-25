@@ -1,5 +1,5 @@
 // apps/web/src/App.jsx
-import React, { Suspense, lazy, useEffect, useState } from "react";
+import React, { Suspense, lazy, useEffect, useRef, useState } from "react";
 import {
   Routes,
   Route,
@@ -211,6 +211,46 @@ export default function App() {
   const navigate = useNavigate();
 
   const { me } = useMe();
+  useEffect(() => {
+  const qs = new URLSearchParams(location.search || "");
+  const isCall = qs.get("call") === "1";
+
+  // reset when not on a call link
+  if (!isCall) {
+    handledCallParamRef.current = false;
+    return;
+  }
+
+  if (handledCallParamRef.current) return;
+  handledCallParamRef.current = true;
+
+  const callId = qs.get("callId") || null;
+  const room = qs.get("room") || null;
+  const callType = qs.get("callType") || "audio";
+
+  if (room) {
+    setIncomingCall({
+      open: true,
+      callId,
+      room,
+      callType,
+      fromUid: null,
+      meta: {},
+    });
+  }
+
+  // clean URL so refresh won't re-trigger forever
+  qs.delete("call");
+  qs.delete("callId");
+  qs.delete("room");
+  qs.delete("callType");
+
+  const nextSearch = qs.toString();
+  navigate(
+    { pathname: location.pathname, search: nextSearch ? `?${nextSearch}` : "" },
+    { replace: true },
+  );
+}, [location.pathname, location.search, navigate]);
 
   // MobileTabBar: tap Help -> load Chatbase on demand (mobile only)
   useEffect(() => {
@@ -241,6 +281,7 @@ export default function App() {
 
   usePostPaymentRecovery(me);
   const [incomingCall, setIncomingCall] = useState(null);
+  const handledCallParamRef = useRef(false);
 
   const myLabel =
     me?.displayName ||

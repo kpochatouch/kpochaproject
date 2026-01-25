@@ -53,7 +53,25 @@ self.addEventListener("notificationclick", (event) => {
 
   let url = "/";
 
-  if (type === "chat_message" && data.room) {
+  // ✅ calls must win even if "room" exists
+  if (
+    type === "call_incoming" ||
+    type === "call_missed" ||
+    data.callId ||
+    data.call_id ||
+    data.callRoom ||
+    data.call_room
+  ) {
+    const callId = data.callId || data.call_id || "";
+    const room = data.room || data.callRoom || data.call_room || "";
+    const callType = data.callType || data.call_type || "audio";
+
+    url =
+      `/inbox?call=1` +
+      `&callId=${encodeURIComponent(callId)}` +
+      `&room=${encodeURIComponent(room)}` +
+      `&callType=${encodeURIComponent(callType)}`;
+  } else if (type === "chat_message" && data.room) {
     url = `/chat?room=${encodeURIComponent(data.room)}`;
   } else if (type === "post_like" && data.postId) {
     url = `/post/${encodeURIComponent(data.postId)}`;
@@ -69,22 +87,18 @@ self.addEventListener("notificationclick", (event) => {
     ].includes(type)
   ) {
     url = "/wallet";
-  } else if (type === "call_incoming" || type === "call_missed") {
-    url = "/inbox";
   }
 
   event.waitUntil(
     self.clients
       .matchAll({ type: "window", includeUncontrolled: true })
       .then((clientsArr) => {
-        // Focus existing window if possible
         for (const client of clientsArr) {
           try {
             if ("navigate" in client) client.navigate(url);
             if ("focus" in client) return client.focus();
           } catch {}
         }
-        // Otherwise open a new window
         if (self.clients.openWindow) return self.clients.openWindow(url);
         return null;
       }),
