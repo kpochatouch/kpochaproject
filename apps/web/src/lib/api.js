@@ -4,6 +4,7 @@
 
 import axios from "axios";
 import { getAuth, onAuthStateChanged } from "firebase/auth";
+import { Capacitor } from "@capacitor/core";
 import { io as ioClient } from "socket.io-client";
 import { v4 as uuidv4 } from "uuid";
 
@@ -127,6 +128,9 @@ export function getInstantCashoutEligibility({
 /* =========================================
    BASE URL (normalize, no trailing slash, no /api suffix)
    ========================================= */
+
+// ✅ SET THIS to your real backend domain (the one your web app uses in production)
+const PROD_ROOT = "https://kpochaproject.onrender.com";
 let ROOT = (
   import.meta.env.VITE_API_BASE_URL ||
   import.meta.env.VITE_API_BASE ||
@@ -135,11 +139,26 @@ let ROOT = (
   .toString()
   .trim();
 
+// ✅ Defaults:
+// - Native (Capacitor) MUST use production backend
+// - Web dev can use localhost
 if (!ROOT) {
-  ROOT = "http://localhost:8080";
+  ROOT = Capacitor.isNativePlatform()
+    ? PROD_ROOT
+    : import.meta.env.DEV
+      ? "http://localhost:8080"
+      : PROD_ROOT;
 }
+
 ROOT = ROOT.replace(/\/+$/, "");
 if (/\/api$/i.test(ROOT)) ROOT = ROOT.replace(/\/api$/i, "");
+
+// ✅ HARD SAFETY: Capacitor should never talk to localhost
+if (Capacitor.isNativePlatform() && /localhost|127\.0\.0\.1/i.test(ROOT)) {
+  ROOT = PROD_ROOT;
+}
+
+console.log("[API ROOT]", ROOT, "native?", Capacitor.isNativePlatform());
 
 /* =========================
    AXIOS client
@@ -154,6 +173,27 @@ export const api = axios.create({
   },
   withCredentials: true,
 });
+
+// ✅ DEBUG: log API failures so we can see the real cause on native
+api.interceptors.response.use(
+  (res) => res,
+  (err) => {
+    try {
+      const url = err?.config?.baseURL
+        ? `${err.config.baseURL}${err.config.url || ""}`
+        : err?.config?.url;
+
+      console.log("[API ERROR]", {
+        url,
+        method: err?.config?.method,
+        status: err?.response?.status,
+        data: err?.response?.data,
+        message: err?.message,
+      });
+    } catch {}
+    return Promise.reject(err);
+  },
+);
 
 /* =========================================
    AUTH HANDLING (Firebase)
@@ -382,10 +422,18 @@ export function connectSocket({
     socketListeners.get("call:status").add(onCallEvent);
   }
 
+  console.log(
+    `[SOCKET] connectSocket() called bootstrapped=${socketBootstrapStarted} ROOT=${ROOT} native=${Capacitor.isNativePlatform()}`,
+  );
+
   // 🔐 HARD GUARD: socket bootstrap must run once per tab lifetime
   if (socketBootstrapStarted) {
+    console.log(
+      "[SOCKET] bootstrap already started, returning existing socket",
+    );
     return socket;
   }
+
   socketBootstrapStarted = true;
 
   try {
@@ -431,9 +479,22 @@ export function connectSocket({
       },
     };
 
+    console.log(
+      "[SOCKET ROOT]",
+      ROOT,
+      "path",
+      opts.path,
+      "transports",
+      opts.transports,
+    );
+
     socket = ioClient(ROOT, opts);
 
     socket.on("connect", () => {
+      console.log(
+        `[SOCKET] connected id=${socket.id} transport=${socket.io?.engine?.transport?.name}`,
+      );
+
       socketConnected = true;
       reconnectAttempts = 0;
 
@@ -478,6 +539,12 @@ export function connectSocket({
     });
 
     socket.on("connect_error", (err) => {
+      console.log("[SOCKET] connect_error", {
+        message: err?.message,
+        name: err?.name,
+        desc: err?.description,
+      });
+
       socketConnected = false;
       console.warn("[socket] connect_error:", err?.message || err);
       _reconnectWithBackoff();
