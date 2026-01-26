@@ -1,4 +1,6 @@
 // apps/api/services/notificationService.js
+import admin from "firebase-admin";
+import DevicePushToken from "../models/DevicePushToken.js";
 import webpush from "web-push";
 import redisClient from "../redis.js";
 import { getIO } from "../sockets/index.js";
@@ -225,6 +227,81 @@ async function sendWebPushToUser(uid, payload) {
   }
 }
 
+async function sendFcmToUser(uid, payload) {
+  try {
+    const tokensDocs = await DevicePushToken.find({
+      ownerUid: uid,
+      disabled: { $ne: true },
+    })
+      .select("token platform")
+      .lean();
+
+    const tokens = tokensDocs
+      .filter((d) => d.platform === "android" || d.platform === "ios")
+      .map((d) => d.token)
+      .filter(Boolean);
+    console.log("[push:fcm] uid=", uid, "tokens=", tokens.length);
+
+    if (!tokens.length) return { ok: false, reason: "no_device_tokens" };
+
+    // FCM "data" values MUST be strings
+    const data = {};
+    const rawData = payload?.data || {};
+    for (const [k, v] of Object.entries(rawData)) {
+      if (v === undefined || v === null) continue;
+      data[k] = typeof v === "string" ? v : JSON.stringify(v);
+    }
+
+    const message = {
+      tokens,
+      notification: {
+        title: payload?.title || "Kpocha Touch",
+        body: payload?.body || "",
+      },
+      data,
+      android: { priority: "high" },
+      apns: {
+        headers: {
+          "apns-priority": "10",
+        },
+        payload: {
+          aps: {
+            sound: "default",
+          },
+        },
+      },
+    };
+
+    const resp = await admin.messaging().sendEachForMulticast(message);
+
+    // Disable bad tokens (best effort)
+    const badTokens = [];
+    resp.responses.forEach((r, idx) => {
+      if (r.success) return;
+      const code = r.error?.code || "";
+      if (
+        code.includes("registration-token-not-registered") ||
+        code.includes("invalid-argument")
+      ) {
+        badTokens.push(tokens[idx]);
+      }
+    });
+
+    if (badTokens.length) {
+      try {
+        await DevicePushToken.updateMany(
+          { ownerUid: uid, token: { $in: badTokens } },
+          { $set: { disabled: true } },
+        );
+      } catch {}
+    }
+
+    return { ok: true, success: resp.successCount, failed: resp.failureCount };
+  } catch (e) {
+    return { ok: false, reason: e?.message || "fcm_failed" };
+  }
+}
+
 /**
  * Create & persist a notification, increment unread counter, and emit socket.
  * Returns the Notification document (lean object if requested).
@@ -272,11 +349,12 @@ export async function createNotification(rawArgs = {}, { lean = false } = {}) {
     priority: doc.priority || "default",
   });
 
-  // Best-effort Web Push (background notifications)
+  // Best-effort Push (WebPush + FCM)
   try {
     const title = doc?.data?.title || "Kpocha Touch";
     const body = doc?.data?.body || "";
-    await sendWebPushToUser(ownerUid, {
+
+    const pushPayload = {
       title,
       body,
       data: {
@@ -284,10 +362,13 @@ export async function createNotification(rawArgs = {}, { lean = false } = {}) {
         type: doc.type,
         ...doc.data,
       },
-    });
+    };
 
-    // (optional) mark deliveredPush on success in DB
-    // You can skip this if you don’t care yet.
+    // 1) Browser / PWA push (VAPID webpush)
+    await sendWebPushToUser(ownerUid, pushPayload);
+
+    // 2) Native push (Android/iOS via FCM tokens saved in DevicePushToken)
+    await sendFcmToUser(ownerUid, pushPayload);
   } catch {}
 
   return lean ? doc.toObject() : doc;

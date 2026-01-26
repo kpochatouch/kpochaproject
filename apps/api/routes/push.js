@@ -2,6 +2,7 @@
 import express from "express";
 import admin from "firebase-admin";
 import PushSubscription from "../models/PushSubscription.js";
+import DevicePushToken from "../models/DevicePushToken.js";
 
 async function requireAuth(req, res, next) {
   try {
@@ -71,6 +72,38 @@ router.post("/push/unsubscribe", requireAuth, async (req, res) => {
   } catch (e) {
     console.error("[push/unsubscribe] error:", e?.message || e);
     return res.status(500).json({ error: "unsubscribe_failed" });
+  }
+});
+
+/**
+ * POST /api/push/device-token
+ * body: { token, platform }
+ */
+router.post("/push/device-token", requireAuth, async (req, res) => {
+  try {
+    const { token, platform } = req.body || {};
+    if (!token) return res.status(400).json({ error: "token_required" });
+    if (!["android", "ios"].includes(platform))
+      return res.status(400).json({ error: "platform_required" });
+
+    await DevicePushToken.findOneAndUpdate(
+      { ownerUid: req.user.uid, platform, token },
+      {
+        $set: {
+          ownerUid: req.user.uid,
+          platform,
+          token,
+          userAgent: req.headers["user-agent"] || "",
+          disabled: false,
+        },
+      },
+      { upsert: true, new: true },
+    );
+
+    return res.json({ ok: true });
+  } catch (e) {
+    console.error("[push/device-token] error:", e?.message || e);
+    return res.status(500).json({ error: "device_token_save_failed" });
   }
 });
 
