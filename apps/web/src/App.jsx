@@ -7,6 +7,8 @@ import {
   useLocation,
   useNavigate,
 } from "react-router-dom";
+import { Capacitor } from "@capacitor/core";
+import { PushNotifications } from "@capacitor/push-notifications";
 import { api, registerSocketHandler } from "./lib/api";
 import CallSheet from "./components/CallSheet.jsx";
 import InstallPWAButton from "./components/InstallPWAButton.jsx";
@@ -22,6 +24,7 @@ import BookingAlert from "./components/BookingAlert.jsx";
 import usePostPaymentRecovery from "./hooks/usePostPaymentRecovery";
 import { ensurePushSubscribed } from "./lib/pushClient";
 import MobileTabBar from "./components/MobileTabBar.jsx";
+console.log("[push] App.jsx loaded");
 
 // ---------- pages (lazy) ----------
 const Home = lazy(() => import("./pages/Home.jsx"));
@@ -150,6 +153,50 @@ function SettingsSmart() {
   return isPro ? <Settings /> : <ClientSettings />;
 }
 
+async function initNativePush(apiClient) {
+  console.log(
+    "[push] initNativePush reached. isNative=",
+    Capacitor.isNativePlatform(),
+  );
+  if (!Capacitor.isNativePlatform()) return;
+
+  // Android 13+ needs runtime permission
+  const perm = await PushNotifications.requestPermissions();
+  if (perm.receive !== "granted") {
+    console.log("[push] permission not granted:", perm);
+    return;
+  }
+
+  await PushNotifications.register();
+
+  PushNotifications.addListener("registration", async (t) => {
+    console.log("[push] FCM token:", t?.value);
+
+    try {
+      await apiClient.post("/api/push/device-token", {
+        token: t?.value,
+        platform: "android",
+      });
+
+      console.log("[push] token saved to backend");
+    } catch (e) {
+      console.log("[push] failed to save token:", e?.message || e);
+    }
+  });
+
+  PushNotifications.addListener("registrationError", (err) => {
+    console.log("[push] registration error:", JSON.stringify(err));
+  });
+
+  PushNotifications.addListener("pushNotificationReceived", (notif) => {
+    console.log("[push] received:", JSON.stringify(notif));
+  });
+
+  PushNotifications.addListener("pushNotificationActionPerformed", (action) => {
+    console.log("[push] action:", JSON.stringify(action));
+  });
+}
+
 /**
  * FindProSmart: used when user taps "Find a Pro"
  * - If not logged in → send to /login
@@ -211,46 +258,64 @@ export default function App() {
   const navigate = useNavigate();
 
   const { me } = useMe();
+
+  // ✅ Native FCM registration (Android APK)
+  const didInitNativePushRef = useRef(false);
+
   useEffect(() => {
-  const qs = new URLSearchParams(location.search || "");
-  const isCall = qs.get("call") === "1";
+    if (didInitNativePushRef.current) return;
+    if (!me?.uid) return;
 
-  // reset when not on a call link
-  if (!isCall) {
-    handledCallParamRef.current = false;
-    return;
-  }
+    didInitNativePushRef.current = true;
 
-  if (handledCallParamRef.current) return;
-  handledCallParamRef.current = true;
-
-  const callId = qs.get("callId") || null;
-  const room = qs.get("room") || null;
-  const callType = qs.get("callType") || "audio";
-
-  if (room) {
-    setIncomingCall({
-      open: true,
-      callId,
-      room,
-      callType,
-      fromUid: null,
-      meta: {},
+    initNativePush(api).catch((e) => {
+      console.log("[push] init failed:", e?.message || e);
     });
-  }
+  }, [me?.uid]);
 
-  // clean URL so refresh won't re-trigger forever
-  qs.delete("call");
-  qs.delete("callId");
-  qs.delete("room");
-  qs.delete("callType");
+  useEffect(() => {
+    const qs = new URLSearchParams(location.search || "");
+    const isCall = qs.get("call") === "1";
 
-  const nextSearch = qs.toString();
-  navigate(
-    { pathname: location.pathname, search: nextSearch ? `?${nextSearch}` : "" },
-    { replace: true },
-  );
-}, [location.pathname, location.search, navigate]);
+    // reset when not on a call link
+    if (!isCall) {
+      handledCallParamRef.current = false;
+      return;
+    }
+
+    if (handledCallParamRef.current) return;
+    handledCallParamRef.current = true;
+
+    const callId = qs.get("callId") || null;
+    const room = qs.get("room") || null;
+    const callType = qs.get("callType") || "audio";
+
+    if (room) {
+      setIncomingCall({
+        open: true,
+        callId,
+        room,
+        callType,
+        fromUid: null,
+        meta: {},
+      });
+    }
+
+    // clean URL so refresh won't re-trigger forever
+    qs.delete("call");
+    qs.delete("callId");
+    qs.delete("room");
+    qs.delete("callType");
+
+    const nextSearch = qs.toString();
+    navigate(
+      {
+        pathname: location.pathname,
+        search: nextSearch ? `?${nextSearch}` : "",
+      },
+      { replace: true },
+    );
+  }, [location.pathname, location.search, navigate]);
 
   // MobileTabBar: tap Help -> load Chatbase on demand (mobile only)
   useEffect(() => {

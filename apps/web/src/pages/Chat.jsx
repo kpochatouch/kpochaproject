@@ -83,6 +83,21 @@ export default function Chat() {
   async function handleStartCall(callType = "audio") {
     if (!peerUid) return;
 
+    // ✅ STEP 1: request mic/cam FIRST (so we don't create a call record if blocked)
+    try {
+      const constraints =
+        callType === "video" ? { audio: true, video: true } : { audio: true };
+
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      stream.getTracks().forEach((t) => t.stop());
+    } catch (e) {
+      console.error("[Chat] getUserMedia failed:", e);
+      alert(
+        "Could not start call.\n\nPlease allow Microphone (and Camera for video).\nSettings → Apps → Kpocha Touch → Permissions.",
+      );
+      return; // ✅ IMPORTANT: do NOT call initiateCall()
+    }
+
     // build meta so receiver sees real caller info
     const fromAvatar =
       currentUser?.avatarUrl ||
@@ -95,14 +110,14 @@ export default function Chat() {
       fromName: myLabel,
       fromAvatar,
       peerUid,
-      chatRoom: room || null, // DM chat room id (if already known)
+      chatRoom: room || null,
       source: "dm_chat",
     };
 
     try {
       const ack = await initiateCall({
         receiverUid: peerUid,
-        callType, // "audio" or "video"
+        callType,
         meta,
       });
 
@@ -115,7 +130,6 @@ export default function Chat() {
         return;
       }
 
-      // Outgoing call → we are the caller
       setCallState({
         open: true,
         room: callRoom,
@@ -124,8 +138,7 @@ export default function Chat() {
         role: "caller",
       });
 
-      // 🔔 AFTER we successfully start the call, write a call bubble into this DM
-      // so Chat + Inbox have a record of "Voice call (you called)" etc.
+      // only write call bubble if call actually started
       if (room) {
         try {
           await sendChatMessage({

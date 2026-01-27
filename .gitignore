@@ -20,3 +20,6 @@ apps/api/dist/
 # 🌐 Hosting caches
 .vercel/
 .render/
+
+# Firebase Android
+apps/web/android/app/google-services.json

@@ -48,20 +48,20 @@ function sanitizePostForClient(p) {
   const mediaNorm = Array.isArray(obj.media)
     ? obj.media
         .map((m) => {
-          const url = m?.url || m?.secure_url || m?.path || "";
+          const url = String(m?.url || m?.secure_url || m?.path || "").trim();
           if (!url) return null;
 
-          const lowerUrl = String(url).toLowerCase();
+          const u = url.toLowerCase();
+
           const isVideo =
             m?.type === "video" ||
-            lowerUrl.endsWith(".mp4") ||
-            lowerUrl.endsWith(".mov") ||
-            lowerUrl.endsWith(".webm");
+            u.endsWith(".mp4") ||
+            u.endsWith(".mov") ||
+            u.endsWith(".webm") ||
+            u.includes("/video/upload/") || // ✅ Cloudinary typical
+            u.includes("/video/"); // ✅ generic fallback
 
-          return {
-            url,
-            type: isVideo ? "video" : "image",
-          };
+          return { url, type: isVideo ? "video" : "image" };
         })
         .filter(Boolean)
     : [];
@@ -76,8 +76,9 @@ function sanitizePostForClient(p) {
       obj.ownerUid ||
       obj.proOwnerUid ||
       obj.createdBy ||
-      (obj.pro && (obj.pro.ownerUid || obj.pro._id)) ||
+      (obj.pro && obj.pro.ownerUid) ||
       null,
+
     text: obj.text,
     media: mediaNorm,
     tags: obj.tags || [],

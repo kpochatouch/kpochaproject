@@ -314,6 +314,7 @@ router.post("/bookings", requireAuth, async (req, res) => {
           body:
             (clientName || "A client") +
             ` requested ${svcSnap.serviceName} in ${toUpper(lga || "")}.`,
+          priority: "high",
           data: {
             bookingId: b._id.toString(),
             status: b.status,
@@ -498,8 +499,8 @@ router.post("/bookings/instant", requireAuth, async (req, res) => {
             typeof coords.lng !== "undefined"
               ? Number(coords.lng)
               : typeof coords.lon !== "undefined"
-                ? Number(coords.lon)
-                : NaN;
+              ? Number(coords.lon)
+              : NaN;
           if (!Number.isFinite(latNum) || !Number.isFinite(lngNum))
             return undefined;
           return { lat: latNum, lng: lngNum };

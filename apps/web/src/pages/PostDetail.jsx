@@ -65,7 +65,25 @@ export default function PostDetail() {
   // media bits
   const videoRef = useRef(null);
   const menuRef = useRef(null);
-  const [muted, setMuted] = useState(true);
+
+  // ----- Global sound preference (shared with FeedCard/ForYou) -----
+  const SOUND_KEY = "kpocha_sound_enabled";
+
+  function getSoundEnabled() {
+    try {
+      return localStorage.getItem(SOUND_KEY) === "1";
+    } catch {
+      return false;
+    }
+  }
+
+  function setSoundEnabled(on) {
+    try {
+      localStorage.setItem(SOUND_KEY, on ? "1" : "0");
+    } catch {}
+  }
+
+  const [muted, setMuted] = useState(() => !getSoundEnabled());
   const [userHasInteracted, setUserHasInteracted] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -465,6 +483,7 @@ export default function PostDetail() {
     if (muted) {
       setMuted(false);
       vid.muted = false;
+      setSoundEnabled(true);
     }
 
     if (vid.paused) {
@@ -495,10 +514,16 @@ export default function PostDetail() {
 
   function onToggleMute(e) {
     e.stopPropagation();
+
+    // ✅ mute/unmute counts as user interaction (same as FeedCard)
+    if (!userHasInteracted) setUserHasInteracted(true);
+
     const vid = videoRef.current;
-    const next = !muted;
+    const next = !muted; // next === true means muted
     setMuted(next);
     if (vid) vid.muted = next;
+
+    setSoundEnabled(!next);
     if (!next && vid?.paused) {
       playTriggeredByObserverRef.current = false;
       vid.play().catch(() => {});
@@ -508,7 +533,19 @@ export default function PostDetail() {
   function onLoadedMetadata() {
     const vid = videoRef.current;
     if (!vid) return;
+
     setDuration(vid.duration || 0);
+
+    // Apply global preference before attempting autoplay
+    const wantSound = getSoundEnabled();
+    vid.muted = !wantSound;
+    setMuted(!wantSound);
+
+    // Treat this as autoplay-like until user interacts
+    playTriggeredByObserverRef.current = true;
+
+    // Try autoplay (will be blocked on some browsers — that's expected)
+    vid.play().catch(() => {});
   }
 
   function onTimeUpdate() {

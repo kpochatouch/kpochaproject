@@ -71,9 +71,41 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
     typeof navigator !== "undefined" &&
     /iPhone|iPad|iPod|Android|Mobi/i.test(navigator.userAgent);
 
+  // ----- Global sound preference (persists across videos + sessions) -----
+  const SOUND_KEY = "kpocha_sound_enabled";
+
+  function getSoundEnabled() {
+    try {
+      return localStorage.getItem(SOUND_KEY) === "1";
+    } catch {
+      return false;
+    }
+  }
+
+  function setSoundEnabled(on) {
+    try {
+      localStorage.setItem(SOUND_KEY, on ? "1" : "0");
+    } catch {}
+  }
+
   // video UI
-  const [muted, setMuted] = useState(true);
+  const [muted, setMuted] = useState(() => !getSoundEnabled());
   const [userHasInteracted, setUserHasInteracted] = useState(false);
+
+  // ----- Lazy video src loader (data-src -> src) -----
+  function ensureVideoSrcLoaded() {
+    const el = videoRef.current;
+    if (!el) return;
+
+    // already set
+    if (el.getAttribute("src")) return;
+
+    const ds = el.getAttribute("data-src");
+    if (ds) {
+      el.setAttribute("src", ds);
+      el.load?.();
+    }
+  }
 
   // time display + scrubbing
   const [currentTime, setCurrentTime] = useState(0);
@@ -246,6 +278,12 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
 
         if (nowInView) {
           try {
+            ensureVideoSrcLoaded();
+
+            const wantSound = getSoundEnabled();
+            el.muted = !wantSound;
+            setMuted(!wantSound);
+
             playTriggeredByObserverRef.current = true;
             await el.play().catch(() => {});
           } catch {
@@ -303,6 +341,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
     if (muted) {
       setMuted(false);
       vid.muted = false;
+      setSoundEnabled(true);
     }
 
     if (vid.paused) {
@@ -339,10 +378,18 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
 
   function onToggleMute(e) {
     e.stopPropagation();
+
+    // This click is a real user interaction → unlock watch-time behavior
+    if (!userHasInteracted) setUserHasInteracted(true);
+
     const vid = videoRef.current;
-    const next = !muted;
+    const next = !muted; // next === true means muted
     setMuted(next);
     if (vid) vid.muted = next;
+
+    // persist global preference (soundEnabled = !muted)
+    setSoundEnabled(!next);
+
     if (!next && vid?.paused) {
       // user asked to unmute → also play
       playTriggeredByObserverRef.current = false;
@@ -361,6 +408,12 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
   function onTimeUpdate() {
     const vid = videoRef.current;
     if (!vid) return;
+
+    // If paused, reset watch clock so resume doesn't create a giant delta
+    if (vid.paused) {
+      lastWatchTsRef.current = 0;
+      return;
+    }
 
     // Update UI (throttled)
     if (!seeking) {
@@ -456,6 +509,13 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
     vid.currentTime = safe;
     setCurrentTime(safe);
     setSeeking(false);
+
+    // reset watch-time clock after seek (match ForYou/PostDetail)
+    const now =
+      typeof performance !== "undefined" && performance.now
+        ? performance.now()
+        : Date.now();
+    lastWatchTsRef.current = now;
   }
 
   // likes
@@ -914,13 +974,13 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
             <>
               <video
                 ref={videoRef}
-                src={media.url}
+                data-src={media.url}
                 className="absolute inset-0 w-full h-full object-cover"
                 muted={muted}
                 loop
                 playsInline
-                preload="metadata"
-                controls={false} // custom controls only
+                preload="none"
+                controls={false}
                 onClick={onClickVideo}
                 onPlay={onVideoPlay}
                 onLoadedMetadata={onLoadedMetadata}

@@ -239,7 +239,24 @@ function ForYouPost({ post, me, navigate }) {
   // media bits (video)
   const videoRef = useRef(null);
   const menuRef = useRef(null);
-  const [muted, setMuted] = useState(true);
+  // ----- Global sound preference (shared with FeedCard/PostDetail) -----
+  const SOUND_KEY = "kpocha_sound_enabled";
+
+  function getSoundEnabled() {
+    try {
+      return localStorage.getItem(SOUND_KEY) === "1";
+    } catch {
+      return false;
+    }
+  }
+
+  function setSoundEnabled(on) {
+    try {
+      localStorage.setItem(SOUND_KEY, on ? "1" : "0");
+    } catch {}
+  }
+
+  const [muted, setMuted] = useState(() => !getSoundEnabled());
   const [userHasInteracted, setUserHasInteracted] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -566,6 +583,7 @@ function ForYouPost({ post, me, navigate }) {
     if (muted) {
       setMuted(false);
       vid.muted = false;
+      setSoundEnabled(true);
     }
 
     if (vid.paused) {
@@ -592,9 +610,13 @@ function ForYouPost({ post, me, navigate }) {
   function onToggleMute(e) {
     e.stopPropagation();
     const vid = videoRef.current;
-    const next = !muted;
+    const next = !muted; // next === true means muted
     setMuted(next);
     if (vid) vid.muted = next;
+
+    // persist global preference
+    setSoundEnabled(!next);
+
     if (!next && vid?.paused) {
       playTriggeredByObserverRef.current = false;
       vid.play().catch(() => {});
@@ -604,10 +626,17 @@ function ForYouPost({ post, me, navigate }) {
   function onLoadedMetadata() {
     const vid = videoRef.current;
     if (!vid) return;
+
     setDuration(vid.duration || 0);
 
-    vid.muted = true;
-    setMuted(true);
+    // Apply global preference before attempting autoplay
+    const wantSound = getSoundEnabled();
+    vid.muted = !wantSound;
+    setMuted(!wantSound);
+
+    // Mark this as "autoplay-like" so watch-time won't start until interaction
+    playTriggeredByObserverRef.current = true;
+
     vid.play().catch(() => {});
   }
 
@@ -935,7 +964,7 @@ function ForYouPost({ post, me, navigate }) {
 
       {/* VIDEO + SIDE ACTIONS */}
       <div
-        className="relative w-full bg-black overflow-hidden aspect-[4/5] sm:aspect-[4/5] lg:aspect-[3/4] xl:aspect-[1/1] max-h-[80vh]"
+        className="relative w-full bg-black overflow-hidden h-[85vh] rounded-xl"
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
       >

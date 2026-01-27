@@ -27,7 +27,7 @@ export default function BookingChat() {
   // Optional: auto-start call via URL (?call=audio or ?call=video)
   const startCallType = useMemo(
     () => new URLSearchParams(location.search).get("call"),
-    [location.search]
+    [location.search],
   );
 
   const { me } = useMe();
@@ -37,11 +37,10 @@ export default function BookingChat() {
     me?.uid || me?.ownerUid || me?._id || me?.id || me?.userId || null;
 
   const myLabel =
-  me?.displayName ||
-  me?.fullName ||
-  me?.email ||
-  (myUid ? `User ${String(myUid).slice(0, 6)}…` : "Unknown");
-
+    me?.displayName ||
+    me?.fullName ||
+    me?.email ||
+    (myUid ? `User ${String(myUid).slice(0, 6)}…` : "Unknown");
 
   // 🔔 call state for this page (caller only)
   const [callState, setCallState] = useState({
@@ -79,7 +78,7 @@ export default function BookingChat() {
   // Booking Chat room for this booking
   const room = useMemo(
     () => (bookingId ? `booking:${bookingId}` : null),
-    [bookingId]
+    [bookingId],
   );
 
   // ---- Load booking meta (for badge + figuring out peerUid) ----
@@ -93,7 +92,7 @@ export default function BookingChat() {
       try {
         setLoadingBooking(true);
         const { data } = await api.get(
-          `/api/bookings/${encodeURIComponent(bookingId)}`
+          `/api/bookings/${encodeURIComponent(bookingId)}`,
         );
         if (!alive) return;
         setBooking(data || null);
@@ -125,7 +124,7 @@ export default function BookingChat() {
       booking?.service?.serviceName ||
       booking?.serviceName ||
       "Selected service",
-    [booking]
+    [booking],
   );
 
   const priceText = useMemo(() => {
@@ -138,7 +137,7 @@ export default function BookingChat() {
 
   const areaText = useMemo(
     () => booking?.lga || booking?.state || "",
-    [booking]
+    [booking],
   );
 
   // Determine the other participant (client ↔ professional)
@@ -229,7 +228,7 @@ export default function BookingChat() {
 
         if (
           ["ended", "cancelled", "declined", "missed", "failed"].includes(
-            status
+            status,
           )
         ) {
           return { ...prev, open: false };
@@ -244,7 +243,7 @@ export default function BookingChat() {
     } catch (e) {
       console.warn(
         "[BookingChat] attach call status listener failed:",
-        e?.message || e
+        e?.message || e,
       );
     }
 
@@ -304,7 +303,22 @@ export default function BookingChat() {
       return;
     }
 
-    // build meta so receiver sees real caller + booking info
+    // ✅ STEP 1: request mic/cam FIRST (so we don't create a call record if blocked)
+    try {
+      const constraints =
+        nextType === "video" ? { audio: true, video: true } : { audio: true };
+
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      stream.getTracks().forEach((t) => t.stop()); // we only needed permission
+    } catch (e) {
+      console.error("[BookingChat] getUserMedia failed:", e);
+      alert(
+        "Could not start call.\n\nPlease allow Microphone (and Camera for video).\nSettings → Apps → Kpocha Touch → Permissions.",
+      );
+      return; // ✅ IMPORTANT: do NOT call initiateCall()
+    }
+
+    // ✅ STEP 2: now create the call on backend
     const fromAvatar = me?.avatarUrl || me?.photoUrl || me?.photoURL || "";
 
     const meta = {
@@ -313,14 +327,14 @@ export default function BookingChat() {
       fromAvatar,
       peerUid,
       bookingId,
-      chatRoom: room || null, // booking chat room id
+      chatRoom: room || null,
       source: "booking_chat",
     };
 
     try {
       const ack = await initiateCall({
         receiverUid: peerUid,
-        callType: nextType, // "audio" or "video"
+        callType: nextType,
         meta,
       });
 
@@ -333,7 +347,6 @@ export default function BookingChat() {
         return;
       }
 
-      // Outgoing call → we are the caller
       setCallState({
         open: true,
         room: callRoom,
@@ -342,7 +355,6 @@ export default function BookingChat() {
         role: "caller",
       });
 
-      // remove ?call=... so it won't auto-start again on refresh/back
       try {
         navigate(`/bookings/${bookingId}/chat`, { replace: true });
       } catch {}
@@ -366,7 +378,7 @@ export default function BookingChat() {
       // completion succeeded: redirect will happen via socket / booking status effect
       try {
         const { data: fresh } = await api.get(
-          `/api/bookings/${encodeURIComponent(bookingId)}`
+          `/api/bookings/${encodeURIComponent(bookingId)}`,
         );
         if (fresh) setBooking(fresh);
       } catch {}

@@ -259,7 +259,17 @@ async function sendFcmToUser(uid, payload) {
         body: payload?.body || "",
       },
       data,
-      android: { priority: "high" },
+      android: {
+        priority: "high",
+        notification: {
+          channelId:
+            data.type === "call_incoming" || data.type === "booking_paid"
+              ? "calls"
+              : "alerts",
+
+          sound: "default",
+        },
+      },
       apns: {
         headers: {
           "apns-priority": "10",
@@ -360,6 +370,7 @@ export async function createNotification(rawArgs = {}, { lean = false } = {}) {
       data: {
         notificationId: String(doc._id),
         type: doc.type,
+        priority: doc.priority || "default",
         ...doc.data,
       },
     };

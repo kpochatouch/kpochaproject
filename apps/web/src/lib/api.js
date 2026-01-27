@@ -146,8 +146,8 @@ if (!ROOT) {
   ROOT = Capacitor.isNativePlatform()
     ? PROD_ROOT
     : import.meta.env.DEV
-      ? "http://localhost:8080"
-      : PROD_ROOT;
+    ? "http://localhost:8080"
+    : PROD_ROOT;
 }
 
 ROOT = ROOT.replace(/\/+$/, "");
@@ -444,34 +444,8 @@ export function connectSocket({
       // 🔥 ask Firebase for a fresh token on each (re)connect
       auth: (cb) => {
         try {
-          const auth = firebaseAuth || getAuth();
-          const user = auth.currentUser;
-          if (!user) {
-            cb(_getAuthPayload()); // probably just uid hint or empty
-            return;
-          }
-
-          // force refresh, then update our cache + send to server
-          user
-            .getIdToken(true)
-            .then((t) => {
-              latestToken = t;
-              try {
-                localStorage.setItem("token", t);
-              } catch {}
-              cb({
-                ..._getAuthPayload(),
-                token: t,
-                uid: user.uid,
-              });
-            })
-            .catch((err) => {
-              console.warn(
-                "[socket] getIdToken(true) failed:",
-                err?.message || err,
-              );
-              cb(_getAuthPayload()); // fallback to whatever we have
-            });
+          // ✅ do NOT force refresh here — it can hang Android boot
+          cb(_getAuthPayload());
         } catch (e) {
           console.warn("[socket] auth callback failed:", e?.message || e);
           cb(_getAuthPayload());
@@ -672,8 +646,7 @@ export async function sendChatMessage({
 
   // 1️⃣ Try to make sure socket is ready
   try {
-    const s = await ensureSocketReady(6000); // wait up to 6s for connect
-
+    const s = await ensureSocketReady(1500);
     return await new Promise((resolve, reject) => {
       try {
         s.emit("chat:message", payload, (ack) => {
