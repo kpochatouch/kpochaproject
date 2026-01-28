@@ -1,6 +1,22 @@
 // apps/web/src/lib/pushClient.js
 import { api } from "./api";
 
+export function getDeviceId() {
+  try {
+    let id = localStorage.getItem("kpocha:deviceId");
+    if (!id) {
+      id =
+        (crypto?.randomUUID ? crypto.randomUUID() : null) ||
+        `dev_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+      localStorage.setItem("kpocha:deviceId", id);
+    }
+    return id;
+  } catch {
+    // storage blocked; still return a best-effort ID for this session
+    return `sess_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  }
+}
+
 function urlBase64ToUint8Array(base64String) {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
   const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
@@ -34,6 +50,9 @@ export async function ensurePushSubscribed() {
     });
   }
 
-  await api.post("/api/push/subscribe", { subscription: sub });
+  await api.post("/api/push/subscribe", {
+    subscription: sub,
+    deviceId: getDeviceId(),
+  });
   return { ok: true };
 }

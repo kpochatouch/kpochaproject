@@ -26,6 +26,8 @@ const router = express.Router();
 router.post("/push/subscribe", requireAuth, async (req, res) => {
   try {
     const subscription = req.body?.subscription;
+    const deviceId = String(req.body?.deviceId || "");
+
     if (!subscription)
       return res.status(400).json({ error: "subscription_required" });
 
@@ -41,6 +43,7 @@ router.post("/push/subscribe", requireAuth, async (req, res) => {
       {
         $set: {
           ownerUid: req.user.uid,
+          deviceId,
           endpoint,
           p256dh,
           auth,
@@ -81,10 +84,24 @@ router.post("/push/unsubscribe", requireAuth, async (req, res) => {
  */
 router.post("/push/device-token", requireAuth, async (req, res) => {
   try {
-    const { token, platform } = req.body || {};
+    const { token, platform, deviceId } = req.body || {};
+    const did = String(deviceId || "");
     if (!token) return res.status(400).json({ error: "token_required" });
     if (!["android", "ios"].includes(platform))
       return res.status(400).json({ error: "platform_required" });
+
+    // ✅ Keep 1 active token per deviceId+platform (prevents duplicates when token rotates)
+    if (did) {
+      await DevicePushToken.updateMany(
+        {
+          ownerUid: req.user.uid,
+          platform,
+          deviceId: did,
+          token: { $ne: token },
+        },
+        { $set: { disabled: true } },
+      );
+    }
 
     await DevicePushToken.findOneAndUpdate(
       { ownerUid: req.user.uid, platform, token },
@@ -93,6 +110,7 @@ router.post("/push/device-token", requireAuth, async (req, res) => {
           ownerUid: req.user.uid,
           platform,
           token,
+          deviceId: did,
           userAgent: req.headers["user-agent"] || "",
           disabled: false,
         },

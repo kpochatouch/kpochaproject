@@ -22,7 +22,7 @@ import RouteLoader from "./components/RouteLoader.jsx";
 import { useMe } from "./context/MeContext.jsx";
 import BookingAlert from "./components/BookingAlert.jsx";
 import usePostPaymentRecovery from "./hooks/usePostPaymentRecovery";
-import { ensurePushSubscribed } from "./lib/pushClient";
+import { ensurePushSubscribed, getDeviceId } from "./lib/pushClient";
 import MobileTabBar from "./components/MobileTabBar.jsx";
 console.log("[push] App.jsx loaded");
 
@@ -176,6 +176,7 @@ async function initNativePush(apiClient) {
       await apiClient.post("/api/push/device-token", {
         token: t?.value,
         platform: "android",
+        deviceId: getDeviceId(),
       });
 
       console.log("[push] token saved to backend");
@@ -260,13 +261,13 @@ export default function App() {
   const { me } = useMe();
 
   // ✅ Native FCM registration (Android APK)
-  const didInitNativePushRef = useRef(false);
+  const didInitNativePushRef = useRef("");
 
   useEffect(() => {
-    if (didInitNativePushRef.current) return;
+    if (didInitNativePushRef.current === me?.uid) return;
     if (!me?.uid) return;
 
-    didInitNativePushRef.current = true;
+    didInitNativePushRef.current = me?.uid || "";
 
     initNativePush(api).catch((e) => {
       console.log("[push] init failed:", e?.message || e);
@@ -338,9 +339,10 @@ export default function App() {
       window.removeEventListener("kpocha:open-chatbase", onOpenChatbase);
   }, [isMobile]);
 
-  // 🔔 Subscribe this device/browser for Web Push (best-effort, no caching)
+  // 🔔 Web/PWA only: subscribe for Web Push (never inside native Capacitor)
   useEffect(() => {
     if (!me?.uid) return;
+    if (Capacitor.isNativePlatform()) return; // ✅ native uses FCM only
     ensurePushSubscribed().catch(() => {});
   }, [me?.uid]);
 

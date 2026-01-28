@@ -8,6 +8,16 @@ import ShareButton from "./ShareButton.jsx";
 import CommentToggle from "./CommentToggle.jsx";
 import ActionButton from "./ActionButton.jsx";
 
+// ------------------- Feed: Only one video plays at a time -------------------
+const FEED_ACTIVE_VIDEO_KEY = "__kpocha_feed_active_video_id__";
+function feedRequestExclusivePlay(postId) {
+  try {
+    window.dispatchEvent(
+      new CustomEvent("kpocha:feed:video:play", { detail: { postId } }),
+    );
+  } catch {}
+}
+
 function timeAgo(ts) {
   if (!ts) return "";
   const d = new Date(ts);
@@ -60,6 +70,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
 
   const [inView, setInView] = useState(false);
   const hasSentViewRef = useRef(false); // for non-video cards only
+  const videoViewTimerRef = useRef(null); // 3s in-view -> send view
   const playTriggeredByObserverRef = useRef(false);
 
   // watch-time tracking for videos
@@ -89,7 +100,21 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
   }
 
   // video UI
-  const [muted, setMuted] = useState(() => !getSoundEnabled());
+  // default to user's saved preference; if missing => sound ON (muted=false)
+  const [muted, setMuted] = useState(() => {
+    try {
+      const v = localStorage.getItem(SOUND_KEY);
+      if (v === null) return false; // default sound ON
+      return v !== "1"; // muted = !soundEnabled
+    } catch {
+      return false;
+    }
+  });
+
+  // facebook-like tiny speaker visibility
+  const [showSpeaker, setShowSpeaker] = useState(true);
+  const speakerTimerRef = useRef(null);
+
   const [userHasInteracted, setUserHasInteracted] = useState(false);
 
   // ----- Lazy video src loader (data-src -> src) -----
@@ -97,33 +122,59 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
     const el = videoRef.current;
     if (!el) return;
 
-    // already set
-    if (el.getAttribute("src")) return;
+    const ds = (el.getAttribute("data-src") || "").trim();
+    if (!ds) return;
 
-    const ds = el.getAttribute("data-src");
-    if (ds) {
-      el.setAttribute("src", ds);
-      el.load?.();
-    }
+    const attrSrc = (el.getAttribute("src") || "").trim();
+
+    // If src is already set correctly, do nothing
+    if (attrSrc && attrSrc === ds) return;
+
+    // Set both attribute and property (WebView needs this sometimes)
+    el.setAttribute("src", ds);
+    el.src = ds;
+
+    try {
+      el.load();
+    } catch {}
   }
 
-  // time display + scrubbing
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [seeking, setSeeking] = useState(false);
-  const lastTimeUpdateRef = useRef(0);
+  function showSpeakerBrief(ms = 1200) {
+    setShowSpeaker(true);
+    if (speakerTimerRef.current) clearTimeout(speakerTimerRef.current);
+    speakerTimerRef.current = setTimeout(() => setShowSpeaker(false), ms);
+  }
+
+  async function autoplayTrySoundThenFallbackMuted(v) {
+    // Try sound first (muted=false)
+    v.muted = false;
+    setMuted(false);
+    setSoundEnabled(true);
+
+    showSpeakerBrief(1500);
+
+    try {
+      await v.play();
+      return;
+    } catch {
+      // Fallback: muted autoplay
+      v.muted = true;
+      setMuted(true);
+      setSoundEnabled(false);
+      try {
+        await v.play();
+      } catch {
+        // still can't play
+      }
+      // if muted fallback happened, keep speaker visible
+      setShowSpeaker(true);
+    }
+  }
 
   const canComment = useMemo(
     () => !commentsDisabled && !!currentUser,
     [commentsDisabled, currentUser],
   );
-
-  function formatTime(sec = 0) {
-    if (!isFinite(sec)) return "0:00";
-    const m = Math.floor(sec / 60);
-    const s = Math.floor(sec % 60);
-    return `${m}:${s < 10 ? "0" : ""}${s}`;
-  }
 
   const media =
     Array.isArray(post.media) && post.media.length ? post.media[0] : null;
@@ -198,11 +249,12 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
   useEffect(() => {
     hasSentViewRef.current = false;
     playTriggeredByObserverRef.current = false;
+    if (videoViewTimerRef.current) {
+      clearTimeout(videoViewTimerRef.current);
+      videoViewTimerRef.current = null;
+    }
     watchAccumRef.current = 0;
     lastWatchTsRef.current = 0;
-    lastTimeUpdateRef.current = 0;
-    setCurrentTime(0);
-    setDuration(0);
   }, [postId]);
 
   function mergeStatsFromServer(partial) {
@@ -262,55 +314,88 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
     await sendViewTick();
   }
 
-  // 2) observe video for auto play/pause
+  // 2) feed-wide exclusive play: if another video starts, pause this one
   useEffect(() => {
-    if (!isVideo || !videoRef.current) return;
+    function onOtherWantsToPlay(e) {
+      const otherId = e?.detail?.postId;
+      if (!otherId || !postId) return;
 
-    const el = videoRef.current;
+      if (otherId !== postId) {
+        const v = videoRef.current;
+        if (v && !v.paused) v.pause();
+      } else {
+      }
+    }
+
+    window.addEventListener("kpocha:feed:video:play", onOtherWantsToPlay);
+    return () =>
+      window.removeEventListener("kpocha:feed:video:play", onOtherWantsToPlay);
+  }, [postId]);
+
+  // 3) observe CARD (not video) for stable autoplay/pause + stop offscreen audio
+  useEffect(() => {
+    if (!isVideo) return;
+    if (!cardRef.current) return;
+
+    const cardEl = cardRef.current;
+
     mediaObserverRef.current?.disconnect();
+    mediaObserverRef.current = null;
 
     const obs = new IntersectionObserver(
       async (entries) => {
         const entry = entries[0];
         const nowInView =
           entry.isIntersecting && entry.intersectionRatio >= 0.6;
+
         setInView(nowInView);
 
+        const v = videoRef.current;
+        if (!v) return;
+
         if (nowInView) {
-          try {
-            ensureVideoSrcLoaded();
+          // Request exclusive play (pauses other cards)
+          feedRequestExclusivePlay(postId);
 
-            const wantSound = getSoundEnabled();
-            el.muted = !wantSound;
-            setMuted(!wantSound);
-
-            playTriggeredByObserverRef.current = true;
-            await el.play().catch(() => {});
-          } catch {
-            // ignore
+          // Start a 3s "in-view" timer: if still in view, count 1 view
+          if (!videoViewTimerRef.current) {
+            videoViewTimerRef.current = setTimeout(() => {
+              videoViewTimerRef.current = null;
+              if (videoRef.current && !videoRef.current.paused) {
+                sendViewTick();
+              }
+            }, 3000);
           }
-        } else if (!entry.isIntersecting) {
-          // Only force-pause when completely off-screen
-          el.pause();
+
+          // Ensure src is loaded
+          ensureVideoSrcLoaded();
+
+          // mark as autoplay-triggered (so 10s engagement won't count until interaction)
+          playTriggeredByObserverRef.current = true;
+
+          // Try sound autoplay first; fallback to muted autoplay if blocked
+          await autoplayTrySoundThenFallbackMuted(v);
+        } else {
+          // Pause when leaving view
+          // Leaving view -> cancel the 3s timer
+          if (videoViewTimerRef.current) {
+            clearTimeout(videoViewTimerRef.current);
+            videoViewTimerRef.current = null;
+          }
+          v.pause();
         }
       },
-      { threshold: [0, 0.4, 0.6, 0.8, 1] },
+      { threshold: [0, 0.25, 0.6, 1] },
     );
 
-    obs.observe(el);
+    obs.observe(cardEl);
     mediaObserverRef.current = obs;
 
     return () => {
       obs.disconnect();
+      mediaObserverRef.current = null;
     };
   }, [postId, isVideo]);
-
-  useEffect(() => {
-    if (!isVideo && mediaObserverRef.current) {
-      mediaObserverRef.current.disconnect();
-      mediaObserverRef.current = null;
-    }
-  }, [isVideo]);
 
   // 3) also send view for NON-video cards (photos / text)
   useEffect(() => {
@@ -331,25 +416,24 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
     return () => obs.disconnect();
   }, [isVideo]);
 
+  useEffect(() => {
+    return () => {
+      if (speakerTimerRef.current) {
+        clearTimeout(speakerTimerRef.current);
+        speakerTimerRef.current = null;
+      }
+    };
+  }, []);
+
   function onClickVideo() {
-    const vid = videoRef.current;
-    if (!vid) return;
+    if (!postId) return;
 
+    // Treat as interaction (unlocks audio on platforms that require a gesture)
     setUserHasInteracted(true);
+    playTriggeredByObserverRef.current = false;
 
-    // first user click → unmute
-    if (muted) {
-      setMuted(false);
-      vid.muted = false;
-      setSoundEnabled(true);
-    }
-
-    if (vid.paused) {
-      playTriggeredByObserverRef.current = false;
-      vid.play().catch(() => {});
-    } else {
-      vid.pause();
-    }
+    // Open fullscreen feed page (ForYou)
+    navigate(`/for-you/${encodeURIComponent(postId)}`);
   }
 
   function onVideoPlay() {
@@ -376,35 +460,12 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
     }
   }
 
-  function onToggleMute(e) {
-    e.stopPropagation();
-
-    // This click is a real user interaction → unlock watch-time behavior
-    if (!userHasInteracted) setUserHasInteracted(true);
-
-    const vid = videoRef.current;
-    const next = !muted; // next === true means muted
-    setMuted(next);
-    if (vid) vid.muted = next;
-
-    // persist global preference (soundEnabled = !muted)
-    setSoundEnabled(!next);
-
-    if (!next && vid?.paused) {
-      // user asked to unmute → also play
-      playTriggeredByObserverRef.current = false;
-      vid.play().catch(() => {});
-    }
-  }
-
   // when metadata loads, capture duration
   function onLoadedMetadata() {
-    const vid = videoRef.current;
-    if (!vid) return;
-    setDuration(vid.duration || 0);
+    // FeedCard doesn't need duration/seek UI.
+    // Keep this hook in case you later want metadata-based logic.
   }
 
-  // keep currentTime in sync for the slider + label AND accumulate watch-time
   function onTimeUpdate() {
     const vid = videoRef.current;
     if (!vid) return;
@@ -413,19 +474,6 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
     if (vid.paused) {
       lastWatchTsRef.current = 0;
       return;
-    }
-
-    // Update UI (throttled)
-    if (!seeking) {
-      const nowUi =
-        typeof performance !== "undefined" && performance.now
-          ? performance.now()
-          : Date.now();
-
-      if (nowUi - lastTimeUpdateRef.current >= 250) {
-        lastTimeUpdateRef.current = nowUi;
-        setCurrentTime(vid.currentTime || 0);
-      }
     }
 
     // Accumulate watch-time ONLY when:
@@ -456,66 +504,6 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
       watchAccumRef.current = 0;
       sendViewTick();
     }
-  }
-
-  // jump helpers
-  function jump(seconds) {
-    const vid = videoRef.current;
-    if (!vid) return;
-    const baseDuration = duration || vid.duration || 0;
-    const next = Math.min(
-      Math.max((vid.currentTime || 0) + seconds, 0),
-      baseDuration || 0,
-    );
-    vid.currentTime = next;
-    setCurrentTime(next);
-  }
-
-  // fullscreen (desktop + mobile Safari fallback)
-  async function toggleFullscreen() {
-    const vid = videoRef.current;
-    if (!vid) return;
-    try {
-      if (document.fullscreenElement) {
-        await document.exitFullscreen().catch(() => {});
-        return;
-      }
-      if (vid.requestFullscreen) return void vid.requestFullscreen();
-      // iOS WebKit fallback
-      const anyVid = /** @type {any} */ (vid);
-      if (anyVid.webkitEnterFullscreen)
-        return void anyVid.webkitEnterFullscreen();
-    } catch {
-      // ignore
-    }
-  }
-
-  // seek slider handlers
-  function onSeekStart() {
-    setSeeking(true);
-  }
-
-  function onSeekChange(v) {
-    setCurrentTime(v);
-  }
-
-  function onSeekCommit(v) {
-    const vid = videoRef.current;
-    if (!vid) {
-      setSeeking(false);
-      return;
-    }
-    const safe = Number.isFinite(v) ? v : 0;
-    vid.currentTime = safe;
-    setCurrentTime(safe);
-    setSeeking(false);
-
-    // reset watch-time clock after seek (match ForYou/PostDetail)
-    const now =
-      typeof performance !== "undefined" && performance.now
-        ? performance.now()
-        : Date.now();
-    lastWatchTsRef.current = now;
   }
 
   // likes
@@ -979,7 +967,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
                 muted={muted}
                 loop
                 playsInline
-                preload="none"
+                preload="metadata"
                 controls={false}
                 onClick={onClickVideo}
                 onPlay={onVideoPlay}
@@ -987,92 +975,36 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
                 onTimeUpdate={onTimeUpdate}
               />
 
-              {!userHasInteracted && (
+              {/* ✅ Speaker icon OVER the video (inside the same relative container) */}
+              {(showSpeaker || muted) && (
                 <button
-                  onClick={onClickVideo}
-                  className="absolute inset-0 flex items-center justify-center bg-black/0"
-                  aria-label="Play video"
                   type="button"
-                />
+                  onClick={(e) => {
+                    e.stopPropagation();
+
+                    const vid = videoRef.current;
+                    if (!vid) return;
+
+                    const nextMuted = !muted;
+                    setMuted(nextMuted);
+                    vid.muted = nextMuted;
+                    setSoundEnabled(!nextMuted);
+
+                    if (!nextMuted && vid.paused) {
+                      playTriggeredByObserverRef.current = false;
+                      vid.play().catch(() => {});
+                    }
+
+                    showSpeakerBrief(1200);
+                  }}
+                  aria-label={muted ? "Unmute" : "Mute"}
+                  className="absolute bottom-3 right-3 z-[3] w-9 h-9 rounded-full bg-black/35 flex items-center justify-center"
+                >
+                  <span className="text-white text-[16px] leading-none">
+                    {muted ? "🔇" : "🔊"}
+                  </span>
+                </button>
               )}
-
-              {/* Quick controls (Play/Pause, Mute) */}
-              <div className="absolute bottom-3 left-3 flex gap-2 z-[2]">
-                <button
-                  onClick={onClickVideo}
-                  className="bg-black/50 text-white text-xs px-3 py-1 rounded-full"
-                  type="button"
-                >
-                  {videoRef.current && !videoRef.current.paused
-                    ? "Pause"
-                    : "Play"}
-                </button>
-                <button
-                  onClick={onToggleMute}
-                  className="bg-black/50 text-white text-xs px-3 py-1 rounded-full"
-                  type="button"
-                >
-                  {muted ? "Unmute" : "Mute"}
-                </button>
-              </div>
-
-              {/* Bottom control bar with seek + time + +/- 10s + fullscreen */}
-              <div
-                className="absolute inset-x-0 bottom-0 z-[2] px-3 pb-3 pt-6
-                       bg-gradient-to-t from-black/70 via-black/20 to-transparent"
-              >
-                <div className="flex items-center justify-between gap-2 mb-2">
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => jump(-10)}
-                      className="rounded-full bg-black/60 text-white text-xs px-3 py-1"
-                      aria-label="Seek backward 10 seconds"
-                      type="button"
-                    >
-                      ⏪ 10s
-                    </button>
-                    <button
-                      onClick={() => jump(+10)}
-                      className="rounded-full bg-black/60 text-white text-xs px-3 py-1"
-                      aria-label="Seek forward 10 seconds"
-                      type="button"
-                    >
-                      10s ⏩
-                    </button>
-                  </div>
-
-                  <div className="flex items-center gap-2 text-[11px] text-white/90">
-                    <span aria-label="Current time">
-                      {formatTime(currentTime)}
-                    </span>
-                    <span className="opacity-70">/</span>
-                    <span aria-label="Duration">{formatTime(duration)}</span>
-                    <button
-                      onClick={toggleFullscreen}
-                      className="rounded-md bg-black/60 text-white text-[11px] px-2 py-1 ml-2"
-                      aria-label="Toggle full screen"
-                      type="button"
-                    >
-                      ⛶
-                    </button>
-                  </div>
-                </div>
-
-                <input
-                  type="range"
-                  min={0}
-                  max={Math.max(1, duration || 0)} // avoid 0 max
-                  step={0.1}
-                  value={Math.min(currentTime, duration || 0)}
-                  onMouseDown={onSeekStart}
-                  onTouchStart={onSeekStart}
-                  onChange={(e) => onSeekChange(Number(e.target.value || 0))}
-                  onMouseUp={(e) => onSeekCommit(Number(e.target.value || 0))}
-                  onTouchEnd={(e) => onSeekCommit(Number(e.target.value || 0))}
-                  className="w-full accent-[#F5C542]"
-                  aria-label="Seek"
-                />
-              </div>
             </>
           ) : (
             <img

@@ -5,6 +5,8 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.webkit.WebSettings;
+import android.webkit.WebView;
 
 import com.getcapacitor.BridgeActivity;
 
@@ -13,6 +15,15 @@ public class MainActivity extends BridgeActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        // ✅ Allow autoplay (including sound) without user gesture in Android WebView
+        try {
+            WebView webView = this.getBridge().getWebView();
+            WebSettings s = webView.getSettings();
+            s.setMediaPlaybackRequiresUserGesture(false);
+        } catch (Exception ignored) {
+        }
+
         createNotificationChannels();
     }
 
@@ -22,7 +33,6 @@ public class MainActivity extends BridgeActivity {
             if (nm == null)
                 return;
 
-            // Incoming calls: loud + heads-up
             NotificationChannel calls = new NotificationChannel(
                     "calls",
                     "Calls",
@@ -30,9 +40,9 @@ public class MainActivity extends BridgeActivity {
             calls.setDescription("Incoming calls");
             calls.enableVibration(true);
             calls.enableLights(true);
+            calls.setLockscreenVisibility(android.app.Notification.VISIBILITY_PUBLIC);
             nm.createNotificationChannel(calls);
 
-            // Alerts: booking/chat/etc
             NotificationChannel alerts = new NotificationChannel(
                     "alerts",
                     "Alerts",
@@ -40,6 +50,7 @@ public class MainActivity extends BridgeActivity {
             alerts.setDescription("Booking and important alerts");
             alerts.enableVibration(true);
             alerts.enableLights(true);
+            alerts.setLockscreenVisibility(android.app.Notification.VISIBILITY_PUBLIC);
             nm.createNotificationChannel(alerts);
         }
     }

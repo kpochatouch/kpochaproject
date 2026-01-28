@@ -103,9 +103,11 @@ const ProSchema = new mongoose.Schema(
   {
     ownerUid: { type: String, required: true, unique: true, index: true },
 
-    name: { type: String, required: true },
+    deviceId: { type: String, default: "", index: true },
 
-    // main display image for barber card
+name: { type: String, required: true },
+
+// main display image for barber card
     photoUrl: { type: String, default: "" },
 
     // geo filters

@@ -184,10 +184,30 @@ function ensureVapidConfigured() {
   }
 }
 
+async function getActiveNativeDeviceIds(uid) {
+  const tokensDocs = await DevicePushToken.find({
+    ownerUid: uid,
+    disabled: { $ne: true },
+  })
+    .select("deviceId platform")
+    .lean();
+
+  return new Set(
+    tokensDocs
+      .filter(
+        (d) => (d.platform === "android" || d.platform === "ios") && d.deviceId,
+      )
+      .map((d) => d.deviceId),
+  );
+}
+
 async function sendWebPushToUser(uid, payload) {
   try {
     const ok = ensureVapidConfigured();
     if (!ok) return { ok: false, reason: "vapid_missing" };
+
+    // deviceIds that are already covered by native push (FCM)
+    const nativeDeviceIds = await getActiveNativeDeviceIds(uid);
 
     const subs = await PushSubscription.find({
       ownerUid: uid,
@@ -197,30 +217,30 @@ async function sendWebPushToUser(uid, payload) {
     if (!subs.length) return { ok: false, reason: "no_subscription" };
 
     let sent = 0;
+
     for (const subDoc of subs) {
       try {
+        // ✅ If this subscription is on a device that has native FCM enabled, skip it.
+        if (subDoc.deviceId && nativeDeviceIds.has(subDoc.deviceId)) continue;
+
         if (!subDoc?.subscription) continue;
+
         await webpush.sendNotification(
           subDoc.subscription,
           JSON.stringify(payload),
         );
         sent += 1;
       } catch (e) {
-        // disable only the failing endpoint, not the whole user
         try {
           await PushSubscription.findOneAndUpdate(
             { ownerUid: uid, endpoint: subDoc.endpoint },
             { $set: { disabled: true } },
           );
         } catch {}
-        // continue loop to try other devices
       }
     }
 
-    if (sent === 0) {
-      return { ok: false, reason: "no_successful_push" };
-    }
-
+    if (sent === 0) return { ok: false, reason: "no_successful_push" };
     return { ok: true, sent };
   } catch (e) {
     return { ok: false, reason: e?.message || "push_failed" };
@@ -233,7 +253,7 @@ async function sendFcmToUser(uid, payload) {
       ownerUid: uid,
       disabled: { $ne: true },
     })
-      .select("token platform")
+      .select("token platform deviceId")
       .lean();
 
     const tokens = tokensDocs

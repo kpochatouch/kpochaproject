@@ -6,6 +6,7 @@ const { Schema } = mongoose;
 const PushSubscriptionSchema = new Schema(
   {
     ownerUid: { type: String, required: true, index: true },
+    deviceId: { type: String, default: "", index: true },
     // The browser subscription object from pushManager.subscribe()
     subscription: { type: Schema.Types.Mixed, required: true },
     // Optional: identify device/browser
