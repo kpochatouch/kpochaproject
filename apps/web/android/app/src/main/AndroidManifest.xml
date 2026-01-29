@@ -9,6 +9,10 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+<uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+
 
     <!-- ✅ optional: declare features (not required, but safe) -->
     <uses-feature
@@ -28,30 +32,79 @@
     android:supportsRtl="true"
     android:theme="@style/AppTheme"
   >
-        <activity
-      android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
+
+  <!-- ✅ Firebase fallback channel when push includes notification payload -->
+    <meta-data
+      android:name="com.google.firebase.messaging.default_notification_channel_id"
+      android:value="alerts"
+    />
+
+    <!-- Main app -->
+    <activity
       android:name=".MainActivity"
+      android:exported="true"
+      android:launchMode="singleTask"
       android:label="@string/title_activity_main"
       android:theme="@style/AppTheme.NoActionBarLaunch"
-      android:launchMode="singleTask"
-      android:exported="true"
+      android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
     >
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
 
-        <provider
+        <intent-filter>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent-filter>
+    </activity>
+
+    <!-- Booking ring: actions -->
+<receiver android:name=".BookingActionReceiver" android:exported="false" />
+
+<!-- Booking ring: foreground service that loops alarm sound -->
+<service
+      android:name=".BookingRingService"
+      android:exported="false"
+      android:foregroundServiceType="dataSync"
+    />
+
+    <!-- Full-screen incoming call UI -->
+    <activity
+      android:name=".IncomingCallActivity"
+      android:exported="false"
+      android:launchMode="singleTask"
+      android:excludeFromRecents="true"
+      android:showOnLockScreen="true"
+      android:turnScreenOn="true"
+      android:taskAffinity=""
+    />
+
+    <!-- Accept/Decline actions -->
+    <receiver android:name=".CallActionReceiver" android:exported="false" />
+
+    <!-- Receives high-priority FCM data messages for calls -->
+    <service android:name=".CallMessagingService" android:exported="false">
+        <intent-filter>
+            <action android:name="com.google.firebase.MESSAGING_EVENT" />
+        </intent-filter>
+    </service>
+
+    <!-- Keeps app alive during ringing -->
+    <service
+      android:name=".CallForegroundService"
+      android:exported="false"
+      android:foregroundServiceType="phoneCall"
+    />
+
+    <provider
       android:name="androidx.core.content.FileProvider"
       android:authorities="${applicationId}.fileprovider"
       android:exported="false"
       android:grantUriPermissions="true"
     >
-            <meta-data
+        <meta-data
         android:name="android.support.FILE_PROVIDER_PATHS"
         android:resource="@xml/file_paths"
       />
-        </provider>
-    </application>
+    </provider>
+
+</application>
+
 </manifest>

@@ -191,13 +191,12 @@ async function initNativePush(apiClient) {
   });
 
   PushNotifications.addListener("pushNotificationReceived", (notif) => {
+    console.log(
+      "[push] received data:",
+      JSON.stringify(notif?.data || notif?.extra || {}),
+    );
     console.log("[push] received:", JSON.stringify(notif));
   });
-
-  console.log(
-    "[push] received data:",
-    JSON.stringify(notif?.data || notif?.extra || {}),
-  );
 
   PushNotifications.addListener("pushNotificationActionPerformed", (action) => {
     try {
@@ -237,16 +236,11 @@ async function initNativePush(apiClient) {
         return;
       }
 
-      // ✅ Booking → open booking details if you have it
-      if (
-        (type === "booking_paid" || type === "booking_new") &&
-        data?.bookingId
-      ) {
-        window.location.href = `/bookings/${data.bookingId}`;
-        console.log(
-          "[push] routing -> booking:",
-          `/bookings/${data.bookingId}`,
-        );
+      // ✅ Booking → open BookingDetails (/bookings/:id)
+      if (type === "booking_paid" && data?.bookingId) {
+        const to = `/bookings/${String(data.bookingId)}`;
+        console.log("[push] routing -> booking:", to);
+        window.location.href = to;
         return;
       }
 

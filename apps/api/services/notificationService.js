@@ -272,10 +272,32 @@ async function sendFcmToUser(uid, payload) {
       data[k] = typeof v === "string" ? v : JSON.stringify(v);
     }
 
+    const isIncomingCall = data.type === "call_incoming";
     const isCall = data.type === "call_incoming" || data.type === "call_missed";
 
-    // ✅ For calls: data-only push (avoid duplicate system notifications)
-    // ✅ For non-calls: keep notification payload so Android shows it even if app is killed
+    // ✅ Phase B: incoming call must be DATA-only and must use native trigger type
+    if (isIncomingCall) {
+      // Convert your app-level type -> native trigger type (Android expects this)
+      data.appType = "call_incoming"; // keep original app-level type for debugging / analytics
+      data.type = "incoming_call";
+
+      // Ensure required fields exist (strings)
+      if (!data.callId && rawData.callId) data.callId = String(rawData.callId);
+      if (!data.room && rawData.room) data.room = String(rawData.room);
+      if (!data.callType && rawData.callType)
+        data.callType = String(rawData.callType);
+
+      // Caller label (best-effort)
+      if (!data.fromName) {
+        data.fromName =
+          (rawData.fromName && String(rawData.fromName)) ||
+          (rawData.callerName && String(rawData.callerName)) ||
+          "Someone";
+      }
+    }
+
+    // ✅ Calls: DATA-only (no notification payload) so Android handles full-screen UI.
+    // ✅ Non-calls: normal notification payload to alerts channel.
     const message = {
       tokens,
 
@@ -292,11 +314,13 @@ async function sendFcmToUser(uid, payload) {
 
       android: {
         priority: "high",
+
+        // For calls: no android.notification payload (CallMessagingService handles it)
         ...(isCall
           ? {}
           : {
               notification: {
-                channelId: data.type === "booking_paid" ? "calls" : "alerts",
+                channelId: "alerts",
                 sound: "default",
               },
             }),
@@ -307,6 +331,14 @@ async function sendFcmToUser(uid, payload) {
         payload: { aps: { sound: "default" } },
       },
     };
+    console.log(
+      "[push:fcm] android data.type =",
+      data.type,
+      "isIncomingCall=",
+      isIncomingCall,
+      "room=",
+      data.room,
+    );
 
     const resp = await admin.messaging().sendEachForMulticast(message);
 

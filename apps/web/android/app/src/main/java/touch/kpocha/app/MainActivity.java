@@ -33,15 +33,9 @@ public class MainActivity extends BridgeActivity {
             if (nm == null)
                 return;
 
-            NotificationChannel calls = new NotificationChannel(
-                    "calls",
-                    "Calls",
-                    NotificationManager.IMPORTANCE_HIGH);
-            calls.setDescription("Incoming calls");
-            calls.enableVibration(true);
-            calls.enableLights(true);
-            calls.setLockscreenVisibility(android.app.Notification.VISIBILITY_PUBLIC);
-            nm.createNotificationChannel(calls);
+            // ✅ Option A: DO NOT create "calls" channel here.
+            // Calls channel is created by CallNotification.ensureChannel() with ringtone
+            // sound.
 
             NotificationChannel alerts = new NotificationChannel(
                     "alerts",
@@ -51,7 +45,26 @@ public class MainActivity extends BridgeActivity {
             alerts.enableVibration(true);
             alerts.enableLights(true);
             alerts.setLockscreenVisibility(android.app.Notification.VISIBILITY_PUBLIC);
+
+            // ✅ sound at channel level (Android channels are immutable once created)
+            try {
+                android.net.Uri sound = android.provider.Settings.System.DEFAULT_NOTIFICATION_URI;
+                android.media.AudioAttributes aa = new android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build();
+                alerts.setSound(sound, aa);
+            } catch (Exception ignored) {
+            }
+
             nm.createNotificationChannel(alerts);
         }
     }
+
+    @Override
+    protected void onNewIntent(android.content.Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+    }
+
 }
