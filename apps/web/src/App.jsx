@@ -8,6 +8,7 @@ import {
   useNavigate,
 } from "react-router-dom";
 import { Capacitor } from "@capacitor/core";
+import { App as CapApp } from "@capacitor/app";
 import { PushNotifications } from "@capacitor/push-notifications";
 import { api, registerSocketHandler } from "./lib/api";
 import CallSheet from "./components/CallSheet.jsx";
@@ -193,8 +194,67 @@ async function initNativePush(apiClient) {
     console.log("[push] received:", JSON.stringify(notif));
   });
 
+  console.log(
+    "[push] received data:",
+    JSON.stringify(notif?.data || notif?.extra || {}),
+  );
+
   PushNotifications.addListener("pushNotificationActionPerformed", (action) => {
-    console.log("[push] action:", JSON.stringify(action));
+    try {
+      console.log("[push] actionPerformed raw:", JSON.stringify(action));
+
+      // ✅ DEBUG: show what data we actually got on tap
+      console.log(
+        "[push] actionPerformed notification keys:",
+        Object.keys(action?.notification || {}),
+      );
+
+      const data =
+        action?.notification?.data ||
+        action?.notification?.extra ||
+        action?.notification ||
+        {};
+
+      const type = data?.type;
+
+      console.log("[push] actionPerformed data:", JSON.stringify(data));
+      console.log("[push] actionPerformed type:", type);
+
+      // ✅ Incoming call → open Call UI via your existing URL handler
+      if (type === "call_incoming" && data?.room) {
+        const qs = new URLSearchParams();
+        qs.set("call", "1");
+        if (data.callId) qs.set("callId", String(data.callId));
+        qs.set("room", String(data.room));
+        if (data.callType) qs.set("callType", String(data.callType));
+
+        // Use window.location so your existing useEffect triggers
+        console.log(
+          "[push] routing -> call deep link:",
+          `/browse?${qs.toString()}`,
+        );
+        window.location.href = `/browse?${qs.toString()}`;
+        return;
+      }
+
+      // ✅ Booking → open booking details if you have it
+      if (
+        (type === "booking_paid" || type === "booking_new") &&
+        data?.bookingId
+      ) {
+        window.location.href = `/bookings/${data.bookingId}`;
+        console.log(
+          "[push] routing -> booking:",
+          `/bookings/${data.bookingId}`,
+        );
+        return;
+      }
+
+      // default fallback
+      window.location.href = "/browse";
+    } catch (e) {
+      window.location.href = "/browse";
+    }
   });
 }
 
@@ -273,6 +333,31 @@ export default function App() {
       console.log("[push] init failed:", e?.message || e);
     });
   }, [me?.uid]);
+
+  // ✅ Native deep-link support (works with notification taps on some devices)
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+
+    const sub = CapApp.addListener("appUrlOpen", (event) => {
+      try {
+        const url = event?.url || "";
+        if (!url) return;
+
+        // event.url can be like: capacitor://localhost/browse?call=1&room=...
+        const u = new URL(url);
+        const path = u.pathname || "/";
+        const search = u.search || "";
+
+        navigate({ pathname: path, search }, { replace: true });
+      } catch {}
+    });
+
+    return () => {
+      try {
+        sub.remove();
+      } catch {}
+    };
+  }, [navigate]);
 
   useEffect(() => {
     const qs = new URLSearchParams(location.search || "");

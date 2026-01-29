@@ -272,33 +272,39 @@ async function sendFcmToUser(uid, payload) {
       data[k] = typeof v === "string" ? v : JSON.stringify(v);
     }
 
+    const isCall = data.type === "call_incoming" || data.type === "call_missed";
+
+    // ✅ For calls: data-only push (avoid duplicate system notifications)
+    // ✅ For non-calls: keep notification payload so Android shows it even if app is killed
     const message = {
       tokens,
-      notification: {
-        title: payload?.title || "Kpocha Touch",
-        body: payload?.body || "",
-      },
+
+      ...(isCall
+        ? {}
+        : {
+            notification: {
+              title: payload?.title || "Kpocha Touch",
+              body: payload?.body || "",
+            },
+          }),
+
       data,
+
       android: {
         priority: "high",
-        notification: {
-          channelId:
-            data.type === "call_incoming" || data.type === "booking_paid"
-              ? "calls"
-              : "alerts",
-
-          sound: "default",
-        },
+        ...(isCall
+          ? {}
+          : {
+              notification: {
+                channelId: data.type === "booking_paid" ? "calls" : "alerts",
+                sound: "default",
+              },
+            }),
       },
+
       apns: {
-        headers: {
-          "apns-priority": "10",
-        },
-        payload: {
-          aps: {
-            sound: "default",
-          },
-        },
+        headers: { "apns-priority": "10" },
+        payload: { aps: { sound: "default" } },
       },
     };
 

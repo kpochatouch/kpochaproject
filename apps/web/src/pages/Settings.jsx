@@ -80,7 +80,7 @@ export default function SettingsPage() {
   const { success, error, info } = useToast();
 
   // step-by-step view (like BookingDetails “wrapped”)
-  const [step, setStep] = useState("general"); // "general" | "pro" | "payments" | "advanced"
+  const [step, setStep] = useState("general"); // "general" | "pro" | "payments" | "system" | "advanced"
 
   // main docs
   const [me, setMe] = useState(null);
@@ -415,8 +415,8 @@ export default function SettingsPage() {
           setProfileVisible(
             Boolean(
               proData?.professional?.profileVisible ??
-              proData?.profileVisible ??
-              true,
+                proData?.profileVisible ??
+                true,
             ),
           );
           setNationwide(Boolean(proData?.professional?.nationwide ?? false));
@@ -432,10 +432,10 @@ export default function SettingsPage() {
             Array.isArray(proData?.professional?.services)
               ? proData.professional.services
               : Array.isArray(proData?.services)
-                ? proData.services.map((s) =>
-                    typeof s === "string" ? s : s.name,
-                  )
-                : [],
+              ? proData.services.map((s) =>
+                  typeof s === "string" ? s : s.name,
+                )
+              : [],
           );
           setYears(proData?.professional?.years || "");
           const hc = String(proData?.professional?.hasCert || "no");
@@ -446,8 +446,8 @@ export default function SettingsPage() {
               proData.professional.workPhotos.length
               ? proData.professional.workPhotos
               : Array.isArray(proData?.gallery) && proData.gallery.length
-                ? proData.gallery
-                : [""],
+              ? proData.gallery
+              : [""],
           );
 
           setProBio(proData?.bio || proData?.description || "");
@@ -1105,6 +1105,11 @@ export default function SettingsPage() {
           onClick={() => setStep("payments")}
         />
         <StepTab
+          label="System"
+          active={step === "system"}
+          onClick={() => setStep("system")}
+        />
+        <StepTab
           label="Advanced"
           active={step === "advanced"}
           onClick={() => setStep("advanced")}
@@ -1189,8 +1194,8 @@ export default function SettingsPage() {
                     canEditUsername
                       ? "You can change your username now."
                       : nextUsernameChangeAt
-                        ? `Next change: ${nextUsernameChangeAt.toLocaleDateString()}`
-                        : "Temporarily locked."
+                      ? `Next change: ${nextUsernameChangeAt.toLocaleDateString()}`
+                      : "Temporarily locked."
                   }
                 />
               </div>
@@ -1794,6 +1799,47 @@ export default function SettingsPage() {
                 >
                   {savingBank ? "Saving…" : "Save Payment Details"}
                 </button>
+              </div>
+            </section>
+          )}
+
+          {/* SYSTEM */}
+          {step === "system" && (
+            <section className="rounded-xl border border-zinc-800 p-4 bg-black/30">
+              <h2 className="text-lg font-semibold mb-2">System</h2>
+              <p className="text-sm text-zinc-400 mb-4">
+                Control notification behavior on this device.
+              </p>
+
+              <button
+                type="button"
+                className="w-full px-4 py-2 rounded-lg border border-zinc-700 hover:bg-zinc-900 text-sm"
+                onClick={async () => {
+                  // Disable ALL browser/PWA web-push subscriptions for this user
+                  try {
+                    await api.post("/api/push/unsubscribe");
+                  } catch {}
+
+                  // Also attempt to unsubscribe the local browser push subscription (best effort)
+                  try {
+                    if ("serviceWorker" in navigator) {
+                      const reg = await navigator.serviceWorker.ready;
+                      const sub = await reg.pushManager.getSubscription();
+                      if (sub) await sub.unsubscribe();
+                    }
+                  } catch {}
+
+                  alert(
+                    "Browser (Chrome/PWA) notifications disabled for this account on this device.",
+                  );
+                }}
+              >
+                Disable Chrome / Browser notifications
+              </button>
+
+              <div className="text-xs text-zinc-500 mt-3">
+                This stops Chrome/PWA push for <b>your account</b>. It does not
+                affect other users.
               </div>
             </section>
           )}

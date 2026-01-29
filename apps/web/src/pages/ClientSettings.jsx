@@ -630,6 +630,42 @@ export default function ClientSettings() {
               {saving ? "Saving…" : "Save changes"}
             </button>
           </div>
+          {/* System (notifications) */}
+          <section className="pt-6 border-t border-zinc-800">
+            <h2 className="text-lg font-semibold mb-2">System</h2>
+            <p className="text-xs text-zinc-500 mb-3">
+              Use this if you keep getting Chrome notifications in addition to
+              the app.
+            </p>
+
+            <button
+              type="button"
+              className="w-full px-4 py-2 rounded-lg border border-zinc-700 hover:bg-zinc-900 text-sm"
+              onClick={async () => {
+                try {
+                  await api.post("/api/push/unsubscribe");
+                } catch {}
+
+                try {
+                  if ("serviceWorker" in navigator) {
+                    const reg = await navigator.serviceWorker.ready;
+                    const sub = await reg.pushManager.getSubscription();
+                    if (sub) await sub.unsubscribe();
+                  }
+                } catch {}
+
+                alert(
+                  "Browser (Chrome/PWA) notifications disabled for this account on this device.",
+                );
+              }}
+            >
+              Disable Chrome / Browser notifications
+            </button>
+
+            <div className="text-[11px] text-zinc-500 mt-2">
+              This does not edit your profile. It only affects browser/PWA push.
+            </div>
+          </section>
         </form>
       )}
     </div>
