@@ -12,11 +12,21 @@ import android.os.Looper;
 import androidx.annotation.Nullable;
 
 public class CallForegroundService extends Service {
+    public static final String ACTION_STOP = "touch.kpocha.app.CALL_STOP";
     private MediaPlayer player;
     private final Handler handler = new Handler(Looper.getMainLooper());
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        // ✅ hard stop (accept/decline)
+        if (intent != null && ACTION_STOP.equals(intent.getAction())) {
+            stopSelfSafe();
+            return START_NOT_STICKY;
+        }
+
+        if (intent == null)
+            return START_NOT_STICKY;
+
         String fromName = intent.getStringExtra("fromName");
         String callId = intent.getStringExtra("callId");
         String room = intent.getStringExtra("room");
@@ -34,9 +44,10 @@ public class CallForegroundService extends Service {
         CallNotification.ensureChannel(this);
 
         // ✅ Foreground notification (for lockscreen + full screen intent)
+        String fromAvatar = intent.getStringExtra("fromAvatar");
         startForeground(
                 CallNotification.NOTIF_ID,
-                CallNotification.buildIncoming(this, fromName, callId, room, callType));
+                CallNotification.buildIncoming(this, fromName, fromAvatar, callId, room, callType));
 
         // ✅ Loop ringtone ourselves (not notification sound)
         startRinging();

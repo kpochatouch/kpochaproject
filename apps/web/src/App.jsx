@@ -380,13 +380,21 @@ export default function App() {
     }
 
     if (room) {
+      const fromName = qs.get("fromName") || "";
+      const fromAvatar = qs.get("fromAvatar") || "";
+
       setIncomingCall({
         open: true,
         callId,
         room,
         callType,
         fromUid: null,
-        meta: {},
+        meta: {
+          fromName,
+          fromAvatar,
+          callerName: fromName,
+          callerAvatar: fromAvatar,
+        },
       });
     }
 
@@ -396,6 +404,8 @@ export default function App() {
     qs.delete("room");
     qs.delete("callType");
     qs.delete("accept");
+    qs.delete("fromName");
+    qs.delete("fromAvatar");
 
     const nextSearch = qs.toString();
     navigate(

@@ -1,5 +1,6 @@
 // apps/web/src/components/CallSheet.jsx
 import { useEffect, useRef, useState } from "react";
+import { Capacitor } from "@capacitor/core";
 import SignalingClient from "../lib/webrtc/SignalingClient";
 import {
   updateCallStatus,
@@ -133,13 +134,15 @@ export default function CallSheet({
     let stashIce = null;
 
     if (role !== "caller") {
-      // incoming side: start ringtone immediately
-      try {
-        const audio = new Audio("/sound/incoming.mp3");
-        audio.loop = true;
-        incomingToneRef.current = audio;
-        audio.play().catch(() => {});
-      } catch {}
+      // incoming side: start ringtone immediately (web/PWA only)
+      if (!Capacitor.isNativePlatform()) {
+        try {
+          const audio = new Audio("/sound/incoming.mp3");
+          audio.loop = true;
+          incomingToneRef.current = audio;
+          audio.play().catch(() => {});
+        } catch {}
+      }
 
       // stash offer (may arrive before Accept)
       stashOffer = (msg) => {

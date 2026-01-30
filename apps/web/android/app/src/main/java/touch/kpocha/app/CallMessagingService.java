@@ -21,12 +21,15 @@ public class CallMessagingService extends FirebaseMessagingService {
             String room = msg.getData().get("room");
             String callType = msg.getData().get("callType");
             String fromName = msg.getData().get("fromName");
+            String fromAvatar = msg.getData().get("fromAvatar") != null ? msg.getData().get("fromAvatar")
+                    : msg.getData().get("callerAvatar");
 
             Intent svc = new Intent(this, CallForegroundService.class);
             svc.putExtra("callId", callId);
             svc.putExtra("room", room);
             svc.putExtra("callType", callType);
             svc.putExtra("fromName", fromName);
+            svc.putExtra("fromAvatar", fromAvatar);
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                 startForegroundService(svc);
             } else {

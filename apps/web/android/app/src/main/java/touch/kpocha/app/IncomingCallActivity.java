@@ -16,6 +16,7 @@ public class IncomingCallActivity extends Activity {
   private String room;
   private String callType;
   private String fromName;
+  private String fromAvatar;
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {
@@ -25,6 +26,7 @@ public class IncomingCallActivity extends Activity {
     room = getIntent().getStringExtra("room");
     callType = getIntent().getStringExtra("callType");
     fromName = getIntent().getStringExtra("fromName");
+    fromAvatar = getIntent().getStringExtra("fromAvatar");
 
     // Show over lockscreen + turn screen on
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
@@ -51,14 +53,27 @@ public class IncomingCallActivity extends Activity {
 
     accept.setOnClickListener(v -> {
       CallNotification.cancel(this);
-      stopService(new Intent(this, CallForegroundService.class));
+      Intent stop = new Intent(this, CallForegroundService.class);
+      stop.setAction(CallForegroundService.ACTION_STOP);
+      startService(stop);
+
       openCallRoute();
-      finish();
+
+      // ✅ give MainActivity time to come to front before we close this screen
+      new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+        try {
+          finish();
+        } catch (Exception ignored) {
+        }
+      }, 400);
     });
 
     decline.setOnClickListener(v -> {
       CallNotification.cancel(this);
-      stopService(new Intent(this, CallForegroundService.class));
+      Intent stop = new Intent(this, CallForegroundService.class);
+      stop.setAction(CallForegroundService.ACTION_STOP);
+      startService(stop);
+
       finish();
     });
   }
@@ -67,6 +82,8 @@ public class IncomingCallActivity extends Activity {
     // This matches your existing JS handler in App.jsx:
     // /browse?call=1&callId=...&room=...&callType=...
     String url = "capacitor://localhost/browse?call=1&accept=1"
+        + "&fromName=" + enc(fromName)
+        + "&fromAvatar=" + enc(fromAvatar)
         + "&callId=" + enc(callId)
         + "&room=" + enc(room)
         + "&callType=" + enc(callType);

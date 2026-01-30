@@ -51,8 +51,8 @@ public final class CallNotification {
         nm.createNotificationChannel(ch);
     }
 
-    public static Notification buildIncoming(Context ctx, String fromName, String callId, String room,
-            String callType) {
+    public static Notification buildIncoming(Context ctx, String fromName, String fromAvatar, String callId,
+            String room, String callType) {
         ensureChannel(ctx);
 
         // Full-screen UI intent
@@ -61,6 +61,7 @@ public final class CallNotification {
         fs.putExtra("room", room);
         fs.putExtra("callType", callType);
         fs.putExtra("fromName", fromName);
+        fs.putExtra("fromAvatar", fromAvatar);
         fs.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
 
         PendingIntent fullScreenPi = PendingIntent.getActivity(ctx, 1001, fs, pendingFlags());
