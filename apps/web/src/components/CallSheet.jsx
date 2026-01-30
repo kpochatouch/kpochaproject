@@ -31,6 +31,7 @@ export default function CallSheet({
   peerName = "",
   peerAvatar = "",
   chatRoom = null,
+  autoAccept = false,
 }) {
   const [sig, setSig] = useState(null);
   const [pc, setPc] = useState(null);
@@ -66,6 +67,8 @@ export default function CallSheet({
 
   // NEW: queue ICE candidates until remoteDescription is set
   const pendingIceRef = useRef([]);
+
+  const autoAcceptedRef = useRef(false);
 
   function stopAllTones() {
     [callerToneRef, incomingToneRef].forEach((ref) => {
@@ -183,6 +186,7 @@ export default function CallSheet({
       setElapsedSeconds(0);
       setHasAccepted(false);
       setCallFailed(false);
+      autoAcceptedRef.current = false;
     };
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -619,6 +623,25 @@ export default function CallSheet({
       setStarting(false);
     }
   }
+
+  // ✅ Native Accept -> deep link sets autoAccept, so receiver auto-runs acceptIncoming() once
+  useEffect(() => {
+    if (!open) return;
+    if (role === "caller") return;
+    if (!autoAccept) return;
+
+    // wait until signaling is ready
+    if (!sig) return;
+
+    // guard: do not double-accept
+    if (starting) return;
+    if (hasAccepted) return;
+    if (autoAcceptedRef.current) return;
+
+    autoAcceptedRef.current = true;
+    acceptIncoming();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, role, autoAccept, sig]);
 
   async function declineIncoming() {
     stopAllTones();

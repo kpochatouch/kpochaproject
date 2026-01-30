@@ -4,42 +4,141 @@
   android:layout_width="match_parent"
   android:layout_height="match_parent"
   android:orientation="vertical"
-  android:padding="24dp"
-  android:gravity="center"
   android:background="@android:color/black"
+  android:padding="24dp"
 >
 
-  <TextView
-    android:id="@+id/callTitle"
-    android:layout_width="wrap_content"
-    android:layout_height="wrap_content"
-    android:text="Incoming call…"
-    android:textSize="24sp"
-    android:textStyle="bold"
-    android:textColor="@android:color/white"
-    android:paddingBottom="24dp"
-  />
-
+  <!-- Top / center content -->
   <LinearLayout
-    android:layout_width="wrap_content"
-    android:layout_height="wrap_content"
-    android:orientation="horizontal"
+    android:layout_width="match_parent"
+    android:layout_height="0dp"
+    android:layout_weight="1"
+    android:orientation="vertical"
+    android:gravity="center"
   >
 
-    <Button
-      android:id="@+id/btnDecline"
-      android:layout_width="wrap_content"
-      android:layout_height="wrap_content"
-      android:text="Decline"
-      android:layout_marginEnd="12dp"
+    <ImageView
+      android:id="@+id/callAvatar"
+      android:layout_width="120dp"
+      android:layout_height="120dp"
+      android:layout_marginBottom="16dp"
+      android:scaleType="centerCrop"
+      android:src="@android:drawable/sym_def_app_icon"
+      android:background="@drawable/avatar_circle"
+      android:clipToOutline="true"
     />
 
-    <Button
-      android:id="@+id/btnAccept"
+    <TextView
+      android:id="@+id/callTitle"
       android:layout_width="wrap_content"
       android:layout_height="wrap_content"
-      android:text="Accept"
+      android:text="Incoming call…"
+      android:textSize="22sp"
+      android:textStyle="bold"
+      android:textColor="@android:color/white"
+      android:paddingBottom="10dp"
     />
+
+    <TextView
+      android:id="@+id/callSubtitle"
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:text="Swipe up to accept"
+      android:textSize="14sp"
+      android:textColor="#AAAAAA"
+    />
+  </LinearLayout>
+
+  <!-- Bottom bar like WhatsApp -->
+  <LinearLayout
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:paddingBottom="8dp"
+  >
+
+    <!-- Decline -->
+    <LinearLayout
+      android:layout_width="0dp"
+      android:layout_height="wrap_content"
+      android:layout_weight="1"
+      android:orientation="vertical"
+      android:gravity="center"
+    >
+      <ImageButton
+        android:id="@+id/btnDeclineRound"
+        android:layout_width="64dp"
+        android:layout_height="64dp"
+        android:background="@drawable/btn_decline_circle"
+        android:src="@android:drawable/sym_action_call"
+        android:contentDescription="Decline"
+        android:tint="@android:color/white"
+      />
+      <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Decline"
+        android:textColor="#AAAAAA"
+        android:textSize="12sp"
+        android:layout_marginTop="6dp"
+      />
+    </LinearLayout>
+
+    <!-- Accept (big center) -->
+    <LinearLayout
+      android:layout_width="0dp"
+      android:layout_height="wrap_content"
+      android:layout_weight="1"
+      android:orientation="vertical"
+      android:gravity="center"
+    >
+      <ImageButton
+        android:id="@+id/btnAcceptRound"
+        android:layout_width="76dp"
+        android:layout_height="76dp"
+        android:background="@drawable/btn_accept_circle"
+        android:src="@android:drawable/sym_action_call"
+        android:contentDescription="Accept"
+        android:tint="@android:color/black"
+      />
+      <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Accept"
+        android:textColor="#AAAAAA"
+        android:textSize="12sp"
+        android:layout_marginTop="6dp"
+      />
+    </LinearLayout>
+
+    <!-- Message (optional placeholder) -->
+    <LinearLayout
+      android:layout_width="0dp"
+      android:layout_height="wrap_content"
+      android:layout_weight="1"
+      android:orientation="vertical"
+      android:gravity="center"
+    >
+      <ImageButton
+        android:id="@+id/btnMessageRound"
+        android:layout_width="64dp"
+        android:layout_height="64dp"
+        android:background="@drawable/btn_neutral_circle"
+        android:src="@android:drawable/ic_dialog_email"
+        android:contentDescription="Message"
+        android:tint="@android:color/white"
+      />
+      <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Message"
+        android:textColor="#AAAAAA"
+        android:textSize="12sp"
+        android:layout_marginTop="6dp"
+      />
+    </LinearLayout>
+
   </LinearLayout>
 
 </LinearLayout>

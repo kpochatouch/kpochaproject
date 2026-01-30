@@ -328,6 +328,9 @@ export default function App() {
     });
   }, [me?.uid]);
 
+  const [incomingCall, setIncomingCall] = useState(null);
+  const handledCallParamRef = useRef(false);
+
   // ✅ Native deep-link support (works with notification taps on some devices)
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
@@ -394,6 +397,8 @@ export default function App() {
           fromAvatar,
           callerName: fromName,
           callerAvatar: fromAvatar,
+          // ✅ native Accept passes accept=1, so make CallSheet auto-accept once
+          autoAccept: shouldAccept,
         },
       });
     }
@@ -446,8 +451,6 @@ export default function App() {
   }, [me?.uid]);
 
   usePostPaymentRecovery(me);
-  const [incomingCall, setIncomingCall] = useState(null);
-  const handledCallParamRef = useRef(false);
 
   const myLabel =
     me?.displayName ||
@@ -795,6 +798,7 @@ export default function App() {
             ""
           }
           // 🔔 allow call summary bubble for DM chat if chatRoom passed
+          autoAccept={Boolean(incomingCall?.meta?.autoAccept)}
           chatRoom={incomingCall?.meta?.chatRoom || null}
           open={Boolean(incomingCall?.open && incomingCall?.room)}
           onClose={() => setIncomingCall(null)}
