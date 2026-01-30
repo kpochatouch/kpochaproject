@@ -44,12 +44,9 @@ public final class CallNotification {
         ch.enableVibration(true);
         ch.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
 
-        Uri sound = android.provider.Settings.System.DEFAULT_RINGTONE_URI;
-        AudioAttributes aa = new AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
-                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                .build();
-        ch.setSound(sound, aa);
+        // ✅ calls channel must be silent; we do looping ringtone in
+        // CallForegroundService
+        ch.setSound(null, null);
 
         nm.createNotificationChannel(ch);
     }

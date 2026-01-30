@@ -22,8 +22,6 @@ public class CallMessagingService extends FirebaseMessagingService {
             String callType = msg.getData().get("callType");
             String fromName = msg.getData().get("fromName");
 
-            CallNotification.show(this, CallNotification.buildIncoming(this, fromName, callId, room, callType));
-
             Intent svc = new Intent(this, CallForegroundService.class);
             svc.putExtra("callId", callId);
             svc.putExtra("room", room);

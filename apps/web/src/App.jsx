@@ -370,6 +370,15 @@ export default function App() {
     const room = qs.get("room") || null;
     const callType = qs.get("callType") || "audio";
 
+    const shouldAccept = qs.get("accept") === "1";
+
+    if (shouldAccept && callId) {
+      // best-effort: tell backend receiver accepted
+      api
+        .post(`/api/calls/${encodeURIComponent(callId)}/accept`)
+        .catch(() => {});
+    }
+
     if (room) {
       setIncomingCall({
         open: true,
@@ -386,6 +395,7 @@ export default function App() {
     qs.delete("callId");
     qs.delete("room");
     qs.delete("callType");
+    qs.delete("accept");
 
     const nextSearch = qs.toString();
     navigate(

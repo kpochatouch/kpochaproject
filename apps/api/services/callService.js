@@ -223,7 +223,18 @@ export async function createCall({
           title: "Incoming call",
           body: `${callerName || "Someone"} is calling you`,
           priority: "high",
-          data: { callId, room, callType, callerUid },
+          data: {
+            callId,
+            room,
+            callType,
+            callerUid,
+
+            // ✅ these feed your native IncomingCallActivity label
+            fromName: callerName || String(callerUid),
+            callerName: callerName || String(callerUid),
+            fromAvatar: callerAvatar || "",
+            callerAvatar: callerAvatar || "",
+          },
           meta: { source: "callService" },
         });
       } catch (e) {

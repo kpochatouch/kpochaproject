@@ -58,6 +58,7 @@ public class MainActivity extends BridgeActivity {
             }
 
             nm.createNotificationChannel(alerts);
+            CallNotification.ensureChannel(this);
         }
     }
 

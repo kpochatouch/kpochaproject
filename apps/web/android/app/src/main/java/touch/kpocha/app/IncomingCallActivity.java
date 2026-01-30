@@ -66,10 +66,10 @@ public class IncomingCallActivity extends Activity {
   private void openCallRoute() {
     // This matches your existing JS handler in App.jsx:
     // /browse?call=1&callId=...&room=...&callType=...
-    String url = "capacitor://localhost/browse?call=1"
-        + "&callId=" + safe(callId)
-        + "&room=" + safe(room)
-        + "&callType=" + safe(callType);
+    String url = "capacitor://localhost/browse?call=1&accept=1"
+        + "&callId=" + enc(callId)
+        + "&room=" + enc(room)
+        + "&callType=" + enc(callType);
 
     Intent i = new Intent(this, MainActivity.class);
     i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
@@ -77,7 +77,14 @@ public class IncomingCallActivity extends Activity {
     startActivity(i);
   }
 
-  private String safe(String s) {
-    return s == null ? "" : s;
+  private String enc(String s) {
+    try {
+      if (s == null)
+        return "";
+      return java.net.URLEncoder.encode(s, "UTF-8");
+    } catch (Exception e) {
+      return s == null ? "" : s;
+    }
   }
+
 }
