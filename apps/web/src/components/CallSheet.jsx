@@ -8,6 +8,10 @@ import {
   registerSocketHandler,
 } from "../lib/api";
 
+// ---- cross-mount stash (survives CallSheet remounts) ----
+const OFFER_STASH = new Map(); // room -> msg
+const ICE_STASH = new Map(); // room -> [candidates]
+
 /**
  * Props:
  * - room: signaling room string (e.g. "call:abc123")
@@ -153,6 +157,29 @@ export default function CallSheet({
       autoAccept,
       native: Capacitor.isNativePlatform(),
     });
+
+    // ✅ restore stash from a previous CallSheet instance (Android remount)
+    if (role !== "caller") {
+      const savedOffer = OFFER_STASH.get(room);
+      const savedIce = ICE_STASH.get(room);
+
+      if (savedOffer && !pendingOfferRef.current) {
+        pendingOfferRef.current = savedOffer;
+        console.log("[CallSheet] restored stashed offer on mount");
+      }
+
+      if (
+        Array.isArray(savedIce) &&
+        savedIce.length &&
+        !pendingIceRef.current.length
+      ) {
+        pendingIceRef.current = [...savedIce];
+        console.log(
+          "[CallSheet] restored stashed ICE on mount:",
+          pendingIceRef.current.length,
+        );
+      }
+    }
 
     let stashOffer = null;
     let stashIce = null;
@@ -595,19 +622,25 @@ export default function CallSheet({
         dlog("retry offer", { tries });
         sig.emit("webrtc:offer", offerNow);
 
-        // 10 tries * 700ms ≈ 7 seconds
-        if (tries >= 10) {
+        // 30 tries * 1000ms ≈ 30 seconds (covers Android remount / reconnect)
+        if (tries >= 30) {
           clearInterval(offerRetryTimerRef.current);
           offerRetryTimerRef.current = null;
         }
-      }, 700);
+      }, 1000);
     }
-
     return pcNew;
   }
 
   function cleanupPeer() {
     stopAllTones();
+
+    // ✅ call ended -> clear cross-mount stash
+    try {
+      OFFER_STASH.delete(room);
+      ICE_STASH.delete(room);
+    } catch {}
+
     // stop offer retry loop (caller side)
     if (offerRetryTimerRef.current) {
       clearInterval(offerRetryTimerRef.current);
@@ -615,6 +648,16 @@ export default function CallSheet({
     }
 
     // 🔽 clear any stashed signaling so it never leaks into next call
+    // ✅ persist stash across remounts (Android accept can remount CallSheet)
+    try {
+      if (role !== "caller") {
+        if (pendingOfferRef.current)
+          OFFER_STASH.set(room, pendingOfferRef.current);
+        if (pendingIceRef.current?.length)
+          ICE_STASH.set(room, [...pendingIceRef.current]);
+      }
+    } catch {}
+
     pendingOfferRef.current = null;
     pendingIceRef.current = [];
 

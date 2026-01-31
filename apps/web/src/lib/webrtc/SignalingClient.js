@@ -67,7 +67,7 @@ export default class SignalingClient {
 
   // *** THIS IS THE IMPORTANT PART ***
   // always send { room, payload } so backend handler matches
-  emit(evt, payload) {
+  emit(evt, payload, ackCb) {
     if (!this.socket) this.connect();
 
     const body = { room: this.room, payload };
@@ -79,6 +79,9 @@ export default class SignalingClient {
 
     this.socket.emit(evt, body, (ack) => {
       console.log("[SignalingClient] ack", evt, ack);
+      try {
+        if (typeof ackCb === "function") ackCb(ack);
+      } catch {}
     });
   }
 
