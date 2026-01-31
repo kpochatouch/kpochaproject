@@ -66,15 +66,20 @@ public final class CallNotification {
 
         PendingIntent fullScreenPi = PendingIntent.getActivity(ctx, 1001, fs, pendingFlags());
 
-        // Accept action
-        Intent a = new Intent(ctx, CallActionReceiver.class);
-        a.setAction(ACTION_ACCEPT);
-        a.putExtra("callId", callId);
-        a.putExtra("room", room);
-        a.putExtra("callType", callType);
-        a.putExtra("fromName", fromName);
+        // ✅ Accept action -> open web CallSheet via deep link (autoAccept)
+        String url = "capacitor://localhost/browse?call=1&accept=1"
+                + "&fromName=" + safeEnc(fromName)
+                + "&fromAvatar=" + safeEnc(fromAvatar)
+                + "&callId=" + safeEnc(callId)
+                + "&room=" + safeEnc(room)
+                + "&callType=" + safeEnc(callType);
 
-        PendingIntent acceptPi = PendingIntent.getBroadcast(ctx, 2001, a, pendingFlags());
+        Intent a = new Intent(ctx, MainActivity.class);
+        a.setAction(Intent.ACTION_VIEW);
+        a.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        a.setData(android.net.Uri.parse(url));
+
+        PendingIntent acceptPi = PendingIntent.getActivity(ctx, 2001, a, pendingFlags());
 
         // Decline action
         Intent d = new Intent(ctx, CallActionReceiver.class);
@@ -106,6 +111,16 @@ public final class CallNotification {
 
     public static void cancel(Context ctx) {
         NotificationManagerCompat.from(ctx).cancel(NOTIF_ID);
+    }
+
+    private static String safeEnc(String s) {
+        try {
+            if (s == null)
+                return "";
+            return java.net.URLEncoder.encode(s, "UTF-8");
+        } catch (Exception e) {
+            return s == null ? "" : s;
+        }
     }
 
     private static int pendingFlags() {

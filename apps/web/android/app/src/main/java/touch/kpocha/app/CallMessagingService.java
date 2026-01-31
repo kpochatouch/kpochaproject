@@ -17,6 +17,11 @@ public class CallMessagingService extends FirebaseMessagingService {
 
         // ✅ CALL
         if ("incoming_call".equals(type)) {
+            // ✅ If user is already inside the app, do NOT show native call UI / banner.
+            if (MainActivity.isAppInForeground()) {
+                return;
+            }
+
             String callId = msg.getData().get("callId");
             String room = msg.getData().get("room");
             String callType = msg.getData().get("callType");

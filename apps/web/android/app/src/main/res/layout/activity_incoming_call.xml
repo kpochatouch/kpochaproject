@@ -85,14 +85,59 @@
       />
     </LinearLayout>
 
-    <!-- Accept (big center) -->
+      <!-- Accept (big center) -->
     <LinearLayout
+      android:id="@+id/acceptGroup"
       android:layout_width="0dp"
       android:layout_height="wrap_content"
       android:layout_weight="1"
       android:orientation="vertical"
       android:gravity="center"
     >
+
+  <LinearLayout
+        android:id="@+id/acceptArrows"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:layout_marginBottom="8dp"
+      >
+
+  <TextView
+          android:id="@+id/arrow1"
+          android:layout_width="wrap_content"
+          android:layout_height="wrap_content"
+          android:text="▲"
+          android:textSize="14sp"
+          android:textColor="#25D366"
+          android:alpha="0.2"
+        />
+
+  <TextView
+          android:id="@+id/arrow2"
+          android:layout_width="wrap_content"
+          android:layout_height="wrap_content"
+          android:text="▲"
+          android:textSize="16sp"
+          android:textColor="#25D366"
+          android:alpha="0.5"
+          android:layout_marginTop="2dp"
+        />
+
+  <TextView
+          android:id="@+id/arrow3"
+          android:layout_width="wrap_content"
+          android:layout_height="wrap_content"
+          android:text="▲"
+          android:textSize="18sp"
+          android:textColor="#25D366"
+          android:alpha="0.9"
+          android:layout_marginTop="2dp"
+        />
+
+</LinearLayout>
+  
       <ImageButton
         android:id="@+id/btnAcceptRound"
         android:layout_width="76dp"

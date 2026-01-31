@@ -220,7 +220,10 @@ async function initNativePush(apiClient) {
       console.log("[push] actionPerformed type:", type);
 
       // ✅ Incoming call → open Call UI via your existing URL handler
-      if (type === "call_incoming" && data?.room) {
+      if (
+        (type === "incoming_call" || type === "call_incoming") &&
+        data?.room
+      ) {
         const qs = new URLSearchParams();
         qs.set("call", "1");
         if (data.callId) qs.set("callId", String(data.callId));

@@ -74,6 +74,44 @@ public class IncomingCallActivity extends Activity {
     TextView subtitle = findViewById(R.id.callSubtitle);
 
     ImageButton accept = findViewById(R.id.btnAcceptRound);
+
+    // ✅ Make swipe-up work when the finger starts on the Accept button
+    if (accept != null) {
+      accept.setOnTouchListener((v, ev) -> {
+        try {
+          int action = ev.getActionMasked();
+          if (action == MotionEvent.ACTION_DOWN) {
+            downX = ev.getRawX();
+            downY = ev.getRawY();
+            return true;
+          }
+          if (action == MotionEvent.ACTION_UP) {
+            float upX = ev.getRawX();
+            float upY = ev.getRawY();
+            float dx = upX - downX;
+            float dy = upY - downY;
+
+            // Swipe UP = Accept
+            if (dy < -SWIPE_PX && Math.abs(dx) < OFFPATH_PX) {
+              doAccept();
+              return true;
+            }
+
+            // Tap = Accept too
+            doAccept();
+            return true;
+          }
+        } catch (Exception ignored) {
+        }
+        return false;
+      });
+    }
+
+    View arrows = findViewById(R.id.acceptArrows);
+    TextView arrow1 = findViewById(R.id.arrow1);
+    TextView arrow2 = findViewById(R.id.arrow2);
+    TextView arrow3 = findViewById(R.id.arrow3);
+
     ImageButton decline = findViewById(R.id.btnDeclineRound);
     ImageButton message = findViewById(R.id.btnMessageRound);
 
@@ -83,9 +121,17 @@ public class IncomingCallActivity extends Activity {
     String label = (fromName != null && !fromName.isEmpty()) ? fromName : "Someone";
     title.setText(label + " is calling…");
     subtitle.setText("Swipe up to accept");
+    startDanglingArrows(arrows, arrow1, arrow2, arrow3);
+
+    startDanglingAcceptButton(accept);
 
     View root = findViewById(android.R.id.content);
+
     if (root != null) {
+      root.setClickable(true);
+      root.setFocusable(true);
+      root.setFocusableInTouchMode(true);
+
       root.setOnTouchListener((v, ev) -> {
         try {
           if (gestureHandled)
@@ -140,10 +186,6 @@ public class IncomingCallActivity extends Activity {
       accept.setImageResource(
           isVideo ? android.R.drawable.presence_video_online : android.R.drawable.sym_action_call);
 
-    }
-
-    if (accept != null) {
-      accept.setOnClickListener(v -> doAccept());
     }
 
     if (decline != null) {
@@ -208,6 +250,7 @@ public class IncomingCallActivity extends Activity {
       String url = "capacitor://localhost" + target;
 
       Intent i = new Intent(this, MainActivity.class);
+      i.setAction(Intent.ACTION_VIEW);
       i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
       i.setData(android.net.Uri.parse(url));
       startActivity(i);
@@ -223,6 +266,7 @@ public class IncomingCallActivity extends Activity {
       try {
         String url = "capacitor://localhost/inbox";
         Intent i = new Intent(this, MainActivity.class);
+        i.setAction(Intent.ACTION_VIEW);
         i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         i.setData(android.net.Uri.parse(url));
         startActivity(i);
@@ -246,6 +290,7 @@ public class IncomingCallActivity extends Activity {
         + "&callType=" + enc(callType);
 
     Intent i = new Intent(this, MainActivity.class);
+    i.setAction(Intent.ACTION_VIEW);
     i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
     i.setData(android.net.Uri.parse(url));
     startActivity(i);
@@ -302,6 +347,58 @@ public class IncomingCallActivity extends Activity {
         }
       }
     }).start();
+  }
+
+  private void startDanglingArrows(View arrows, TextView a1, TextView a2, TextView a3) {
+    try {
+      if (arrows == null || a1 == null || a2 == null || a3 == null)
+        return;
+
+      // Reset baseline
+      arrows.setTranslationY(0f);
+
+      // Move the stack upward repeatedly
+      android.animation.ObjectAnimator up = android.animation.ObjectAnimator.ofFloat(arrows, "translationY", 14f, -18f);
+      up.setDuration(750);
+      up.setRepeatCount(android.animation.ValueAnimator.INFINITE);
+      up.setRepeatMode(android.animation.ValueAnimator.RESTART);
+
+      // Fade each arrow with small offsets (looks like motion)
+      android.animation.ObjectAnimator f1 = android.animation.ObjectAnimator.ofFloat(a1, "alpha", 0.15f, 0.9f, 0.15f);
+      f1.setDuration(750);
+      f1.setRepeatCount(android.animation.ValueAnimator.INFINITE);
+
+      android.animation.ObjectAnimator f2 = android.animation.ObjectAnimator.ofFloat(a2, "alpha", 0.15f, 0.9f, 0.15f);
+      f2.setDuration(750);
+      f2.setRepeatCount(android.animation.ValueAnimator.INFINITE);
+      f2.setStartDelay(120);
+
+      android.animation.ObjectAnimator f3 = android.animation.ObjectAnimator.ofFloat(a3, "alpha", 0.15f, 0.9f, 0.15f);
+      f3.setDuration(750);
+      f3.setRepeatCount(android.animation.ValueAnimator.INFINITE);
+      f3.setStartDelay(240);
+
+      up.start();
+      f1.start();
+      f2.start();
+      f3.start();
+    } catch (Exception ignored) {
+    }
+  }
+
+  private void startDanglingAcceptButton(ImageButton accept) {
+    try {
+      if (accept == null)
+        return;
+
+      android.animation.ObjectAnimator bob = android.animation.ObjectAnimator.ofFloat(accept, "translationY", 0f, -14f,
+          0f);
+      bob.setDuration(850);
+      bob.setRepeatCount(android.animation.ValueAnimator.INFINITE);
+      bob.setRepeatMode(android.animation.ValueAnimator.RESTART);
+      bob.start();
+    } catch (Exception ignored) {
+    }
   }
 
 }

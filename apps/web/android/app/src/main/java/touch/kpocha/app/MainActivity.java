@@ -11,6 +11,12 @@ import android.webkit.WebView;
 import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
+    // ✅ Foreground tracker: used to suppress call notifications while app is open
+    private static volatile boolean sIsForeground = false;
+
+    public static boolean isAppInForeground() {
+        return sIsForeground;
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -25,6 +31,25 @@ public class MainActivity extends BridgeActivity {
         }
 
         createNotificationChannels();
+
+        // ✅ Cold-start deep link fallback (when app was closed)
+        try {
+            android.net.Uri data = getIntent() != null ? getIntent().getData() : null;
+            if (data != null && getBridge() != null && getBridge().getWebView() != null) {
+                final String u = data.toString(); // capacitor://localhost/...
+                getBridge().getWebView().post(() -> {
+                    try {
+                        String path = u.replace("capacitor://localhost", "");
+                        getBridge().getWebView().evaluateJavascript(
+                                "window.location.href = " + org.json.JSONObject.quote(path) + ";",
+                                null);
+                    } catch (Exception ignored2) {
+                    }
+                });
+            }
+        } catch (Exception ignored) {
+        }
+
     }
 
     private void createNotificationChannels() {
@@ -63,9 +88,48 @@ public class MainActivity extends BridgeActivity {
     }
 
     @Override
-    protected void onNewIntent(android.content.Intent intent) {
+    public void onNewIntent(android.content.Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
+
+        try {
+            if (getBridge() != null) {
+                getBridge().onNewIntent(intent);
+            }
+        } catch (Exception ignored) {
+        }
+
+        // ✅ HARD fallback: if appUrlOpen doesn't fire on this device, force the WebView
+        // route
+        try {
+            android.net.Uri data = intent != null ? intent.getData() : null;
+            if (data != null && getBridge() != null && getBridge().getWebView() != null) {
+                final String u = data.toString(); // e.g. capacitor://localhost/browse?call=1...
+                getBridge().getWebView().post(() -> {
+                    try {
+                        // turn capacitor://localhost/... into a normal in-app path for the SPA
+                        String path = u.replace("capacitor://localhost", "");
+                        getBridge().getWebView().evaluateJavascript(
+                                "window.location.href = " + org.json.JSONObject.quote(path) + ";",
+                                null);
+                    } catch (Exception ignored2) {
+                    }
+                });
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        sIsForeground = true;
+    }
+
+    @Override
+    public void onPause() {
+        sIsForeground = false;
+        super.onPause();
     }
 
 }
