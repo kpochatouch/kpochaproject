@@ -465,6 +465,11 @@ export default function CallSheet({
         });
 
         await pcNew.setRemoteDescription(new RTCSessionDescription(remoteSdp));
+        // stop retrying offer once we got an answer
+        if (offerRetryTimerRef.current) {
+          clearInterval(offerRetryTimerRef.current);
+          offerRetryTimerRef.current = null;
+        }
 
         // NEW: flush any ICE that arrived early
         if (pendingIceRef.current.length) {
@@ -559,51 +564,43 @@ export default function CallSheet({
       lastOfferRef.current = offer;
       dlog("TX offer", { asCaller, signalingState: pcNew.signalingState });
 
-      // Send offer and inspect ack. If nobody received it, retry a few times.
-      sig.emit("webrtc:offer", offer, (ack) => {
-        try {
-          const deliveredTo = ack?.deliveredTo ?? 0;
-          const totalInRoom = ack?.totalInRoom ?? 0;
-          dlog("offer ack", { deliveredTo, totalInRoom });
+      // Send the offer immediately
+      sig.emit("webrtc:offer", offer);
 
-          // receiver not in room yet -> retry offer
-          if (deliveredTo === 0) {
-            // clear existing loop if any
-            if (offerRetryTimerRef.current) {
-              clearInterval(offerRetryTimerRef.current);
-              offerRetryTimerRef.current = null;
-            }
+      // Proactively resend the offer for a few seconds until we get an answer.
+      // This avoids relying on webrtc:need-offer (your server isn't forwarding it).
+      if (offerRetryTimerRef.current) {
+        clearInterval(offerRetryTimerRef.current);
+        offerRetryTimerRef.current = null;
+      }
 
-            let tries = 0;
-            offerRetryTimerRef.current = setInterval(() => {
-              tries += 1;
+      let tries = 0;
+      offerRetryTimerRef.current = setInterval(() => {
+        tries += 1;
 
-              // stop retry if call ended or progressed
-              if (!open || !sig || peerAccepted || hasConnected) {
-                clearInterval(offerRetryTimerRef.current);
-                offerRetryTimerRef.current = null;
-                return;
-              }
+        // stop retry if call ended or progressed
+        if (!open || !sig || peerAccepted || hasConnected) {
+          clearInterval(offerRetryTimerRef.current);
+          offerRetryTimerRef.current = null;
+          return;
+        }
 
-              const offerNow = lastOfferRef.current;
-              if (!offerNow) {
-                clearInterval(offerRetryTimerRef.current);
-                offerRetryTimerRef.current = null;
-                return;
-              }
+        const offerNow = lastOfferRef.current;
+        if (!offerNow) {
+          clearInterval(offerRetryTimerRef.current);
+          offerRetryTimerRef.current = null;
+          return;
+        }
 
-              dlog("retry offer", { tries });
-              sig.emit("webrtc:offer", offerNow);
+        dlog("retry offer", { tries });
+        sig.emit("webrtc:offer", offerNow);
 
-              // 8 tries * 800ms ≈ 6.4 seconds
-              if (tries >= 8) {
-                clearInterval(offerRetryTimerRef.current);
-                offerRetryTimerRef.current = null;
-              }
-            }, 800);
-          }
-        } catch {}
-      });
+        // 10 tries * 700ms ≈ 7 seconds
+        if (tries >= 10) {
+          clearInterval(offerRetryTimerRef.current);
+          offerRetryTimerRef.current = null;
+        }
+      }, 700);
     }
 
     return pcNew;
