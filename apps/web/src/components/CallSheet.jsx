@@ -73,6 +73,13 @@ export default function CallSheet({
 
   const autoAcceptedRef = useRef(false);
 
+  // DEBUG
+  const DEBUG_CALL = true;
+  const dlog = (...args) => {
+    if (!DEBUG_CALL) return;
+    console.log("[CallDBG]", ...args);
+  };
+
   function stopAllTones() {
     [callerToneRef, incomingToneRef].forEach((ref) => {
       try {
@@ -135,6 +142,15 @@ export default function CallSheet({
     );
     sc.connect();
     setSig(sc);
+
+    dlog("sheet open", {
+      role,
+      room,
+      callId,
+      callType,
+      autoAccept,
+      native: Capacitor.isNativePlatform(),
+    });
 
     let stashOffer = null;
     let stashIce = null;
@@ -373,6 +389,12 @@ export default function CallSheet({
     const handleOffer = async (msg) => {
       try {
         const remoteSdp = msg?.payload || msg; // unwrap payload
+        dlog("RX offer", {
+          asCaller,
+          hasRemoteDesc: !!pcNew.remoteDescription,
+          signalingState: pcNew.signalingState,
+        });
+
         await pcNew.setRemoteDescription(new RTCSessionDescription(remoteSdp));
 
         // NEW: flush any ICE that arrived early (receiver side too)
@@ -394,6 +416,7 @@ export default function CallSheet({
         if (!asCaller) {
           const answer = await pcNew.createAnswer();
           await pcNew.setLocalDescription(answer);
+          dlog("TX answer", { asCaller, signalingState: pcNew.signalingState });
           sig.emit("webrtc:answer", answer);
         }
       } catch (e) {
@@ -426,6 +449,12 @@ export default function CallSheet({
         }
 
         const remoteSdp = msg?.payload || msg;
+        dlog("RX answer", {
+          asCaller,
+          signalingState: pcNew.signalingState,
+          hasLocalDesc: !!pcNew.localDescription,
+        });
+
         await pcNew.setRemoteDescription(new RTCSessionDescription(remoteSdp));
 
         // NEW: flush any ICE that arrived early
@@ -454,6 +483,11 @@ export default function CallSheet({
     const onIce = async (msg) => {
       try {
         const cand = msg?.payload || msg;
+        dlog("RX ice", {
+          asCaller,
+          hasRemoteDesc: !!pcNew.remoteDescription,
+          queued: pendingIceRef.current.length,
+        });
         if (!cand) return;
 
         // If remoteDescription not ready yet, store candidate
@@ -472,9 +506,14 @@ export default function CallSheet({
     sig.on("webrtc:ice", onIce);
 
     // ✅ If receiver missed the offer (lockscreen delay), they can request resend
-    const onNeedOffer = async () => {
+    const onNeedOffer = async (msg) => {
       try {
         if (!asCaller) return;
+
+        const req = msg?.payload || msg;
+        dlog("RX need-offer", { req, asCaller, room, callId });
+
+        console.log("[CallSheet] got need-offer", { req, room, callId });
 
         const offer = lastOfferRef.current || pcNew.localDescription;
         if (!offer) {
@@ -509,7 +548,7 @@ export default function CallSheet({
 
       // ✅ remember it for resends (lockscreen / reconnect cases)
       lastOfferRef.current = offer;
-
+      dlog("TX offer", { asCaller, signalingState: pcNew.signalingState });
       sig.emit("webrtc:offer", offer);
     }
 
@@ -657,7 +696,10 @@ export default function CallSheet({
             console.warn(
               "[CallSheet] no offer after accept -> requesting resend",
             );
+            // Send both shapes (some servers wrap in {payload})
+            dlog("TX need-offer", { callId, room });
             sig?.emit("webrtc:need-offer", { callId, room });
+            sig?.emit("webrtc:need-offer", { payload: { callId, room } });
           }
         } catch {}
       }, 800);
