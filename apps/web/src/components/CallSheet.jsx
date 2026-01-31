@@ -68,6 +68,9 @@ export default function CallSheet({
   // NEW: queue ICE candidates until remoteDescription is set
   const pendingIceRef = useRef([]);
 
+  // NEW: keep the latest caller offer so we can resend it if receiver missed it
+  const lastOfferRef = useRef(null);
+
   const autoAcceptedRef = useRef(false);
 
   function stopAllTones() {
@@ -468,8 +471,33 @@ export default function CallSheet({
     sig.on("webrtc:answer", onAnswer);
     sig.on("webrtc:ice", onIce);
 
+    // ✅ If receiver missed the offer (lockscreen delay), they can request resend
+    const onNeedOffer = async () => {
+      try {
+        if (!asCaller) return;
+
+        const offer = lastOfferRef.current || pcNew.localDescription;
+        if (!offer) {
+          console.warn("[CallSheet] need-offer but no local offer to resend");
+          return;
+        }
+
+        console.log("[CallSheet] resend offer -> receiver requested");
+        sig.emit("webrtc:offer", offer);
+      } catch (e) {
+        console.warn("[CallSheet] resend offer failed:", e?.message || e);
+      }
+    };
+
+    sig.on("webrtc:need-offer", onNeedOffer);
+
     // ✅ store handlers so cleanupPeer can remove them later
-    pcNew.__sigHandlers = { onAnswer, onIce, onOffer: handleOffer };
+    pcNew.__sigHandlers = {
+      onAnswer,
+      onIce,
+      onOffer: handleOffer,
+      onNeedOffer,
+    };
 
     // caller creates offer immediately
     if (asCaller) {
@@ -478,6 +506,10 @@ export default function CallSheet({
         offerToReceiveVideo: wantVideo,
       });
       await pcNew.setLocalDescription(offer);
+
+      // ✅ remember it for resends (lockscreen / reconnect cases)
+      lastOfferRef.current = offer;
+
       sig.emit("webrtc:offer", offer);
     }
 
@@ -498,6 +530,7 @@ export default function CallSheet({
         if (h.onAnswer) sig.off("webrtc:answer", h.onAnswer);
         if (h.onIce) sig.off("webrtc:ice", h.onIce);
         if (h.onOffer) sig.off("webrtc:offer", h.onOffer);
+        if (h.onNeedOffer) sig.off("webrtc:need-offer", h.onNeedOffer);
       }
     } catch {}
 
@@ -610,7 +643,24 @@ export default function CallSheet({
       stopAllTones();
       setHasAccepted(true); // 👈 receiver has accepted
       await safeUpdateStatus("accepted");
-      await setupPeerConnection(false);
+
+      const pcNew = await setupPeerConnection(false);
+
+      // ✅ If we still don't have an offer shortly after accept,
+      // request the caller to resend it (lockscreen delay fix).
+      setTimeout(() => {
+        try {
+          const hasOfferNow =
+            !!pendingOfferRef.current || !!pcNew?.remoteDescription;
+
+          if (!hasOfferNow) {
+            console.warn(
+              "[CallSheet] no offer after accept -> requesting resend",
+            );
+            sig?.emit("webrtc:need-offer", { callId, room });
+          }
+        } catch {}
+      }, 800);
     } catch (e) {
       console.error("accept call failed:", e);
       alert(
