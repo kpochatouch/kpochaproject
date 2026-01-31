@@ -70,6 +70,8 @@ export default function CallSheet({
 
   // NEW: keep the latest caller offer so we can resend it if receiver missed it
   const lastOfferRef = useRef(null);
+  // NEW: retry sending offer when receiver wasn't in the room yet
+  const offerRetryTimerRef = useRef(null);
 
   const autoAcceptedRef = useRef(false);
 
@@ -201,6 +203,13 @@ export default function CallSheet({
 
       setSig(null);
       stopAllTones();
+
+      // stop offer retry loop (caller side)
+      if (offerRetryTimerRef.current) {
+        clearInterval(offerRetryTimerRef.current);
+        offerRetryTimerRef.current = null;
+      }
+
       setAutoStarted(false);
       setElapsedSeconds(0);
       setHasAccepted(false);
@@ -549,7 +558,52 @@ export default function CallSheet({
       // ✅ remember it for resends (lockscreen / reconnect cases)
       lastOfferRef.current = offer;
       dlog("TX offer", { asCaller, signalingState: pcNew.signalingState });
-      sig.emit("webrtc:offer", offer);
+
+      // Send offer and inspect ack. If nobody received it, retry a few times.
+      sig.emit("webrtc:offer", offer, (ack) => {
+        try {
+          const deliveredTo = ack?.deliveredTo ?? 0;
+          const totalInRoom = ack?.totalInRoom ?? 0;
+          dlog("offer ack", { deliveredTo, totalInRoom });
+
+          // receiver not in room yet -> retry offer
+          if (deliveredTo === 0) {
+            // clear existing loop if any
+            if (offerRetryTimerRef.current) {
+              clearInterval(offerRetryTimerRef.current);
+              offerRetryTimerRef.current = null;
+            }
+
+            let tries = 0;
+            offerRetryTimerRef.current = setInterval(() => {
+              tries += 1;
+
+              // stop retry if call ended or progressed
+              if (!open || !sig || peerAccepted || hasConnected) {
+                clearInterval(offerRetryTimerRef.current);
+                offerRetryTimerRef.current = null;
+                return;
+              }
+
+              const offerNow = lastOfferRef.current;
+              if (!offerNow) {
+                clearInterval(offerRetryTimerRef.current);
+                offerRetryTimerRef.current = null;
+                return;
+              }
+
+              dlog("retry offer", { tries });
+              sig.emit("webrtc:offer", offerNow);
+
+              // 8 tries * 800ms ≈ 6.4 seconds
+              if (tries >= 8) {
+                clearInterval(offerRetryTimerRef.current);
+                offerRetryTimerRef.current = null;
+              }
+            }, 800);
+          }
+        } catch {}
+      });
     }
 
     return pcNew;
@@ -557,6 +611,11 @@ export default function CallSheet({
 
   function cleanupPeer() {
     stopAllTones();
+    // stop offer retry loop (caller side)
+    if (offerRetryTimerRef.current) {
+      clearInterval(offerRetryTimerRef.current);
+      offerRetryTimerRef.current = null;
+    }
 
     // 🔽 clear any stashed signaling so it never leaks into next call
     pendingOfferRef.current = null;
