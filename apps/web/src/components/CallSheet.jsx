@@ -12,16 +12,6 @@ import {
 const OFFER_STASH = new Map(); // room -> msg
 const ICE_STASH = new Map(); // room -> [candidates]
 
-function persistReceiverStash(room, pendingOfferRef, pendingIceRef) {
-  try {
-    if (!room) return;
-    if (pendingOfferRef?.current)
-      OFFER_STASH.set(room, pendingOfferRef.current);
-    if (pendingIceRef?.current?.length)
-      ICE_STASH.set(room, [...pendingIceRef.current]);
-  } catch {}
-}
-
 /**
  * Props:
  * - room: signaling room string (e.g. "call:abc123")
@@ -195,34 +185,20 @@ export default function CallSheet({
     let stashIce = null;
 
     if (role !== "caller") {
-      // incoming side: start ringtone only for REAL "incoming" state (avoid re-ring after end/remount)
+      // incoming side: start ringtone immediately (web/PWA only)
       if (!Capacitor.isNativePlatform()) {
-        const shouldRing =
-          role !== "caller" &&
-          !autoAccept &&
-          !hasAccepted &&
-          !hasConnected &&
-          !callFailed;
-
-        if (shouldRing && !incomingToneRef.current) {
-          try {
-            const audio = new Audio("/sound/incoming.mp3");
-            audio.loop = true;
-            incomingToneRef.current = audio;
-            audio.play().catch(() => {});
-          } catch {}
-        } else if (!shouldRing) {
-          // ensure we never keep ringing in non-incoming states
-          stopAllTones();
-        }
+        try {
+          const audio = new Audio("/sound/incoming.mp3");
+          audio.loop = true;
+          incomingToneRef.current = audio;
+          audio.play().catch(() => {});
+        } catch {}
       }
 
       // stash offer (may arrive before Accept)
       stashOffer = (msg) => {
-        if (hasAccepted || hasConnected) return; // ignore late offers once accepted/connected
-        pendingOfferRef.current = msg;
-        OFFER_STASH.set(room, msg); // keep cross-mount copy up to date
         console.log("[CallSheet] stashed incoming offer before accept");
+        pendingOfferRef.current = msg;
       };
       sc.on("webrtc:offer", stashOffer);
 
@@ -231,7 +207,6 @@ export default function CallSheet({
         const cand = msg?.payload || msg;
         if (!cand) return;
         pendingIceRef.current.push(cand);
-        ICE_STASH.set(room, [...pendingIceRef.current]);
         console.log(
           "[CallSheet] stashed ICE before accept",
           pendingIceRef.current.length,
@@ -245,11 +220,6 @@ export default function CallSheet({
         if (stashOffer) sc.off("webrtc:offer", stashOffer);
         if (stashIce) sc.off("webrtc:ice", stashIce);
       } catch {}
-
-      // ✅ if Android remounts CallSheet, persist receiver stash BEFORE wiping refs
-      if (role !== "caller") {
-        persistReceiverStash(room, pendingOfferRef, pendingIceRef);
-      }
 
       try {
         sc.disconnect();
@@ -677,10 +647,16 @@ export default function CallSheet({
       offerRetryTimerRef.current = null;
     }
 
-    // ✅ If Android remounts CallSheet mid-call, persist stash before clearing
-    if (role !== "caller") {
-      persistReceiverStash(room, pendingOfferRef, pendingIceRef);
-    }
+    // 🔽 clear any stashed signaling so it never leaks into next call
+    // ✅ persist stash across remounts (Android accept can remount CallSheet)
+    try {
+      if (role !== "caller") {
+        if (pendingOfferRef.current)
+          OFFER_STASH.set(room, pendingOfferRef.current);
+        if (pendingIceRef.current?.length)
+          ICE_STASH.set(room, [...pendingIceRef.current]);
+      }
+    } catch {}
 
     pendingOfferRef.current = null;
     pendingIceRef.current = [];

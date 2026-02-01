@@ -1,4 +1,4 @@
-//app/web/android/app/src/main/java/touch/kpocha/app/CallNotification.java
+//apps/web/android/app/src/main/java/touch/kpocha/app/CallNotification.java
 package touch.kpocha.app;
 
 import android.app.Notification;
@@ -74,12 +74,15 @@ public final class CallNotification {
                 + "&room=" + safeEnc(room)
                 + "&callType=" + safeEnc(callType);
 
-        Intent a = new Intent(ctx, MainActivity.class);
-        a.setAction(Intent.ACTION_VIEW);
-        a.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-        a.setData(android.net.Uri.parse(url));
+        Intent a = new Intent(ctx, CallActionReceiver.class);
+        a.setAction(ACTION_ACCEPT);
+        a.putExtra("callId", callId);
+        a.putExtra("room", room);
+        a.putExtra("callType", callType);
+        a.putExtra("fromName", fromName);
+        a.putExtra("fromAvatar", fromAvatar);
 
-        PendingIntent acceptPi = PendingIntent.getActivity(ctx, 2001, a, pendingFlags());
+        PendingIntent acceptPi = PendingIntent.getBroadcast(ctx, 2001, a, pendingFlags());
 
         // Decline action
         Intent d = new Intent(ctx, CallActionReceiver.class);
