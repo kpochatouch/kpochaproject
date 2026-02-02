@@ -7,7 +7,7 @@ import {
   useLocation,
   useNavigate,
 } from "react-router-dom";
-import { Capacitor } from "@capacitor/core";
+import { Capacitor, registerPlugin } from "@capacitor/core";
 import { App as CapApp } from "@capacitor/app";
 import { PushNotifications } from "@capacitor/push-notifications";
 import { api, registerSocketHandler } from "./lib/api";
@@ -26,6 +26,8 @@ import usePostPaymentRecovery from "./hooks/usePostPaymentRecovery";
 import { ensurePushSubscribed, getDeviceId } from "./lib/pushClient";
 import MobileTabBar from "./components/MobileTabBar.jsx";
 console.log("[push] App.jsx loaded");
+
+const NotifStatus = registerPlugin("NotifStatus");
 
 // ---------- pages (lazy) ----------
 const Home = lazy(() => import("./pages/Home.jsx"));
@@ -333,6 +335,7 @@ export default function App() {
 
   const [incomingCall, setIncomingCall] = useState(null);
   const handledCallParamRef = useRef(false);
+  const [notifWarn, setNotifWarn] = useState(null);
 
   // ✅ Native deep-link support (works with notification taps on some devices)
   useEffect(() => {
@@ -360,6 +363,51 @@ export default function App() {
   }, [navigate]);
 
   useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+
+    let alive = true;
+
+    async function checkNow() {
+      try {
+        const st = await NotifStatus.getStatus();
+        if (!alive) return;
+
+        const appEnabled = Boolean(st?.appEnabled);
+        const callsEnabled = Boolean(st?.callsEnabled);
+
+        if (!appEnabled || !callsEnabled) {
+          setNotifWarn({ appEnabled, callsEnabled });
+        } else {
+          setNotifWarn(null);
+        }
+      } catch {
+        // If plugin not available for any reason, don't block user
+        setNotifWarn(null);
+      }
+    }
+
+    // check on first mount
+    checkNow();
+
+    // check when app regains focus
+    const onFocus = () => checkNow();
+    window.addEventListener("focus", onFocus);
+
+    // check when returning to app (native)
+    const sub = CapApp.addListener("appStateChange", (s) => {
+      if (s?.isActive) checkNow();
+    });
+
+    return () => {
+      alive = false;
+      window.removeEventListener("focus", onFocus);
+      try {
+        sub?.remove();
+      } catch {}
+    };
+  }, []);
+
+  useEffect(() => {
     const qs = new URLSearchParams(location.search || "");
     const isCall = qs.get("call") === "1";
 
@@ -375,7 +423,6 @@ export default function App() {
     const callId = qs.get("callId") || null;
     const room = qs.get("room") || null;
     const callType = qs.get("callType") || "audio";
-
     const shouldAccept = qs.get("accept") === "1";
 
     if (shouldAccept && callId) {
@@ -539,6 +586,42 @@ export default function App() {
       <div className="min-h-screen flex flex-col bg-black text-white">
         {/* global click → custom event used by menus/overlays */}
         <ClickOutsideLayer />
+
+        {Capacitor.isNativePlatform() && notifWarn && (
+          <div className="fixed top-3 left-3 right-3 z-[9999] rounded-2xl border border-zinc-700 bg-black/90 p-4 shadow-xl">
+            <div className="text-sm font-semibold text-white">
+              Turn on notifications for the best call experience
+            </div>
+
+            <div className="mt-1 text-xs text-zinc-300">
+              {notifWarn.appEnabled
+                ? "Calls notifications are OFF. Incoming calls may not show the call screen."
+                : "App notifications are OFF. Incoming calls may not show the call screen."}
+            </div>
+
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                className="px-3 py-2 rounded-xl bg-emerald-500 text-black text-xs font-bold"
+                onClick={async () => {
+                  try {
+                    await NotifStatus.openAppNotificationSettings();
+                  } catch {}
+                }}
+              >
+                Open Settings
+              </button>
+
+              <button
+                type="button"
+                className="px-3 py-2 rounded-xl border border-zinc-600 text-white text-xs"
+                onClick={() => setNotifWarn(null)}
+              >
+                Not now
+              </button>
+            </div>
+          </div>
+        )}
 
         {!hideChrome && <Navbar />}
 
