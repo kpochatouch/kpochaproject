@@ -453,7 +453,13 @@ export default function CallSheet({
           const answer = await pcNew.createAnswer();
           await pcNew.setLocalDescription(answer);
           dlog("TX answer", { asCaller, signalingState: pcNew.signalingState });
+
+          // send WebRTC answer first
           sig.emit("webrtc:answer", answer);
+
+          // NOW it is safe to tell backend "accepted"
+          // (caller should not stop offer resend until they get this answer)
+          safeUpdateStatus("accepted").catch(() => {});
         }
       } catch (e) {
         console.error("[CallSheet] handle offer failed:", e);
@@ -605,8 +611,8 @@ export default function CallSheet({
       offerRetryTimerRef.current = setInterval(() => {
         tries += 1;
 
-        // stop retry if call ended or progressed
-        if (!open || !sig || peerAccepted || hasConnected) {
+        // stop retry only when the call is actually progressing at WebRTC level
+        if (!open || !sig || hasConnected) {
           clearInterval(offerRetryTimerRef.current);
           offerRetryTimerRef.current = null;
           return;
@@ -778,11 +784,7 @@ export default function CallSheet({
         callType,
       });
 
-      stopAllTones();
       setHasAccepted(true); // 👈 receiver has accepted
-      await safeUpdateStatus("accepted");
-
-      const pcNew = await setupPeerConnection(false);
 
       // ✅ If we still don't have an offer shortly after accept,
       // request the caller to resend it (lockscreen delay fix).
