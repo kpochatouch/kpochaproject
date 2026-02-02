@@ -12,8 +12,8 @@ import androidx.core.app.NotificationManagerCompat;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.Plugin;
+import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
-import com.getcapacitor.annotation.PluginMethod;
 
 @CapacitorPlugin(name = "NotifStatus")
 public class NotifStatusPlugin extends Plugin {
