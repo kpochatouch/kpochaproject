@@ -785,7 +785,7 @@ export default function CallSheet({
       });
 
       setHasAccepted(true); // 👈 receiver has accepted
-
+      const pcNew = await setupPeerConnection(false);
       // ✅ If we still don't have an offer shortly after accept,
       // request the caller to resend it (lockscreen delay fix).
       setTimeout(() => {
