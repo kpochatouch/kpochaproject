@@ -369,18 +369,24 @@ export default function App() {
 
     async function checkNow() {
       try {
+        console.log("[NotifStatus] checkNow: calling native plugin...");
         const st = await NotifStatus.getStatus();
+        console.log("[NotifStatus] status result:", st);
+
         if (!alive) return;
 
         const appEnabled = Boolean(st?.appEnabled);
         const callsEnabled = Boolean(st?.callsEnabled);
+
+        console.log("[NotifStatus] parsed:", { appEnabled, callsEnabled });
 
         if (!appEnabled || !callsEnabled) {
           setNotifWarn({ appEnabled, callsEnabled });
         } else {
           setNotifWarn(null);
         }
-      } catch {
+      } catch (e) {
+        console.log("[NotifStatus] getStatus FAILED:", e);
         // If plugin not available for any reason, don't block user
         setNotifWarn(null);
       }
