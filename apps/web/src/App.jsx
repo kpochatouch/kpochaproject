@@ -593,13 +593,6 @@ export default function App() {
         {/* global click → custom event used by menus/overlays */}
         <ClickOutsideLayer />
 
-        {/* ✅ TEMP DEBUG: remove later */}
-        {Capacitor.isNativePlatform() && (
-          <div className="fixed bottom-3 left-3 right-3 z-[9999] rounded-xl border border-zinc-800 bg-black/80 p-2 text-[11px] text-zinc-200">
-            {notifDbg || "[NotifStatus] no debug yet"}
-          </div>
-        )}
-
         {Capacitor.isNativePlatform() && notifWarn && (
           <div className="fixed top-3 left-3 right-3 z-[9999] rounded-2xl border border-zinc-700 bg-black/90 p-4 shadow-xl">
             <div className="text-sm font-semibold text-white">
