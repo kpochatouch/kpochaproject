@@ -39,6 +39,20 @@ public class IncomingCallActivity extends Activity {
   private int SWIPE_PX; // computed at runtime
   private int OFFPATH_PX; // computed at runtime
 
+  private View acceptSwipeContainer;
+
+  // keep references so we can stop animations immediately when gesture starts
+  private View acceptArrows;
+  private android.animation.ObjectAnimator arrowsUpAnim;
+  private android.animation.ObjectAnimator arrow1Anim;
+  private android.animation.ObjectAnimator arrow2Anim;
+  private android.animation.ObjectAnimator arrow3Anim;
+  private android.animation.ObjectAnimator acceptBobAnim;
+
+  private float gestureStartXRaw = 0f;
+  private float gestureStartYRaw = 0f;
+  private boolean gestureDragging = false;
+
   @Override
   protected void onCreate(Bundle savedInstanceState) {
     super.onCreate(savedInstanceState);
@@ -74,40 +88,107 @@ public class IncomingCallActivity extends Activity {
     TextView subtitle = findViewById(R.id.callSubtitle);
 
     ImageButton accept = findViewById(R.id.btnAcceptRound);
+    acceptSwipeContainer = findViewById(R.id.acceptSwipeContainer);
 
-    // ✅ Make swipe-up work when the finger starts on the Accept button
+    // ✅ WhatsApp-like swipe on the Accept button:
+    // UP = Accept, LEFT = Decline, RIGHT = Message
     if (accept != null) {
       accept.setOnTouchListener((v, ev) -> {
         try {
           int action = ev.getActionMasked();
+
           if (action == MotionEvent.ACTION_DOWN) {
-            downX = ev.getRawX();
-            downY = ev.getRawY();
+            stopDanglingNow(); // ✅ stop instruction animation immediately
+            gestureStartXRaw = ev.getRawX();
+            gestureStartYRaw = ev.getRawY();
+            gestureDragging = true;
             return true;
           }
-          if (action == MotionEvent.ACTION_UP) {
-            float upX = ev.getRawX();
-            float upY = ev.getRawY();
-            float dx = upX - downX;
-            float dy = upY - downY;
 
-            // Swipe UP = Accept
-            if (dy < -SWIPE_PX && Math.abs(dx) < OFFPATH_PX) {
-              doAccept();
+          if (action == MotionEvent.ACTION_MOVE && gestureDragging) {
+            float dx = ev.getRawX() - gestureStartXRaw; // left negative, right positive
+            float dy = ev.getRawY() - gestureStartYRaw; // up negative
+
+            float clampX = Math.max(-SWIPE_PX * 1.2f, Math.min(SWIPE_PX * 1.2f, dx));
+            float clampY = Math.max(-SWIPE_PX * 1.2f, Math.min(0f, dy)); // only allow UP
+
+            if (acceptSwipeContainer != null) {
+              acceptSwipeContainer.setTranslationX(clampX);
+              acceptSwipeContainer.setTranslationY(clampY);
+            }
+
+            if (acceptArrows != null) {
+              float progress = Math.min(1f, Math.abs(clampY) / (float) SWIPE_PX);
+              acceptArrows.setAlpha(1f - (0.35f * progress));
+            }
+
+            return true;
+          }
+
+          if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+            gestureDragging = false;
+
+            float dx = ev.getRawX() - gestureStartXRaw;
+            float dy = ev.getRawY() - gestureStartYRaw;
+
+            boolean swipeUp = dy < -SWIPE_PX && Math.abs(dx) < OFFPATH_PX;
+            boolean swipeLeft = dx < -SWIPE_PX && Math.abs(dy) < OFFPATH_PX;
+            boolean swipeRight = dx > SWIPE_PX && Math.abs(dy) < OFFPATH_PX;
+
+            if (swipeUp) {
+              if (acceptSwipeContainer != null) {
+                acceptSwipeContainer.animate()
+                    .translationY(-SWIPE_PX * 1.4f)
+                    .translationX(0f)
+                    .setDuration(140)
+                    .withEndAction(this::doAccept)
+                    .start();
+              } else {
+                doAccept();
+              }
               return true;
             }
 
-            // Tap = Accept too
-            doAccept();
+            if (swipeLeft) {
+              if (acceptSwipeContainer != null) {
+                acceptSwipeContainer.animate()
+                    .translationX(-SWIPE_PX * 1.4f)
+                    .translationY(0f)
+                    .setDuration(140)
+                    .withEndAction(this::doDecline)
+                    .start();
+              } else {
+                doDecline();
+              }
+              return true;
+            }
+
+            if (swipeRight) {
+              if (acceptSwipeContainer != null) {
+                acceptSwipeContainer.animate()
+                    .translationX(SWIPE_PX * 1.4f)
+                    .translationY(0f)
+                    .setDuration(140)
+                    .withEndAction(this::doMessage)
+                    .start();
+              } else {
+                doMessage();
+              }
+              return true;
+            }
+
+            // Not enough swipe: snap back and do nothing
+            snapBackSwipeUI();
             return true;
           }
+
         } catch (Exception ignored) {
         }
         return false;
       });
     }
 
-    View arrows = findViewById(R.id.acceptArrows);
+    acceptArrows = findViewById(R.id.acceptArrows);
     TextView arrow1 = findViewById(R.id.arrow1);
     TextView arrow2 = findViewById(R.id.arrow2);
     TextView arrow3 = findViewById(R.id.arrow3);
@@ -121,8 +202,8 @@ public class IncomingCallActivity extends Activity {
     String label = (fromName != null && !fromName.isEmpty()) ? fromName : "Someone";
     title.setText(label + " is calling…");
     subtitle.setText("Swipe up to accept");
-    startDanglingArrows(arrows, arrow1, arrow2, arrow3);
 
+    startDanglingArrows(acceptArrows, arrow1, arrow2, arrow3);
     startDanglingAcceptButton(accept);
 
     View root = findViewById(android.R.id.content);
@@ -196,6 +277,40 @@ public class IncomingCallActivity extends Activity {
       message.setOnClickListener(v -> doMessage());
     }
 
+  }
+
+  private void stopDanglingNow() {
+    try {
+      if (arrowsUpAnim != null)
+        arrowsUpAnim.cancel();
+      if (arrow1Anim != null)
+        arrow1Anim.cancel();
+      if (arrow2Anim != null)
+        arrow2Anim.cancel();
+      if (arrow3Anim != null)
+        arrow3Anim.cancel();
+      if (acceptBobAnim != null)
+        acceptBobAnim.cancel();
+
+      if (acceptArrows != null) {
+        acceptArrows.animate().cancel();
+        acceptArrows.setTranslationY(0f);
+        acceptArrows.setAlpha(1f);
+      }
+    } catch (Exception ignored) {
+    }
+  }
+
+  private void snapBackSwipeUI() {
+    try {
+      if (acceptSwipeContainer != null) {
+        acceptSwipeContainer.animate().translationX(0f).translationY(0f).setDuration(160).start();
+      }
+      if (acceptArrows != null) {
+        acceptArrows.animate().alpha(1f).setDuration(160).start();
+      }
+    } catch (Exception ignored) {
+    }
   }
 
   private void doAccept() {
@@ -357,31 +472,29 @@ public class IncomingCallActivity extends Activity {
       // Reset baseline
       arrows.setTranslationY(0f);
 
-      // Move the stack upward repeatedly
-      android.animation.ObjectAnimator up = android.animation.ObjectAnimator.ofFloat(arrows, "translationY", 14f, -18f);
-      up.setDuration(750);
-      up.setRepeatCount(android.animation.ValueAnimator.INFINITE);
-      up.setRepeatMode(android.animation.ValueAnimator.RESTART);
+      arrowsUpAnim = android.animation.ObjectAnimator.ofFloat(arrows, "translationY", 14f, -18f);
+      arrowsUpAnim.setDuration(750);
+      arrowsUpAnim.setRepeatCount(android.animation.ValueAnimator.INFINITE);
+      arrowsUpAnim.setRepeatMode(android.animation.ValueAnimator.RESTART);
 
-      // Fade each arrow with small offsets (looks like motion)
-      android.animation.ObjectAnimator f1 = android.animation.ObjectAnimator.ofFloat(a1, "alpha", 0.15f, 0.9f, 0.15f);
-      f1.setDuration(750);
-      f1.setRepeatCount(android.animation.ValueAnimator.INFINITE);
+      arrow1Anim = android.animation.ObjectAnimator.ofFloat(a1, "alpha", 0.15f, 0.9f, 0.15f);
+      arrow1Anim.setDuration(750);
+      arrow1Anim.setRepeatCount(android.animation.ValueAnimator.INFINITE);
 
-      android.animation.ObjectAnimator f2 = android.animation.ObjectAnimator.ofFloat(a2, "alpha", 0.15f, 0.9f, 0.15f);
-      f2.setDuration(750);
-      f2.setRepeatCount(android.animation.ValueAnimator.INFINITE);
-      f2.setStartDelay(120);
+      arrow2Anim = android.animation.ObjectAnimator.ofFloat(a2, "alpha", 0.15f, 0.9f, 0.15f);
+      arrow2Anim.setDuration(750);
+      arrow2Anim.setRepeatCount(android.animation.ValueAnimator.INFINITE);
+      arrow2Anim.setStartDelay(120);
 
-      android.animation.ObjectAnimator f3 = android.animation.ObjectAnimator.ofFloat(a3, "alpha", 0.15f, 0.9f, 0.15f);
-      f3.setDuration(750);
-      f3.setRepeatCount(android.animation.ValueAnimator.INFINITE);
-      f3.setStartDelay(240);
+      arrow3Anim = android.animation.ObjectAnimator.ofFloat(a3, "alpha", 0.15f, 0.9f, 0.15f);
+      arrow3Anim.setDuration(750);
+      arrow3Anim.setRepeatCount(android.animation.ValueAnimator.INFINITE);
+      arrow3Anim.setStartDelay(240);
 
-      up.start();
-      f1.start();
-      f2.start();
-      f3.start();
+      arrowsUpAnim.start();
+      arrow1Anim.start();
+      arrow2Anim.start();
+      arrow3Anim.start();
     } catch (Exception ignored) {
     }
   }
@@ -391,12 +504,11 @@ public class IncomingCallActivity extends Activity {
       if (accept == null)
         return;
 
-      android.animation.ObjectAnimator bob = android.animation.ObjectAnimator.ofFloat(accept, "translationY", 0f, -14f,
-          0f);
-      bob.setDuration(850);
-      bob.setRepeatCount(android.animation.ValueAnimator.INFINITE);
-      bob.setRepeatMode(android.animation.ValueAnimator.RESTART);
-      bob.start();
+      acceptBobAnim = android.animation.ObjectAnimator.ofFloat(accept, "translationY", 0f, -14f, 0f);
+      acceptBobAnim.setDuration(850);
+      acceptBobAnim.setRepeatCount(android.animation.ValueAnimator.INFINITE);
+      acceptBobAnim.setRepeatMode(android.animation.ValueAnimator.RESTART);
+      acceptBobAnim.start();
     } catch (Exception ignored) {
     }
   }

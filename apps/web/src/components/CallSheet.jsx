@@ -359,8 +359,10 @@ export default function CallSheet({
     const wantVideo = mode === "video" && !camOff;
 
     const iceServers = await SignalingClient.getIceServers();
+    console.log("[ICECFG] iceServers", iceServers);
 
     const pcNew = new RTCPeerConnection({ iceServers });
+
     setPc(pcNew);
 
     // local media

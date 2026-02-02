@@ -1,3 +1,4 @@
+//apps/web/android/app/src/main/java/touch/kpocha/app/CallActionReceiver.java
 package touch.kpocha.app;
 
 import android.content.BroadcastReceiver;
@@ -7,7 +8,8 @@ import android.content.Intent;
 public class CallActionReceiver extends BroadcastReceiver {
   @Override
   public void onReceive(Context ctx, Intent intent) {
-    if (ctx == null || intent == null) return;
+    if (ctx == null || intent == null)
+      return;
 
     String action = intent.getAction();
 
@@ -18,24 +20,26 @@ public class CallActionReceiver extends BroadcastReceiver {
       } catch (Exception ignored) {
       }
       try {
-        ctx.stopService(new Intent(ctx, CallForegroundService.class));
+        Intent stop = new Intent(ctx, CallForegroundService.class);
+        stop.setAction(CallForegroundService.ACTION_STOP);
+        ctx.startService(stop);
       } catch (Exception ignored) {
       }
 
-      // 2) Go DIRECTLY to the web CallSheet via deep link (no native IncomingCallActivity hop)
+      // 2) Go DIRECTLY to the web CallSheet via deep link (no native
+      // IncomingCallActivity hop)
       String fromName = intent.getStringExtra("fromName");
       String fromAvatar = intent.getStringExtra("fromAvatar");
       String callId = intent.getStringExtra("callId");
       String room = intent.getStringExtra("room");
       String callType = intent.getStringExtra("callType");
 
-      String url =
-          "capacitor://localhost/browse?call=1&accept=1"
-              + "&fromName=" + safeEnc(fromName)
-              + "&fromAvatar=" + safeEnc(fromAvatar)
-              + "&callId=" + safeEnc(callId)
-              + "&room=" + safeEnc(room)
-              + "&callType=" + safeEnc(callType);
+      String url = "capacitor://localhost/browse?call=1&accept=1"
+          + "&fromName=" + safeEnc(fromName)
+          + "&fromAvatar=" + safeEnc(fromAvatar)
+          + "&callId=" + safeEnc(callId)
+          + "&room=" + safeEnc(room)
+          + "&callType=" + safeEnc(callType);
 
       Intent open = new Intent(ctx, MainActivity.class);
       open.setAction(Intent.ACTION_VIEW);
@@ -44,6 +48,12 @@ public class CallActionReceiver extends BroadcastReceiver {
               | Intent.FLAG_ACTIVITY_SINGLE_TOP
               | Intent.FLAG_ACTIVITY_CLEAR_TOP);
       open.setData(android.net.Uri.parse(url));
+
+      open.putExtra("callId", callId);
+      open.putExtra("room", room);
+      open.putExtra("callType", callType);
+      open.putExtra("fromName", fromName);
+      open.putExtra("fromAvatar", fromAvatar);
 
       ctx.startActivity(open);
       return;
@@ -55,7 +65,9 @@ public class CallActionReceiver extends BroadcastReceiver {
       } catch (Exception ignored) {
       }
       try {
-        ctx.stopService(new Intent(ctx, CallForegroundService.class));
+        Intent stop = new Intent(ctx, CallForegroundService.class);
+        stop.setAction(CallForegroundService.ACTION_STOP);
+        ctx.startService(stop);
       } catch (Exception ignored) {
       }
     }
@@ -63,7 +75,8 @@ public class CallActionReceiver extends BroadcastReceiver {
 
   private static String safeEnc(String s) {
     try {
-      if (s == null) return "";
+      if (s == null)
+        return "";
       return java.net.URLEncoder.encode(s, "UTF-8");
     } catch (Exception e) {
       return s == null ? "" : s;

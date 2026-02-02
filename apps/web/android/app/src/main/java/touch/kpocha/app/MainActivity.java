@@ -34,19 +34,42 @@ public class MainActivity extends BridgeActivity {
         createNotificationChannels();
 
         // ✅ Cold-start deep link fallback (when app was closed)
+        // Retry a few times so the SPA/router is definitely ready before forcing
+        // navigation.
         try {
             android.net.Uri data = getIntent() != null ? getIntent().getData() : null;
             if (data != null && getBridge() != null && getBridge().getWebView() != null) {
                 final String u = data.toString(); // capacitor://localhost/...
-                getBridge().getWebView().post(() -> {
-                    try {
-                        String path = u.replace("capacitor://localhost", "");
-                        getBridge().getWebView().evaluateJavascript(
-                                "window.location.href = " + org.json.JSONObject.quote(path) + ";",
-                                null);
-                    } catch (Exception ignored2) {
+                final String path = u.replace("capacitor://localhost", "");
+
+                final android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
+                final int[] tries = new int[] { 0 };
+
+                Runnable r = new Runnable() {
+                    @Override
+                    public void run() {
+                        tries[0] += 1;
+                        try {
+                            // If WebView isn't initialized enough yet, retry briefly
+                            if (getBridge() == null || getBridge().getWebView() == null) {
+                                if (tries[0] < 10)
+                                    h.postDelayed(this, 120);
+                                return;
+                            }
+
+                            getBridge().getWebView().evaluateJavascript(
+                                    "window.location.href = " + org.json.JSONObject.quote(path) + ";",
+                                    null);
+                        } catch (Exception ignored2) {
+                        }
+
+                        // Retry a few times to survive slow cold-starts
+                        if (tries[0] < 5)
+                            h.postDelayed(this, 180);
                     }
-                });
+                };
+
+                h.postDelayed(r, 120);
             }
         } catch (Exception ignored) {
         }
@@ -100,22 +123,40 @@ public class MainActivity extends BridgeActivity {
         } catch (Exception ignored) {
         }
 
-        // ✅ HARD fallback: if appUrlOpen doesn't fire on this device, force the WebView
-        // route
+        // ✅ HARD fallback: force the WebView route (with retry, to survive slow router
+        // load)
         try {
             android.net.Uri data = intent != null ? intent.getData() : null;
-            if (data != null && getBridge() != null && getBridge().getWebView() != null) {
+            if (data != null) {
                 final String u = data.toString(); // e.g. capacitor://localhost/browse?call=1...
-                getBridge().getWebView().post(() -> {
-                    try {
-                        // turn capacitor://localhost/... into a normal in-app path for the SPA
-                        String path = u.replace("capacitor://localhost", "");
-                        getBridge().getWebView().evaluateJavascript(
-                                "window.location.href = " + org.json.JSONObject.quote(path) + ";",
-                                null);
-                    } catch (Exception ignored2) {
+                final String path = u.replace("capacitor://localhost", "");
+
+                final android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
+                final int[] tries = new int[] { 0 };
+
+                Runnable r = new Runnable() {
+                    @Override
+                    public void run() {
+                        tries[0] += 1;
+                        try {
+                            if (getBridge() == null || getBridge().getWebView() == null) {
+                                if (tries[0] < 10)
+                                    h.postDelayed(this, 120);
+                                return;
+                            }
+
+                            getBridge().getWebView().evaluateJavascript(
+                                    "window.location.href = " + org.json.JSONObject.quote(path) + ";",
+                                    null);
+                        } catch (Exception ignored2) {
+                        }
+
+                        if (tries[0] < 5)
+                            h.postDelayed(this, 180);
                     }
-                });
+                };
+
+                h.postDelayed(r, 60);
             }
         } catch (Exception ignored) {
         }
