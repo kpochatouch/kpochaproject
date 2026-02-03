@@ -109,21 +109,70 @@ export default class SignalingClient {
 
   // get ICE servers from backend
   static async getIceServers() {
+    // IMPORTANT:
+    // Your Android log shows DNS failures resolving *.metered.ca.
+    // So on native (Capacitor), we filter those out to avoid ICE failure.
+    // We always add a known-good STUN fallback.
+
+    const isNative =
+      typeof window !== "undefined" &&
+      !!window?.Capacitor?.isNativePlatform?.() &&
+      window.Capacitor.isNativePlatform();
+
+    const SAFE_STUN = [
+      {
+        urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"],
+      },
+    ];
+
+    function normalizeIce(list) {
+      const arr = Array.isArray(list) ? list : [];
+      return arr
+        .map((s) => {
+          if (!s) return null;
+          // allow either {urls: "..."} or {urls:[...]}
+          const urls = Array.isArray(s.urls) ? s.urls : s.urls ? [s.urls] : [];
+          return { ...s, urls };
+        })
+        .filter(Boolean);
+    }
+
+    function filterBadHosts(servers) {
+      // Filter out metered.* hosts that fail DNS on some mobile networks
+      // (error -105 in your adb logcat).
+      const BAD = ["metered.ca"];
+
+      return servers
+        .map((s) => {
+          const urls = (s.urls || []).filter((u) => {
+            const lu = String(u || "").toLowerCase();
+            return !BAD.some((h) => lu.includes(h));
+          });
+          return { ...s, urls };
+        })
+        .filter((s) => (s.urls || []).length);
+    }
+
     try {
       const res = await api.get("/api/webrtc/ice");
-      const ice = res?.data?.iceServers || res?.data || [];
-      console.log("[getIceServers] using backend ICE:", ice);
+      const raw = res?.data?.iceServers || res?.data || [];
+      let ice = normalizeIce(raw);
+
+      if (isNative) {
+        ice = filterBadHosts(ice);
+      }
+
+      // Always include safe STUN at the end
+      ice = [...ice, ...SAFE_STUN];
+
+      console.log("[getIceServers] using ICE:", { isNative, ice });
       return ice;
     } catch (err) {
       console.warn(
-        "[getIceServers] backend failed, using default STUN",
+        "[getIceServers] backend failed, using SAFE STUN",
         err?.message || err,
       );
-      return [
-        {
-          urls: ["stun:stun.l.google.com:19302"],
-        },
-      ];
+      return SAFE_STUN;
     }
   }
 }
