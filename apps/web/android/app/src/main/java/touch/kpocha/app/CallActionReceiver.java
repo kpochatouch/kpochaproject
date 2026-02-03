@@ -4,14 +4,18 @@ package touch.kpocha.app;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.util.Log;
 
 public class CallActionReceiver extends BroadcastReceiver {
+  private static final String TAG = "CallActionReceiver";
+
   @Override
   public void onReceive(Context ctx, Intent intent) {
     if (ctx == null || intent == null)
       return;
 
     String action = intent.getAction();
+    Log.d(TAG, "onReceive action=" + action + " extras=" + intent.getExtras());
 
     if (CallNotification.ACTION_ACCEPT.equals(action)) {
       // 1) stop the foreground ringing + notification immediately
@@ -54,6 +58,7 @@ public class CallActionReceiver extends BroadcastReceiver {
       open.putExtra("callType", callType);
       open.putExtra("fromName", fromName);
       open.putExtra("fromAvatar", fromAvatar);
+      Log.d(TAG, "starting MainActivity deepLink=" + url);
 
       ctx.startActivity(open);
       return;

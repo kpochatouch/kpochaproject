@@ -2,11 +2,13 @@
 package touch.kpocha.app;
 
 import android.content.Intent;
+import android.util.Log;
 
 import com.google.firebase.messaging.FirebaseMessagingService;
 import com.google.firebase.messaging.RemoteMessage;
 
 public class CallMessagingService extends FirebaseMessagingService {
+    private static final String TAG = "CallMessaging";
 
     @Override
     public void onMessageReceived(RemoteMessage msg) {
@@ -14,9 +16,12 @@ public class CallMessagingService extends FirebaseMessagingService {
             return;
 
         String type = msg.getData().get("type");
+        Log.d(TAG, "onMessageReceived type=" + type + " data=" + msg.getData());
 
         // ✅ CALL
         if ("incoming_call".equals(type)) {
+            Log.d(TAG, "incoming_call: appInForeground=" + MainActivity.isAppInForeground());
+
             // ✅ If user is already inside the app, do NOT show native call UI / banner.
             if (MainActivity.isAppInForeground()) {
                 return;
@@ -28,6 +33,8 @@ public class CallMessagingService extends FirebaseMessagingService {
             String fromName = msg.getData().get("fromName");
             String fromAvatar = msg.getData().get("fromAvatar") != null ? msg.getData().get("fromAvatar")
                     : msg.getData().get("callerAvatar");
+
+            Log.d(TAG, "starting CallForegroundService callId=" + callId + " room=" + room + " callType=" + callType);
 
             Intent svc = new Intent(this, CallForegroundService.class);
             svc.putExtra("callId", callId);

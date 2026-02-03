@@ -8,18 +8,24 @@ import android.net.Uri;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.util.Log;
 
 import androidx.annotation.Nullable;
 
 public class CallForegroundService extends Service {
+    private static final String TAG = "CallForeground";
+
     public static final String ACTION_STOP = "touch.kpocha.app.CALL_STOP";
     private MediaPlayer player;
     private final Handler handler = new Handler(Looper.getMainLooper());
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        Log.d(TAG, "onStartCommand action=" + (intent != null ? intent.getAction() : "null") + " extras="
+                + (intent != null ? intent.getExtras() : "null"));
         // ✅ hard stop (accept/decline)
         if (intent != null && ACTION_STOP.equals(intent.getAction())) {
+            Log.d(TAG, "ACTION_STOP received -> stopSelfSafe()");
             stopSelfSafe();
             return START_NOT_STICKY;
         }
@@ -31,6 +37,8 @@ public class CallForegroundService extends Service {
         String callId = intent.getStringExtra("callId");
         String room = intent.getStringExtra("room");
         String callType = intent.getStringExtra("callType");
+
+        Log.d(TAG, "ring start callId=" + callId + " room=" + room + " callType=" + callType + " fromName=" + fromName);
 
         int ringSeconds = 30; // WhatsApp-like default
         try {
@@ -93,6 +101,8 @@ public class CallForegroundService extends Service {
     }
 
     private void stopSelfSafe() {
+        Log.d(TAG, "stopSelfSafe()");
+
         try {
             stopRinging();
             CallNotification.cancel(this);

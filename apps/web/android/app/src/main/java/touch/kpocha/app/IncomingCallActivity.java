@@ -8,6 +8,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Log;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
@@ -23,7 +24,7 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 
 public class IncomingCallActivity extends Activity {
-
+  private static final String TAG = "IncomingCall";
   private String callId;
   private String room;
   private String callType;
@@ -63,6 +64,7 @@ public class IncomingCallActivity extends Activity {
     fromName = getIntent().getStringExtra("fromName");
     fromAvatar = getIntent().getStringExtra("fromAvatar");
     chatRoom = getIntent().getStringExtra("chatRoom");
+    Log.d(TAG, "onCreate callId=" + callId + " room=" + room + " callType=" + callType + " fromName=" + fromName);
 
     // Show over lockscreen + turn screen on
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
@@ -314,6 +316,7 @@ public class IncomingCallActivity extends Activity {
   }
 
   private void doAccept() {
+    Log.d(TAG, "doAccept() callId=" + callId + " room=" + room);
     CallNotification.cancel(this);
 
     Intent stop = new Intent(this, CallForegroundService.class);
@@ -408,6 +411,7 @@ public class IncomingCallActivity extends Activity {
     i.setAction(Intent.ACTION_VIEW);
     i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
     i.setData(android.net.Uri.parse(url));
+    Log.d(TAG, "openCallRoute url=" + url);
     startActivity(i);
   }
 

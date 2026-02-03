@@ -5,12 +5,15 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.util.Log;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 
 import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
+    private static final String TAG = "MainActivity";
+
     // ✅ Foreground tracker: used to suppress call notifications while app is open
     private static volatile boolean sIsForeground = false;
 
@@ -21,6 +24,8 @@ public class MainActivity extends BridgeActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        Log.d(TAG, "onCreate intent=" + getIntent());
+        Log.d(TAG, "onCreate data=" + (getIntent() != null ? getIntent().getDataString() : "null"));
         registerPlugin(touch.kpocha.app.NotifStatusPlugin.class);
 
         // ✅ Allow autoplay (including sound) without user gesture in Android WebView
@@ -41,6 +46,7 @@ public class MainActivity extends BridgeActivity {
             if (data != null && getBridge() != null && getBridge().getWebView() != null) {
                 final String u = data.toString(); // capacitor://localhost/...
                 final String path = u.replace("capacitor://localhost", "");
+                Log.d(TAG, "cold-start forcing WebView route path=" + path);
 
                 final android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
                 final int[] tries = new int[] { 0 };
@@ -115,6 +121,8 @@ public class MainActivity extends BridgeActivity {
     public void onNewIntent(android.content.Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
+        Log.d(TAG, "onNewIntent intent=" + intent);
+        Log.d(TAG, "onNewIntent data=" + (intent != null ? intent.getDataString() : "null"));
 
         try {
             if (getBridge() != null) {
@@ -130,6 +138,7 @@ public class MainActivity extends BridgeActivity {
             if (data != null) {
                 final String u = data.toString(); // e.g. capacitor://localhost/browse?call=1...
                 final String path = u.replace("capacitor://localhost", "");
+                Log.d(TAG, "forcing WebView route path=" + path);
 
                 final android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
                 final int[] tries = new int[] { 0 };

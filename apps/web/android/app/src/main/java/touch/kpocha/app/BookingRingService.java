@@ -5,6 +5,7 @@ import android.app.Service;
 import android.content.Intent;
 import android.media.MediaPlayer;
 import android.net.Uri;
+import android.util.Log;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
@@ -64,16 +65,17 @@ public class BookingRingService extends Service {
         }
     }
 
-  private void stopRinging() {
-    try {
-      if (player != null) {
-        if (player.isPlaying()) player.stop();
-        player.release();
-      }
-    } catch (Exception ignored) {
+    private void stopRinging() {
+        try {
+            if (player != null) {
+                if (player.isPlaying())
+                    player.stop();
+                player.release();
+            }
+        } catch (Exception ignored) {
+        }
+        player = null;
     }
-    player = null;
-  }
 
     private void stopSelfSafe() {
         try {
