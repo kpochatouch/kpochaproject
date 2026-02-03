@@ -38,6 +38,8 @@ public class IncomingCallActivity extends Activity {
 
   private int SWIPE_PX; // computed at runtime
   private int OFFPATH_PX; // computed at runtime
+  private static volatile boolean sAccepting = false;
+  private long lastAcceptMs = 0;
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {
@@ -199,6 +201,13 @@ public class IncomingCallActivity extends Activity {
   }
 
   private void doAccept() {
+    long now = android.os.SystemClock.uptimeMillis();
+    if (sAccepting || (now - lastAcceptMs) < 1500) {
+      return;
+    }
+    sAccepting = true;
+    lastAcceptMs = now;
+
     CallNotification.cancel(this);
 
     Intent stop = new Intent(this, CallForegroundService.class);
@@ -217,12 +226,15 @@ public class IncomingCallActivity extends Activity {
     openCallRoute();
 
     // give MainActivity time to come to front before we close this screen
-    new Handler(Looper.getMainLooper()).postDelayed(() -> {
-      try {
-        finish();
-      } catch (Exception ignored) {
-      }
-    }, 400);
+    try {
+      finish();
+    } catch (Exception ignored) {
+    } finally {
+      // release debounce after a short delay, but Activity is already gone
+      new Handler(Looper.getMainLooper()).postDelayed(() -> {
+        sAccepting = false;
+      }, 600);
+    }
   }
 
   private void doDecline() {

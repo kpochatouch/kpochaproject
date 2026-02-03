@@ -12,6 +12,15 @@ import {
 const OFFER_STASH = new Map(); // room -> msg
 const ICE_STASH = new Map(); // room -> [candidates]
 
+// ---- stable signaling pool (prevents double-connect on remount/double-open) ----
+const SIG_POOL = new Map(); // key -> { sc, refs }
+function sigKey(room, role) {
+  return `${room}::${role}`;
+}
+
+// ---- receiver start guard (prevents double-start side effects) ----
+const START_GUARD = new Set(); // room -> started (receiver only)
+
 /**
  * Props:
  * - room: signaling room string (e.g. "call:abc123")
@@ -79,6 +88,20 @@ export default function CallSheet({
 
   const autoAcceptedRef = useRef(false);
 
+  // ---- receiver correctness guards ----
+  const acceptOnceRef = useRef(false); // prevents double acceptIncoming
+  const acceptedRef = useRef(false); // true immediately when accept starts
+  const answeredRef = useRef(false); // true after we send answer
+  const lastOfferHashRef = useRef(null); // dedupe identical offers
+  const stashHandlersAttachedRef = useRef(false);
+
+  function hashSdp(sdp) {
+    if (!sdp) return "";
+    let h = 0;
+    for (let i = 0; i < sdp.length; i++) h = (h * 31 + sdp.charCodeAt(i)) | 0;
+    return String(h);
+  }
+
   // DEBUG
   const DEBUG_CALL = true;
   const dlog = (...args) => {
@@ -142,11 +165,22 @@ export default function CallSheet({
   useEffect(() => {
     if (!open || !room) return;
 
-    const sc = new SignalingClient(
-      room,
-      role === "caller" ? "caller" : "receiver",
-    );
-    sc.connect();
+    const pooledRole = role === "caller" ? "caller" : "receiver";
+    const key = sigKey(room, pooledRole);
+
+    let sc;
+    const pooled = SIG_POOL.get(key);
+
+    if (pooled?.sc) {
+      sc = pooled.sc;
+      pooled.refs += 1;
+      SIG_POOL.set(key, pooled);
+    } else {
+      sc = new SignalingClient(room, pooledRole);
+      sc.connect();
+      SIG_POOL.set(key, { sc, refs: 1 });
+    }
+
     setSig(sc);
 
     dlog("sheet open", {
@@ -195,24 +229,31 @@ export default function CallSheet({
         } catch {}
       }
 
-      // stash offer (may arrive before Accept)
-      stashOffer = (msg) => {
-        console.log("[CallSheet] stashed incoming offer before accept");
-        pendingOfferRef.current = msg;
-      };
-      sc.on("webrtc:offer", stashOffer);
+      // attach stash handlers once per mounted CallSheet instance
+      if (!stashHandlersAttachedRef.current) {
+        stashHandlersAttachedRef.current = true;
 
-      // stash ICE (may arrive before Accept)
-      stashIce = (msg) => {
-        const cand = msg?.payload || msg;
-        if (!cand) return;
-        pendingIceRef.current.push(cand);
-        console.log(
-          "[CallSheet] stashed ICE before accept",
-          pendingIceRef.current.length,
-        );
-      };
-      sc.on("webrtc:ice", stashIce);
+        stashOffer = (msg) => {
+          if (!acceptedRef.current) {
+            console.log("[CallSheet] stashed incoming offer before accept");
+          }
+          pendingOfferRef.current = msg;
+        };
+        sc.on("webrtc:offer", stashOffer);
+
+        stashIce = (msg) => {
+          const cand = msg?.payload || msg;
+          if (!cand) return;
+          pendingIceRef.current.push(cand);
+          if (!acceptedRef.current) {
+            console.log(
+              "[CallSheet] stashed ICE before accept",
+              pendingIceRef.current.length,
+            );
+          }
+        };
+        sc.on("webrtc:ice", stashIce);
+      }
     }
 
     return () => {
@@ -222,12 +263,27 @@ export default function CallSheet({
       } catch {}
 
       try {
-        sc.disconnect();
-      } catch {}
+        const pooledRole = role === "caller" ? "caller" : "receiver";
+        const key = sigKey(room, pooledRole);
+        const pooled = SIG_POOL.get(key);
 
+        if (pooled?.sc) {
+          pooled.refs -= 1;
+          if (pooled.refs <= 0) {
+            try {
+              pooled.sc.disconnect();
+            } catch {}
+            SIG_POOL.delete(key);
+          } else {
+            SIG_POOL.set(key, pooled);
+          }
+        }
+      } catch {}
+      // clear any stashed signaling so it never leaks into next open
       pendingOfferRef.current = null;
       pendingIceRef.current = [];
 
+      stashHandlersAttachedRef.current = false;
       setSig(null);
       stopAllTones();
 
@@ -242,6 +298,13 @@ export default function CallSheet({
       setHasAccepted(false);
       setCallFailed(false);
       autoAcceptedRef.current = false;
+      acceptOnceRef.current = false;
+      acceptedRef.current = false;
+      answeredRef.current = false;
+      lastOfferHashRef.current = null;
+      try {
+        START_GUARD.delete(room);
+      } catch {}
     };
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -424,7 +487,22 @@ export default function CallSheet({
     // signaling listeners
     const handleOffer = async (msg) => {
       try {
-        const remoteSdp = msg?.payload || msg; // unwrap payload
+        // Receiver only: never process offers twice after we already answered
+        if (!asCaller && answeredRef.current) {
+          dlog("ignore offer: already answered");
+          return;
+        }
+
+        const remoteSdp = msg?.payload || msg;
+        const sdpText = remoteSdp?.sdp || "";
+        const offerHash = hashSdp(sdpText);
+
+        if (!asCaller && offerHash && lastOfferHashRef.current === offerHash) {
+          dlog("ignore duplicate offer (same SDP)");
+          return;
+        }
+        if (!asCaller && offerHash) lastOfferHashRef.current = offerHash;
+
         dlog("RX offer", {
           asCaller,
           hasRemoteDesc: !!pcNew.remoteDescription,
@@ -433,7 +511,7 @@ export default function CallSheet({
 
         await pcNew.setRemoteDescription(new RTCSessionDescription(remoteSdp));
 
-        // NEW: flush any ICE that arrived early (receiver side too)
+        // Flush ICE that arrived early
         if (pendingIceRef.current.length) {
           const queued = [...pendingIceRef.current];
           pendingIceRef.current = [];
@@ -454,6 +532,9 @@ export default function CallSheet({
           await pcNew.setLocalDescription(answer);
           dlog("TX answer", { asCaller, signalingState: pcNew.signalingState });
           sig.emit("webrtc:answer", answer);
+
+          // ✅ mark answered: ignore any further offers from resend loop
+          answeredRef.current = true;
         }
       } catch (e) {
         console.error("[CallSheet] handle offer failed:", e);
@@ -467,8 +548,9 @@ export default function CallSheet({
     // 🔴 NEW: if we already received an offer BEFORE Accept, handle it now
     if (!asCaller && pendingOfferRef.current) {
       console.log("[CallSheet] processing stashed offer after accept");
-      handleOffer(pendingOfferRef.current);
-      pendingOfferRef.current = null;
+      const stashed = pendingOfferRef.current;
+      pendingOfferRef.current = null; // clear first to avoid re-entrancy
+      handleOffer(stashed);
     }
 
     const onAnswer = async (msg) => {
@@ -689,10 +771,15 @@ export default function CallSheet({
     setElapsedSeconds(0); // reset duration when call ends
     setCallFailed(false); // 👈 reset failure flag
 
+    // reset receiver guards
+    acceptOnceRef.current = false;
+    acceptedRef.current = false;
+    answeredRef.current = false;
+    lastOfferHashRef.current = null;
+
     try {
-      sig?.disconnect();
+      START_GUARD.delete(room);
     } catch {}
-    setSig(null);
 
     // stop local & remote streams
     if (localRef.current?.srcObject) {
@@ -768,6 +855,23 @@ export default function CallSheet({
 
   async function acceptIncoming() {
     if (!sig || !room) return;
+
+    // ✅ receiver start guard MUST be checked BEFORE locking acceptOnceRef
+    if (START_GUARD.has(room)) {
+      console.log("[CallDBG] receiver start guarded:", room);
+      return;
+    }
+
+    // ✅ hard guard: accept only once per CallSheet lifecycle
+    if (acceptOnceRef.current) {
+      console.log("[CallDBG] acceptIncoming ignored: already accepted");
+      return;
+    }
+    acceptOnceRef.current = true;
+
+    // ✅ mark accepted immediately so stashOffer/stashIce stop acting "pre-accept"
+    acceptedRef.current = true;
+
     setStarting(true);
     try {
       console.log("[CallSheet] acceptIncoming()", {
@@ -779,8 +883,11 @@ export default function CallSheet({
       });
 
       stopAllTones();
-      setHasAccepted(true); // 👈 receiver has accepted
+      setHasAccepted(true);
       await safeUpdateStatus("accepted");
+
+      // ✅ receiver start guard (prevents double-start side effects)
+      START_GUARD.add(room);
 
       const pcNew = await setupPeerConnection(false);
 
