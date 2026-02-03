@@ -37,48 +37,7 @@ public class MainActivity extends BridgeActivity {
         }
 
         createNotificationChannels();
-
-        // ✅ Cold-start deep link fallback (when app was closed)
-        // Retry a few times so the SPA/router is definitely ready before forcing
-        // navigation.
-        try {
-            android.net.Uri data = getIntent() != null ? getIntent().getData() : null;
-            if (data != null && getBridge() != null && getBridge().getWebView() != null) {
-                final String u = data.toString(); // capacitor://localhost/...
-                final String path = u.replace("capacitor://localhost", "");
-                Log.d(TAG, "cold-start forcing WebView route path=" + path);
-
-                final android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
-                final int[] tries = new int[] { 0 };
-
-                Runnable r = new Runnable() {
-                    @Override
-                    public void run() {
-                        tries[0] += 1;
-                        try {
-                            // If WebView isn't initialized enough yet, retry briefly
-                            if (getBridge() == null || getBridge().getWebView() == null) {
-                                if (tries[0] < 10)
-                                    h.postDelayed(this, 120);
-                                return;
-                            }
-
-                            getBridge().getWebView().evaluateJavascript(
-                                    "window.location.href = " + org.json.JSONObject.quote(path) + ";",
-                                    null);
-                        } catch (Exception ignored2) {
-                        }
-
-                        // Retry a few times to survive slow cold-starts
-                        if (tries[0] < 5)
-                            h.postDelayed(this, 180);
-                    }
-                };
-
-                h.postDelayed(r, 120);
-            }
-        } catch (Exception ignored) {
-        }
+        forwardDeepLinkOnce(getIntent());
 
     }
 
@@ -117,6 +76,41 @@ public class MainActivity extends BridgeActivity {
         }
     }
 
+    // ✅ One-time deep link fallback (NO retry spam)
+    // Capacitor normally delivers deep links via appUrlOpen to App.jsx.
+    // This is only a safety net for cold/slow starts.
+    private void forwardDeepLinkOnce(android.content.Intent intent) {
+        try {
+            android.net.Uri data = intent != null ? intent.getData() : null;
+            if (data == null)
+                return;
+
+            final String u = data.toString(); // capacitor://localhost/...
+            final String path = u.replace("capacitor://localhost", "");
+
+            if (path == null || path.trim().length() == 0 || "/".equals(path.trim())) {
+                Log.d(TAG, "forwardDeepLinkOnce: ignoring empty path");
+                return;
+            }
+
+            Log.d(TAG, "forwardDeepLinkOnce path=" + path);
+
+            final android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
+            h.postDelayed(() -> {
+                try {
+                    if (getBridge() == null || getBridge().getWebView() == null)
+                        return;
+
+                    getBridge().getWebView().evaluateJavascript(
+                            "window.location.href = " + org.json.JSONObject.quote(path) + ";",
+                            null);
+                } catch (Exception ignored) {
+                }
+            }, 250);
+        } catch (Exception ignored) {
+        }
+    }
+
     @Override
     public void onNewIntent(android.content.Intent intent) {
         super.onNewIntent(intent);
@@ -131,44 +125,8 @@ public class MainActivity extends BridgeActivity {
         } catch (Exception ignored) {
         }
 
-        // ✅ HARD fallback: force the WebView route (with retry, to survive slow router
-        // load)
-        try {
-            android.net.Uri data = intent != null ? intent.getData() : null;
-            if (data != null) {
-                final String u = data.toString(); // e.g. capacitor://localhost/browse?call=1...
-                final String path = u.replace("capacitor://localhost", "");
-                Log.d(TAG, "forcing WebView route path=" + path);
+        forwardDeepLinkOnce(intent);
 
-                final android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
-                final int[] tries = new int[] { 0 };
-
-                Runnable r = new Runnable() {
-                    @Override
-                    public void run() {
-                        tries[0] += 1;
-                        try {
-                            if (getBridge() == null || getBridge().getWebView() == null) {
-                                if (tries[0] < 10)
-                                    h.postDelayed(this, 120);
-                                return;
-                            }
-
-                            getBridge().getWebView().evaluateJavascript(
-                                    "window.location.href = " + org.json.JSONObject.quote(path) + ";",
-                                    null);
-                        } catch (Exception ignored2) {
-                        }
-
-                        if (tries[0] < 5)
-                            h.postDelayed(this, 180);
-                    }
-                };
-
-                h.postDelayed(r, 60);
-            }
-        } catch (Exception ignored) {
-        }
     }
 
     @Override
