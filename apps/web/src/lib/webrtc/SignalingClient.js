@@ -9,10 +9,14 @@ export default class SignalingClient {
     this.role = role;
     this.socket = null;
     this.joined = false;
+    this.joining = false;
+
     this._handlers = new Map(); // evt -> Set(handlers)
+
+    // ✅ queue emits until room:join ack says ok
+    this._outbox = []; // [{ evt, payload, ackCb }]
   }
 
-  // connect and join the call room
   connect() {
     if (this.socket) return this.socket;
 
@@ -22,16 +26,52 @@ export default class SignalingClient {
       role: this.role,
     });
 
+    this.joining = true;
+
     this.socket.emit(
       "room:join",
       { room: this.room, who: `call:${this.role}` },
       (ack) => {
         console.log("[SignalingClient] room:join ack", ack);
+
         this.joined = !!ack?.ok;
+        this.joining = false;
+
+        // ✅ flush any queued signaling that happened before join completed
+        if (this.joined && this._outbox.length) {
+          const queued = [...this._outbox];
+          this._outbox.length = 0;
+          for (const item of queued) {
+            try {
+              this._emitNow(item.evt, item.payload, item.ackCb);
+            } catch {}
+          }
+          console.log("[SignalingClient] flushed outbox", queued.length);
+        }
       },
     );
 
     return this.socket;
+  }
+
+  _emitNow(evt, payload, ackCb) {
+    if (!this.socket) this.connect();
+
+    const body = { room: this.room, payload };
+
+    console.log("[SignalingClient] emit", evt, {
+      room: this.room,
+      hasPayload: !!payload,
+      joined: this.joined,
+      queued: this._outbox.length,
+    });
+
+    this.socket.emit(evt, body, (ack) => {
+      console.log("[SignalingClient] ack", evt, ack);
+      try {
+        if (typeof ackCb === "function") ackCb(ack);
+      } catch {}
+    });
   }
 
   // listen for signaling events
@@ -70,19 +110,19 @@ export default class SignalingClient {
   emit(evt, payload, ackCb) {
     if (!this.socket) this.connect();
 
-    const body = { room: this.room, payload };
+    // ✅ If join not completed yet, queue this signal
+    if (!this.joined) {
+      this._outbox.push({ evt, payload, ackCb });
+      console.log("[SignalingClient] queued (not joined yet)", evt, {
+        room: this.room,
+        queued: this._outbox.length,
+      });
 
-    console.log("[SignalingClient] emit", evt, {
-      room: this.room,
-      hasPayload: !!payload,
-    });
+      // make sure connect() has been called (it has), so join is in-flight
+      return;
+    }
 
-    this.socket.emit(evt, body, (ack) => {
-      console.log("[SignalingClient] ack", evt, ack);
-      try {
-        if (typeof ackCb === "function") ackCb(ack);
-      } catch {}
-    });
+    this._emitNow(evt, payload, ackCb);
   }
 
   // leave the room
@@ -103,8 +143,12 @@ export default class SignalingClient {
     } catch {}
 
     this.socket.emit("room:leave", { room: this.room });
+    try {
+      this._outbox.length = 0;
+    } catch {}
     this.socket = null;
     this.joined = false;
+    this.joining = false;
   }
 
   // get ICE servers from backend

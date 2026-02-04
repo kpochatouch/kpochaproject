@@ -18,6 +18,26 @@ function sigKey(room, role) {
   return `${room}::${role}`;
 }
 
+function releaseSigPool(room, role) {
+  try {
+    const pooledRole = role === "caller" ? "caller" : "receiver";
+    const key = sigKey(room, pooledRole);
+    const pooled = SIG_POOL.get(key);
+
+    if (pooled?.sc) {
+      pooled.refs -= 1;
+      if (pooled.refs <= 0) {
+        try {
+          pooled.sc.disconnect(); // this emits room:leave
+        } catch {}
+        SIG_POOL.delete(key);
+      } else {
+        SIG_POOL.set(key, pooled);
+      }
+    }
+  } catch {}
+}
+
 // ---- receiver start guard (prevents double-start side effects) ----
 const START_GUARD = new Set(); // room -> started (receiver only)
 
@@ -94,6 +114,10 @@ export default function CallSheet({
   const answeredRef = useRef(false); // true after we send answer
   const lastOfferHashRef = useRef(null); // dedupe identical offers
   const stashHandlersAttachedRef = useRef(false);
+
+  // track stash handlers so we can detach them after accept
+  const stashOfferHandlerRef = useRef(null);
+  const stashIceHandlerRef = useRef(null);
 
   function hashSdp(sdp) {
     if (!sdp) return "";
@@ -234,24 +258,27 @@ export default function CallSheet({
         stashHandlersAttachedRef.current = true;
 
         stashOffer = (msg) => {
-          if (!acceptedRef.current) {
-            console.log("[CallSheet] stashed incoming offer before accept");
-          }
+          if (acceptedRef.current) return; // pre-accept only
+          console.log("[CallSheet] stashed incoming offer before accept");
           pendingOfferRef.current = msg;
         };
-        sc.on("webrtc:offer", stashOffer);
 
         stashIce = (msg) => {
+          if (acceptedRef.current) return; // pre-accept only
           const cand = msg?.payload || msg;
           if (!cand) return;
           pendingIceRef.current.push(cand);
-          if (!acceptedRef.current) {
-            console.log(
-              "[CallSheet] stashed ICE before accept",
-              pendingIceRef.current.length,
-            );
-          }
+          console.log(
+            "[CallSheet] stashed ICE before accept",
+            pendingIceRef.current.length,
+          );
         };
+
+        // store so acceptIncoming() can detach them immediately after accept
+        stashOfferHandlerRef.current = stashOffer;
+        stashIceHandlerRef.current = stashIce;
+
+        sc.on("webrtc:offer", stashOffer);
         sc.on("webrtc:ice", stashIce);
       }
     }
@@ -262,28 +289,26 @@ export default function CallSheet({
         if (stashIce) sc.off("webrtc:ice", stashIce);
       } catch {}
 
+      // ✅ preserve pre-accept stash across remounts (Android accept can remount)
       try {
-        const pooledRole = role === "caller" ? "caller" : "receiver";
-        const key = sigKey(room, pooledRole);
-        const pooled = SIG_POOL.get(key);
-
-        if (pooled?.sc) {
-          pooled.refs -= 1;
-          if (pooled.refs <= 0) {
-            try {
-              pooled.sc.disconnect();
-            } catch {}
-            SIG_POOL.delete(key);
-          } else {
-            SIG_POOL.set(key, pooled);
-          }
+        if (role !== "caller" && !acceptedRef.current) {
+          if (pendingOfferRef.current)
+            OFFER_STASH.set(room, pendingOfferRef.current);
+          if (pendingIceRef.current?.length)
+            ICE_STASH.set(room, [...pendingIceRef.current]);
         }
       } catch {}
-      // clear any stashed signaling so it never leaks into next open
+
+      // clear only the per-instance refs (stash is now persisted if needed)
       pendingOfferRef.current = null;
       pendingIceRef.current = [];
 
       stashHandlersAttachedRef.current = false;
+
+      // cleanup stash handler refs
+      stashOfferHandlerRef.current = null;
+      stashIceHandlerRef.current = null;
+
       setSig(null);
       stopAllTones();
 
@@ -717,12 +742,6 @@ export default function CallSheet({
   function cleanupPeer() {
     stopAllTones();
 
-    // ✅ call ended -> clear cross-mount stash
-    try {
-      OFFER_STASH.delete(room);
-      ICE_STASH.delete(room);
-    } catch {}
-
     // stop offer retry loop (caller side)
     if (offerRetryTimerRef.current) {
       clearInterval(offerRetryTimerRef.current);
@@ -732,11 +751,15 @@ export default function CallSheet({
     // 🔽 clear any stashed signaling so it never leaks into next call
     // ✅ persist stash across remounts (Android accept can remount CallSheet)
     try {
-      if (role !== "caller") {
+      if (role !== "caller" && !acceptedRef.current) {
         if (pendingOfferRef.current)
           OFFER_STASH.set(room, pendingOfferRef.current);
         if (pendingIceRef.current?.length)
           ICE_STASH.set(room, [...pendingIceRef.current]);
+      } else {
+        // after accept, never carry anything across remounts
+        OFFER_STASH.delete(room);
+        ICE_STASH.delete(room);
       }
     } catch {}
 
@@ -788,12 +811,16 @@ export default function CallSheet({
       } catch {}
       localRef.current.srcObject = null;
     }
+
     if (remoteRef.current?.srcObject) {
       try {
         remoteRef.current.srcObject.getTracks().forEach((t) => t.stop());
       } catch {}
       remoteRef.current.srcObject = null;
     }
+
+    // ✅ Only leave signaling room when the call truly ends
+    releaseSigPool(room, role);
   }
 
   async function safeUpdateStatus(status, meta = {}) {
@@ -871,6 +898,38 @@ export default function CallSheet({
 
     // ✅ mark accepted immediately so stashOffer/stashIce stop acting "pre-accept"
     acceptedRef.current = true;
+
+    // ✅ after accept, stash handlers must be detached (we are now "live")
+    try {
+      const so = stashOfferHandlerRef.current;
+      const si = stashIceHandlerRef.current;
+
+      // detach from the exact SignalingClient instance used by this CallSheet
+      if (so) sig.off("webrtc:offer", so);
+      if (si) sig.off("webrtc:ice", si);
+
+      stashOfferHandlerRef.current = null;
+      stashIceHandlerRef.current = null;
+    } catch {}
+
+    // ✅ safety net: if an offer arrives in the tiny gap before setupPeerConnection attaches,
+    // re-stash it (prevents "lost offer" between handler swap)
+    try {
+      const gapOffer = (msg) => {
+        if (answeredRef.current) return;
+        if (acceptedRef.current) {
+          pendingOfferRef.current = msg;
+        }
+      };
+      sig.on("webrtc:offer", gapOffer);
+
+      // remove this temporary listener shortly after setup starts
+      setTimeout(() => {
+        try {
+          sig.off("webrtc:offer", gapOffer);
+        } catch {}
+      }, 1500);
+    } catch {}
 
     setStarting(true);
     try {
