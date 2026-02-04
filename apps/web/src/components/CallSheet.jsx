@@ -1,45 +1,11 @@
 // apps/web/src/components/CallSheet.jsx
 import { useEffect, useRef, useState } from "react";
-import { Capacitor } from "@capacitor/core";
 import SignalingClient from "../lib/webrtc/SignalingClient";
 import {
   updateCallStatus,
   sendChatMessage,
   registerSocketHandler,
 } from "../lib/api";
-
-// ---- cross-mount stash (survives CallSheet remounts) ----
-const OFFER_STASH = new Map(); // room -> msg
-const ICE_STASH = new Map(); // room -> [candidates]
-
-// ---- stable signaling pool (prevents double-connect on remount/double-open) ----
-const SIG_POOL = new Map(); // key -> { sc, refs }
-function sigKey(room, role) {
-  return `${room}::${role}`;
-}
-
-function releaseSigPool(room, role) {
-  try {
-    const pooledRole = role === "caller" ? "caller" : "receiver";
-    const key = sigKey(room, pooledRole);
-    const pooled = SIG_POOL.get(key);
-
-    if (pooled?.sc) {
-      pooled.refs -= 1;
-      if (pooled.refs <= 0) {
-        try {
-          pooled.sc.disconnect(); // this emits room:leave
-        } catch {}
-        SIG_POOL.delete(key);
-      } else {
-        SIG_POOL.set(key, pooled);
-      }
-    }
-  } catch {}
-}
-
-// ---- receiver start guard (prevents double-start side effects) ----
-const START_GUARD = new Set(); // room -> started (receiver only)
 
 /**
  * Props:
@@ -64,7 +30,6 @@ export default function CallSheet({
   peerName = "",
   peerAvatar = "",
   chatRoom = null,
-  autoAccept = false,
 }) {
   const [sig, setSig] = useState(null);
   const [pc, setPc] = useState(null);
@@ -90,7 +55,6 @@ export default function CallSheet({
 
   const localRef = useRef(null);
   const remoteRef = useRef(null);
-  const pcRef = useRef(null);
 
   // ring tones
   const callerToneRef = useRef(null);
@@ -101,38 +65,6 @@ export default function CallSheet({
 
   // NEW: queue ICE candidates until remoteDescription is set
   const pendingIceRef = useRef([]);
-
-  // NEW: keep the latest caller offer so we can resend it if receiver missed it
-  const lastOfferRef = useRef(null);
-  // NEW: retry sending offer when receiver wasn't in the room yet
-  const offerRetryTimerRef = useRef(null);
-
-  const autoAcceptedRef = useRef(false);
-
-  // ---- receiver correctness guards ----
-  const acceptOnceRef = useRef(false); // prevents double acceptIncoming
-  const acceptedRef = useRef(false); // true immediately when accept starts
-  const answeredRef = useRef(false); // true after we send answer
-  const lastOfferHashRef = useRef(null); // dedupe identical offers
-  const stashHandlersAttachedRef = useRef(false);
-
-  // track stash handlers so we can detach them after accept
-  const stashOfferHandlerRef = useRef(null);
-  const stashIceHandlerRef = useRef(null);
-
-  function hashSdp(sdp) {
-    if (!sdp) return "";
-    let h = 0;
-    for (let i = 0; i < sdp.length; i++) h = (h * 31 + sdp.charCodeAt(i)) | 0;
-    return String(h);
-  }
-
-  // DEBUG
-  const DEBUG_CALL = true;
-  const dlog = (...args) => {
-    if (!DEBUG_CALL) return;
-    console.log("[CallDBG]", ...args);
-  };
 
   function stopAllTones() {
     [callerToneRef, incomingToneRef].forEach((ref) => {
@@ -190,98 +122,43 @@ export default function CallSheet({
   useEffect(() => {
     if (!open || !room) return;
 
-    const pooledRole = role === "caller" ? "caller" : "receiver";
-    const key = sigKey(room, pooledRole);
-
-    let sc;
-    const pooled = SIG_POOL.get(key);
-
-    if (pooled?.sc) {
-      sc = pooled.sc;
-      pooled.refs += 1;
-      SIG_POOL.set(key, pooled);
-    } else {
-      sc = new SignalingClient(room, pooledRole);
-      sc.connect();
-      SIG_POOL.set(key, { sc, refs: 1 });
-    }
-
-    setSig(sc);
-
-    dlog("sheet open", {
-      role,
+    const sc = new SignalingClient(
       room,
-      callId,
-      callType,
-      autoAccept,
-      native: Capacitor.isNativePlatform(),
-    });
-
-    // ✅ restore stash from a previous CallSheet instance (Android remount)
-    if (role !== "caller") {
-      const savedOffer = OFFER_STASH.get(room);
-      const savedIce = ICE_STASH.get(room);
-
-      if (savedOffer && !pendingOfferRef.current) {
-        pendingOfferRef.current = savedOffer;
-        console.log("[CallSheet] restored stashed offer on mount");
-      }
-
-      if (
-        Array.isArray(savedIce) &&
-        savedIce.length &&
-        !pendingIceRef.current.length
-      ) {
-        pendingIceRef.current = [...savedIce];
-        console.log(
-          "[CallSheet] restored stashed ICE on mount:",
-          pendingIceRef.current.length,
-        );
-      }
-    }
+      role === "caller" ? "caller" : "receiver",
+    );
+    sc.connect();
+    setSig(sc);
 
     let stashOffer = null;
     let stashIce = null;
 
     if (role !== "caller") {
-      // incoming side: start ringtone immediately (web/PWA only)
-      if (!Capacitor.isNativePlatform()) {
-        try {
-          const audio = new Audio("/sound/incoming.mp3");
-          audio.loop = true;
-          incomingToneRef.current = audio;
-          audio.play().catch(() => {});
-        } catch {}
-      }
+      // incoming side: start ringtone immediately
+      try {
+        const audio = new Audio("/sound/incoming.mp3");
+        audio.loop = true;
+        incomingToneRef.current = audio;
+        audio.play().catch(() => {});
+      } catch {}
 
-      // attach stash handlers once per mounted CallSheet instance
-      if (!stashHandlersAttachedRef.current) {
-        stashHandlersAttachedRef.current = true;
+      // stash offer (may arrive before Accept)
+      stashOffer = (msg) => {
+        console.log("[CallSheet] stashed incoming offer before accept");
+        pendingOfferRef.current = msg;
+      };
+      sc.on("webrtc:offer", stashOffer);
 
-        stashOffer = (msg) => {
-          if (acceptedRef.current) return; // pre-accept only
-          console.log("[CallSheet] stashed incoming offer before accept");
-          pendingOfferRef.current = msg;
-        };
-
-        stashIce = (msg) => {
-          if (acceptedRef.current) return; // pre-accept only
-          const cand = msg?.payload || msg;
-          if (!cand) return;
-          pendingIceRef.current.push(cand);
-          console.log(
-            "[CallSheet] stashed ICE before accept",
-            pendingIceRef.current.length,
-          );
-        };
-
-        // store so acceptIncoming() can detach them immediately after accept
-        stashOfferHandlerRef.current = stashOffer;
-        stashIceHandlerRef.current = stashIce;
-
-        sc.on("webrtc:offer", stashOffer);
-        sc.on("webrtc:ice", stashIce);
-      }
+      // stash ICE (may arrive before Accept)
+      stashIce = (msg) => {
+        const cand = msg?.payload || msg;
+        if (!cand) return;
+        pendingIceRef.current.push(cand);
+        console.log(
+          "[CallSheet] stashed ICE before accept",
+          pendingIceRef.current.length,
+        );
+      };
+      sc.on("webrtc:ice", stashIce);
     }
 
     return () => {
@@ -290,47 +167,19 @@ export default function CallSheet({
         if (stashIce) sc.off("webrtc:ice", stashIce);
       } catch {}
 
-      // ✅ preserve pre-accept stash across remounts (Android accept can remount)
       try {
-        if (role !== "caller" && !acceptedRef.current) {
-          if (pendingOfferRef.current)
-            OFFER_STASH.set(room, pendingOfferRef.current);
-          if (pendingIceRef.current?.length)
-            ICE_STASH.set(room, [...pendingIceRef.current]);
-        }
+        sc.disconnect();
       } catch {}
 
-      // clear only the per-instance refs (stash is now persisted if needed)
       pendingOfferRef.current = null;
       pendingIceRef.current = [];
 
-      stashHandlersAttachedRef.current = false;
-
-      // cleanup stash handler refs
-      stashOfferHandlerRef.current = null;
-      stashIceHandlerRef.current = null;
-
       setSig(null);
       stopAllTones();
-
-      // stop offer retry loop (caller side)
-      if (offerRetryTimerRef.current) {
-        clearInterval(offerRetryTimerRef.current);
-        offerRetryTimerRef.current = null;
-      }
-
       setAutoStarted(false);
       setElapsedSeconds(0);
       setHasAccepted(false);
       setCallFailed(false);
-      autoAcceptedRef.current = false;
-      acceptOnceRef.current = false;
-      acceptedRef.current = false;
-      answeredRef.current = false;
-      lastOfferHashRef.current = null;
-      try {
-        START_GUARD.delete(room);
-      } catch {}
     };
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -387,19 +236,6 @@ export default function CallSheet({
       console.warn(
         "[CallSheet] Call failed: no WebRTC connection within 20 seconds",
       );
-
-      try {
-        const pcNow = pcRef.current;
-        if (pcNow) {
-          pcNow.getStats().then((stats) => {
-            for (const r of stats.values()) {
-              if (r.type === "candidate-pair" && (r.selected || r.nominated)) {
-                console.log("[CallSheet] timeout candidate-pair", r);
-              }
-            }
-          });
-        }
-      } catch {}
 
       // 1) Stop any ringing / tones
       stopAllTones();
@@ -463,66 +299,6 @@ export default function CallSheet({
     const iceServers = await SignalingClient.getIceServers();
 
     const pcNew = new RTCPeerConnection({ iceServers });
-
-    // ✅ prove what ICE servers are actually configured (TURN presence)
-    try {
-      console.log("[ICECFG] pc.getConfiguration() =", pcNew.getConfiguration());
-    } catch {}
-
-    // ✅ dump the SELECTED candidate pair (this is the real TURN proof)
-    async function dumpSelectedIce(tag) {
-      try {
-        const stats = await pcNew.getStats();
-
-        let selectedPair = null;
-
-        // Chrome: transport.selectedCandidatePairId OR candidate-pair.selected=true
-        for (const r of stats.values()) {
-          if (r.type === "transport" && r.selectedCandidatePairId) {
-            selectedPair = stats.get(r.selectedCandidatePairId);
-            break;
-          }
-        }
-
-        if (!selectedPair) {
-          for (const r of stats.values()) {
-            if (r.type === "candidate-pair" && r.selected === true) {
-              selectedPair = r;
-              break;
-            }
-          }
-        }
-
-        if (!selectedPair) {
-          console.log(`[ICEPATH] ${tag} NO_SELECTED_PAIR_YET`);
-          return;
-        }
-
-        const localCand = stats.get(selectedPair.localCandidateId);
-        const remoteCand = stats.get(selectedPair.remoteCandidateId);
-
-        const lType = localCand?.candidateType || "unknown";
-        const rType = remoteCand?.candidateType || "unknown";
-
-        const lAddr = localCand?.address || localCand?.ip || "n/a";
-        const rAddr = remoteCand?.address || remoteCand?.ip || "n/a";
-
-        const lPort = localCand?.port || "n/a";
-        const rPort = remoteCand?.port || "n/a";
-
-        // host=LAN, srflx=STUN, relay=TURN
-        console.log(
-          `[ICEPATH] ${tag} SELECTED local=${lType} ${lAddr}:${lPort} remote=${rType} ${rAddr}:${rPort}`,
-        );
-      } catch (e) {
-        console.log(`[ICEPATH] ${tag} ERROR`, e?.message || e);
-      }
-    }
-
-    setTimeout(() => dumpSelectedIce("T+2s"), 2000);
-    setTimeout(() => dumpSelectedIce("T+5s"), 5000);
-    setTimeout(() => dumpSelectedIce("T+10s"), 10000);
-    pcRef.current = pcNew;
     setPc(pcNew);
 
     // local media
@@ -542,15 +318,9 @@ export default function CallSheet({
     pcNew.onicecandidate = (ev) => {
       if (ev.candidate) {
         try {
-          const c = ev.candidate;
-          const out = c.toJSON ? c.toJSON() : c;
-
-          // 🔎 debug: show candidate type (host/srflx/relay)
-          const candStr = c?.candidate || "";
-          const typMatch = candStr.match(/ typ ([a-zA-Z0-9]+)/);
-          const typ = typMatch ? typMatch[1] : "unknown";
-          console.log("[CallSheet] LOCAL candidate", { typ, candStr });
-
+          const out = ev.candidate.toJSON
+            ? ev.candidate.toJSON()
+            : ev.candidate;
           sig.emit("webrtc:ice", out);
         } catch (e) {
           console.warn("[CallSheet] emit ice failed:", e?.message || e);
@@ -562,25 +332,6 @@ export default function CallSheet({
 
     pcNew.oniceconnectionstatechange = () => {
       console.log("[CallSheet] iceConnectionState:", pcNew.iceConnectionState);
-
-      if (
-        pcNew.iceConnectionState === "connected" ||
-        pcNew.iceConnectionState === "completed"
-      ) {
-        dumpSelectedIce("ICE_CONNECTED");
-      }
-
-      if (pcNew.iceConnectionState === "failed") {
-        dumpSelectedIce("ICE_FAILED");
-      }
-    };
-
-    pcNew.onicegatheringstatechange = () => {
-      console.log("[CallSheet] iceGatheringState:", pcNew.iceGatheringState);
-    };
-
-    pcNew.onicecandidateerror = (e) => {
-      console.warn("[CallSheet] icecandidateerror", e);
     };
 
     pcNew.onconnectionstatechange = () => {
@@ -592,21 +343,7 @@ export default function CallSheet({
         signalingState: pcNew.signalingState,
       });
 
-      // 🔎 DEBUG: when ICE fails, dump selected candidate-pair
-      if (st === "failed") {
-        try {
-          pcNew.getStats().then((stats) => {
-            for (const r of stats.values()) {
-              if (r.type === "candidate-pair" && (r.selected || r.nominated)) {
-                console.log("[CallSheet] selected candidate-pair", r);
-              }
-            }
-          });
-        } catch {}
-      }
-
       if (st === "connected") {
-        dumpSelectedIce("PC_CONNECTED");
         setHasConnected((prev) => {
           if (!prev) {
             stopAllTones();
@@ -625,31 +362,10 @@ export default function CallSheet({
     // signaling listeners
     const handleOffer = async (msg) => {
       try {
-        // Receiver only: never process offers twice after we already answered
-        if (!asCaller && answeredRef.current) {
-          dlog("ignore offer: already answered");
-          return;
-        }
-
-        const remoteSdp = msg?.payload || msg;
-        const sdpText = remoteSdp?.sdp || "";
-        const offerHash = hashSdp(sdpText);
-
-        if (!asCaller && offerHash && lastOfferHashRef.current === offerHash) {
-          dlog("ignore duplicate offer (same SDP)");
-          return;
-        }
-        if (!asCaller && offerHash) lastOfferHashRef.current = offerHash;
-
-        dlog("RX offer", {
-          asCaller,
-          hasRemoteDesc: !!pcNew.remoteDescription,
-          signalingState: pcNew.signalingState,
-        });
-
+        const remoteSdp = msg?.payload || msg; // unwrap payload
         await pcNew.setRemoteDescription(new RTCSessionDescription(remoteSdp));
 
-        // Flush ICE that arrived early
+        // NEW: flush any ICE that arrived early (receiver side too)
         if (pendingIceRef.current.length) {
           const queued = [...pendingIceRef.current];
           pendingIceRef.current = [];
@@ -668,11 +384,7 @@ export default function CallSheet({
         if (!asCaller) {
           const answer = await pcNew.createAnswer();
           await pcNew.setLocalDescription(answer);
-          dlog("TX answer", { asCaller, signalingState: pcNew.signalingState });
           sig.emit("webrtc:answer", answer);
-
-          // ✅ mark answered: ignore any further offers from resend loop
-          answeredRef.current = true;
         }
       } catch (e) {
         console.error("[CallSheet] handle offer failed:", e);
@@ -686,9 +398,8 @@ export default function CallSheet({
     // 🔴 NEW: if we already received an offer BEFORE Accept, handle it now
     if (!asCaller && pendingOfferRef.current) {
       console.log("[CallSheet] processing stashed offer after accept");
-      const stashed = pendingOfferRef.current;
-      pendingOfferRef.current = null; // clear first to avoid re-entrancy
-      handleOffer(stashed);
+      handleOffer(pendingOfferRef.current);
+      pendingOfferRef.current = null;
     }
 
     const onAnswer = async (msg) => {
@@ -705,18 +416,7 @@ export default function CallSheet({
         }
 
         const remoteSdp = msg?.payload || msg;
-        dlog("RX answer", {
-          asCaller,
-          signalingState: pcNew.signalingState,
-          hasLocalDesc: !!pcNew.localDescription,
-        });
-
         await pcNew.setRemoteDescription(new RTCSessionDescription(remoteSdp));
-        // stop retrying offer once we got an answer
-        if (offerRetryTimerRef.current) {
-          clearInterval(offerRetryTimerRef.current);
-          offerRetryTimerRef.current = null;
-        }
 
         // NEW: flush any ICE that arrived early
         if (pendingIceRef.current.length) {
@@ -744,11 +444,6 @@ export default function CallSheet({
     const onIce = async (msg) => {
       try {
         const cand = msg?.payload || msg;
-        dlog("RX ice", {
-          asCaller,
-          hasRemoteDesc: !!pcNew.remoteDescription,
-          queued: pendingIceRef.current.length,
-        });
         if (!cand) return;
 
         // If remoteDescription not ready yet, store candidate
@@ -766,38 +461,8 @@ export default function CallSheet({
     sig.on("webrtc:answer", onAnswer);
     sig.on("webrtc:ice", onIce);
 
-    // ✅ If receiver missed the offer (lockscreen delay), they can request resend
-    const onNeedOffer = async (msg) => {
-      try {
-        if (!asCaller) return;
-
-        const req = msg?.payload || msg;
-        dlog("RX need-offer", { req, asCaller, room, callId });
-
-        console.log("[CallSheet] got need-offer", { req, room, callId });
-
-        const offer = lastOfferRef.current || pcNew.localDescription;
-        if (!offer) {
-          console.warn("[CallSheet] need-offer but no local offer to resend");
-          return;
-        }
-
-        console.log("[CallSheet] resend offer -> receiver requested");
-        sig.emit("webrtc:offer", offer);
-      } catch (e) {
-        console.warn("[CallSheet] resend offer failed:", e?.message || e);
-      }
-    };
-
-    sig.on("webrtc:need-offer", onNeedOffer);
-
     // ✅ store handlers so cleanupPeer can remove them later
-    pcNew.__sigHandlers = {
-      onAnswer,
-      onIce,
-      onOffer: handleOffer,
-      onNeedOffer,
-    };
+    pcNew.__sigHandlers = { onAnswer, onIce, onOffer: handleOffer };
 
     // caller creates offer immediately
     if (asCaller) {
@@ -806,122 +471,50 @@ export default function CallSheet({
         offerToReceiveVideo: wantVideo,
       });
       await pcNew.setLocalDescription(offer);
-
-      // ✅ remember it for resends (lockscreen / reconnect cases)
-      lastOfferRef.current = offer;
-      dlog("TX offer", { asCaller, signalingState: pcNew.signalingState });
-
-      // Send the offer immediately
       sig.emit("webrtc:offer", offer);
-
-      // Proactively resend the offer for a few seconds until we get an answer.
-      // This avoids relying on webrtc:need-offer (your server isn't forwarding it).
-      if (offerRetryTimerRef.current) {
-        clearInterval(offerRetryTimerRef.current);
-        offerRetryTimerRef.current = null;
-      }
-
-      let tries = 0;
-      offerRetryTimerRef.current = setInterval(() => {
-        tries += 1;
-
-        // stop retry if call ended or progressed
-        if (!open || !sig || peerAccepted || hasConnected) {
-          clearInterval(offerRetryTimerRef.current);
-          offerRetryTimerRef.current = null;
-          return;
-        }
-
-        const offerNow = lastOfferRef.current;
-        if (!offerNow) {
-          clearInterval(offerRetryTimerRef.current);
-          offerRetryTimerRef.current = null;
-          return;
-        }
-
-        dlog("retry offer", { tries });
-        sig.emit("webrtc:offer", offerNow);
-
-        // 30 tries * 1000ms ≈ 30 seconds (covers Android remount / reconnect)
-        if (tries >= 30) {
-          clearInterval(offerRetryTimerRef.current);
-          offerRetryTimerRef.current = null;
-        }
-      }, 1000);
     }
+
     return pcNew;
   }
 
   function cleanupPeer() {
     stopAllTones();
 
-    // stop offer retry loop (caller side)
-    if (offerRetryTimerRef.current) {
-      clearInterval(offerRetryTimerRef.current);
-      offerRetryTimerRef.current = null;
-    }
-
     // 🔽 clear any stashed signaling so it never leaks into next call
-    // ✅ persist stash across remounts (Android accept can remount CallSheet)
-    try {
-      if (role !== "caller" && !acceptedRef.current) {
-        if (pendingOfferRef.current)
-          OFFER_STASH.set(room, pendingOfferRef.current);
-        if (pendingIceRef.current?.length)
-          ICE_STASH.set(room, [...pendingIceRef.current]);
-      } else {
-        // after accept, never carry anything across remounts
-        OFFER_STASH.delete(room);
-        ICE_STASH.delete(room);
-      }
-    } catch {}
-
     pendingOfferRef.current = null;
     pendingIceRef.current = [];
 
     // ✅ remove signaling listeners attached in setupPeerConnection()
     try {
-      const pcNow = pcRef.current;
-      const h = pcNow?.__sigHandlers;
-
+      const h = pc?.__sigHandlers;
       if (h && sig) {
         if (h.onAnswer) sig.off("webrtc:answer", h.onAnswer);
         if (h.onIce) sig.off("webrtc:ice", h.onIce);
         if (h.onOffer) sig.off("webrtc:offer", h.onOffer);
-        if (h.onNeedOffer) sig.off("webrtc:need-offer", h.onNeedOffer);
       }
-      if (pcNow) pcNow.__sigHandlers = null;
     } catch {}
 
     try {
-      const pcNow = pcRef.current;
-      if (pcNow) {
-        pcNow.getSenders()?.forEach((s) => {
+      if (pc) {
+        pc.getSenders()?.forEach((s) => {
           try {
             s.track?.stop();
           } catch {}
         });
-        pcNow.close();
+        pc.close();
       }
     } catch {}
-
     setPc(null);
-    pcRef.current = null;
     setHasConnected(false);
     setHasAccepted(false); // 👈 reset accept state
     setPeerAccepted(false);
     setElapsedSeconds(0); // reset duration when call ends
     setCallFailed(false); // 👈 reset failure flag
 
-    // reset receiver guards
-    acceptOnceRef.current = false;
-    acceptedRef.current = false;
-    answeredRef.current = false;
-    lastOfferHashRef.current = null;
-
     try {
-      START_GUARD.delete(room);
+      sig?.disconnect();
     } catch {}
+    setSig(null);
 
     // stop local & remote streams
     if (localRef.current?.srcObject) {
@@ -930,16 +523,12 @@ export default function CallSheet({
       } catch {}
       localRef.current.srcObject = null;
     }
-
     if (remoteRef.current?.srcObject) {
       try {
         remoteRef.current.srcObject.getTracks().forEach((t) => t.stop());
       } catch {}
       remoteRef.current.srcObject = null;
     }
-
-    // ✅ Only leave signaling room when the call truly ends
-    releaseSigPool(room, role);
   }
 
   async function safeUpdateStatus(status, meta = {}) {
@@ -1001,55 +590,6 @@ export default function CallSheet({
 
   async function acceptIncoming() {
     if (!sig || !room) return;
-
-    // ✅ receiver start guard MUST be checked BEFORE locking acceptOnceRef
-    if (START_GUARD.has(room)) {
-      console.log("[CallDBG] receiver start guarded:", room);
-      return;
-    }
-
-    // ✅ hard guard: accept only once per CallSheet lifecycle
-    if (acceptOnceRef.current) {
-      console.log("[CallDBG] acceptIncoming ignored: already accepted");
-      return;
-    }
-    acceptOnceRef.current = true;
-
-    // ✅ mark accepted immediately so stashOffer/stashIce stop acting "pre-accept"
-    acceptedRef.current = true;
-
-    // ✅ after accept, stash handlers must be detached (we are now "live")
-    try {
-      const so = stashOfferHandlerRef.current;
-      const si = stashIceHandlerRef.current;
-
-      // detach from the exact SignalingClient instance used by this CallSheet
-      if (so) sig.off("webrtc:offer", so);
-      if (si) sig.off("webrtc:ice", si);
-
-      stashOfferHandlerRef.current = null;
-      stashIceHandlerRef.current = null;
-    } catch {}
-
-    // ✅ safety net: if an offer arrives in the tiny gap before setupPeerConnection attaches,
-    // re-stash it (prevents "lost offer" between handler swap)
-    try {
-      const gapOffer = (msg) => {
-        if (answeredRef.current) return;
-        if (acceptedRef.current) {
-          pendingOfferRef.current = msg;
-        }
-      };
-      sig.on("webrtc:offer", gapOffer);
-
-      // remove this temporary listener shortly after setup starts
-      setTimeout(() => {
-        try {
-          sig.off("webrtc:offer", gapOffer);
-        } catch {}
-      }, 1500);
-    } catch {}
-
     setStarting(true);
     try {
       console.log("[CallSheet] acceptIncoming()", {
@@ -1061,32 +601,9 @@ export default function CallSheet({
       });
 
       stopAllTones();
-      setHasAccepted(true);
+      setHasAccepted(true); // 👈 receiver has accepted
       await safeUpdateStatus("accepted");
-
-      // ✅ receiver start guard (prevents double-start side effects)
-      START_GUARD.add(room);
-
-      const pcNew = await setupPeerConnection(false);
-
-      // ✅ If we still don't have an offer shortly after accept,
-      // request the caller to resend it (lockscreen delay fix).
-      setTimeout(() => {
-        try {
-          const hasOfferNow =
-            !!pendingOfferRef.current || !!pcNew?.remoteDescription;
-
-          if (!hasOfferNow) {
-            console.warn(
-              "[CallSheet] no offer after accept -> requesting resend",
-            );
-            // Send both shapes (some servers wrap in {payload})
-            dlog("TX need-offer", { callId, room });
-            sig?.emit("webrtc:need-offer", { callId, room });
-            sig?.emit("webrtc:need-offer", { payload: { callId, room } });
-          }
-        } catch {}
-      }, 800);
+      await setupPeerConnection(false);
     } catch (e) {
       console.error("accept call failed:", e);
       alert(
@@ -1099,25 +616,6 @@ export default function CallSheet({
       setStarting(false);
     }
   }
-
-  // ✅ Native Accept -> deep link sets autoAccept, so receiver auto-runs acceptIncoming() once
-  useEffect(() => {
-    if (!open) return;
-    if (role === "caller") return;
-    if (!autoAccept) return;
-
-    // wait until signaling is ready
-    if (!sig) return;
-
-    // guard: do not double-accept
-    if (starting) return;
-    if (hasAccepted) return;
-    if (autoAcceptedRef.current) return;
-
-    autoAcceptedRef.current = true;
-    acceptIncoming();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, role, autoAccept, sig]);
 
   async function declineIncoming() {
     stopAllTones();

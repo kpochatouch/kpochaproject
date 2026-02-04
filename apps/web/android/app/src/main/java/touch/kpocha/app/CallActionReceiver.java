@@ -38,7 +38,8 @@ public class CallActionReceiver extends BroadcastReceiver {
       String room = intent.getStringExtra("room");
       String callType = intent.getStringExtra("callType");
 
-      String url = "capacitor://localhost/browse?call=1&accept=1"
+      String url = "capacitor://localhost/browse?call=1"
+
           + "&fromName=" + safeEnc(fromName)
           + "&fromAvatar=" + safeEnc(fromAvatar)
           + "&callId=" + safeEnc(callId)

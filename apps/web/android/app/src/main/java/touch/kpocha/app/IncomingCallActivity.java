@@ -296,7 +296,7 @@ public class IncomingCallActivity extends Activity {
   private void openCallRoute() {
     // This matches your existing JS handler in App.jsx:
     // /browse?call=1&callId=...&room=...&callType=...
-    String url = "capacitor://localhost/browse?call=1&accept=1"
+    String url = "capacitor://localhost/browse?call=1"
         + "&fromName=" + enc(fromName)
         + "&fromAvatar=" + enc(fromAvatar)
         + "&callId=" + enc(callId)
