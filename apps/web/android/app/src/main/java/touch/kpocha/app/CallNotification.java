@@ -63,16 +63,18 @@ public final class CallNotification {
         fs.putExtra("fromName", fromName);
         fs.putExtra("fromAvatar", fromAvatar);
         fs.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        // ✅ make intent identity unique per call (prevents stale intent reuse)
+        try {
+            fs.setData(android.net.Uri.parse("kpocha://call/" + (callId != null ? callId : "")));
+        } catch (Exception ignored) {
+        }
 
-        PendingIntent fullScreenPi = PendingIntent.getActivity(ctx, 1001, fs, pendingFlags());
+        int h = (callId != null ? callId.hashCode() : 0);
+        int rcFs = 1000 + (h & 0x0FFF);
+        int rcA = 2000 + (h & 0x0FFF);
+        int rcD = 3000 + (h & 0x0FFF);
 
-        // ✅ Accept action -> open web CallSheet via deep link (autoAccept)
-        String url = "capacitor://localhost/browse?call=1&accept=1"
-                + "&fromName=" + safeEnc(fromName)
-                + "&fromAvatar=" + safeEnc(fromAvatar)
-                + "&callId=" + safeEnc(callId)
-                + "&room=" + safeEnc(room)
-                + "&callType=" + safeEnc(callType);
+        PendingIntent fullScreenPi = PendingIntent.getActivity(ctx, rcFs, fs, pendingFlags());
 
         Intent a = new Intent(ctx, CallActionReceiver.class);
         a.setAction(ACTION_ACCEPT);
@@ -82,14 +84,14 @@ public final class CallNotification {
         a.putExtra("fromName", fromName);
         a.putExtra("fromAvatar", fromAvatar);
 
-        PendingIntent acceptPi = PendingIntent.getBroadcast(ctx, 2001, a, pendingFlags());
+        PendingIntent acceptPi = PendingIntent.getBroadcast(ctx, rcA, a, pendingFlags());
 
         // Decline action
         Intent d = new Intent(ctx, CallActionReceiver.class);
         d.setAction(ACTION_DECLINE);
         d.putExtra("callId", callId);
 
-        PendingIntent declinePi = PendingIntent.getBroadcast(ctx, 2002, d, pendingFlags());
+        PendingIntent declinePi = PendingIntent.getBroadcast(ctx, rcD, d, pendingFlags());
 
         String label = (fromName != null && !fromName.isEmpty()) ? fromName : "Someone";
 
@@ -114,16 +116,6 @@ public final class CallNotification {
 
     public static void cancel(Context ctx) {
         NotificationManagerCompat.from(ctx).cancel(NOTIF_ID);
-    }
-
-    private static String safeEnc(String s) {
-        try {
-            if (s == null)
-                return "";
-            return java.net.URLEncoder.encode(s, "UTF-8");
-        } catch (Exception e) {
-            return s == null ? "" : s;
-        }
     }
 
     private static int pendingFlags() {

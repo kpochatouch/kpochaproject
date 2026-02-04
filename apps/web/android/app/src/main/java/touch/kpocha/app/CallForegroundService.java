@@ -15,11 +15,18 @@ public class CallForegroundService extends Service {
     public static final String ACTION_STOP = "touch.kpocha.app.CALL_STOP";
     private MediaPlayer player;
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private String currentCallId = null;
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         // ✅ hard stop (accept/decline)
         if (intent != null && ACTION_STOP.equals(intent.getAction())) {
+            try {
+                String callId = intent.getStringExtra("callId");
+                currentCallId = callId;
+                CallSession.clearActiveIfMatches(callId);
+            } catch (Exception ignored) {
+            }
             stopSelfSafe();
             return START_NOT_STICKY;
         }
@@ -29,8 +36,32 @@ public class CallForegroundService extends Service {
 
         String fromName = intent.getStringExtra("fromName");
         String callId = intent.getStringExtra("callId");
+        currentCallId = callId;
+
+        // ✅ If this call was already accepted, never ring again (late push defense)
+        try {
+            if (CallSession.isAccepted(callId)) {
+                stopSelfSafe();
+                return START_NOT_STICKY;
+            }
+        } catch (Exception ignored) {
+        }
+
         String room = intent.getStringExtra("room");
         String callType = intent.getStringExtra("callType");
+
+        // ✅ If app is already open, do NOT show native incoming UI or ring.
+        // Web layer (socket) should handle it.
+        if (MainActivity.isAppInForeground()) {
+            stopSelfSafe();
+            return START_NOT_STICKY;
+        }
+
+        // ✅ Dedupe: ignore late/duplicate incoming triggers for the same callId
+        if (!CallSession.shouldStartIncoming(callId)) {
+            stopSelfSafe();
+            return START_NOT_STICKY;
+        }
 
         int ringSeconds = 30; // WhatsApp-like default
         try {
@@ -93,6 +124,14 @@ public class CallForegroundService extends Service {
     }
 
     private void stopSelfSafe() {
+        // ✅ Always clear "active" on ANY stop path (timeout / cancel / errors)
+        try {
+            if (currentCallId != null) {
+                CallSession.clearActiveIfMatches(currentCallId);
+            }
+        } catch (Exception ignored) {
+        }
+
         try {
             stopRinging();
             CallNotification.cancel(this);

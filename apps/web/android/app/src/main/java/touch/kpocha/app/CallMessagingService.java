@@ -17,17 +17,35 @@ public class CallMessagingService extends FirebaseMessagingService {
 
         // ✅ CALL
         if ("incoming_call".equals(type)) {
+            String callId = msg.getData().get("callId");
+
+            // ✅ If this call was already accepted, ignore any late/duplicate push
+            try {
+                if (CallSession.isAccepted(callId)) {
+                    return;
+                }
+            } catch (Exception ignored) {
+            }
+
             // ✅ If user is already inside the app, do NOT show native call UI / banner.
             if (MainActivity.isAppInForeground()) {
                 return;
             }
 
-            String callId = msg.getData().get("callId");
             String room = msg.getData().get("room");
             String callType = msg.getData().get("callType");
             String fromName = msg.getData().get("fromName");
-            String fromAvatar = msg.getData().get("fromAvatar") != null ? msg.getData().get("fromAvatar")
+            String fromAvatar = msg.getData().get("fromAvatar") != null
+                    ? msg.getData().get("fromAvatar")
                     : msg.getData().get("callerAvatar");
+
+            // ✅ DEDUPE (MUST be last, because it mutates active-call state)
+            try {
+                if (!CallSession.shouldStartIncoming(callId)) {
+                    return;
+                }
+            } catch (Exception ignored) {
+            }
 
             Intent svc = new Intent(this, CallForegroundService.class);
             svc.putExtra("callId", callId);
@@ -35,12 +53,12 @@ public class CallMessagingService extends FirebaseMessagingService {
             svc.putExtra("callType", callType);
             svc.putExtra("fromName", fromName);
             svc.putExtra("fromAvatar", fromAvatar);
+
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                 startForegroundService(svc);
             } else {
                 startService(svc);
             }
-
             return;
         }
 
