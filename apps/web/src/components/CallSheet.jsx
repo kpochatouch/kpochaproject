@@ -90,6 +90,7 @@ export default function CallSheet({
 
   const localRef = useRef(null);
   const remoteRef = useRef(null);
+  const pcRef = useRef(null);
 
   // ring tones
   const callerToneRef = useRef(null);
@@ -387,6 +388,19 @@ export default function CallSheet({
         "[CallSheet] Call failed: no WebRTC connection within 20 seconds",
       );
 
+      try {
+        const pcNow = pcRef.current;
+        if (pcNow) {
+          pcNow.getStats().then((stats) => {
+            for (const r of stats.values()) {
+              if (r.type === "candidate-pair" && (r.selected || r.nominated)) {
+                console.log("[CallSheet] timeout candidate-pair", r);
+              }
+            }
+          });
+        }
+      } catch {}
+
       // 1) Stop any ringing / tones
       stopAllTones();
 
@@ -449,6 +463,66 @@ export default function CallSheet({
     const iceServers = await SignalingClient.getIceServers();
 
     const pcNew = new RTCPeerConnection({ iceServers });
+
+    // ✅ prove what ICE servers are actually configured (TURN presence)
+    try {
+      console.log("[ICECFG] pc.getConfiguration() =", pcNew.getConfiguration());
+    } catch {}
+
+    // ✅ dump the SELECTED candidate pair (this is the real TURN proof)
+    async function dumpSelectedIce(tag) {
+      try {
+        const stats = await pcNew.getStats();
+
+        let selectedPair = null;
+
+        // Chrome: transport.selectedCandidatePairId OR candidate-pair.selected=true
+        for (const r of stats.values()) {
+          if (r.type === "transport" && r.selectedCandidatePairId) {
+            selectedPair = stats.get(r.selectedCandidatePairId);
+            break;
+          }
+        }
+
+        if (!selectedPair) {
+          for (const r of stats.values()) {
+            if (r.type === "candidate-pair" && r.selected === true) {
+              selectedPair = r;
+              break;
+            }
+          }
+        }
+
+        if (!selectedPair) {
+          console.log(`[ICEPATH] ${tag} NO_SELECTED_PAIR_YET`);
+          return;
+        }
+
+        const localCand = stats.get(selectedPair.localCandidateId);
+        const remoteCand = stats.get(selectedPair.remoteCandidateId);
+
+        const lType = localCand?.candidateType || "unknown";
+        const rType = remoteCand?.candidateType || "unknown";
+
+        const lAddr = localCand?.address || localCand?.ip || "n/a";
+        const rAddr = remoteCand?.address || remoteCand?.ip || "n/a";
+
+        const lPort = localCand?.port || "n/a";
+        const rPort = remoteCand?.port || "n/a";
+
+        // host=LAN, srflx=STUN, relay=TURN
+        console.log(
+          `[ICEPATH] ${tag} SELECTED local=${lType} ${lAddr}:${lPort} remote=${rType} ${rAddr}:${rPort}`,
+        );
+      } catch (e) {
+        console.log(`[ICEPATH] ${tag} ERROR`, e?.message || e);
+      }
+    }
+
+    setTimeout(() => dumpSelectedIce("T+2s"), 2000);
+    setTimeout(() => dumpSelectedIce("T+5s"), 5000);
+    setTimeout(() => dumpSelectedIce("T+10s"), 10000);
+    pcRef.current = pcNew;
     setPc(pcNew);
 
     // local media
@@ -468,9 +542,15 @@ export default function CallSheet({
     pcNew.onicecandidate = (ev) => {
       if (ev.candidate) {
         try {
-          const out = ev.candidate.toJSON
-            ? ev.candidate.toJSON()
-            : ev.candidate;
+          const c = ev.candidate;
+          const out = c.toJSON ? c.toJSON() : c;
+
+          // 🔎 debug: show candidate type (host/srflx/relay)
+          const candStr = c?.candidate || "";
+          const typMatch = candStr.match(/ typ ([a-zA-Z0-9]+)/);
+          const typ = typMatch ? typMatch[1] : "unknown";
+          console.log("[CallSheet] LOCAL candidate", { typ, candStr });
+
           sig.emit("webrtc:ice", out);
         } catch (e) {
           console.warn("[CallSheet] emit ice failed:", e?.message || e);
@@ -482,6 +562,25 @@ export default function CallSheet({
 
     pcNew.oniceconnectionstatechange = () => {
       console.log("[CallSheet] iceConnectionState:", pcNew.iceConnectionState);
+
+      if (
+        pcNew.iceConnectionState === "connected" ||
+        pcNew.iceConnectionState === "completed"
+      ) {
+        dumpSelectedIce("ICE_CONNECTED");
+      }
+
+      if (pcNew.iceConnectionState === "failed") {
+        dumpSelectedIce("ICE_FAILED");
+      }
+    };
+
+    pcNew.onicegatheringstatechange = () => {
+      console.log("[CallSheet] iceGatheringState:", pcNew.iceGatheringState);
+    };
+
+    pcNew.onicecandidateerror = (e) => {
+      console.warn("[CallSheet] icecandidateerror", e);
     };
 
     pcNew.onconnectionstatechange = () => {
@@ -493,7 +592,21 @@ export default function CallSheet({
         signalingState: pcNew.signalingState,
       });
 
+      // 🔎 DEBUG: when ICE fails, dump selected candidate-pair
+      if (st === "failed") {
+        try {
+          pcNew.getStats().then((stats) => {
+            for (const r of stats.values()) {
+              if (r.type === "candidate-pair" && (r.selected || r.nominated)) {
+                console.log("[CallSheet] selected candidate-pair", r);
+              }
+            }
+          });
+        } catch {}
+      }
+
       if (st === "connected") {
+        dumpSelectedIce("PC_CONNECTED");
         setHasConnected((prev) => {
           if (!prev) {
             stopAllTones();
@@ -768,26 +881,32 @@ export default function CallSheet({
 
     // ✅ remove signaling listeners attached in setupPeerConnection()
     try {
-      const h = pc?.__sigHandlers;
+      const pcNow = pcRef.current;
+      const h = pcNow?.__sigHandlers;
+
       if (h && sig) {
         if (h.onAnswer) sig.off("webrtc:answer", h.onAnswer);
         if (h.onIce) sig.off("webrtc:ice", h.onIce);
         if (h.onOffer) sig.off("webrtc:offer", h.onOffer);
         if (h.onNeedOffer) sig.off("webrtc:need-offer", h.onNeedOffer);
       }
+      if (pcNow) pcNow.__sigHandlers = null;
     } catch {}
 
     try {
-      if (pc) {
-        pc.getSenders()?.forEach((s) => {
+      const pcNow = pcRef.current;
+      if (pcNow) {
+        pcNow.getSenders()?.forEach((s) => {
           try {
             s.track?.stop();
           } catch {}
         });
-        pc.close();
+        pcNow.close();
       }
     } catch {}
+
     setPc(null);
+    pcRef.current = null;
     setHasConnected(false);
     setHasAccepted(false); // 👈 reset accept state
     setPeerAccepted(false);
