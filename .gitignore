@@ -2,6 +2,10 @@
 serviceAccountKey.json
 .env
 
+# Monorepo: ignore env files anywhere
+**/.env
+**/.env.*
+
 # 📦 Dependencies
 node_modules/
 apps/*/node_modules/

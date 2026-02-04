@@ -52,16 +52,6 @@ public class IncomingCallActivity extends Activity {
     fromAvatar = getIntent().getStringExtra("fromAvatar");
     chatRoom = getIntent().getStringExtra("chatRoom");
 
-    // ✅ If this call was already accepted in webview, ignore any late native UI
-    // re-open
-    if (CallSession.isAccepted(callId)) {
-      try {
-        finish();
-      } catch (Exception ignored) {
-      }
-      return;
-    }
-
     // Show over lockscreen + turn screen on
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
       setShowWhenLocked(true);
@@ -218,12 +208,6 @@ public class IncomingCallActivity extends Activity {
     sAccepting = true;
     lastAcceptMs = now;
 
-    // ✅ mark accepted at native level so late push can't resurrect ringing/UI
-    try {
-      CallSession.markAccepted(callId);
-    } catch (Exception ignored) {
-    }
-
     CallNotification.cancel(this);
 
     Intent stop = new Intent(this, CallForegroundService.class);
@@ -256,11 +240,6 @@ public class IncomingCallActivity extends Activity {
 
   private void doDecline() {
     CallNotification.cancel(this);
-
-    try {
-      CallSession.clearIfMatches(callId);
-    } catch (Exception ignored) {
-    }
 
     Intent stop = new Intent(this, CallForegroundService.class);
     stop.setAction(CallForegroundService.ACTION_STOP);

@@ -1,4 +1,4 @@
-//apps/web/android/app/src/mainjava/touch/kpocha/app/CallActionReceiver.java
+//apps/web/android/app/src/main/java/touch/kpocha/app/CallActionReceiver.java
 package touch.kpocha.app;
 
 import android.content.BroadcastReceiver;
@@ -15,15 +15,6 @@ public class CallActionReceiver extends BroadcastReceiver {
 
     if (CallNotification.ACTION_ACCEPT.equals(action)) {
       String callId = intent.getStringExtra("callId");
-
-      // ✅ DEDUPE: if this call was already accepted, ignore duplicate Accept
-      // taps/broadcasts
-      try {
-        if (CallSession.isAccepted(callId))
-          return;
-        CallSession.markAccepted(callId);
-      } catch (Exception ignored) {
-      }
 
       // 1) stop the foreground ringing + notification immediately
       try {
@@ -77,12 +68,6 @@ public class CallActionReceiver extends BroadcastReceiver {
 
       try {
         CallNotification.cancel(ctx);
-      } catch (Exception ignored) {
-      }
-
-      // ✅ clear session so next call can ring normally
-      try {
-        CallSession.clearIfMatches(callId);
       } catch (Exception ignored) {
       }
 

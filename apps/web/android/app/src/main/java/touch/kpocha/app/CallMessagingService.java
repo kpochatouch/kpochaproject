@@ -19,14 +19,6 @@ public class CallMessagingService extends FirebaseMessagingService {
         if ("incoming_call".equals(type)) {
             String callId = msg.getData().get("callId");
 
-            // ✅ If this call was already accepted, ignore any late/duplicate push
-            try {
-                if (CallSession.isAccepted(callId)) {
-                    return;
-                }
-            } catch (Exception ignored) {
-            }
-
             // ✅ If user is already inside the app, do NOT show native call UI / banner.
             if (MainActivity.isAppInForeground()) {
                 return;
@@ -38,14 +30,6 @@ public class CallMessagingService extends FirebaseMessagingService {
             String fromAvatar = msg.getData().get("fromAvatar") != null
                     ? msg.getData().get("fromAvatar")
                     : msg.getData().get("callerAvatar");
-
-            // ✅ DEDUPE (MUST be last, because it mutates active-call state)
-            try {
-                if (!CallSession.shouldStartIncoming(callId)) {
-                    return;
-                }
-            } catch (Exception ignored) {
-            }
 
             Intent svc = new Intent(this, CallForegroundService.class);
             svc.putExtra("callId", callId);

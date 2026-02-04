@@ -50,13 +50,6 @@ public class CallForegroundService extends Service {
         String room = intent.getStringExtra("room");
         String callType = intent.getStringExtra("callType");
 
-        // ✅ If app is already open, do NOT show native incoming UI or ring.
-        // Web layer (socket) should handle it.
-        if (MainActivity.isAppInForeground()) {
-            stopSelfSafe();
-            return START_NOT_STICKY;
-        }
-
         // ✅ Dedupe: ignore late/duplicate incoming triggers for the same callId
         if (!CallSession.shouldStartIncoming(callId)) {
             stopSelfSafe();
