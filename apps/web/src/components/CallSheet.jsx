@@ -363,6 +363,7 @@ export default function CallSheet({
 
     const pcNew = new RTCPeerConnection({ iceServers });
     setPc(pcNew);
+    const mySession = callSessionRef.current;
 
     // local media
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -374,6 +375,7 @@ export default function CallSheet({
 
     // remote media
     pcNew.ontrack = (ev) => {
+      if (callSessionRef.current !== mySession) return;
       if (remoteRef.current) remoteRef.current.srcObject = ev.streams[0];
     };
 
@@ -394,10 +396,13 @@ export default function CallSheet({
     };
 
     pcNew.oniceconnectionstatechange = () => {
+      if (callSessionRef.current !== mySession) return; // ✅ ignore stale PC events
       console.log("[CallSheet] iceConnectionState:", pcNew.iceConnectionState);
     };
 
     pcNew.onconnectionstatechange = () => {
+      if (callSessionRef.current !== mySession) return; // ✅ ignore stale PC events
+
       const st = pcNew.connectionState;
 
       console.log("[CallSheet] connectionState change:", {
@@ -417,8 +422,10 @@ export default function CallSheet({
           return true;
         });
       }
+
+      // ✅ only mark disconnected if THIS call had connected before (prevents false negatives)
       if (["disconnected", "failed", "closed"].includes(st)) {
-        setHasConnected(false);
+        setHasConnected((prev) => (prev ? false : prev));
       }
     };
 
@@ -718,7 +725,6 @@ export default function CallSheet({
   async function acceptIncoming() {
     if (!sig || !room) return;
     setStarting(true);
-    callSessionRef.current += 1;
     try {
       console.log("[CallSheet] acceptIncoming()", {
         open,
