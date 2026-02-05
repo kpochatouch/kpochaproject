@@ -224,6 +224,11 @@ public class IncomingCallActivity extends Activity {
     } catch (Exception ignored) {
     }
 
+    try {
+      CallSession.markAccepted(callId);
+    } catch (Exception ignored) {
+    }
+
     openCallRoute();
 
     // give MainActivity time to come to front before we close this screen

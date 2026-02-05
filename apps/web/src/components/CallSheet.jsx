@@ -66,6 +66,7 @@ export default function CallSheet({
 
   // NEW: queue ICE candidates until remoteDescription is set
   const pendingIceRef = useRef([]);
+  const shouldHardCleanupRef = useRef(false);
 
   function stopAllTones() {
     [callerToneRef, incomingToneRef].forEach((ref) => {
@@ -129,6 +130,7 @@ export default function CallSheet({
     );
     sc.connect();
     setSig(sc);
+    shouldHardCleanupRef.current = false;
 
     let stashOffer = null;
     let stashIce = null;
@@ -172,7 +174,11 @@ export default function CallSheet({
       } catch {}
 
       try {
-        sc.disconnect();
+        if (shouldHardCleanupRef.current) {
+          sc.disconnect();
+        } else {
+          console.log("[CallSheet] skip disconnect on remount");
+        }
       } catch {}
 
       pendingOfferRef.current = null;
@@ -184,6 +190,7 @@ export default function CallSheet({
       setElapsedSeconds(0);
       setHasAccepted(false);
       setCallFailed(false);
+      setPeerAccepted(false);
     };
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -483,6 +490,7 @@ export default function CallSheet({
 
   function cleanupPeer() {
     stopAllTones();
+    shouldHardCleanupRef.current = true;
 
     // 🔽 clear any stashed signaling so it never leaks into next call
     pendingOfferRef.current = null;
@@ -514,11 +522,6 @@ export default function CallSheet({
     setPeerAccepted(false);
     setElapsedSeconds(0); // reset duration when call ends
     setCallFailed(false); // 👈 reset failure flag
-
-    try {
-      sig?.disconnect();
-    } catch {}
-    setSig(null);
 
     // stop local & remote streams
     if (localRef.current?.srcObject) {
