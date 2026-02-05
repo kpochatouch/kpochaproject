@@ -346,6 +346,33 @@ export default function attachSockets(httpServer) {
     });
 
     /* ---------------------------------------------------
+   Call readiness barrier (relay)
+   - receiver emits "call:ready"
+   - server forwards to room
+--------------------------------------------------- */
+    socket.on("call:ready", async (raw = {}, cb) => {
+      await authReady;
+
+      const r = roomName(raw.room) || socket.data.room;
+      const payload = raw?.payload ?? raw;
+
+      if (!r || payload == null) {
+        cb?.({ ok: false, error: "room_or_payload_required" });
+        return;
+      }
+
+      // Forward to everyone else in the room
+      socket.to(r).emit("call:ready", {
+        payload,
+        from: socket.data.uid || hinted || socket.id,
+        room: r,
+        ts: Date.now(),
+      });
+
+      cb?.({ ok: true, room: r });
+    });
+
+    /* ---------------------------------------------------
        Call: initiate (delegated to callService)
     --------------------------------------------------- */
     socket.on("call:initiate", async (p = {}, ack) => {
@@ -359,7 +386,9 @@ export default function attachSockets(httpServer) {
 
         const callId =
           p.callId ||
-          `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+          `${Date.now().toString(36)}-${Math.random()
+            .toString(36)
+            .slice(2, 8)}`;
         const room = p.room || `call:${callId}`;
 
         // centralised service creates record, emits and notifies

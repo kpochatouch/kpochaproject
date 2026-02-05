@@ -498,6 +498,7 @@ export function connectSocket({
       _ensureWire("webrtc:offer");
       _ensureWire("webrtc:answer");
       _ensureWire("webrtc:ice");
+      _ensureWire("call:ready");
     });
 
     socket.on("disconnect", (reason) => {

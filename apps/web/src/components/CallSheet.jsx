@@ -31,6 +31,7 @@ export default function CallSheet({
   peerName = "",
   peerAvatar = "",
   chatRoom = null,
+  autoAccept = false,
 }) {
   const [sig, setSig] = useState(null);
   const [pc, setPc] = useState(null);
@@ -41,6 +42,8 @@ export default function CallSheet({
   const [autoStarted, setAutoStarted] = useState(false);
   const [peerAccepted, setPeerAccepted] = useState(false);
   const [peerStatus, setPeerStatus] = useState(null);
+  const [peerReady, setPeerReady] = useState(false); // ✅ receiver says “UI ready”
+  const readySentRef = useRef(false); // ✅ receiver sends ready only once
 
   const [micMuted, setMicMuted] = useState(false);
   const [camOff, setCamOff] = useState(mode === "audio");
@@ -132,6 +135,22 @@ export default function CallSheet({
     setSig(sc);
     shouldHardCleanupRef.current = false;
 
+    // ✅ barrier handshake: receiver tells caller "I'm ready"
+    const onPeerReady = (msg) => {
+      try {
+        const p = msg?.payload || msg;
+        if (!p) return;
+        if (callId && p.callId && p.callId !== callId) return;
+        try {
+          sc.off("call:ready", onPeerReady);
+        } catch {}
+
+        console.log("[CallSheet] peerReady received", p);
+        setPeerReady(true);
+      } catch {}
+    };
+    sc.on("call:ready", onPeerReady);
+
     let stashOffer = null;
     let stashIce = null;
 
@@ -191,6 +210,8 @@ export default function CallSheet({
       setHasAccepted(false);
       setCallFailed(false);
       setPeerAccepted(false);
+      setPeerReady(false);
+      readySentRef.current = false;
     };
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -301,6 +322,19 @@ export default function CallSheet({
       } catch {}
     };
   }, [open, callId, onClose]);
+
+  // ✅ Auto-accept when opened from native Android accept
+  useEffect(() => {
+    if (!open || !room) return;
+    if (role !== "receiver") return;
+    if (!autoAccept) return;
+    if (hasAccepted) return;
+    if (!sig) return;
+
+    console.log("[CallSheet] autoAccept triggered");
+    acceptIncoming();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, room, role, autoAccept, sig, hasAccepted]);
 
   async function setupPeerConnection(asCaller) {
     if (!sig || !room) return null;
@@ -520,6 +554,8 @@ export default function CallSheet({
     setHasConnected(false);
     setHasAccepted(false); // 👈 reset accept state
     setPeerAccepted(false);
+    setPeerReady(false);
+    readySentRef.current = false;
     setElapsedSeconds(0); // reset duration when call ends
     setCallFailed(false); // 👈 reset failure flag
 
@@ -569,8 +605,36 @@ export default function CallSheet({
         } catch {}
       }
 
-      await setupPeerConnection(true);
       await safeUpdateStatus("ringing");
+
+      // ✅ Wait for receiver readiness barrier (but never forever)
+      const readyOrTimeout = await new Promise((resolve) => {
+        if (peerReady) return resolve(true);
+
+        const t = setTimeout(() => resolve(false), 4500); // fallback to keep old behavior alive
+        const unsub = () => {};
+
+        // If peerReady flips true, resolve early
+        const check = () => {
+          if (peerReady) {
+            clearTimeout(t);
+            resolve(true);
+          }
+        };
+
+        const id = setInterval(() => {
+          check();
+          if (peerReady) clearInterval(id);
+        }, 100);
+
+        // cleanup handled by timeout/resolve
+      });
+
+      console.log("[CallSheet] startCaller barrier result:", readyOrTimeout, {
+        peerReady,
+      });
+
+      await setupPeerConnection(true);
     } catch (e) {
       console.error("call start error:", e);
       alert(
@@ -608,8 +672,15 @@ export default function CallSheet({
       });
 
       stopAllTones();
-      setHasAccepted(true); // 👈 receiver has accepted
+      setHasAccepted(true);
       await safeUpdateStatus("accepted");
+
+      // ✅ tell caller “receiver UI is alive and accepted”
+      if (!readySentRef.current) {
+        readySentRef.current = true;
+        sig.emit("call:ready", { callId, room, ts: Date.now() });
+      }
+
       await setupPeerConnection(false);
     } catch (e) {
       console.error("accept call failed:", e);
