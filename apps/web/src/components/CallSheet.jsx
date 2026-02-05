@@ -45,6 +45,16 @@ export default function CallSheet({
   const [peerReady, setPeerReady] = useState(false); // ✅ receiver says “UI ready”
   const readySentRef = useRef(false); // ✅ receiver sends ready only once
 
+  // ✅ refs (avoid stale React state inside timers/promises)
+  const peerReadyRef = useRef(false);
+  const gotAnswerRef = useRef(false);
+
+  // ✅ caller offer resend loop
+  const offerResendTimerRef = useRef(null);
+
+  // ✅ prevent stale timers/events from older calls triggering failures
+  const callSessionRef = useRef(0);
+
   const [micMuted, setMicMuted] = useState(false);
   const [camOff, setCamOff] = useState(mode === "audio");
 
@@ -127,6 +137,9 @@ export default function CallSheet({
   useEffect(() => {
     if (!open || !room) return;
 
+    // ✅ new call session begins as soon as this sheet opens for a room
+    callSessionRef.current += 1;
+
     const sc = new SignalingClient(
       room,
       role === "caller" ? "caller" : "receiver",
@@ -146,6 +159,7 @@ export default function CallSheet({
         } catch {}
 
         console.log("[CallSheet] peerReady received", p);
+        peerReadyRef.current = true;
         setPeerReady(true);
       } catch {}
     };
@@ -212,6 +226,16 @@ export default function CallSheet({
       setPeerAccepted(false);
       setPeerReady(false);
       readySentRef.current = false;
+      peerReadyRef.current = false;
+      gotAnswerRef.current = false;
+
+      // stop caller offer resend loop (if any)
+      try {
+        if (offerResendTimerRef.current) {
+          clearInterval(offerResendTimerRef.current);
+          offerResendTimerRef.current = null;
+        }
+      } catch {}
     };
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -256,35 +280,29 @@ export default function CallSheet({
     if (!open) return;
 
     const accepted = peerAccepted || hasAccepted;
-
-    // Nobody has accepted yet → no timer
     if (!accepted) return;
-
-    // Already connected → no need for timeout
     if (hasConnected) return;
 
-    // Start 20s timeout once we're in "accepted but not connected" state
+    // ✅ guard: only the current call session may fail itself
+    const mySession = callSessionRef.current;
+
     const timeoutId = setTimeout(() => {
+      if (callSessionRef.current !== mySession) return;
+
       console.warn(
         "[CallSheet] Call failed: no WebRTC connection within 20 seconds",
       );
 
-      // 1) Stop any ringing / tones
       stopAllTones();
-
-      // 2) Mark as failed so UI shows "Call failed"
       setCallFailed(true);
-
-      // 3) Let backend know it failed because of timeout (optional)
       safeUpdateStatus("failed", { reason: "timeout_no_connection" });
 
-      // 4) Auto hang up after a short pause so user can briefly see "Call failed"
       setTimeout(() => {
+        if (callSessionRef.current !== mySession) return;
         hangup("failed");
       }, 1500);
-    }, 20000); // 20,000 ms = 20 seconds
+    }, 20000);
 
-    // Cleanup: if state changes (connects, closes, etc.), cancel timeout
     return () => clearTimeout(timeoutId);
   }, [open, peerAccepted, hasAccepted, hasConnected]);
 
@@ -463,6 +481,14 @@ export default function CallSheet({
         const remoteSdp = msg?.payload || msg;
         await pcNew.setRemoteDescription(new RTCSessionDescription(remoteSdp));
 
+        gotAnswerRef.current = true;
+        try {
+          if (offerResendTimerRef.current) {
+            clearInterval(offerResendTimerRef.current);
+            offerResendTimerRef.current = null;
+          }
+        } catch {}
+
         // NEW: flush any ICE that arrived early
         if (pendingIceRef.current.length) {
           const queued = [...pendingIceRef.current];
@@ -509,14 +535,37 @@ export default function CallSheet({
     // ✅ store handlers so cleanupPeer can remove them later
     pcNew.__sigHandlers = { onAnswer, onIce, onOffer: handleOffer };
 
-    // caller creates offer immediately
+    // caller creates offer immediately + resend loop for swiped-out cold start
     if (asCaller) {
       const offer = await pcNew.createOffer({
         offerToReceiveAudio: true,
         offerToReceiveVideo: wantVideo,
       });
       await pcNew.setLocalDescription(offer);
-      sig.emit("webrtc:offer", offer);
+
+      const sendOfferOnce = () => {
+        try {
+          sig.emit("webrtc:offer", offer, (ack) => {
+            // ack: { ok, room, deliveredTo, totalInRoom }
+            console.log("[CallSheet] offer ack", ack);
+          });
+        } catch {}
+      };
+
+      // send immediately
+      sendOfferOnce();
+
+      // clear old timer if any
+      try {
+        if (offerResendTimerRef.current)
+          clearInterval(offerResendTimerRef.current);
+      } catch {}
+
+      offerResendTimerRef.current = setInterval(() => {
+        if (gotAnswerRef.current) return;
+        if (pcNew.signalingState !== "have-local-offer") return; // only while offer outstanding
+        sendOfferOnce();
+      }, 1200);
     }
 
     return pcNew;
@@ -525,6 +574,19 @@ export default function CallSheet({
   function cleanupPeer() {
     stopAllTones();
     shouldHardCleanupRef.current = true;
+
+    // ✅ invalidate old timers/handlers
+    callSessionRef.current += 1;
+
+    // stop caller offer resend loop
+    try {
+      if (offerResendTimerRef.current) {
+        clearInterval(offerResendTimerRef.current);
+        offerResendTimerRef.current = null;
+      }
+    } catch {}
+    gotAnswerRef.current = false;
+    peerReadyRef.current = false;
 
     // 🔽 clear any stashed signaling so it never leaks into next call
     pendingOfferRef.current = null;
@@ -587,6 +649,7 @@ export default function CallSheet({
   async function startCaller() {
     if (!sig || !room) return;
     setStarting(true);
+
     try {
       console.log("[CallSheet] startCaller()", {
         open,
@@ -607,31 +670,24 @@ export default function CallSheet({
 
       await safeUpdateStatus("ringing");
 
-      // ✅ Wait for receiver readiness barrier (but never forever)
+      // ✅ Wait for receiver readiness barrier (ref-safe; longer for cold start)
       const readyOrTimeout = await new Promise((resolve) => {
-        if (peerReady) return resolve(true);
+        if (peerReadyRef.current) return resolve(true);
 
-        const t = setTimeout(() => resolve(false), 4500); // fallback to keep old behavior alive
-        const unsub = () => {};
-
-        // If peerReady flips true, resolve early
-        const check = () => {
-          if (peerReady) {
-            clearTimeout(t);
-            resolve(true);
-          }
-        };
+        const maxWaitMs = 15000; // swiped-out cold start
+        const t = setTimeout(() => resolve(false), maxWaitMs);
 
         const id = setInterval(() => {
-          check();
-          if (peerReady) clearInterval(id);
-        }, 100);
-
-        // cleanup handled by timeout/resolve
+          if (peerReadyRef.current) {
+            clearTimeout(t);
+            clearInterval(id);
+            resolve(true);
+          }
+        }, 150);
       });
 
       console.log("[CallSheet] startCaller barrier result:", readyOrTimeout, {
-        peerReady,
+        peerReadyRef: peerReadyRef.current,
       });
 
       await setupPeerConnection(true);
@@ -662,6 +718,7 @@ export default function CallSheet({
   async function acceptIncoming() {
     if (!sig || !room) return;
     setStarting(true);
+    callSessionRef.current += 1;
     try {
       console.log("[CallSheet] acceptIncoming()", {
         open,
