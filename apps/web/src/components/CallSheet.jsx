@@ -6,6 +6,7 @@ import {
   sendChatMessage,
   registerSocketHandler,
 } from "../lib/api";
+import { Capacitor } from "@capacitor/core";
 
 /**
  * Props:
@@ -133,13 +134,16 @@ export default function CallSheet({
     let stashIce = null;
 
     if (role !== "caller") {
-      // incoming side: start ringtone immediately
-      try {
-        const audio = new Audio("/sound/incoming.mp3");
-        audio.loop = true;
-        incomingToneRef.current = audio;
-        audio.play().catch(() => {});
-      } catch {}
+      // ✅ Incoming ringtone only for web/PWA.
+      // Native already rings via Android (ForegroundService / system).
+      if (!Capacitor.isNativePlatform()) {
+        try {
+          const audio = new Audio("/sound/incoming.mp3");
+          audio.loop = true;
+          incomingToneRef.current = audio;
+          audio.play().catch(() => {});
+        } catch {}
+      }
 
       // stash offer (may arrive before Accept)
       stashOffer = (msg) => {

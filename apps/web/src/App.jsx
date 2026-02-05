@@ -364,7 +364,9 @@ export default function App() {
     const isCall = qs.get("call") === "1";
 
     // reset when not on a call link
+    // ✅ but do NOT reset while a call modal is open (prevents native re-open loops)
     if (!isCall) {
+      if (incomingCall?.open) return;
       handledCallParamRef.current = false;
       return;
     }
@@ -377,6 +379,16 @@ export default function App() {
     const callType = qs.get("callType") || "audio";
 
     const shouldAccept = qs.get("accept") === "1";
+
+    // ✅ If we're already showing THIS call, don't reopen / restart anything.
+    // Just ignore duplicate deep links from Android.
+    if (
+      incomingCall?.open &&
+      incomingCall?.callId &&
+      incomingCall.callId === callId
+    ) {
+      return;
+    }
 
     if (shouldAccept && callId) {
       // best-effort: tell backend receiver accepted
