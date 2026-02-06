@@ -1,41 +1,41 @@
-//apps/web/src/lib/nativeVideoPlayer.js
+// apps/web/src/lib/nativeVideoPlayer.js
 import { Capacitor } from "@capacitor/core";
+import { registerPlugin } from "@capacitor/core";
 
-let NativeVideoPlayer = null;
+// This must match @CapacitorPlugin(name = "NativeVideoPlayer") in Android
+const NativeVideoPlayer = registerPlugin("NativeVideoPlayer");
 
-async function getNativeVideoPlayer() {
-  // Only attempt on native platforms
-  if (!Capacitor.isNativePlatform()) return null;
-
-  // Capacitor v5+ plugin access pattern
-  if (NativeVideoPlayer) return NativeVideoPlayer;
-
-  try {
-    const mod = await import("capacitor-native-video-player");
-    NativeVideoPlayer = mod?.NativeVideoPlayer || null;
-    return NativeVideoPlayer;
-  } catch (e) {
-    console.warn("[NativeVideoPlayer] plugin not available:", e);
-    return null;
-  }
-}
 export async function openNativeVideoPlayer({
   url,
   startMs = 0,
   muted = false,
   loop = true,
 } = {}) {
-  const p = await getNativeVideoPlayer();
-  if (!p?.open) return false;
+  if (!Capacitor.isNativePlatform()) return false;
+  if (!url) return false;
 
-  await p.open({ url, startMs, muted, loop });
-  return true;
+  try {
+    await NativeVideoPlayer.open({ url, startMs, muted, loop });
+    return true;
+  } catch (e) {
+    console.warn("[NativeVideoPlayer] open failed", e);
+    return false;
+  }
 }
 
+// You do NOT have a close() method in your Java plugin yet.
+// Keep this as a safe stub so calls won't crash if you still import it somewhere.
 export async function closeNativeVideoPlayer() {
-  const p = await getNativeVideoPlayer();
-  if (!p?.close) return false;
+  if (!Capacitor.isNativePlatform()) return false;
 
-  await p.close();
-  return true;
+  try {
+    // If you later implement NativeVideoPlayer.close on Android, this will work.
+    if (typeof NativeVideoPlayer.close === "function") {
+      await NativeVideoPlayer.close();
+      return true;
+    }
+  } catch (e) {
+    console.warn("[NativeVideoPlayer] close failed", e);
+  }
+  return false;
 }

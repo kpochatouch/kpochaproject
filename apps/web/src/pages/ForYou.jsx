@@ -46,6 +46,8 @@ export default function ForYou() {
   // sentinel used by IntersectionObserver (better than window.scroll)
   const sentinelRef = useRef(null);
   const observerRef = useRef(null);
+  // Queue cursor to keep /next calls stable (fixes "only 2 videos")
+  const lastCursorIdRef = useRef(null);
 
   // initial load (first + next)
   useEffect(() => {
@@ -87,6 +89,8 @@ export default function ForYou() {
 
         if (!cancelled) {
           setFeedPosts(posts);
+          // cursor is the last item we have
+          lastCursorIdRef.current = posts[posts.length - 1]?._id || null;
         }
       } catch (err) {
         if (!cancelled) {
@@ -114,7 +118,8 @@ export default function ForYou() {
       // We may get duplicates or null from /next sometimes.
       // So we attempt several hops in one "loadMore" call before giving up.
       let attempts = 0;
-      let cursorId = feedPosts[feedPosts.length - 1]?._id;
+      let cursorId =
+        lastCursorIdRef.current || feedPosts[feedPosts.length - 1]?._id;
 
       while (attempts < 6 && cursorId) {
         attempts += 1;
@@ -145,6 +150,7 @@ export default function ForYou() {
 
         // ✅ found a new one
         setFeedPosts((prev) => [...prev, nxt]);
+        lastCursorIdRef.current = nxt?._id || cursorId || null;
         return;
       }
 
@@ -233,10 +239,25 @@ export default function ForYou() {
   }
 
   return (
-    <div className="max-w-xl mx-auto pb-16">
-      {feedPosts.map((post) => (
-        <ForYouPost key={post._id} post={post} me={me} navigate={navigate} />
+    <div
+      className="max-w-xl mx-auto h-[100dvh] overflow-y-auto snap-y snap-mandatory"
+      style={{ WebkitOverflowScrolling: "touch" }}
+    >
+      {feedPosts.map((post, index) => (
+        <ForYouPost
+          key={post._id}
+          post={post}
+          index={index}
+          me={me}
+          navigate={navigate}
+          onNeedMore={() => {
+            // preload when close to end (flip buffer)
+            const remaining = feedPosts.length - 1 - index;
+            if (remaining <= 2) loadMore();
+          }}
+        />
       ))}
+
       <div ref={sentinelRef} className="h-1 w-full" aria-hidden="true" />
 
       {loadingMore && (
@@ -262,7 +283,7 @@ export default function ForYou() {
  * CHILD: single post in the For You feed
  * (all the video player + side buttons, comments, etc.)
  */
-function ForYouPost({ post, me, navigate }) {
+function ForYouPost({ post, index, me, navigate, onNeedMore }) {
   const id = post?._id;
 
   const [stats, setStats] = useState({
@@ -296,6 +317,7 @@ function ForYouPost({ post, me, navigate }) {
 
   // media bits (video)
   const videoRef = useRef(null);
+  const pageRef = useRef(null);
   const menuRef = useRef(null);
   // ----- Global sound preference (shared with FeedCard/PostDetail) -----
   const SOUND_KEY = "kpocha_sound_enabled";
@@ -324,10 +346,75 @@ function ForYouPost({ post, me, navigate }) {
   const playTriggeredByObserverRef = useRef(false);
   const watchAccumRef = useRef(0);
   const lastWatchTsRef = useRef(0);
+  // ---- Global: only one <video> plays at a time (flip deck) ----
+  // Stored on window to survive re-renders without new files.
+  function claimActiveVideo(vid) {
+    try {
+      const prev = window.__kpochaActiveVideo;
+      if (prev && prev !== vid) {
+        try {
+          prev.pause();
+        } catch {}
+      }
+      window.__kpochaActiveVideo = vid;
+    } catch {}
+  }
 
   const [showControls, setShowControls] = useState(false);
   const [videoError, setVideoError] = useState("");
   const [broken, setBroken] = useState(false);
+  // Flip rule: play ONLY when this page is snapped (nearly full-screen visible)
+  useEffect(() => {
+    const el = pageRef.current;
+    const vid = videoRef.current;
+    if (!el || !vid || !id) return;
+
+    const obs = new IntersectionObserver(
+      (entries) => {
+        const entry = entries?.[0];
+        const ratio = entry?.intersectionRatio || 0;
+
+        // Active only when almost fully in view (snap page)
+        const isActive = ratio >= 0.9;
+
+        if (isActive) {
+          // preload more when close to end
+          try {
+            onNeedMore && onNeedMore();
+          } catch {}
+
+          // apply sound preference for autoplay
+          const wantSound = getSoundEnabled();
+          vid.muted = !wantSound;
+          setMuted(!wantSound);
+
+          // exclusive play
+          claimActiveVideo(vid);
+
+          // autoplay (muted unless user enabled sound)
+          playTriggeredByObserverRef.current = true;
+          vid.play().catch(() => {});
+        } else {
+          // pause when not active
+          try {
+            vid.pause();
+          } catch {}
+        }
+      },
+      { threshold: [0, 0.5, 0.9, 1] },
+    );
+
+    obs.observe(el);
+
+    return () => {
+      try {
+        obs.disconnect();
+      } catch {}
+      try {
+        vid.pause();
+      } catch {}
+    };
+  }, [id, index, onNeedMore]);
 
   // load stats for this post
   useEffect(() => {
@@ -702,15 +789,12 @@ function ForYouPost({ post, me, navigate }) {
 
     setDuration(vid.duration || 0);
 
-    // Apply global preference before attempting autoplay
+    // Apply global preference, but DO NOT autoplay here.
     const wantSound = getSoundEnabled();
     vid.muted = !wantSound;
     setMuted(!wantSound);
 
-    // Mark this as "autoplay-like" so watch-time won't start until interaction
     playTriggeredByObserverRef.current = true;
-
-    vid.play().catch(() => {});
   }
 
   function onTimeUpdate() {
@@ -937,7 +1021,7 @@ function ForYouPost({ post, me, navigate }) {
   }
 
   return (
-    <article className="mb-10">
+    <article ref={pageRef} className="h-[100dvh] snap-start snap-always">
       {/* header (profile + book) */}
       <div className="px-4 pt-4 pb-2 flex items-start justify-between gap-3">
         <div className="flex gap-3">
@@ -1051,7 +1135,7 @@ function ForYouPost({ post, me, navigate }) {
 
       {/* VIDEO + SIDE ACTIONS */}
       <div
-        className="relative w-full bg-black overflow-hidden h-[85vh] rounded-xl"
+        className="relative w-full bg-black overflow-hidden h-[100dvh]"
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
       >
