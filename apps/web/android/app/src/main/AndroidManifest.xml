@@ -78,6 +78,14 @@
       android:taskAffinity=""
     />
 
+    <activity
+      android:name=".NativeVideoPlayerActivity"
+      android:exported="false"
+      android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen"
+      android:screenOrientation="sensor"
+      android:configChanges="orientation|screenSize|keyboardHidden"
+    />
+
     <!-- Accept/Decline actions -->
     <receiver android:name=".CallActionReceiver" android:exported="false" />
 

@@ -3,7 +3,8 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import { useMe } from "../context/MeContext.jsx";
-
+import { Capacitor } from "@capacitor/core";
+import { openNativeVideoPlayer } from "../lib/nativeVideoPlayer";
 import RouteLoader from "../components/RouteLoader.jsx";
 
 function timeAgo(ts) {
@@ -42,6 +43,9 @@ export default function ForYou() {
   const [error, setError] = useState("");
   const [loadingMore, setLoadingMore] = useState(false);
   const [endOfFeed, setEndOfFeed] = useState(false);
+  // sentinel used by IntersectionObserver (better than window.scroll)
+  const sentinelRef = useRef(null);
+  const observerRef = useRef(null);
 
   // initial load (first + next)
   useEffect(() => {
@@ -104,51 +108,93 @@ export default function ForYou() {
     if (loadingMore || endOfFeed) return;
     if (!feedPosts.length) return;
 
-    const last = feedPosts[feedPosts.length - 1];
-    if (!last || !last._id) return;
-
     setLoadingMore(true);
+
     try {
-      const res = await api.get(`/api/posts/${last._id}/next`);
-      const nxt = res?.data?.next || null;
+      // We may get duplicates or null from /next sometimes.
+      // So we attempt several hops in one "loadMore" call before giving up.
+      let attempts = 0;
+      let cursorId = feedPosts[feedPosts.length - 1]?._id;
 
-      if (!nxt || !nxt._id || nxt._id === last._id) {
-        setEndOfFeed(true);
+      while (attempts < 6 && cursorId) {
+        attempts += 1;
+
+        const res = await api.get(`/api/posts/${cursorId}/next`);
+        const nxt = res?.data?.next || null;
+
+        // If server says no next, only then we end.
+        if (!nxt || !nxt._id) {
+          setEndOfFeed(true);
+          return;
+        }
+
+        // If server repeats same id, move cursor and try again (don’t end feed)
+        if (String(nxt._id) === String(cursorId)) {
+          cursorId = nxt._id;
+          continue;
+        }
+
+        // If duplicate of any already loaded, move cursor and try again
+        const already = feedPosts.some(
+          (p) => String(p._id) === String(nxt._id),
+        );
+        if (already) {
+          cursorId = nxt._id;
+          continue;
+        }
+
+        // ✅ found a new one
+        setFeedPosts((prev) => [...prev, nxt]);
         return;
       }
 
-      // avoid duplicates
-      const already = feedPosts.some((p) => p._id === nxt._id);
-      if (already) {
-        setEndOfFeed(true);
-        return;
-      }
-
-      setFeedPosts((prev) => [...prev, nxt]);
+      // If we tried multiple times and kept getting duplicates, do NOT kill the feed.
+      // Just stop this attempt; next scroll may succeed.
+      return;
     } catch {
-      setEndOfFeed(true);
+      // On transient failure, do NOT kill the feed permanently.
+      return;
     } finally {
       setLoadingMore(false);
     }
   }, [feedPosts, loadingMore, endOfFeed]);
 
-  // window scroll listener → when close to bottom, loadMore()
+  // IntersectionObserver → loadMore() when sentinel becomes visible
   useEffect(() => {
-    function onScroll() {
-      if (loadingMore || endOfFeed) return;
+    const el = sentinelRef.current;
+    if (!el) return;
 
-      const doc = document.documentElement;
-      const scrollBottom = window.innerHeight + window.scrollY;
-      const threshold = doc.scrollHeight - 600; // px from bottom
-
-      if (scrollBottom >= threshold) {
-        loadMore();
-      }
+    // clean up any previous observer
+    if (observerRef.current) {
+      try {
+        observerRef.current.disconnect();
+      } catch {}
+      observerRef.current = null;
     }
 
-    window.addEventListener("scroll", onScroll);
-    return () => window.removeEventListener("scroll", onScroll);
-  }, [loadMore, loadingMore, endOfFeed]);
+    observerRef.current = new IntersectionObserver(
+      (entries) => {
+        const entry = entries?.[0];
+        if (!entry?.isIntersecting) return;
+        // call loadMore when we're near the bottom
+        loadMore();
+      },
+      {
+        root: null, // viewport
+        rootMargin: "1200px", // start loading earlier (before user hits bottom)
+        threshold: 0,
+      },
+    );
+
+    observerRef.current.observe(el);
+
+    return () => {
+      try {
+        observerRef.current?.disconnect();
+      } catch {}
+      observerRef.current = null;
+    };
+  }, [loadMore]);
 
   if (loading) return <RouteLoader full />;
 
@@ -191,6 +237,7 @@ export default function ForYou() {
       {feedPosts.map((post) => (
         <ForYouPost key={post._id} post={post} me={me} navigate={navigate} />
       ))}
+      <div ref={sentinelRef} className="h-1 w-full" aria-hidden="true" />
 
       {loadingMore && (
         <div className="px-4 py-3 text-[11px] text-gray-500">Loading more…</div>
@@ -229,12 +276,23 @@ function ForYouPost({ post, me, navigate }) {
   });
 
   const [comments, setComments] = useState([]);
-  const [showComments, setShowComments] = useState(true);
+  const [showComments, setShowComments] = useState(false);
   const [commentText, setCommentText] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [loadingLike, setLoadingLike] = useState(false);
   const [loadingSave, setLoadingSave] = useState(false);
+
+  // caption inside video (TikTok-like)
+  const [showFullCaption, setShowFullCaption] = useState(false);
+  const CAPTION_MAX = 110;
+
+  const captionText = String(post?.text || "").trim();
+  const captionTooLong = captionText.length > CAPTION_MAX;
+  const captionShown =
+    !showFullCaption && captionTooLong
+      ? captionText.slice(0, CAPTION_MAX) + "…"
+      : captionText;
 
   // media bits (video)
   const videoRef = useRef(null);
@@ -343,7 +401,7 @@ function ForYouPost({ post, me, navigate }) {
     setCurrentTime(0);
     setDuration(0);
     setUserHasInteracted(false);
-    setMuted(true);
+    setMuted(() => !getSoundEnabled());
     setShowControls(false);
     setVideoError("");
   }, [id]);
@@ -574,9 +632,24 @@ function ForYouPost({ post, me, navigate }) {
   }
 
   // VIDEO CONTROLS
-  function onClickVideo() {
+  async function onClickVideo() {
+    // 1) If native platform, open native ExoPlayer
+    const url = videoSrc;
+    if (Capacitor.isNativePlatform() && url) {
+      const wantSound = getSoundEnabled();
+      const ok = await openNativeVideoPlayer({
+        url,
+        startMs: 0,
+        muted: !wantSound,
+        loop: true,
+      });
+      if (ok) return; // ✅ native player took over
+    }
+
+    // 2) Web fallback (desktop / browser)
     const vid = videoRef.current;
     if (!vid) return;
+
     setUserHasInteracted(true);
     setShowControls(true);
 
@@ -737,9 +810,28 @@ function ForYouPost({ post, me, navigate }) {
     }
   }
 
-  function handleVideoError() {
-    console.warn("Video failed to load");
-    setVideoError("This video cannot be played (it may have been removed).");
+  async function handleVideoError() {
+    console.warn("Video failed to load in <video>, trying fallback...");
+
+    // If native app, try opening ExoPlayer immediately (often plays what WebView can't).
+    try {
+      const url = videoSrc;
+      if (Capacitor.isNativePlatform() && url) {
+        const wantSound = getSoundEnabled();
+        const ok = await openNativeVideoPlayer({
+          url,
+          startMs: 0,
+          muted: !wantSound,
+          loop: true,
+        });
+        if (ok) return; // ✅ native player handled it
+      }
+    } catch {}
+
+    // If fallback didn't work, show a softer message
+    setVideoError(
+      "This video couldn't play in the embedded player. Tap the video to open it.",
+    );
   }
 
   function handleMouseEnter() {
@@ -957,11 +1049,6 @@ function ForYouPost({ post, me, navigate }) {
         </div>
       </div>
 
-      {/* optional caption text */}
-      {post.text && (
-        <div className="px-4 pb-3 text-sm text-white">{post.text}</div>
-      )}
-
       {/* VIDEO + SIDE ACTIONS */}
       <div
         className="relative w-full bg-black overflow-hidden h-[85vh] rounded-xl"
@@ -983,6 +1070,39 @@ function ForYouPost({ post, me, navigate }) {
           onTimeUpdate={onTimeUpdate}
           onError={handleVideoError}
         />
+
+        {/* CAPTION INSIDE VIDEO (bottom-left) */}
+        {captionText && (
+          <div className="absolute left-0 right-16 bottom-0 z-[3] px-4 pb-4 pt-10 bg-gradient-to-t from-black/80 via-black/30 to-transparent pointer-events-none">
+            <div className="text-white text-sm leading-snug pointer-events-auto">
+              <span>{captionShown}</span>
+              {captionTooLong && !showFullCaption && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowFullCaption(true);
+                  }}
+                  className="ml-2 text-xs text-gold"
+                >
+                  more…
+                </button>
+              )}
+              {captionTooLong && showFullCaption && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowFullCaption(false);
+                  }}
+                  className="ml-2 text-xs text-gold"
+                >
+                  less
+                </button>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* SIDE ACTIONS like TikTok / Reels */}
         <div className="absolute right-3 bottom-4 flex flex-col items-center gap-4 z-[3]">
@@ -1056,16 +1176,6 @@ function ForYouPost({ post, me, navigate }) {
             </div>
           </div>
         </div>
-
-        {/* initial tap overlay to start audio */}
-        {!userHasInteracted && (
-          <button
-            onClick={onClickVideo}
-            className="absolute inset-0"
-            aria-label="Play video"
-            type="button"
-          />
-        )}
 
         {/* playback controls (appear on hover / tap) */}
         {showControls && (

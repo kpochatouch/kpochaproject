@@ -1,9 +1,14 @@
-// apps/web/src/pages/ForYou.jsx
-import { useEffect, useRef, useState, useCallback } from "react";
+// apps/web/src/pages/PostDetail.jsx
+import { useEffect, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import { useMe } from "../context/MeContext.jsx";
 
+import LikeButton from "../components/LikeButton.jsx";
+import ShareButton from "../components/ShareButton.jsx";
+import CommentToggle from "../components/CommentToggle.jsx";
+import FollowButton from "../components/FollowButton.jsx";
+import ActionButton from "../components/ActionButton.jsx";
 import RouteLoader from "../components/RouteLoader.jsx";
 
 function timeAgo(ts) {
@@ -26,197 +31,18 @@ function formatTime(sec = 0) {
   return `${m}:${s < 10 ? "0" : ""}${s}`;
 }
 
-/**
- * PARENT: vertical "For You" feed
- * - Loads first post (from :id or /for-you/start)
- * - Loads the next one
- * - On scroll-near-bottom, keeps loading next posts
- */
-export default function ForYou() {
+export default function PostDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { me } = useMe();
 
-  const [feedPosts, setFeedPosts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [post, setPost] = useState(null);
   const [error, setError] = useState("");
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [endOfFeed, setEndOfFeed] = useState(false);
 
-  // initial load (first + next)
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadInitial() {
-      setLoading(true);
-      setError("");
-      setFeedPosts([]);
-      setEndOfFeed(false);
-
-      try {
-        let firstPost = null;
-
-        if (id) {
-          const { data } = await api.get(`/api/posts/${id}`);
-          firstPost = data || null;
-        } else {
-          const { data } = await api.get("/api/posts/for-you/start");
-          firstPost = data?.post || data?.start || null;
-        }
-
-        if (!firstPost || !firstPost._id) {
-          throw new Error("No videos available right now.");
-        }
-
-        const posts = [firstPost];
-
-        // try to pre-fetch the very next post
-        try {
-          const resNext = await api.get(`/api/posts/${firstPost._id}/next`);
-          const nxt = resNext?.data?.next || null;
-          if (nxt && nxt._id && nxt._id !== firstPost._id) {
-            posts.push(nxt);
-          }
-        } catch {
-          // ignore – we'll still show the first post
-        }
-
-        if (!cancelled) {
-          setFeedPosts(posts);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(err?.message || "Unable to load For You feed.");
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-
-    loadInitial();
-    return () => {
-      cancelled = true;
-    };
-  }, [id]);
-
-  // load the "next" post based on the last item in the feed
-  const loadMore = useCallback(async () => {
-    if (loadingMore || endOfFeed) return;
-    if (!feedPosts.length) return;
-
-    const last = feedPosts[feedPosts.length - 1];
-    if (!last || !last._id) return;
-
-    setLoadingMore(true);
-    try {
-      const res = await api.get(`/api/posts/${last._id}/next`);
-      const nxt = res?.data?.next || null;
-
-      if (!nxt || !nxt._id || nxt._id === last._id) {
-        setEndOfFeed(true);
-        return;
-      }
-
-      // avoid duplicates
-      const already = feedPosts.some((p) => p._id === nxt._id);
-      if (already) {
-        setEndOfFeed(true);
-        return;
-      }
-
-      setFeedPosts((prev) => [...prev, nxt]);
-    } catch {
-      setEndOfFeed(true);
-    } finally {
-      setLoadingMore(false);
-    }
-  }, [feedPosts, loadingMore, endOfFeed]);
-
-  // window scroll listener → when close to bottom, loadMore()
-  useEffect(() => {
-    function onScroll() {
-      if (loadingMore || endOfFeed) return;
-
-      const doc = document.documentElement;
-      const scrollBottom = window.innerHeight + window.scrollY;
-      const threshold = doc.scrollHeight - 600; // px from bottom
-
-      if (scrollBottom >= threshold) {
-        loadMore();
-      }
-    }
-
-    window.addEventListener("scroll", onScroll);
-    return () => window.removeEventListener("scroll", onScroll);
-  }, [loadMore, loadingMore, endOfFeed]);
-
-  if (loading) return <RouteLoader full />;
-
-  if (error) {
-    return (
-      <div className="max-w-xl mx-auto p-4">
-        <div className="bg-[#151515] border border-[#2a2a2a] rounded-xl p-6">
-          <div className="text-lg font-semibold mb-2">For You</div>
-          <div className="text-sm text-gray-400">{error}</div>
-          <div className="mt-4">
-            <Link to="/browse" className="text-gold">
-              ← Back to feed
-            </Link>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (!feedPosts.length) {
-    return (
-      <div className="max-w-xl mx-auto p-4">
-        <div className="bg-[#151515] border border-[#2a2a2a] rounded-xl p-6">
-          <div className="text-lg font-semibold mb-2">For You</div>
-          <div className="text-sm text-gray-400">
-            No videos available right now.
-          </div>
-          <div className="mt-4">
-            <Link to="/browse" className="text-gold">
-              ← Back to feed
-            </Link>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="max-w-xl mx-auto pb-16">
-      {feedPosts.map((post) => (
-        <ForYouPost key={post._id} post={post} me={me} navigate={navigate} />
-      ))}
-
-      {loadingMore && (
-        <div className="px-4 py-3 text-[11px] text-gray-500">Loading more…</div>
-      )}
-
-      {endOfFeed && (
-        <div className="px-4 py-4 text-[11px] text-gray-600 text-center">
-          You&apos;ve reached the end for now.
-        </div>
-      )}
-
-      <div className="px-4 py-6">
-        <Link to="/browse" className="text-gold">
-          ← Back to feed
-        </Link>
-      </div>
-    </div>
-  );
-}
-
-/**
- * CHILD: single post in the For You feed
- * (all the video player + side buttons, comments, etc.)
- */
-function ForYouPost({ post, me, navigate }) {
-  const id = post?._id;
+  // 🆕 next recommended post
+  const [nextPost, setNextPost] = useState(null);
+  const [loadingNext, setLoadingNext] = useState(false);
 
   const [stats, setStats] = useState({
     viewsCount: 0,
@@ -229,17 +55,30 @@ function ForYouPost({ post, me, navigate }) {
   });
 
   const [comments, setComments] = useState([]);
-  const [showComments, setShowComments] = useState(true);
   const [commentText, setCommentText] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [loadingLike, setLoadingLike] = useState(false);
   const [loadingSave, setLoadingSave] = useState(false);
 
-  // media bits (video)
+  // media bits
   const videoRef = useRef(null);
   const menuRef = useRef(null);
-  // ----- Global sound preference (shared with FeedCard/PostDetail) -----
+
+  // --- Engagement sheet (overlay) ---
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [sheetTab, setSheetTab] = useState("comments"); // "comments" | "likes" | "views"
+
+  function openSheet(tab) {
+    setSheetTab(tab);
+    setSheetOpen(true);
+  }
+
+  function closeSheet() {
+    setSheetOpen(false);
+  }
+
+  // ----- Global sound preference (shared with FeedCard/ForYou) -----
   const SOUND_KEY = "kpocha_sound_enabled";
 
   function getSoundEnabled() {
@@ -262,20 +101,61 @@ function ForYouPost({ post, me, navigate }) {
   const [duration, setDuration] = useState(0);
   const [seeking, setSeeking] = useState(false);
 
-  const lastTimeUpdateRef = useRef(0);
-  const playTriggeredByObserverRef = useRef(false);
-  const watchAccumRef = useRef(0);
-  const lastWatchTsRef = useRef(0);
+  const lastTimeUpdateRef = useRef(0); // UI throttle
+  const playTriggeredByObserverRef = useRef(false); // keep API same as FeedCard
+  const hasSentInitialViewRef = useRef(false); // for non-video single view
+  const watchAccumRef = useRef(0); // seconds watched since last tick
+  const lastWatchTsRef = useRef(0); // timestamp for watch-time
 
-  const [showControls, setShowControls] = useState(false);
-  const [videoError, setVideoError] = useState("");
-  const [broken, setBroken] = useState(false);
+  // 🆕 auto-jump state
+  const hasAutoJumpedRef = useRef(false);
 
-  // load stats for this post
+  // 🆕 swipe up state
+  const touchStartYRef = useRef(null);
+  const touchStartXRef = useRef(null);
+
+  // ---------- fetch post ----------
+  useEffect(() => {
+    let on = true;
+    setLoading(true);
+    setError("");
+    (async () => {
+      try {
+        const { data } = await api.get(`/api/posts/${id}`);
+        if (!on) return;
+        setPost(data || null);
+      } catch {
+        if (!on) return;
+        setError("Post not found.");
+      } finally {
+        if (on) setLoading(false);
+      }
+    })();
+    return () => {
+      on = false;
+    };
+  }, [id]);
+
+  // global menu close via custom "global-click" event
+  useEffect(() => {
+    function onGlobalClick(e) {
+      if (!menuOpen) return;
+      if (!menuRef.current) return;
+
+      const target = e?.detail?.target;
+      if (target && menuRef.current.contains(target)) return;
+
+      setMenuOpen(false);
+    }
+
+    window.addEventListener("global-click", onGlobalClick);
+    return () => window.removeEventListener("global-click", onGlobalClick);
+  }, [menuOpen]);
+
+  // ---------- initial stats ----------
   useEffect(() => {
     if (!id) return;
     let on = true;
-
     (async () => {
       try {
         const res = await api.get(`/api/posts/${id}/stats`);
@@ -312,13 +192,12 @@ function ForYouPost({ post, me, navigate }) {
         // ignore
       }
     })();
-
     return () => {
       on = false;
     };
   }, [id]);
 
-  // load comments for this post
+  // ---------- load comments (detail defaults open) ----------
   useEffect(() => {
     if (!id) return;
     let on = true;
@@ -335,31 +214,48 @@ function ForYouPost({ post, me, navigate }) {
     };
   }, [id]);
 
-  // reset watchers when post changes
+  // 🆕 ---------- load next recommended post ----------
   useEffect(() => {
+    if (!id) return;
+    let active = true;
+
+    setLoadingNext(true);
+    setNextPost(null);
+
+    (async () => {
+      try {
+        const res = await api.get(`/api/posts/${id}/next`);
+        if (!active) return;
+
+        const nxt = res?.data?.next || null;
+
+        if (nxt && nxt._id && nxt._id !== id) {
+          setNextPost(nxt);
+        } else {
+          setNextPost(null);
+        }
+      } catch {
+        if (active) setNextPost(null);
+      } finally {
+        if (active) setLoadingNext(false);
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [id]);
+
+  // reset watch/initial view flags when post changes
+  useEffect(() => {
+    hasSentInitialViewRef.current = false;
     watchAccumRef.current = 0;
     lastWatchTsRef.current = 0;
     lastTimeUpdateRef.current = 0;
+    hasAutoJumpedRef.current = false; // 🆕 reset auto jump
     setCurrentTime(0);
     setDuration(0);
-    setUserHasInteracted(false);
-    setMuted(true);
-    setShowControls(false);
-    setVideoError("");
   }, [id]);
-
-  // click-outside to close menu
-  useEffect(() => {
-    function onGlobalClick(e) {
-      if (!menuOpen) return;
-      if (!menuRef.current) return;
-      const target = e?.detail?.target;
-      if (target && menuRef.current.contains(target)) return;
-      setMenuOpen(false);
-    }
-    window.addEventListener("global-click", onGlobalClick);
-    return () => window.removeEventListener("global-click", onGlobalClick);
-  }, [menuOpen]);
 
   function mergeStatsFromServer(partial) {
     if (!partial || typeof partial !== "object") return;
@@ -409,7 +305,23 @@ function ForYouPost({ post, me, navigate }) {
     }
   }
 
-  // LIKE / SAVE / SHARE
+  async function sendInitialViewOnce() {
+    if (hasSentInitialViewRef.current || !id) return;
+    hasSentInitialViewRef.current = true;
+    await sendViewTick();
+  }
+
+  // For NON-video posts: send one view when loaded
+  useEffect(() => {
+    if (!post) return;
+    const media =
+      Array.isArray(post.media) && post.media.length ? post.media[0] : null;
+    const isVideo = media?.type === "video";
+    if (isVideo) return;
+    sendInitialViewOnce();
+  }, [post, id]);
+
+  // ---------- actions ----------
   async function toggleLike() {
     if (!me) return alert("Login to like");
     if (!id || loadingLike) return;
@@ -473,7 +385,8 @@ function ForYouPost({ post, me, navigate }) {
   async function handleShare() {
     if (!id) return;
     const base = window.location.origin;
-    const url = `${base}/for-you/${id}`;
+    const url = `${base}/post/${id}`;
+
     try {
       const res = await api.post(`/api/posts/${id}/share`);
       mergeStatsFromServer(res?.data || {});
@@ -490,7 +403,7 @@ function ForYouPost({ post, me, navigate }) {
         });
         return;
       } catch {
-        // ignore
+        // ignore and fall back
       }
     }
     try {
@@ -501,7 +414,6 @@ function ForYouPost({ post, me, navigate }) {
     }
   }
 
-  // COMMENTS
   async function submitComment(e) {
     e?.preventDefault();
     if (!me) return alert("Login to comment");
@@ -573,12 +485,12 @@ function ForYouPost({ post, me, navigate }) {
     }
   }
 
-  // VIDEO CONTROLS
+  // ---------- Video controls & watch-time ----------
+
   function onClickVideo() {
     const vid = videoRef.current;
     if (!vid) return;
     setUserHasInteracted(true);
-    setShowControls(true);
 
     if (muted) {
       setMuted(false);
@@ -595,8 +507,13 @@ function ForYouPost({ post, me, navigate }) {
   }
 
   function onVideoPlay() {
-    if (playTriggeredByObserverRef.current) return;
-    if (!userHasInteracted) setUserHasInteracted(true);
+    if (playTriggeredByObserverRef.current) {
+      return;
+    }
+
+    if (!userHasInteracted) {
+      setUserHasInteracted(true);
+    }
 
     const now =
       typeof performance !== "undefined" && performance.now
@@ -609,14 +526,16 @@ function ForYouPost({ post, me, navigate }) {
 
   function onToggleMute(e) {
     e.stopPropagation();
+
+    // ✅ mute/unmute counts as user interaction (same as FeedCard)
+    if (!userHasInteracted) setUserHasInteracted(true);
+
     const vid = videoRef.current;
     const next = !muted; // next === true means muted
     setMuted(next);
     if (vid) vid.muted = next;
 
-    // persist global preference
     setSoundEnabled(!next);
-
     if (!next && vid?.paused) {
       playTriggeredByObserverRef.current = false;
       vid.play().catch(() => {});
@@ -634,9 +553,10 @@ function ForYouPost({ post, me, navigate }) {
     vid.muted = !wantSound;
     setMuted(!wantSound);
 
-    // Mark this as "autoplay-like" so watch-time won't start until interaction
+    // Treat this as autoplay-like until user interacts
     playTriggeredByObserverRef.current = true;
 
+    // Try autoplay (will be blocked on some browsers — that's expected)
     vid.play().catch(() => {});
   }
 
@@ -644,6 +564,7 @@ function ForYouPost({ post, me, navigate }) {
     const vid = videoRef.current;
     if (!vid) return;
 
+    // UI update (throttled for slider/time label)
     if (!seeking) {
       const nowUi =
         typeof performance !== "undefined" && performance.now
@@ -655,16 +576,19 @@ function ForYouPost({ post, me, navigate }) {
       }
     }
 
+    // Watch-time accumulation (only when playing)
     if (vid.paused) {
       lastWatchTsRef.current = 0;
       return;
     }
+
     if (playTriggeredByObserverRef.current && !userHasInteracted) return;
 
     const now =
       typeof performance !== "undefined" && performance.now
         ? performance.now()
         : Date.now();
+
     if (!lastWatchTsRef.current) {
       lastWatchTsRef.current = now;
       return;
@@ -679,6 +603,20 @@ function ForYouPost({ post, me, navigate }) {
     if (watchAccumRef.current >= 10) {
       watchAccumRef.current = 0;
       sendViewTick();
+    }
+
+    // 🆕 Auto-jump only when video is basically 100% done
+    const total = duration || vid.duration || 0;
+
+    if (
+      total > 0 &&
+      !hasAutoJumpedRef.current &&
+      nextPost &&
+      nextPost._id &&
+      (vid.currentTime || 0) >= total - 0.3 // last 0.3s ≈ 100%
+    ) {
+      hasAutoJumpedRef.current = true;
+      navigate(`/post/${nextPost._id}`);
     }
   }
 
@@ -729,7 +667,7 @@ function ForYouPost({ post, me, navigate }) {
         return;
       }
       if (vid.requestFullscreen) return void vid.requestFullscreen();
-      const anyVid = vid;
+      const anyVid = /** @type {any} */ (vid);
       if (anyVid.webkitEnterFullscreen)
         return void anyVid.webkitEnterFullscreen();
     } catch {
@@ -737,16 +675,36 @@ function ForYouPost({ post, me, navigate }) {
     }
   }
 
-  function handleVideoError() {
-    console.warn("Video failed to load");
-    setVideoError("This video cannot be played (it may have been removed).");
+  // 🆕 Swipe up handlers
+  function handleSwipeStart(e) {
+    const t = e.touches?.[0];
+    if (!t) return;
+    touchStartYRef.current = t.clientY;
+    touchStartXRef.current = t.clientX;
   }
 
-  function handleMouseEnter() {
-    setShowControls(true);
-  }
-  function handleMouseLeave() {
-    setShowControls(false);
+  function handleSwipeEnd(e) {
+    const t = e.changedTouches?.[0];
+    if (!t) return;
+
+    const startY = touchStartYRef.current;
+    const startX = touchStartXRef.current;
+    if (startY == null || startX == null) return;
+
+    const dy = startY - t.clientY;
+    const dx = t.clientX - startX;
+
+    const minDistance = 60;
+
+    // vertical swipe up (ignore slight diagonal)
+    if (dy > minDistance && Math.abs(dy) > Math.abs(dx)) {
+      if (nextPost && nextPost._id) {
+        navigate(`/post/${nextPost._id}`);
+      }
+    }
+
+    touchStartYRef.current = null;
+    touchStartXRef.current = null;
   }
 
   // ---------- derived ----------
@@ -758,31 +716,7 @@ function ForYouPost({ post, me, navigate }) {
 
   const media =
     Array.isArray(post?.media) && post.media.length ? post.media[0] : null;
-
-  const videoSrc =
-    (media && (media.url || media.secure_url || media.path)) ||
-    post.videoUrl ||
-    "";
-
-  const isVideo = (() => {
-    if (!media) return false;
-    if (media.type === "video") return true;
-
-    const u = String(
-      media.url || media.secure_url || media.path || "",
-    ).toLowerCase();
-
-    if (!u) return false;
-
-    // treat common video URLs as video even if type is missing
-    return (
-      u.endsWith(".mp4") ||
-      u.endsWith(".mov") ||
-      u.endsWith(".webm") ||
-      u.endsWith(".mkv") ||
-      u.includes("/video/")
-    );
-  })();
+  const isVideo = media?.type === "video";
 
   const pro = post?.pro || {};
   const avatar = pro.photoUrl || post?.authorAvatar || "";
@@ -832,21 +766,34 @@ function ForYouPost({ post, me, navigate }) {
         return;
       }
     } catch {
-      // ignore
+      // ignore, fall back to UID route
     }
 
     navigate(`/profile/${encodeURIComponent(uid)}`);
   }
 
-  // This lets all videos (including old / broken Cloudinary ones) show up.
-  if (!videoSrc) {
-    // nothing to play at all, skip it
-    return null;
+  // ---------- UI ----------
+  if (loading) return <RouteLoader full />;
+
+  if (error || !post) {
+    return (
+      <div className="max-w-xl mx-auto p-4">
+        <div className="bg-[#151515] border border-[#2a2a2a] rounded-xl p-6">
+          <div className="text-lg font-semibold mb-2">Post</div>
+          <div className="text-sm text-gray-400">{error || "Not found"}</div>
+          <div className="mt-4">
+            <Link to="/browse" className="text-gold">
+              ← Back to feed
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
-    <article className="mb-10">
-      {/* header (profile + book) */}
+    <div className="max-w-xl mx-auto">
+      {/* header */}
       <div className="px-4 pt-4 pb-2 flex items-start justify-between gap-3">
         <div className="flex gap-3">
           <div
@@ -904,6 +851,7 @@ function ForYouPost({ post, me, navigate }) {
 
             {menuOpen && (
               <div className="absolute right-0 mt-2 w-56 bg-[#141414] border border-[#2a2a2a] rounded-lg shadow-lg z-30">
+                {/* Save/Unsave */}
                 <button
                   onClick={() => {
                     toggleSave();
@@ -917,10 +865,11 @@ function ForYouPost({ post, me, navigate }) {
                     : "Save post / Add to collection"}
                 </button>
 
+                {/* Copy link */}
                 <button
                   onClick={() => {
                     const base = window.location.origin;
-                    const url = `${base}/for-you/${id}`;
+                    const url = `${base}/post/${id}`;
                     if (navigator.clipboard?.writeText) {
                       navigator.clipboard
                         .writeText(url)
@@ -937,15 +886,54 @@ function ForYouPost({ post, me, navigate }) {
                   Copy link
                 </button>
 
+                {/* Owner-only actions */}
                 {isOwner ? (
-                  <button
-                    onClick={handleHideOrDeletePost}
-                    disabled={deleting}
-                    className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b] text-red-300 disabled:opacity-50"
-                    type="button"
-                  >
-                    {deleting ? "Deleting…" : "Delete / Hide Post"}
-                  </button>
+                  <>
+                    {post.commentsDisabled ? (
+                      <button
+                        onClick={async () => {
+                          try {
+                            await api.patch(`/api/posts/${id}/comments/enable`);
+                            setPost((p) => ({ ...p, commentsDisabled: false }));
+                            setMenuOpen(false);
+                          } catch {
+                            alert("Failed to enable comments");
+                          }
+                        }}
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
+                        type="button"
+                      >
+                        Enable comments
+                      </button>
+                    ) : (
+                      <button
+                        onClick={async () => {
+                          try {
+                            await api.patch(
+                              `/api/posts/${id}/comments/disable`,
+                            );
+                            setPost((p) => ({ ...p, commentsDisabled: true }));
+                            setMenuOpen(false);
+                          } catch {
+                            alert("Failed to disable comments");
+                          }
+                        }}
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
+                        type="button"
+                      >
+                        Disable comments
+                      </button>
+                    )}
+
+                    <button
+                      onClick={handleHideOrDeletePost}
+                      disabled={deleting}
+                      className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b] text-red-300 disabled:opacity-50"
+                      type="button"
+                    >
+                      {deleting ? "Deleting…" : "Delete / Hide Post"}
+                    </button>
+                  </>
                 ) : (
                   <div className="px-3 py-2 text-xs text-gray-500">
                     You can only hide your own post
@@ -957,268 +945,365 @@ function ForYouPost({ post, me, navigate }) {
         </div>
       </div>
 
-      {/* optional caption text */}
+      {/* text */}
       {post.text && (
         <div className="px-4 pb-3 text-sm text-white">{post.text}</div>
       )}
 
-      {/* VIDEO + SIDE ACTIONS */}
-      <div
-        className="relative w-full bg-black overflow-hidden h-[85vh] rounded-xl"
-        onMouseEnter={handleMouseEnter}
-        onMouseLeave={handleMouseLeave}
-      >
-        <video
-          ref={videoRef}
-          src={videoSrc}
-          className="absolute inset-0 w-full h-full object-cover"
-          muted={muted}
-          loop
-          playsInline
-          preload="metadata"
-          controls={false}
-          onClick={onClickVideo}
-          onPlay={onVideoPlay}
-          onLoadedMetadata={onLoadedMetadata}
-          onTimeUpdate={onTimeUpdate}
-          onError={handleVideoError}
-        />
+      {/* media */}
+      {media && (
+        <div
+          className="relative w-full bg-black overflow-hidden aspect-[4/5] sm:aspect-[4/5] lg:aspect-[3/4] xl:aspect-[1/1] max-h-[80vh]"
+          onTouchStart={handleSwipeStart} // 🆕 swipe start
+          onTouchEnd={handleSwipeEnd} // 🆕 swipe end
+        >
+          {isVideo ? (
+            <>
+              <video
+                ref={videoRef}
+                src={media.url}
+                className="absolute inset-0 w-full h-full object-cover"
+                muted={muted}
+                loop
+                playsInline
+                preload="metadata"
+                controls={false}
+                onClick={onClickVideo}
+                onPlay={onVideoPlay}
+                onLoadedMetadata={onLoadedMetadata}
+                onTimeUpdate={onTimeUpdate}
+              />
+              {!userHasInteracted && (
+                <button
+                  onClick={onClickVideo}
+                  className="absolute inset-0"
+                  aria-label="Play video"
+                  type="button"
+                />
+              )}
 
-        {/* SIDE ACTIONS like TikTok / Reels */}
-        <div className="absolute right-3 bottom-4 flex flex-col items-center gap-4 z-[3]">
-          {/* Like */}
+              {/* quick controls */}
+              <div className="absolute bottom-3 left-3 flex gap-2 z-[2]">
+                <button
+                  onClick={onClickVideo}
+                  className="bg-black/50 text-white text-xs px-3 py-1 rounded-full"
+                  type="button"
+                >
+                  {videoRef.current && !videoRef.current.paused
+                    ? "Pause"
+                    : "Play"}
+                </button>
+                <button
+                  onClick={onToggleMute}
+                  className="bg-black/50 text-white text-xs px-3 py-1 rounded-full"
+                  type="button"
+                >
+                  {muted ? "Unmute" : "Mute"}
+                </button>
+              </div>
+
+              {/* bottom controls */}
+              <div className="absolute inset-x-0 bottom-0 z-[2] px-3 pb-3 pt-6 bg-gradient-to-t from-black/70 via-black/20 to-transparent">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => jump(-10)}
+                      className="rounded-full bg-black/60 text-white text-xs px-3 py-1"
+                      type="button"
+                    >
+                      ⏪ 10s
+                    </button>
+                    <button
+                      onClick={() => jump(+10)}
+                      className="rounded-full bg-black/60 text-white text-xs px-3 py-1"
+                      type="button"
+                    >
+                      10s ⏩
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2 text-[11px] text-white/90">
+                    <span>
+                      {formatTime(currentTime)} / {formatTime(duration)}
+                    </span>
+                    <button
+                      onClick={toggleFullscreen}
+                      className="rounded-md bg-black/60 text-white text-[11px] px-2 py-1 ml-2"
+                      type="button"
+                    >
+                      ⛶
+                    </button>
+                  </div>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={Math.max(1, duration || 0)}
+                  step={0.1}
+                  value={Math.min(currentTime, duration || 0)}
+                  onMouseDown={onSeekStart}
+                  onTouchStart={onSeekStart}
+                  onChange={(e) => onSeekChange(Number(e.target.value || 0))}
+                  onMouseUp={(e) => onSeekCommit(Number(e.target.value || 0))}
+                  onTouchEnd={(e) => onSeekCommit(Number(e.target.value || 0))}
+                  className="w-full accent-[#F5C542]"
+                />
+              </div>
+            </>
+          ) : (
+            <img
+              src={media.url}
+              alt=""
+              loading="lazy"
+              className="absolute inset-0 w-full h-full object-cover"
+            />
+          )}
+        </div>
+      )}
+
+      {/* counts */}
+      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 text-xs text-gray-400 border-t border-[#1F1F1F]">
+        <div className="flex flex-wrap gap-4">
           <button
             type="button"
-            onClick={toggleLike}
-            disabled={loadingLike}
-            className="w-10 h-10 rounded-full bg-black/60 flex items-center justify-center"
+            onClick={() => openSheet("likes")}
+            className="hover:text-white"
           >
-            <span
-              className={
-                stats.likedByMe
-                  ? "text-[#F5C542] text-lg"
-                  : "text-white text-lg"
-              }
-            >
-              ♥
-            </span>
+            {stats.likesCount} likes
           </button>
-          <div className="text-[11px] text-white">{stats.likesCount ?? 0}</div>
 
-          {/* Comments toggle */}
           <button
             type="button"
-            onClick={() => setShowComments((v) => !v)}
-            className="w-10 h-10 rounded-full bg-black/60 flex items-center justify-center"
+            onClick={() => openSheet("comments")}
+            className="hover:text-white"
           >
-            <span className="text-white text-lg">💬</span>
+            {stats.commentsCount} comments
           </button>
-          <div className="text-[11px] text-white">
-            {stats.commentsCount ?? 0}
-          </div>
 
-          {/* Save */}
-          <button
-            type="button"
-            onClick={toggleSave}
-            disabled={loadingSave}
-            className="w-10 h-10 rounded-full bg-black/60 flex items-center justify-center"
-          >
-            <span
-              className={
-                stats.savedByMe
-                  ? "text-[#F5C542] text-lg"
-                  : "text-white text-lg"
-              }
-            >
-              🔖
-            </span>
-          </button>
-          <div className="text-[11px] text-white">{stats.savesCount ?? 0}</div>
-
-          {/* Share */}
-          <button
-            type="button"
-            onClick={handleShare}
-            className="w-10 h-10 rounded-full bg-black/60 flex items-center justify-center"
-          >
-            <span className="text-white text-lg">↗</span>
-          </button>
-          <div className="text-[11px] text-white">{stats.sharesCount ?? 0}</div>
-
-          {/* Views (eye) */}
-          <div className="flex flex-col items-center gap-1 mt-1">
-            <div className="w-10 h-10 rounded-full bg-black/40 flex items-center justify-center">
-              <span className="text-white text-base">👁</span>
-            </div>
-            <div className="text-[11px] text-white">
-              {stats.viewsCount ?? 0}
-            </div>
-          </div>
+          <div>{stats.sharesCount} shares</div>
         </div>
 
-        {/* initial tap overlay to start audio */}
-        {!userHasInteracted && (
-          <button
-            onClick={onClickVideo}
-            className="absolute inset-0"
-            aria-label="Play video"
-            type="button"
-          />
-        )}
-
-        {/* playback controls (appear on hover / tap) */}
-        {showControls && (
-          <>
-            {/* quick controls */}
-            <div className="absolute bottom-3 left-3 flex gap-2 z-[2]">
-              <button
-                onClick={onClickVideo}
-                className="bg-black/50 text-white text-xs px-3 py-1 rounded-full"
-                type="button"
-              >
-                {videoRef.current && !videoRef.current.paused
-                  ? "Pause"
-                  : "Play"}
-              </button>
-              <button
-                onClick={onToggleMute}
-                className="bg-black/50 text-white text-xs px-3 py-1 rounded-full"
-                type="button"
-              >
-                {muted ? "Unmute" : "Mute"}
-              </button>
-            </div>
-
-            {/* bottom seek + time + fullscreen */}
-            <div className="absolute inset-x-0 bottom-0 z-[2] px-3 pb-3 pt-6 bg-gradient-to-t from-black/70 via-black/20 to-transparent">
-              <div className="flex items-center justify-between gap-2 mb-2">
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => jump(-10)}
-                    className="rounded-full bg-black/60 text-white text-xs px-3 py-1"
-                    type="button"
-                  >
-                    ⏪ 10s
-                  </button>
-                  <button
-                    onClick={() => jump(+10)}
-                    className="rounded-full bg-black/60 text-white text-xs px-3 py-1"
-                    type="button"
-                  >
-                    10s ⏩
-                  </button>
-                </div>
-                <div className="flex items-center gap-2 text-[11px] text-white/90">
-                  <span>
-                    {formatTime(currentTime)} / {formatTime(duration)}
-                  </span>
-                  <button
-                    onClick={toggleFullscreen}
-                    className="rounded-md bg-black/60 text-white text-[11px] px-2 py-1 ml-2"
-                    type="button"
-                  >
-                    ⛶
-                  </button>
-                </div>
-              </div>
-              <input
-                type="range"
-                min={0}
-                max={Math.max(1, duration || 0)}
-                step={0.1}
-                value={Math.min(currentTime, duration || 0)}
-                onMouseDown={onSeekStart}
-                onTouchStart={onSeekStart}
-                onChange={(e) => onSeekChange(Number(e.target.value || 0))}
-                onMouseUp={(e) => onSeekCommit(Number(e.target.value || 0))}
-                onTouchEnd={(e) => onSeekCommit(Number(e.target.value || 0))}
-                className="w-full accent-[#F5C542]"
-              />
-            </div>
-          </>
-        )}
-
-        {videoError && (
-          <div className="absolute inset-x-0 bottom-16 px-4">
-            <div className="bg-red-600/80 text-xs text-white px-3 py-2 rounded-lg">
-              {videoError}
-            </div>
-          </div>
-        )}
+        <button
+          type="button"
+          onClick={() => openSheet("views")}
+          className="flex items-center gap-1 hover:text-white"
+        >
+          <span role="img" aria-label="views">
+            👁
+          </span>
+          <span>Views</span>
+          <span>{stats.viewsCount}</span>
+        </button>
       </div>
 
-      {/* comments */}
-      {showComments && (
-        <div className="px-4 py-3 border-t border-[#1F1F1F]">
-          {!post?.commentsDisabled ? (
-            <form onSubmit={submitComment} className="flex gap-2 mb-3">
-              <input
-                value={commentText}
-                onChange={(e) => setCommentText(e.target.value)}
-                placeholder={me ? "Write a comment..." : "Login to comment..."}
-                className="flex-1 bg-[#121212] border border-[#2b2b2b] rounded-full px-3 py-2 text-sm text-white"
-              />
+      {/* actions */}
+      <div className="relative z-[1] flex border-t border-[#1F1F1F]">
+        <LikeButton active={stats.likedByMe} onClick={toggleLike} />
+        <CommentToggle onClick={() => openSheet("comments")} />
+        <ShareButton onClick={handleShare} />
+        {!isOwner ? (
+          <FollowButton
+            targetUid={followTargetUid}
+            proId={post?.proId || null}
+          />
+        ) : (
+          <ActionButton disabled className="text-gray-500 select-none">
+            —
+          </ActionButton>
+        )}
+      </div>
+      {/* Engagement Sheet Overlay (Comments / Likes / Views) */}
+      {sheetOpen && (
+        <div className="fixed inset-0 z-[100]">
+          {/* backdrop */}
+          <button
+            type="button"
+            onClick={closeSheet}
+            aria-label="Close"
+            className="absolute inset-0 bg-black/70"
+          />
+
+          {/* sheet */}
+          <div className="absolute inset-x-0 bottom-0 max-w-xl mx-auto bg-[#0f0f0f] border-t border-[#2a2a2a] rounded-t-2xl">
+            {/* header + tabs */}
+            <div className="px-4 pt-3 pb-2 flex items-center justify-between">
+              <div className="flex gap-4 text-sm">
+                <button
+                  type="button"
+                  onClick={() => setSheetTab("comments")}
+                  className={
+                    sheetTab === "comments"
+                      ? "text-white font-semibold"
+                      : "text-gray-400"
+                  }
+                >
+                  Comments
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSheetTab("likes")}
+                  className={
+                    sheetTab === "likes"
+                      ? "text-white font-semibold"
+                      : "text-gray-400"
+                  }
+                >
+                  Likes
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSheetTab("views")}
+                  className={
+                    sheetTab === "views"
+                      ? "text-white font-semibold"
+                      : "text-gray-400"
+                  }
+                >
+                  Views
+                </button>
+              </div>
+
               <button
-                className="text-sm bg-[#F5C542] text-black rounded-full px-3 py-1"
-                type="submit"
-                disabled={!me}
+                type="button"
+                onClick={closeSheet}
+                className="text-gray-300 hover:text-white"
+                aria-label="Close panel"
               >
-                Post
+                ✕
               </button>
-            </form>
-          ) : (
-            <div className="text-xs text-red-400 mb-3">
-              Comments are disabled for this post.
             </div>
-          )}
-          <div className="space-y-3">
-            {comments.map((c) => (
-              <div key={c._id} className="flex gap-2">
-                <div className="w-8 h-8 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center text-xs text-white">
-                  {c.authorAvatar ? (
-                    <img
-                      src={c.authorAvatar}
-                      alt={c.authorName}
-                      className="w-full h-full object-cover"
-                      loading="lazy"
-                    />
-                  ) : (
-                    (c.authorName || "U").slice(0, 1).toUpperCase()
-                  )}
-                </div>
-                <div className="flex-1">
-                  <div className="text-xs text-white font-semibold">
-                    {c.authorName || "User"}
-                  </div>
-                  <div className="bg-[#141414] rounded-2xl px-3 py-2 text-sm text-gray-200">
-                    {c.text}
-                  </div>
-                  <div className="flex gap-3 items-center text-[10px] text-gray-500 mt-1">
-                    <span>
-                      {c.createdAt
-                        ? new Date(c.createdAt).toLocaleString()
-                        : ""}
-                    </span>
-                    {me?.uid && me.uid === c.ownerUid && (
+
+            {/* body */}
+            <div className="h-[60vh] overflow-y-auto px-4 pb-4">
+              {/* COMMENTS TAB */}
+              {sheetTab === "comments" && (
+                <>
+                  {!post?.commentsDisabled ? (
+                    <form
+                      onSubmit={submitComment}
+                      className="flex gap-2 mb-3 sticky top-0 bg-[#0f0f0f] pt-2"
+                    >
+                      <input
+                        value={commentText}
+                        onChange={(e) => setCommentText(e.target.value)}
+                        placeholder={
+                          me ? "Write a comment..." : "Login to comment..."
+                        }
+                        className="flex-1 bg-[#121212] border border-[#2b2b2b] rounded-full px-3 py-2 text-sm text-white"
+                      />
                       <button
-                        type="button"
-                        onClick={() => handleDeleteComment(c._id)}
-                        className="text-red-300 hover:text-red-100"
+                        className="text-sm bg-[#F5C542] text-black rounded-full px-3 py-1"
+                        type="submit"
+                        disabled={!me}
                       >
-                        Delete
+                        Post
                       </button>
+                    </form>
+                  ) : (
+                    <div className="text-xs text-red-400 mb-3 pt-2">
+                      Comments are disabled for this post.
+                    </div>
+                  )}
+
+                  <div className="space-y-3">
+                    {comments.map((c) => (
+                      <div key={c._id} className="flex gap-2">
+                        <div className="w-8 h-8 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center text-xs text-white">
+                          {c.authorAvatar ? (
+                            <img
+                              src={c.authorAvatar}
+                              alt={c.authorName}
+                              className="w-full h-full object-cover"
+                              loading="lazy"
+                            />
+                          ) : (
+                            (c.authorName || "U").slice(0, 1).toUpperCase()
+                          )}
+                        </div>
+
+                        <div className="flex-1">
+                          <div className="text-xs text-white font-semibold">
+                            {c.authorName || "User"}
+                          </div>
+                          <div className="bg-[#141414] rounded-2xl px-3 py-2 text-sm text-gray-200">
+                            {c.text}
+                          </div>
+                          <div className="flex gap-3 items-center text-[10px] text-gray-500 mt-1">
+                            <span>
+                              {c.createdAt
+                                ? new Date(c.createdAt).toLocaleString()
+                                : ""}
+                            </span>
+                            {me?.uid && me.uid === c.ownerUid && (
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteComment(c._id)}
+                                className="text-red-300 hover:text-red-100"
+                              >
+                                Delete
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+
+                    {comments.length === 0 && (
+                      <div className="text-xs text-gray-500">
+                        No comments yet.
+                      </div>
                     )}
                   </div>
+                </>
+              )}
+
+              {/* LIKES TAB (counts only for now) */}
+              {sheetTab === "likes" && (
+                <div className="py-3">
+                  <div className="text-sm text-white">
+                    {stats.likesCount} likes
+                  </div>
+                  {stats.likedByMe && (
+                    <div className="text-xs text-gold mt-2">
+                      You liked this post.
+                    </div>
+                  )}
+                  <div className="text-xs text-gray-500 mt-2">
+                    Likes list is not exposed by the API yet (we only have
+                    counts).
+                  </div>
                 </div>
-              </div>
-            ))}
-            {comments.length === 0 && (
-              <div className="text-xs text-gray-500">No comments yet.</div>
-            )}
+              )}
+
+              {/* VIEWS TAB (counts only for now) */}
+              {sheetTab === "views" && (
+                <div className="py-3">
+                  <div className="text-sm text-white">
+                    {stats.viewsCount} views
+                  </div>
+                  <div className="text-xs text-gray-500 mt-2">
+                    Viewers list is not stored by the API yet (we only have
+                    counts).
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
-    </article>
+
+      {/* 🆕 optional small hint when loading next */}
+      {loadingNext && (
+        <div className="px-4 pt-2 text-[11px] text-zinc-500">
+          Preparing next video…
+        </div>
+      )}
+
+      {/* back link */}
+      <div className="px-4 py-6">
+        <Link to="/browse" className="text-gold">
+          ← Back to feed
+        </Link>
+      </div>
+    </div>
   );
 }

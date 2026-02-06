@@ -7,6 +7,8 @@ import LikeButton from "./LikeButton.jsx";
 import ShareButton from "./ShareButton.jsx";
 import CommentToggle from "./CommentToggle.jsx";
 import ActionButton from "./ActionButton.jsx";
+import { openNativeVideoPlayer } from "../lib/nativeVideoPlayer";
+import { Capacitor } from "@capacitor/core";
 
 // ------------------- Feed: Only one video plays at a time -------------------
 const FEED_ACTIVE_VIDEO_KEY = "__kpocha_feed_active_video_id__";
@@ -425,14 +427,24 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
     };
   }, []);
 
-  function onClickVideo() {
+  async function onClickVideo() {
     if (!postId) return;
 
-    // Treat as interaction (unlocks audio on platforms that require a gesture)
+    const url = media?.url;
+    if (Capacitor.isNativePlatform() && url) {
+      // Native full player first (real player)
+      const ok = await openNativeVideoPlayer({
+        url,
+        startMs: 0,
+        muted: false, // or use your global preference
+        loop: true,
+      });
+      if (ok) return;
+    }
+
+    // Web/desktop fallback
     setUserHasInteracted(true);
     playTriggeredByObserverRef.current = false;
-
-    // Open fullscreen feed page (ForYou)
     navigate(`/for-you/${encodeURIComponent(postId)}`);
   }
 
