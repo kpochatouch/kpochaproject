@@ -1,20 +1,18 @@
 {
   "name": "kpocha-touch-monorepo",
   "private": true,
-  "workspaces": [
-    "apps/*"
-  ],
+  "workspaces": ["apps/*"],
   "scripts": {
-  "dev:web": "npm --workspace apps/web run dev",
-  "dev:api": "npm --workspace apps/api run dev",
-  "build:web": "npm --workspace apps/web run build",
-  "start:api": "npm --workspace apps/api start",
-  "postinstall": "patch-package"
-},
+    "dev:web": "npm --workspace apps/web run dev",
+    "dev:api": "npm --workspace apps/api run dev",
+    "build:web": "npm --workspace apps/web run build",
+    "start:api": "npm --workspace apps/api start",
+    "postinstall": "patch-package"
+  },
+  "dependencies": {
+    "patch-package": "^8.0.1"
+  },
   "engines": {
     "node": ">=18"
-  },
-  "devDependencies": {
-    "patch-package": "^8.0.1"
   }
 }
