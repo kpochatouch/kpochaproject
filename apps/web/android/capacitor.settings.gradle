@@ -7,3 +7,6 @@ project(':capacitor-app').projectDir = new File('../../../node_modules/@capacito
 
 include ':capacitor-push-notifications'
 project(':capacitor-push-notifications').projectDir = new File('../../../node_modules/@capacitor/push-notifications/android')
+
+include ':capacitor-native-video-player'
+project(':capacitor-native-video-player').projectDir = new File('../../../node_modules/capacitor-native-video-player/android')
