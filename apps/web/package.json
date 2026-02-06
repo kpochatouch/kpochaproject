@@ -20,6 +20,7 @@
     "@capacitor/push-notifications": "^8.0.0",
     "aws-amplify": "^6.15.7",
     "axios": "^1.7.2",
+    "capacitor-native-video-player": "^0.0.1",
     "firebase": "^12.3.0",
     "framer-motion": "^12.23.24",
     "nigerian-states-and-lgas": "^1.0.8",
