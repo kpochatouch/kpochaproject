@@ -5,6 +5,14 @@ import { api } from "../lib/api";
 import { useMe } from "../context/MeContext.jsx";
 import { Capacitor } from "@capacitor/core";
 import { openNativeVideoPlayer } from "../lib/nativeVideoPlayer";
+import { openNativeFeed } from "../lib/nativeFeed";
+import {
+  requestExclusivePlay,
+  pauseIfActive,
+  getSoundEnabled,
+  setSoundEnabled,
+} from "../lib/mediaPolicy";
+import MobileBackButton from "../components/MobileBackButton.jsx";
 import RouteLoader from "../components/RouteLoader.jsx";
 
 function timeAgo(ts) {
@@ -49,8 +57,32 @@ export default function ForYou() {
   // Queue cursor to keep /next calls stable (fixes "only 2 videos")
   const lastCursorIdRef = useRef(null);
 
-  // initial load (first + next)
+  // ✅ Native Android: open the real native feed screen (do not run the web feed here)
   useEffect(() => {
+    let alive = true;
+
+    (async () => {
+      if (!Capacitor.isNativePlatform()) return;
+
+      // If you pass lga later, do it here.
+      const opened = await openNativeFeed({ lga: "" });
+
+      // If native UI opened, stop rendering/loading web feed to avoid double work.
+      if (alive && opened) {
+        setLoading(false);
+        setFeedPosts([]);
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // initial load (first + next) — web only (Android native uses NativeFeedActivity)
+  useEffect(() => {
+    if (Capacitor.isNativePlatform()) return;
+
     let cancelled = false;
 
     async function loadInitial() {
@@ -239,41 +271,79 @@ export default function ForYou() {
   }
 
   return (
-    <div
-      className="max-w-xl mx-auto h-[100dvh] overflow-y-auto snap-y snap-mandatory"
-      style={{ WebkitOverflowScrolling: "touch" }}
-    >
-      {feedPosts.map((post, index) => (
-        <ForYouPost
-          key={post._id}
-          post={post}
-          index={index}
-          me={me}
-          navigate={navigate}
-          onNeedMore={() => {
-            // preload when close to end (flip buffer)
-            const remaining = feedPosts.length - 1 - index;
-            if (remaining <= 2) loadMore();
-          }}
-        />
-      ))}
+    <div className="w-full h-[100dvh] bg-black overflow-hidden">
+      {/* Top bar (Back + label) - does not push layout */}
+      <div className="fixed top-0 left-0 right-0 z-[50] px-3 pt-3 pb-2 bg-gradient-to-b from-black/75 via-black/40 to-transparent pointer-events-auto">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <MobileBackButton fallback="/browse" />
+            <div className="text-white font-semibold">For You</div>
+          </div>
 
-      <div ref={sentinelRef} className="h-1 w-full" aria-hidden="true" />
-
-      {loadingMore && (
-        <div className="px-4 py-3 text-[11px] text-gray-500">Loading more…</div>
-      )}
-
-      {endOfFeed && (
-        <div className="px-4 py-4 text-[11px] text-gray-600 text-center">
-          You&apos;ve reached the end for now.
+          <div className="flex items-center gap-3 text-white/90">
+            <button
+              type="button"
+              className="p-2 rounded-full hover:bg-white/10"
+              aria-label="Search"
+            >
+              🔍
+            </button>
+            <button
+              type="button"
+              className="p-2 rounded-full hover:bg-white/10"
+              aria-label="Camera"
+            >
+              📷
+            </button>
+            <button
+              type="button"
+              className="p-2 rounded-full hover:bg-white/10"
+              aria-label="Profile"
+              onClick={() => navigate("/profile")}
+            >
+              👤
+            </button>
+          </div>
         </div>
-      )}
+      </div>
 
-      <div className="px-4 py-6">
-        <Link to="/browse" className="text-gold">
-          ← Back to feed
-        </Link>
+      {/* self-contained spinner animation */}
+      <style>{`
+        @keyframes kpochaSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+      `}</style>
+
+      {/* snap container */}
+      <div
+        className="w-full h-[100dvh] overflow-y-auto snap-y snap-mandatory"
+        style={{ WebkitOverflowScrolling: "touch" }}
+      >
+        {feedPosts.map((post, index) => (
+          <ForYouPost
+            key={post._id}
+            post={post}
+            index={index}
+            me={me}
+            navigate={navigate}
+            onNeedMore={() => {
+              const remaining = feedPosts.length - 1 - index;
+              if (remaining <= 2) loadMore();
+            }}
+          />
+        ))}
+
+        <div ref={sentinelRef} className="h-1 w-full" aria-hidden="true" />
+
+        {loadingMore && (
+          <div className="px-4 py-3 text-[11px] text-gray-500">
+            Loading more…
+          </div>
+        )}
+
+        {endOfFeed && (
+          <div className="px-4 py-4 text-[11px] text-gray-600 text-center">
+            You&apos;ve reached the end for now.
+          </div>
+        )}
       </div>
     </div>
   );
@@ -319,22 +389,6 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
   const videoRef = useRef(null);
   const pageRef = useRef(null);
   const menuRef = useRef(null);
-  // ----- Global sound preference (shared with FeedCard/PostDetail) -----
-  const SOUND_KEY = "kpocha_sound_enabled";
-
-  function getSoundEnabled() {
-    try {
-      return localStorage.getItem(SOUND_KEY) === "1";
-    } catch {
-      return false;
-    }
-  }
-
-  function setSoundEnabled(on) {
-    try {
-      localStorage.setItem(SOUND_KEY, on ? "1" : "0");
-    } catch {}
-  }
 
   const [muted, setMuted] = useState(() => !getSoundEnabled());
   const [userHasInteracted, setUserHasInteracted] = useState(false);
@@ -348,21 +402,10 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
   const lastWatchTsRef = useRef(0);
   // ---- Global: only one <video> plays at a time (flip deck) ----
   // Stored on window to survive re-renders without new files.
-  function claimActiveVideo(vid) {
-    try {
-      const prev = window.__kpochaActiveVideo;
-      if (prev && prev !== vid) {
-        try {
-          prev.pause();
-        } catch {}
-      }
-      window.__kpochaActiveVideo = vid;
-    } catch {}
-  }
 
   const [showControls, setShowControls] = useState(false);
   const [videoError, setVideoError] = useState("");
-  const [broken, setBroken] = useState(false);
+  const [showSpinner, setShowSpinner] = useState(true);
   // Flip rule: play ONLY when this page is snapped (nearly full-screen visible)
   useEffect(() => {
     const el = pageRef.current;
@@ -388,17 +431,14 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
           vid.muted = !wantSound;
           setMuted(!wantSound);
 
-          // exclusive play
-          claimActiveVideo(vid);
+          // exclusive play (only one post plays at a time)
+          requestExclusivePlay(id, vid);
 
           // autoplay (muted unless user enabled sound)
           playTriggeredByObserverRef.current = true;
           vid.play().catch(() => {});
         } else {
-          // pause when not active
-          try {
-            vid.pause();
-          } catch {}
+          pauseIfActive(id, vid);
         }
       },
       { threshold: [0, 0.5, 0.9, 1] },
@@ -491,7 +531,8 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
     setMuted(() => !getSoundEnabled());
     setShowControls(false);
     setVideoError("");
-  }, [id]);
+    setShowSpinner(true);
+  }, [id, videoSrc]);
 
   // click-outside to close menu
   useEffect(() => {
@@ -1021,133 +1062,29 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
   }
 
   return (
-    <article ref={pageRef} className="h-[100dvh] snap-start snap-always">
-      {/* header (profile + book) */}
-      <div className="px-4 pt-4 pb-2 flex items-start justify-between gap-3">
-        <div className="flex gap-3">
-          <div
-            className="w-10 h-10 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center cursor-pointer"
-            onClick={goToProfile}
-            title="View profile"
-            role="button"
-            aria-label="View profile"
-          >
-            {avatar ? (
-              <img
-                src={avatar}
-                alt={proName}
-                className="w-full h-full object-cover"
-              />
-            ) : (
-              <span className="text-sm text-white">
-                {proName.slice(0, 1).toUpperCase()}
-              </span>
-            )}
-          </div>
-          <div>
-            <div
-              className="text-sm font-semibold text-white truncate max-w-[120px] cursor-pointer"
-              onClick={goToProfile}
-              title="View profile"
-            >
-              {proName}
-            </div>
-
-            <div className="text-xs text-gray-400">
-              {lga || "Nigeria"} • {timeAgo(post.createdAt)}
-            </div>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {post.proId && (
-            <Link
-              to={`/book/${post.proId}`}
-              className="rounded-md bg-gold text-black px-3 py-1 text-sm font-semibold"
-            >
-              Book
-            </Link>
-          )}
-          <div className="relative" ref={menuRef}>
-            <button
-              onClick={() => setMenuOpen((v) => !v)}
-              aria-label="Open post menu"
-              className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-800 text-white"
-              type="button"
-            >
-              ⋯
-            </button>
-
-            {menuOpen && (
-              <div className="absolute right-0 mt-2 w-56 bg-[#141414] border border-[#2a2a2a] rounded-lg shadow-lg z-30">
-                <button
-                  onClick={() => {
-                    toggleSave();
-                    setMenuOpen(false);
-                  }}
-                  className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
-                  type="button"
-                >
-                  {stats.savedByMe
-                    ? "Unsave post"
-                    : "Save post / Add to collection"}
-                </button>
-
-                <button
-                  onClick={() => {
-                    const base = window.location.origin;
-                    const url = `${base}/for-you/${id}`;
-                    if (navigator.clipboard?.writeText) {
-                      navigator.clipboard
-                        .writeText(url)
-                        .then(() => alert("Link copied"))
-                        .catch(() => alert("Share link: " + url));
-                    } else {
-                      alert("Share link: " + url);
-                    }
-                    setMenuOpen(false);
-                  }}
-                  className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
-                  type="button"
-                >
-                  Copy link
-                </button>
-
-                {isOwner ? (
-                  <button
-                    onClick={handleHideOrDeletePost}
-                    disabled={deleting}
-                    className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b] text-red-300 disabled:opacity-50"
-                    type="button"
-                  >
-                    {deleting ? "Deleting…" : "Delete / Hide Post"}
-                  </button>
-                ) : (
-                  <div className="px-3 py-2 text-xs text-gray-500">
-                    You can only hide your own post
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* VIDEO + SIDE ACTIONS */}
+    <article
+      ref={pageRef}
+      className="relative w-full h-[100dvh] snap-start snap-always bg-black overflow-hidden"
+    >
+      {/* VIDEO fills the whole screen */}
       <div
-        className="relative w-full bg-black overflow-hidden h-[100dvh]"
+        className="absolute inset-0 bg-black"
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
       >
         <video
           ref={videoRef}
           src={videoSrc}
-          className="absolute inset-0 w-full h-full object-cover"
+          className="absolute inset-0 w-full h-full object-cover z-[1]"
           muted={muted}
           loop
           playsInline
           preload="metadata"
           controls={false}
+          onLoadStart={() => setShowSpinner(true)}
+          onLoadedData={() => setShowSpinner(false)}
+          onCanPlay={() => setShowSpinner(false)}
+          onPlaying={() => setShowSpinner(false)}
           onClick={onClickVideo}
           onPlay={onVideoPlay}
           onLoadedMetadata={onLoadedMetadata}
@@ -1155,10 +1092,131 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
           onError={handleVideoError}
         />
 
-        {/* CAPTION INSIDE VIDEO (bottom-left) */}
+        {/* ✅ spinner while loading (replaces grey player look) */}
+        {showSpinner && (
+          <div className="absolute inset-0 z-[2] flex items-center justify-center pointer-events-none">
+            <div
+              className="w-10 h-10 rounded-full border-4 border-white/30 border-t-white"
+              style={{ animation: "kpochaSpin 0.9s linear infinite" }}
+            />
+          </div>
+        )}
+
+        {/* HEADER overlays video (no layout pushing = no grey bar) */}
+        <div className="absolute top-0 left-0 right-0 z-[5] px-4 pt-4 pb-2 flex items-start justify-between gap-3 bg-gradient-to-b from-black/70 via-black/30 to-transparent">
+          <div className="flex gap-3">
+            <div
+              className="w-10 h-10 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center cursor-pointer"
+              onClick={goToProfile}
+              title="View profile"
+              role="button"
+              aria-label="View profile"
+            >
+              {avatar ? (
+                <img
+                  src={avatar}
+                  alt={proName}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <span className="text-sm text-white">
+                  {proName.slice(0, 1).toUpperCase()}
+                </span>
+              )}
+            </div>
+            <div>
+              <div
+                className="text-sm font-semibold text-white truncate max-w-[160px] cursor-pointer"
+                onClick={goToProfile}
+                title="View profile"
+              >
+                {proName}
+              </div>
+
+              <div className="text-xs text-gray-300">
+                {lga || "Nigeria"} • {timeAgo(post.createdAt)}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {post.proId && (
+              <Link
+                to={`/book/${post.proId}`}
+                className="rounded-md bg-gold text-black px-3 py-1 text-sm font-semibold"
+              >
+                Book
+              </Link>
+            )}
+            <div className="relative" ref={menuRef}>
+              <button
+                onClick={() => setMenuOpen((v) => !v)}
+                aria-label="Open post menu"
+                className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10 text-white"
+                type="button"
+              >
+                ⋯
+              </button>
+
+              {menuOpen && (
+                <div className="absolute right-0 mt-2 w-56 bg-[#141414] border border-[#2a2a2a] rounded-lg shadow-lg z-30">
+                  <button
+                    onClick={() => {
+                      toggleSave();
+                      setMenuOpen(false);
+                    }}
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
+                    type="button"
+                  >
+                    {stats.savedByMe
+                      ? "Unsave post"
+                      : "Save post / Add to collection"}
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      const base = window.location.origin;
+                      const url = `${base}/for-you/${id}`;
+                      if (navigator.clipboard?.writeText) {
+                        navigator.clipboard
+                          .writeText(url)
+                          .then(() => alert("Link copied"))
+                          .catch(() => alert("Share link: " + url));
+                      } else {
+                        alert("Share link: " + url);
+                      }
+                      setMenuOpen(false);
+                    }}
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
+                    type="button"
+                  >
+                    Copy link
+                  </button>
+
+                  {isOwner ? (
+                    <button
+                      onClick={handleHideOrDeletePost}
+                      disabled={deleting}
+                      className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b] text-red-300 disabled:opacity-50"
+                      type="button"
+                    >
+                      {deleting ? "Deleting…" : "Delete / Hide Post"}
+                    </button>
+                  ) : (
+                    <div className="px-3 py-2 text-xs text-gray-500">
+                      You can only hide your own post
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* CAPTION (bottom-left) */}
         {captionText && (
-          <div className="absolute left-0 right-16 bottom-0 z-[3] px-4 pb-4 pt-10 bg-gradient-to-t from-black/80 via-black/30 to-transparent pointer-events-none">
-            <div className="text-white text-sm leading-snug pointer-events-auto">
+          <div className="absolute left-0 right-16 bottom-0 z-[5] px-4 pb-4 pt-12 bg-gradient-to-t from-black/80 via-black/30 to-transparent">
+            <div className="text-white text-sm leading-snug">
               <span>{captionShown}</span>
               {captionTooLong && !showFullCaption && (
                 <button
@@ -1188,13 +1246,13 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
           </div>
         )}
 
-        {/* SIDE ACTIONS like TikTok / Reels */}
-        <div className="absolute right-3 bottom-4 flex flex-col items-center gap-4 z-[3]">
-          {/* Like */}
+        {/* SIDE ACTIONS (force pointer events + higher z-index so they click) */}
+        <div className="absolute right-3 bottom-20 flex flex-col items-center gap-4 z-[20] pointer-events-auto">
           <button
             type="button"
             onClick={toggleLike}
             disabled={loadingLike}
+            style={{ touchAction: "manipulation" }}
             className="w-10 h-10 rounded-full bg-black/60 flex items-center justify-center"
           >
             <span
@@ -1209,10 +1267,10 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
           </button>
           <div className="text-[11px] text-white">{stats.likesCount ?? 0}</div>
 
-          {/* Comments toggle */}
           <button
             type="button"
-            onClick={() => setShowComments((v) => !v)}
+            onClick={() => setShowComments(true)}
+            style={{ touchAction: "manipulation" }}
             className="w-10 h-10 rounded-full bg-black/60 flex items-center justify-center"
           >
             <span className="text-white text-lg">💬</span>
@@ -1221,11 +1279,11 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
             {stats.commentsCount ?? 0}
           </div>
 
-          {/* Save */}
           <button
             type="button"
             onClick={toggleSave}
             disabled={loadingSave}
+            style={{ touchAction: "manipulation" }}
             className="w-10 h-10 rounded-full bg-black/60 flex items-center justify-center"
           >
             <span
@@ -1240,17 +1298,16 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
           </button>
           <div className="text-[11px] text-white">{stats.savesCount ?? 0}</div>
 
-          {/* Share */}
           <button
             type="button"
             onClick={handleShare}
+            style={{ touchAction: "manipulation" }}
             className="w-10 h-10 rounded-full bg-black/60 flex items-center justify-center"
           >
             <span className="text-white text-lg">↗</span>
           </button>
           <div className="text-[11px] text-white">{stats.sharesCount ?? 0}</div>
 
-          {/* Views (eye) */}
           <div className="flex flex-col items-center gap-1 mt-1">
             <div className="w-10 h-10 rounded-full bg-black/40 flex items-center justify-center">
               <span className="text-white text-base">👁</span>
@@ -1261,80 +1318,8 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
           </div>
         </div>
 
-        {/* playback controls (appear on hover / tap) */}
-        {showControls && (
-          <>
-            {/* quick controls */}
-            <div className="absolute bottom-3 left-3 flex gap-2 z-[2]">
-              <button
-                onClick={onClickVideo}
-                className="bg-black/50 text-white text-xs px-3 py-1 rounded-full"
-                type="button"
-              >
-                {videoRef.current && !videoRef.current.paused
-                  ? "Pause"
-                  : "Play"}
-              </button>
-              <button
-                onClick={onToggleMute}
-                className="bg-black/50 text-white text-xs px-3 py-1 rounded-full"
-                type="button"
-              >
-                {muted ? "Unmute" : "Mute"}
-              </button>
-            </div>
-
-            {/* bottom seek + time + fullscreen */}
-            <div className="absolute inset-x-0 bottom-0 z-[2] px-3 pb-3 pt-6 bg-gradient-to-t from-black/70 via-black/20 to-transparent">
-              <div className="flex items-center justify-between gap-2 mb-2">
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => jump(-10)}
-                    className="rounded-full bg-black/60 text-white text-xs px-3 py-1"
-                    type="button"
-                  >
-                    ⏪ 10s
-                  </button>
-                  <button
-                    onClick={() => jump(+10)}
-                    className="rounded-full bg-black/60 text-white text-xs px-3 py-1"
-                    type="button"
-                  >
-                    10s ⏩
-                  </button>
-                </div>
-                <div className="flex items-center gap-2 text-[11px] text-white/90">
-                  <span>
-                    {formatTime(currentTime)} / {formatTime(duration)}
-                  </span>
-                  <button
-                    onClick={toggleFullscreen}
-                    className="rounded-md bg-black/60 text-white text-[11px] px-2 py-1 ml-2"
-                    type="button"
-                  >
-                    ⛶
-                  </button>
-                </div>
-              </div>
-              <input
-                type="range"
-                min={0}
-                max={Math.max(1, duration || 0)}
-                step={0.1}
-                value={Math.min(currentTime, duration || 0)}
-                onMouseDown={onSeekStart}
-                onTouchStart={onSeekStart}
-                onChange={(e) => onSeekChange(Number(e.target.value || 0))}
-                onMouseUp={(e) => onSeekCommit(Number(e.target.value || 0))}
-                onTouchEnd={(e) => onSeekCommit(Number(e.target.value || 0))}
-                className="w-full accent-[#F5C542]"
-              />
-            </div>
-          </>
-        )}
-
         {videoError && (
-          <div className="absolute inset-x-0 bottom-16 px-4">
+          <div className="absolute inset-x-0 bottom-28 px-4 z-[7]">
             <div className="bg-red-600/80 text-xs text-white px-3 py-2 rounded-lg">
               {videoError}
             </div>
@@ -1342,74 +1327,90 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
         )}
       </div>
 
-      {/* comments */}
+      {/* COMMENTS as an overlay drawer (Facebook-ish, doesn’t break snap) */}
       {showComments && (
-        <div className="px-4 py-3 border-t border-[#1F1F1F]">
-          {!post?.commentsDisabled ? (
-            <form onSubmit={submitComment} className="flex gap-2 mb-3">
-              <input
-                value={commentText}
-                onChange={(e) => setCommentText(e.target.value)}
-                placeholder={me ? "Write a comment..." : "Login to comment..."}
-                className="flex-1 bg-[#121212] border border-[#2b2b2b] rounded-full px-3 py-2 text-sm text-white"
-              />
+        <div className="absolute inset-0 z-[10] bg-black/70 pointer-events-auto">
+          <div className="absolute inset-x-0 bottom-0 max-h-[70dvh] bg-[#101010] border-t border-[#1F1F1F] rounded-t-2xl overflow-y-auto">
+            <div className="p-3 flex items-center justify-between">
+              <div className="text-sm font-semibold">Comments</div>
               <button
-                className="text-sm bg-[#F5C542] text-black rounded-full px-3 py-1"
-                type="submit"
-                disabled={!me}
+                type="button"
+                onClick={() => setShowComments(false)}
+                className="text-sm text-zinc-300"
               >
-                Post
+                Close
               </button>
-            </form>
-          ) : (
-            <div className="text-xs text-red-400 mb-3">
-              Comments are disabled for this post.
             </div>
-          )}
-          <div className="space-y-3">
-            {comments.map((c) => (
-              <div key={c._id} className="flex gap-2">
-                <div className="w-8 h-8 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center text-xs text-white">
-                  {c.authorAvatar ? (
-                    <img
-                      src={c.authorAvatar}
-                      alt={c.authorName}
-                      className="w-full h-full object-cover"
-                      loading="lazy"
-                    />
-                  ) : (
-                    (c.authorName || "U").slice(0, 1).toUpperCase()
-                  )}
-                </div>
-                <div className="flex-1">
-                  <div className="text-xs text-white font-semibold">
-                    {c.authorName || "User"}
-                  </div>
-                  <div className="bg-[#141414] rounded-2xl px-3 py-2 text-sm text-gray-200">
-                    {c.text}
-                  </div>
-                  <div className="flex gap-3 items-center text-[10px] text-gray-500 mt-1">
-                    <span>
-                      {c.createdAt
-                        ? new Date(c.createdAt).toLocaleString()
-                        : ""}
-                    </span>
-                    {me?.uid && me.uid === c.ownerUid && (
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteComment(c._id)}
-                        className="text-red-300 hover:text-red-100"
-                      >
-                        Delete
-                      </button>
+
+            {!post?.commentsDisabled ? (
+              <form onSubmit={submitComment} className="flex gap-2 px-3 pb-3">
+                <input
+                  value={commentText}
+                  onChange={(e) => setCommentText(e.target.value)}
+                  placeholder={
+                    me ? "Write a comment..." : "Login to comment..."
+                  }
+                  className="flex-1 bg-[#121212] border border-[#2b2b2b] rounded-full px-3 py-2 text-sm text-white"
+                />
+                <button
+                  className="text-sm bg-[#F5C542] text-black rounded-full px-3 py-1"
+                  type="submit"
+                  disabled={!me}
+                >
+                  Post
+                </button>
+              </form>
+            ) : (
+              <div className="text-xs text-red-400 px-3 pb-3">
+                Comments are disabled for this post.
+              </div>
+            )}
+
+            <div className="px-3 pb-4 space-y-3">
+              {comments.map((c) => (
+                <div key={c._id} className="flex gap-2">
+                  <div className="w-8 h-8 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center text-xs text-white">
+                    {c.authorAvatar ? (
+                      <img
+                        src={c.authorAvatar}
+                        alt={c.authorName}
+                        className="w-full h-full object-cover"
+                        loading="lazy"
+                      />
+                    ) : (
+                      (c.authorName || "U").slice(0, 1).toUpperCase()
                     )}
                   </div>
+                  <div className="flex-1">
+                    <div className="text-xs text-white font-semibold">
+                      {c.authorName || "User"}
+                    </div>
+                    <div className="bg-[#141414] rounded-2xl px-3 py-2 text-sm text-gray-200">
+                      {c.text}
+                    </div>
+                    <div className="flex gap-3 items-center text-[10px] text-gray-500 mt-1">
+                      <span>
+                        {c.createdAt
+                          ? new Date(c.createdAt).toLocaleString()
+                          : ""}
+                      </span>
+                      {me?.uid && me.uid === c.ownerUid && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteComment(c._id)}
+                          className="text-red-300 hover:text-red-100"
+                        >
+                          Delete
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            ))}
-            {comments.length === 0 && (
-              <div className="text-xs text-gray-500">No comments yet.</div>
-            )}
+              ))}
+              {comments.length === 0 && (
+                <div className="text-xs text-gray-500">No comments yet.</div>
+              )}
+            </div>
           </div>
         </div>
       )}

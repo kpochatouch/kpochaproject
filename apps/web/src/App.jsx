@@ -545,7 +545,10 @@ export default function App() {
     import("./pages/PublicProfile.jsx");
   }, []);
 
-  const hideChrome = location.pathname.startsWith("/aws-liveness");
+  const isForYouRoute = location.pathname.startsWith("/for-you");
+  const hideChrome =
+    isForYouRoute || location.pathname.startsWith("/aws-liveness");
+
   return (
     <ToastProvider>
       <div className="min-h-screen flex flex-col bg-black text-white">
