@@ -64,14 +64,31 @@ export default function ForYou() {
     (async () => {
       if (!Capacitor.isNativePlatform()) return;
 
-      // If you pass lga later, do it here.
-      const opened = await openNativeFeed({ lga: "" });
+      // ✅ fail-safe: never spin forever
+      const timeoutMs = 2000;
+      const timeout = new Promise((resolve) =>
+        setTimeout(() => resolve(false), timeoutMs),
+      );
 
-      // If native UI opened, stop rendering/loading web feed to avoid double work.
-      if (alive && opened) {
+      let opened = false;
+      try {
+        opened = await Promise.race([openNativeFeed({ lga: "" }), timeout]);
+      } catch {
+        opened = false;
+      }
+
+      if (!alive) return;
+
+      if (opened) {
+        // native UI took over; stop web rendering
         setLoading(false);
         setFeedPosts([]);
+        return;
       }
+
+      // ✅ native feed did NOT open -> show an error instead of infinite loader
+      setLoading(false);
+      setError("Native feed failed to open. Please try again.");
     })();
 
     return () => {
@@ -253,6 +270,14 @@ export default function ForYou() {
   }
 
   if (!feedPosts.length) {
+    if (Capacitor.isNativePlatform()) {
+      return (
+        <div className="w-full h-[100dvh] bg-black flex items-center justify-center">
+          <div className="text-sm text-gray-400">Opening For You…</div>
+        </div>
+      );
+    }
+
     return (
       <div className="max-w-xl mx-auto p-4">
         <div className="bg-[#151515] border border-[#2a2a2a] rounded-xl p-6">
@@ -291,10 +316,13 @@ export default function ForYou() {
             <button
               type="button"
               className="p-2 rounded-full hover:bg-white/10"
-              aria-label="Camera"
+              aria-label="Upload"
+              style={{ touchAction: "manipulation" }}
+              onClick={() => navigate("/compose")}
             >
               📷
             </button>
+
             <button
               type="button"
               className="p-2 rounded-full hover:bg-white/10"
@@ -532,7 +560,7 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
     setShowControls(false);
     setVideoError("");
     setShowSpinner(true);
-  }, [id, videoSrc]);
+  }, [id]);
 
   // click-outside to close menu
   useEffect(() => {
