@@ -3,12 +3,16 @@ apply plugin: 'com.android.application'
 android {
     namespace = "touch.kpocha.app"
     compileSdk = rootProject.ext.compileSdkVersion
+        buildFeatures {
+        buildConfig = true
+    }
     defaultConfig {
         applicationId "touch.kpocha.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "1.0"
+         buildConfigField "String", "API_BASE", "\"https://kpochaproject.onrender.com\""
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -41,6 +45,7 @@ dependencies {
     implementation platform("com.google.firebase:firebase-bom:33.5.1")
     implementation "com.google.firebase:firebase-messaging"
     implementation "com.google.android.exoplayer:exoplayer:2.19.1"
+    implementation "com.google.android.material:material:1.11.0"
 
     /* ✅ REQUIRED for NativeFeed (RecyclerView, LinearLayoutManager) */
     implementation "androidx.recyclerview:recyclerview:1.3.2"

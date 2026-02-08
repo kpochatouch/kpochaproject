@@ -5,7 +5,11 @@ import { api } from "./api"; // ✅ re-use the same ROOT the app already uses
 
 const NativeFeed = registerPlugin("NativeFeed");
 
-export async function openNativeFeed({ lga = "" } = {}) {
+export async function openNativeFeed({
+  lga = "",
+  startPostId = "",
+  startIndex = -1,
+} = {}) {
   if (!Capacitor.isNativePlatform()) return false;
 
   const apiBase = api?.defaults?.baseURL || "";
@@ -18,7 +22,7 @@ export async function openNativeFeed({ lga = "" } = {}) {
   } catch {}
 
   try {
-    await NativeFeed.open({ apiBase, lga, token });
+    await NativeFeed.open({ apiBase, lga, token, startPostId, startIndex });
     return true;
   } catch (e) {
     console.warn("[NativeFeed] open failed", e);

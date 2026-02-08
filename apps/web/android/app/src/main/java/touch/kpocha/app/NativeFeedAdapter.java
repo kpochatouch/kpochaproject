@@ -77,19 +77,44 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
         h.muteBadge.setOnClickListener(v -> {
             boolean nextMuted = !VideoPlaybackManager.get().isMuted();
             VideoPlaybackManager.get().setMuted(nextMuted);
+
+            // Update this row’s badge immediately
             h.muteBadge.setText(nextMuted ? "🔇" : "🔊");
+
+            // Also refresh the active row badge if different (keeps UI consistent)
+            int clickedPos = h.getBindingAdapterPosition();
+            if (clickedPos == RecyclerView.NO_POSITION)
+                return;
+
+            if (activePos != RecyclerView.NO_POSITION && activePos != clickedPos) {
+                notifyItemChanged(activePos);
+            }
+
         });
 
         // IMPORTANT: if this is NOT the active item, ensure player is detached from
         // this row
         if (pos != activePos) {
+            // Safe: only detaches if this view is currently attached
             VideoPlaybackManager.get().detach(h.playerView);
         }
+
     }
 
     @Override
     public int getItemCount() {
         return items.size();
+    }
+
+    public int findIndexByPostId(String postId) {
+        if (postId == null)
+            return -1;
+        for (int i = 0; i < items.size(); i++) {
+            PostItem p = items.get(i);
+            if (p != null && postId.equals(p.id))
+                return i;
+        }
+        return -1;
     }
 
     @Override
@@ -152,8 +177,13 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
         }
 
         if (activePos != bestPos) {
+            int prev = activePos;
             activePos = bestPos;
-            notifyDataSetChanged(); // so non-active rows detach
+
+            // Only rebind the two affected rows (previous active + new active)
+            if (prev != RecyclerView.NO_POSITION)
+                notifyItemChanged(prev);
+            notifyItemChanged(activePos);
 
             // ✅ View tick: count once when a new video becomes active
             try {
@@ -171,9 +201,10 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
         RecyclerView.ViewHolder vh = rv.findViewHolderForAdapterPosition(bestPos);
         if (vh instanceof VH) {
             VH row = (VH) vh;
-            VideoPlaybackManager.get().setMuted(true); // Facebook feed default
-            row.muteBadge.setText("🔇");
+            // Do NOT force-mute every time. Respect current mute state.
+            row.muteBadge.setText(VideoPlaybackManager.get().isMuted() ? "🔇" : "🔊");
             VideoPlaybackManager.get().play(activity, p.mediaUrl, row.playerView);
+
         }
     }
 

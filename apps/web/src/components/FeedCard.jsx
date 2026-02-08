@@ -445,7 +445,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
     // Web/desktop fallback
     setUserHasInteracted(true);
     playTriggeredByObserverRef.current = false;
-    navigate(`/for-you/${encodeURIComponent(postId)}`);
+    navigate(`/post/${encodeURIComponent(postId)}`);
   }
 
   function onVideoPlay() {
@@ -969,13 +969,13 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
 
       {/* media */}
       {media && (
-        <div className="relative w-full bg-black overflow-hidden aspect-[4/5] sm:aspect-[4/5] lg:aspect-[3/4] xl:aspect-[1/1] max-h-[80vh]">
+        <div className="relative w-full bg-black overflow-hidden flex items-center justify-center">
           {isVideo ? (
             <>
               <video
                 ref={videoRef}
                 data-src={media.url}
-                className="absolute inset-0 w-full h-full object-cover"
+                className="w-full max-h-[80vh] object-contain"
                 muted={muted}
                 loop
                 playsInline
@@ -987,13 +987,11 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
                 onTimeUpdate={onTimeUpdate}
               />
 
-              {/* ✅ Speaker icon OVER the video (inside the same relative container) */}
               {(showSpeaker || muted) && (
                 <button
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-
                     const vid = videoRef.current;
                     if (!vid) return;
 
@@ -1023,7 +1021,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
               src={media.url}
               alt=""
               loading="lazy"
-              className="absolute inset-0 w-full h-full object-cover"
+              className="w-full max-h-[80vh] object-contain"
             />
           )}
         </div>

@@ -11,6 +11,10 @@ import FollowButton from "../components/FollowButton.jsx";
 import ActionButton from "../components/ActionButton.jsx";
 import RouteLoader from "../components/RouteLoader.jsx";
 
+const isMobile =
+  typeof navigator !== "undefined" &&
+  /iPhone|iPad|iPod|Android|Mobi/i.test(navigator.userAgent);
+
 function timeAgo(ts) {
   if (!ts) return "";
   const d = new Date(ts);
@@ -39,10 +43,6 @@ export default function PostDetail() {
   const [loading, setLoading] = useState(true);
   const [post, setPost] = useState(null);
   const [error, setError] = useState("");
-
-  // 🆕 next recommended post
-  const [nextPost, setNextPost] = useState(null);
-  const [loadingNext, setLoadingNext] = useState(false);
 
   const [stats, setStats] = useState({
     viewsCount: 0,
@@ -106,13 +106,6 @@ export default function PostDetail() {
   const hasSentInitialViewRef = useRef(false); // for non-video single view
   const watchAccumRef = useRef(0); // seconds watched since last tick
   const lastWatchTsRef = useRef(0); // timestamp for watch-time
-
-  // 🆕 auto-jump state
-  const hasAutoJumpedRef = useRef(false);
-
-  // 🆕 swipe up state
-  const touchStartYRef = useRef(null);
-  const touchStartXRef = useRef(null);
 
   // ---------- fetch post ----------
   useEffect(() => {
@@ -214,45 +207,12 @@ export default function PostDetail() {
     };
   }, [id]);
 
-  // 🆕 ---------- load next recommended post ----------
-  useEffect(() => {
-    if (!id) return;
-    let active = true;
-
-    setLoadingNext(true);
-    setNextPost(null);
-
-    (async () => {
-      try {
-        const res = await api.get(`/api/posts/${id}/next`);
-        if (!active) return;
-
-        const nxt = res?.data?.next || null;
-
-        if (nxt && nxt._id && nxt._id !== id) {
-          setNextPost(nxt);
-        } else {
-          setNextPost(null);
-        }
-      } catch {
-        if (active) setNextPost(null);
-      } finally {
-        if (active) setLoadingNext(false);
-      }
-    })();
-
-    return () => {
-      active = false;
-    };
-  }, [id]);
-
   // reset watch/initial view flags when post changes
   useEffect(() => {
     hasSentInitialViewRef.current = false;
     watchAccumRef.current = 0;
     lastWatchTsRef.current = 0;
     lastTimeUpdateRef.current = 0;
-    hasAutoJumpedRef.current = false; // 🆕 reset auto jump
     setCurrentTime(0);
     setDuration(0);
   }, [id]);
@@ -604,20 +564,6 @@ export default function PostDetail() {
       watchAccumRef.current = 0;
       sendViewTick();
     }
-
-    // 🆕 Auto-jump only when video is basically 100% done
-    const total = duration || vid.duration || 0;
-
-    if (
-      total > 0 &&
-      !hasAutoJumpedRef.current &&
-      nextPost &&
-      nextPost._id &&
-      (vid.currentTime || 0) >= total - 0.3 // last 0.3s ≈ 100%
-    ) {
-      hasAutoJumpedRef.current = true;
-      navigate(`/post/${nextPost._id}`);
-    }
   }
 
   function onSeekStart() {
@@ -673,38 +619,6 @@ export default function PostDetail() {
     } catch {
       // ignore
     }
-  }
-
-  // 🆕 Swipe up handlers
-  function handleSwipeStart(e) {
-    const t = e.touches?.[0];
-    if (!t) return;
-    touchStartYRef.current = t.clientY;
-    touchStartXRef.current = t.clientX;
-  }
-
-  function handleSwipeEnd(e) {
-    const t = e.changedTouches?.[0];
-    if (!t) return;
-
-    const startY = touchStartYRef.current;
-    const startX = touchStartXRef.current;
-    if (startY == null || startX == null) return;
-
-    const dy = startY - t.clientY;
-    const dx = t.clientX - startX;
-
-    const minDistance = 60;
-
-    // vertical swipe up (ignore slight diagonal)
-    if (dy > minDistance && Math.abs(dy) > Math.abs(dx)) {
-      if (nextPost && nextPost._id) {
-        navigate(`/post/${nextPost._id}`);
-      }
-    }
-
-    touchStartYRef.current = null;
-    touchStartXRef.current = null;
   }
 
   // ---------- derived ----------
@@ -952,11 +866,7 @@ export default function PostDetail() {
 
       {/* media */}
       {media && (
-        <div
-          className="relative w-full bg-black overflow-hidden aspect-[4/5] sm:aspect-[4/5] lg:aspect-[3/4] xl:aspect-[1/1] max-h-[80vh]"
-          onTouchStart={handleSwipeStart} // 🆕 swipe start
-          onTouchEnd={handleSwipeEnd} // 🆕 swipe end
-        >
+        <div className="relative w-full bg-black overflow-hidden aspect-[4/5] sm:aspect-[4/5] lg:aspect-[3/4] xl:aspect-[1/1] max-h-[80vh]">
           {isVideo ? (
             <>
               <video
@@ -1288,13 +1198,6 @@ export default function PostDetail() {
               )}
             </div>
           </div>
-        </div>
-      )}
-
-      {/* 🆕 optional small hint when loading next */}
-      {loadingNext && (
-        <div className="px-4 pt-2 text-[11px] text-zinc-500">
-          Preparing next video…
         </div>
       )}
 
