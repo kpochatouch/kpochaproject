@@ -12,6 +12,7 @@ import androidx.recyclerview.widget.RecyclerView;
 import java.util.List;
 
 import android.content.Intent;
+import android.util.Log;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
@@ -48,6 +49,7 @@ public class NativeFeedActivity extends Activity {
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_native_feed);
+        Log.d("NativeFeedActivity", "onCreate()");
 
         apiBase = getIntent().getStringExtra(EXTRA_API_BASE);
         if (apiBase == null || apiBase.trim().isEmpty()) {

@@ -8,6 +8,7 @@ import ServicePicker from "../components/ServicePicker";
 import ProDrawer from "../components/ProDrawer";
 import FeedCard from "../components/FeedCard";
 import ErrorBoundary from "../components/ErrorBoundary";
+import RouteLoader from "../components/RouteLoader.jsx";
 import SideMenu from "../components/SideMenu.jsx";
 import FeedComposer from "../components/FeedComposer.jsx";
 import { connectSocket, registerSocketHandler } from "../lib/api";
@@ -481,9 +482,7 @@ export default function Browse() {
   return (
     <ErrorBoundary>
       {isNative && isFeedTab ? (
-        <div className="max-w-6xl mx-auto px-4 py-10 text-zinc-400">
-          Opening native feed…
-        </div>
+        <RouteLoader full />
       ) : (
         <div className="max-w-6xl mx-auto px-4 py-10">
           {/* header + tabs */}
