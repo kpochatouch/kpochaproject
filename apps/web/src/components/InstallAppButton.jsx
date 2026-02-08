@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo } from "react";
+import { Capacitor } from "@capacitor/core";
 
 export default function InstallAppButton() {
   const [deferredPrompt, setDeferredPrompt] = useState(null);
@@ -32,6 +33,7 @@ export default function InstallAppButton() {
   }, []);
 
   if (isStandalone) return null;
+  if (Capacitor.isNativePlatform()) return null;
 
   async function handleInstall() {
     // ✅ Android / Chromium real install

@@ -1,5 +1,6 @@
 //apps/web/src/components/InstallPWAButton.jsx
 import { useEffect, useMemo, useState } from "react";
+import { Capacitor } from "@capacitor/core";
 
 const KEY_LAST_NAG = "kpocha:pwaLastNagAt";
 const NAG_EVERY_MS = 12 * 60 * 60 * 1000;
@@ -8,6 +9,9 @@ export default function InstallPWAButton() {
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [open, setOpen] = useState(false);
   const [showIOSGuide, setShowIOSGuide] = useState(false);
+
+  // ✅ Never show PWA install UI inside native APK
+  if (Capacitor.isNativePlatform()) return null;
 
   const isStandalone = useMemo(() => {
     const standaloneMatchMedia = window.matchMedia?.(

@@ -1,7 +1,6 @@
 //apps/web/src/lib/nativeFeed.js
-import { Capacitor } from "@capacitor/core";
-import { registerPlugin } from "@capacitor/core";
-import { api } from "./api"; // ✅ re-use the same ROOT the app already uses
+// apps/web/src/lib/nativeFeed.js
+import { Capacitor, registerPlugin } from "@capacitor/core";
 
 const NativeFeed = registerPlugin("NativeFeed");
 
@@ -12,20 +11,32 @@ export async function openNativeFeed({
 } = {}) {
   if (!Capacitor.isNativePlatform()) return false;
 
-  const apiBase = api?.defaults?.baseURL || "";
-  if (!apiBase) return false;
-
-  // token optional — native feed endpoint (/posts/public) works without it
+  // token optional — native feed endpoint works without it
   let token = "";
   try {
     token = localStorage.getItem("token") || "";
   } catch {}
 
+  // IMPORTANT:
+  // Do NOT block if apiBase is empty.
+  // Your NativeFeedActivity already has a fallback to BuildConfig.API_BASE.
+  const apiBase = ""; // let Android fallback to BuildConfig.API_BASE
+
   try {
+    console.log("[NativeFeed] calling NativeFeed.open()", {
+      apiBase,
+      lga,
+      hasToken: !!token,
+      startPostId,
+      startIndex,
+    });
+
     await NativeFeed.open({ apiBase, lga, token, startPostId, startIndex });
+
+    console.log("[NativeFeed] NativeFeed.open() OK");
     return true;
   } catch (e) {
-    console.warn("[NativeFeed] open failed", e);
+    console.warn("[NativeFeed] NativeFeed.open() FAILED", e);
     return false;
   }
 }

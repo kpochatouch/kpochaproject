@@ -12,12 +12,31 @@ import SideMenu from "../components/SideMenu.jsx";
 import FeedComposer from "../components/FeedComposer.jsx";
 import { connectSocket, registerSocketHandler } from "../lib/api";
 import NotificationsBell from "../components/NotificationBell.jsx";
+import { Capacitor } from "@capacitor/core";
+import { openNativeFeed } from "../lib/nativeFeed";
 
 /* ---------------- Main Browse page ---------------- */
 export default function Browse() {
   const navigate = useNavigate();
   const location = useLocation();
   const { me, isAdmin } = useMe();
+
+  // ✅ Android Native: automatically open NativeFeed instead of React feed
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+
+    const qs = new URLSearchParams(location.search || "");
+
+    // 🔥 critical: do NOT open native feed during call flows
+    if (qs.get("call") === "1") return;
+
+    // only auto-open if we're on the Feed tab (not Pros)
+    const t = (qs.get("tab") || "").toLowerCase();
+    const isFeed = t !== "pros";
+    if (!isFeed) return;
+
+    openNativeFeed({ lga }).catch(() => {});
+  }, [location.search, lga]);
 
   // derive initial tab from URL (?tab=pros) but default to "feed"
   const [tab, setTab] = useState(() => {
@@ -71,6 +90,7 @@ export default function Browse() {
 
   const isFeedTab = tab === "feed";
   const isProsTab = tab === "pros";
+  const isNative = Capacitor.isNativePlatform();
 
   // helper to sync tab with URL
   function setTabAndUrl(nextTab) {
@@ -136,8 +156,8 @@ export default function Browse() {
         const list = Array.isArray(data)
           ? data
           : Array.isArray(data?.items)
-            ? data.items
-            : [];
+          ? data.items
+          : [];
         setPros(list);
       } catch {
         if (!on) return;
@@ -256,8 +276,8 @@ export default function Browse() {
         const list = Array.isArray(r.data)
           ? r.data
           : Array.isArray(r.data?.items)
-            ? r.data.items
-            : [];
+          ? r.data.items
+          : [];
 
         if (append) {
           setFeed((prev) => {
@@ -460,343 +480,353 @@ export default function Browse() {
 
   return (
     <ErrorBoundary>
-      <div className="max-w-6xl mx-auto px-4 py-10">
-        {/* header + tabs */}
-        <div className="mb-6 flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex items-center gap-2">
-            <img
-              src="/discovery.png"
-              alt="Discover"
-              className="w-6 h-6 object-contain max-w-full"
-            />
-            <h1 className="text-2xl font-semibold">Discover</h1>
-          </div>
-
-          <div className="flex items-center gap-3">
-            {/* 🔔 Notifications bell is always visible; badge shows only when there are unread items */}
-            <NotificationsBell />
-
-            {/* tab pills */}
-            <div className="inline-flex rounded-xl border border-zinc-800 overflow-hidden">
-              <button
-                className={`px-4 py-2 text-sm border-r border-zinc-800 ${
-                  isFeedTab
-                    ? "bg-gold text-black font-semibold"
-                    : "hover:bg-zinc-900"
-                }`}
-                onClick={() => setTabAndUrl("feed")}
-                type="button"
-              >
-                Feed
-              </button>
-              <button
-                className={`px-4 py-2 text-sm ${
-                  isProsTab
-                    ? "bg-gold text-black font-semibold"
-                    : "hover:bg-zinc-900"
-                }`}
-                onClick={() => setTabAndUrl("pros")}
-                type="button"
-              >
-                Pros
-              </button>
-            </div>
-          </div>
+      {isNative && isFeedTab ? (
+        <div className="max-w-6xl mx-auto px-4 py-10 text-zinc-400">
+          Opening native feed…
         </div>
-
-        {/* filters — only show on Pros tab */}
-        {isProsTab && (
-          <div className="flex flex-wrap items-center gap-2 mb-6">
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Search by name or description…"
-              className="bg-black border border-zinc-800 rounded-lg px-3 py-2 w-56 max-w-full"
-            />
-
-            <div className="w-56 max-w-full">
-              {/* ServicePicker meta.name = service NAME filter */}
-              <ServicePicker
-                value={service}
-                onChange={(_value, meta) => setService(meta?.name || "")}
-                placeholder="All services"
-                includeOther={false}
+      ) : (
+        <div className="max-w-6xl mx-auto px-4 py-10">
+          {/* header + tabs */}
+          <div className="mb-6 flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-2">
+              <img
+                src="/discovery.png"
+                alt="Discover"
+                className="w-6 h-6 object-contain max-w-full"
               />
+              <h1 className="text-2xl font-semibold">Discover</h1>
             </div>
 
-            <select
-              value={stateName}
-              onChange={(e) => {
-                const val = e.target.value.toUpperCase();
-                setStateName(val);
-                setLga("");
-              }}
-              className="bg-black border border-zinc-800 rounded-lg px-3 py-2"
-            >
-              <option value="">All States</option>
-              {states.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
+            <div className="flex items-center gap-3">
+              {/* 🔔 Notifications bell is always visible; badge shows only when there are unread items */}
+              <NotificationsBell />
 
-            <select
-              value={lga}
-              onChange={(e) => setLga(e.target.value.toUpperCase())}
-              className="bg-black border border-zinc-800 rounded-lg px-3 py-2"
-              disabled={stateName && !lgasForState.length}
-            >
-              <option value="">All LGAs</option>
-              {(stateName ? lgasForState : []).map((x) => (
-                <option key={x} value={x}>
-                  {x}
-                </option>
-              ))}
-            </select>
-
-            <button
-              onClick={clearFilters}
-              className="rounded-lg border border-zinc-700 px-3 py-2 text-sm"
-              type="button"
-            >
-              Clear
-            </button>
+              {/* tab pills */}
+              <div className="inline-flex rounded-xl border border-zinc-800 overflow-hidden">
+                <button
+                  className={`px-4 py-2 text-sm border-r border-zinc-800 ${
+                    isFeedTab
+                      ? "bg-gold text-black font-semibold"
+                      : "hover:bg-zinc-900"
+                  }`}
+                  onClick={() => setTabAndUrl("feed")}
+                  type="button"
+                >
+                  Feed
+                </button>
+                <button
+                  className={`px-4 py-2 text-sm ${
+                    isProsTab
+                      ? "bg-gold text-black font-semibold"
+                      : "hover:bg-zinc-900"
+                  }`}
+                  onClick={() => setTabAndUrl("pros")}
+                  type="button"
+                >
+                  Pros
+                </button>
+              </div>
+            </div>
           </div>
-        )}
 
-        {/* content */}
-        {isProsTab ? (
-          <>
-            {errPros && (
-              <div className="mb-4 rounded border border-red-800 bg-red-900/30 text-red-100 px-3 py-2">
-                {errPros}
-              </div>
-            )}
-            {loadingPros ? (
-              <p className="text-zinc-400">Loading…</p>
-            ) : filteredAndRanked.length ? (
-              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {filteredAndRanked.map((pro) => (
-                  <BarberCard
-                    key={pro.id || pro._id}
-                    barber={pro}
-                    onOpen={setOpenPro}
-                    onBook={(svc) => goBook(pro, svc)}
-                  />
-                ))}
-              </div>
-            ) : (
-              <div className="text-zinc-400">
-                No professionals match your filters.
-              </div>
-            )}
-          </>
-        ) : (
-          <div className="flex flex-col lg:flex-row gap-4 items-start">
-            {/* LEFT MENU */}
-            <div className="lg:w-56 w-full self-start lg:sticky lg:top-20">
-              <SideMenu me={me} />
-            </div>
+          {/* filters — only show on Pros tab */}
+          {isProsTab && (
+            <div className="flex flex-wrap items-center gap-2 mb-6">
+              <input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Search by name or description…"
+                className="bg-black border border-zinc-800 rounded-lg px-3 py-2 w-56 max-w-full"
+              />
 
-            {/* FEED */}
-            <div className="flex-1 w-full max-w-2xl lg:mx-0 mx-auto">
-              {canPostOnFeed && (
-                <FeedComposer
-                  lga={lga}
-                  onPosted={() => fetchFeed({ append: false, before: null })}
+              <div className="w-56 max-w-full">
+                {/* ServicePicker meta.name = service NAME filter */}
+                <ServicePicker
+                  value={service}
+                  onChange={(_value, meta) => setService(meta?.name || "")}
+                  placeholder="All services"
+                  includeOther={false}
                 />
-              )}
+              </div>
 
-              {errFeed && (
-                <div className="mb-4 rounded border border-red-800 bg-red-900/30 text-red-100 px-3 py-2">
-                  {errFeed}
-                </div>
-              )}
+              <select
+                value={stateName}
+                onChange={(e) => {
+                  const val = e.target.value.toUpperCase();
+                  setStateName(val);
+                  setLga("");
+                }}
+                className="bg-black border border-zinc-800 rounded-lg px-3 py-2"
+              >
+                <option value="">All States</option>
+                {states.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
 
-              {loadingFeed ? (
-                <p className="text-zinc-400">Loading feed…</p>
-              ) : feed.length ? (
-                <>
-                  <div className="space-y-4">
-                    {feed.map((post) => (
-                      <FeedCard
-                        key={post._id || post.id}
-                        post={post}
-                        currentUser={
-                          me ? { uid: me.uid || me.id, ...me } : null
-                        }
-                        onDeleted={() =>
-                          fetchFeed({ append: false, before: null })
-                        }
-                      />
-                    ))}
-                  </div>
+              <select
+                value={lga}
+                onChange={(e) => setLga(e.target.value.toUpperCase())}
+                className="bg-black border border-zinc-800 rounded-lg px-3 py-2"
+                disabled={stateName && !lgasForState.length}
+              >
+                <option value="">All LGAs</option>
+                {(stateName ? lgasForState : []).map((x) => (
+                  <option key={x} value={x}>
+                    {x}
+                  </option>
+                ))}
+              </select>
 
-                  {/* invisible sentinel */}
-                  <div ref={sentinelRef} className="h-1 w-full" aria-hidden />
-
-                  <div className="mt-6 flex justify-center">
-                    {loadingMore ? (
-                      <div className="text-sm text-zinc-400">Loading…</div>
-                    ) : hasMore ? (
-                      <button
-                        onClick={loadMore}
-                        className="flex items-center gap-2 px-4 py-2 rounded-md border border-zinc-700 hover:bg-zinc-900"
-                        aria-label="Load more posts"
-                        type="button"
-                      >
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          className="w-5 h-5"
-                          aria-hidden
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth="2"
-                            d="M19 9l-7 7-7-7"
-                          />
-                        </svg>
-                        <span className="text-sm">Load more</span>
-                      </button>
-                    ) : (
-                      <div className="text-xs text-zinc-500">No more posts</div>
-                    )}
-                  </div>
-                </>
-              ) : (
-                <div className="rounded-lg border border-zinc-800 p-6 text-zinc-400">
-                  No updates yet.
-                </div>
-              )}
+              <button
+                onClick={clearFilters}
+                className="rounded-lg border border-zinc-700 px-3 py-2 text-sm"
+                type="button"
+              >
+                Clear
+              </button>
             </div>
+          )}
 
-            {/* RIGHT ADS */}
-            <div className="hidden lg:block w-56 self-start lg:top-20 lg:sticky">
-              <div className="space-y-4">
-                {isAdmin ? (
-                  <div className="rounded-lg border border-zinc-800 bg-black/40 p-3 space-y-2">
-                    <div className="text-xs text-zinc-300 mb-1">
-                      Advert (admin only)
-                    </div>
-                    <input
-                      value={adminAdUrl}
-                      onChange={(e) => {
-                        setAdminAdUrl(e.target.value);
-                        setAdMsg("");
-                      }}
-                      placeholder="Image / video URL"
-                      className="w-full bg-black border border-zinc-700 rounded px-2 py-1 text-xs"
+          {/* content */}
+          {isProsTab ? (
+            <>
+              {errPros && (
+                <div className="mb-4 rounded border border-red-800 bg-red-900/30 text-red-100 px-3 py-2">
+                  {errPros}
+                </div>
+              )}
+              {loadingPros ? (
+                <p className="text-zinc-400">Loading…</p>
+              ) : filteredAndRanked.length ? (
+                <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {filteredAndRanked.map((pro) => (
+                    <BarberCard
+                      key={pro.id || pro._id}
+                      barber={pro}
+                      onOpen={setOpenPro}
+                      onBook={(svc) => goBook(pro, svc)}
                     />
-                    <input
-                      type="file"
-                      accept="image/*,video/*"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (!file) return;
-                        const localUrl = URL.createObjectURL(file);
-                        setAdminAdUrl(localUrl);
-                        setAdMsg("Local preview (not uploaded to backend)");
-                      }}
-                      className="w-full text-[10px] text-zinc-400"
-                    />
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => {
-                          if (!adminAdUrl.trim())
-                            return setAdMsg("Paste a media URL first.");
-                          setAdMsg("Previewing…");
-                          setTimeout(() => setAdMsg("Preview ready"), 300);
-                        }}
-                        className="flex-1 rounded-md border border-zinc-700 px-2 py-1 text-xs hover:bg-zinc-900"
-                        type="button"
-                      >
-                        Preview
-                      </button>
-                      <button
-                        onClick={async () => {
-                          if (!adminAdUrl.trim())
-                            return setAdMsg("Paste a media URL first.");
-                          try {
-                            setAdMsg("Publishing…");
-                            await api.post("/api/posts", {
-                              text: "Sponsored",
-                              media: [
-                                {
-                                  url: adminAdUrl.trim(),
-                                  type: /\.(mp4|mov|webm)$/i.test(adminAdUrl)
-                                    ? "video"
-                                    : "image",
-                                },
-                              ],
-                              isPublic: true,
-                              tags: ["AD"],
-                            });
-                            setAdMsg("Published to feed ✔");
-                            await fetchFeed({
-                              append: false,
-                              before: null,
-                            });
-                          } catch (e) {
-                            setAdMsg(
-                              e?.response?.data?.error ||
-                                "Failed to publish ad",
-                            );
+                  ))}
+                </div>
+              ) : (
+                <div className="text-zinc-400">
+                  No professionals match your filters.
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="flex flex-col lg:flex-row gap-4 items-start">
+              {/* LEFT MENU */}
+              <div className="lg:w-56 w-full self-start lg:sticky lg:top-20">
+                <SideMenu me={me} />
+              </div>
+
+              {/* FEED */}
+              <div className="flex-1 w-full max-w-2xl lg:mx-0 mx-auto">
+                {canPostOnFeed && (
+                  <FeedComposer
+                    lga={lga}
+                    onPosted={() => fetchFeed({ append: false, before: null })}
+                  />
+                )}
+
+                {errFeed && (
+                  <div className="mb-4 rounded border border-red-800 bg-red-900/30 text-red-100 px-3 py-2">
+                    {errFeed}
+                  </div>
+                )}
+
+                {loadingFeed ? (
+                  <p className="text-zinc-400">Loading feed…</p>
+                ) : feed.length ? (
+                  <>
+                    <div className="space-y-4">
+                      {feed.map((post) => (
+                        <FeedCard
+                          key={post._id || post.id}
+                          post={post}
+                          currentUser={
+                            me ? { uid: me.uid || me.id, ...me } : null
                           }
-                        }}
-                        className="flex-1 rounded-md bg-gold text-black px-2 py-1 text-xs font-semibold"
-                        type="button"
-                      >
-                        Publish
-                      </button>
+                          onDeleted={() =>
+                            fetchFeed({ append: false, before: null })
+                          }
+                        />
+                      ))}
                     </div>
-                    {adMsg && (
-                      <p className="text-[10px] text-zinc-500 mt-1">{adMsg}</p>
-                    )}
-                  </div>
-                ) : null}
 
-                {adminAdUrl ? (
-                  <div className="rounded-lg border border-zinc-800 overflow-hidden bg-black/40 h-40 flex items-center justify-center">
-                    {adminAdUrl.match(/\.(mp4|mov|webm)$/i) ? (
-                      <video
-                        src={adminAdUrl}
-                        muted
-                        loop
-                        playsInline
-                        autoPlay
-                        className="w-full h-full object-cover max-w-full"
-                      />
-                    ) : (
-                      <img
-                        src={adminAdUrl}
-                        alt="ad"
-                        loading="lazy"
-                        className="w-full h-full object-cover max-w-full"
-                      />
-                    )}
-                  </div>
+                    {/* invisible sentinel */}
+                    <div ref={sentinelRef} className="h-1 w-full" aria-hidden />
+
+                    <div className="mt-6 flex justify-center">
+                      {loadingMore ? (
+                        <div className="text-sm text-zinc-400">Loading…</div>
+                      ) : hasMore ? (
+                        <button
+                          onClick={loadMore}
+                          className="flex items-center gap-2 px-4 py-2 rounded-md border border-zinc-700 hover:bg-zinc-900"
+                          aria-label="Load more posts"
+                          type="button"
+                        >
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            className="w-5 h-5"
+                            aria-hidden
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth="2"
+                              d="M19 9l-7 7-7-7"
+                            />
+                          </svg>
+                          <span className="text-sm">Load more</span>
+                        </button>
+                      ) : (
+                        <div className="text-xs text-zinc-500">
+                          No more posts
+                        </div>
+                      )}
+                    </div>
+                  </>
                 ) : (
-                  <div className="h-40 rounded-lg border border-zinc-800 bg-black/20 flex items-center justify-center text-xs text-zinc-500">
-                    Advert space
+                  <div className="rounded-lg border border-zinc-800 p-6 text-zinc-400">
+                    No updates yet.
                   </div>
                 )}
               </div>
-            </div>
-          </div>
-        )}
 
-        <ProDrawer
-          open={!!openPro}
-          pro={openPro}
-          onClose={() => setOpenPro(null)}
-          onBook={(svc) => (openPro ? goBook(openPro, svc) : null)}
-        />
-      </div>
+              {/* RIGHT ADS */}
+              <div className="hidden lg:block w-56 self-start lg:top-20 lg:sticky">
+                <div className="space-y-4">
+                  {isAdmin ? (
+                    <div className="rounded-lg border border-zinc-800 bg-black/40 p-3 space-y-2">
+                      <div className="text-xs text-zinc-300 mb-1">
+                        Advert (admin only)
+                      </div>
+                      <input
+                        value={adminAdUrl}
+                        onChange={(e) => {
+                          setAdminAdUrl(e.target.value);
+                          setAdMsg("");
+                        }}
+                        placeholder="Image / video URL"
+                        className="w-full bg-black border border-zinc-700 rounded px-2 py-1 text-xs"
+                      />
+                      <input
+                        type="file"
+                        accept="image/*,video/*"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          const localUrl = URL.createObjectURL(file);
+                          setAdminAdUrl(localUrl);
+                          setAdMsg("Local preview (not uploaded to backend)");
+                        }}
+                        className="w-full text-[10px] text-zinc-400"
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => {
+                            if (!adminAdUrl.trim())
+                              return setAdMsg("Paste a media URL first.");
+                            setAdMsg("Previewing…");
+                            setTimeout(() => setAdMsg("Preview ready"), 300);
+                          }}
+                          className="flex-1 rounded-md border border-zinc-700 px-2 py-1 text-xs hover:bg-zinc-900"
+                          type="button"
+                        >
+                          Preview
+                        </button>
+                        <button
+                          onClick={async () => {
+                            if (!adminAdUrl.trim())
+                              return setAdMsg("Paste a media URL first.");
+                            try {
+                              setAdMsg("Publishing…");
+                              await api.post("/api/posts", {
+                                text: "Sponsored",
+                                media: [
+                                  {
+                                    url: adminAdUrl.trim(),
+                                    type: /\.(mp4|mov|webm)$/i.test(adminAdUrl)
+                                      ? "video"
+                                      : "image",
+                                  },
+                                ],
+                                isPublic: true,
+                                tags: ["AD"],
+                              });
+                              setAdMsg("Published to feed ✔");
+                              await fetchFeed({
+                                append: false,
+                                before: null,
+                              });
+                            } catch (e) {
+                              setAdMsg(
+                                e?.response?.data?.error ||
+                                  "Failed to publish ad",
+                              );
+                            }
+                          }}
+                          className="flex-1 rounded-md bg-gold text-black px-2 py-1 text-xs font-semibold"
+                          type="button"
+                        >
+                          Publish
+                        </button>
+                      </div>
+                      {adMsg && (
+                        <p className="text-[10px] text-zinc-500 mt-1">
+                          {adMsg}
+                        </p>
+                      )}
+                    </div>
+                  ) : null}
+
+                  {adminAdUrl ? (
+                    <div className="rounded-lg border border-zinc-800 overflow-hidden bg-black/40 h-40 flex items-center justify-center">
+                      {adminAdUrl.match(/\.(mp4|mov|webm)$/i) ? (
+                        <video
+                          src={adminAdUrl}
+                          muted
+                          loop
+                          playsInline
+                          autoPlay
+                          className="w-full h-full object-cover max-w-full"
+                        />
+                      ) : (
+                        <img
+                          src={adminAdUrl}
+                          alt="ad"
+                          loading="lazy"
+                          className="w-full h-full object-cover max-w-full"
+                        />
+                      )}
+                    </div>
+                  ) : (
+                    <div className="h-40 rounded-lg border border-zinc-800 bg-black/20 flex items-center justify-center text-xs text-zinc-500">
+                      Advert space
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          <ProDrawer
+            open={!!openPro}
+            pro={openPro}
+            onClose={() => setOpenPro(null)}
+            onBook={(svc) => (openPro ? goBook(openPro, svc) : null)}
+          />
+        </div>
+      )}
     </ErrorBoundary>
   );
 }
