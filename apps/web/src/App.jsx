@@ -25,6 +25,7 @@ import BookingAlert from "./components/BookingAlert.jsx";
 import usePostPaymentRecovery from "./hooks/usePostPaymentRecovery";
 import { ensurePushSubscribed, getDeviceId } from "./lib/pushClient";
 import MobileTabBar from "./components/MobileTabBar.jsx";
+import { openNativeFeed } from "./lib/nativeFeed";
 console.log("[push] App.jsx loaded");
 
 // ---------- pages (lazy) ----------
@@ -301,6 +302,37 @@ function FindProSmart() {
 export default function App() {
   const location = useLocation();
 
+  // ✅ Android-only: cold-start opens NativeFeed
+  // ❗ Guarded so it NEVER interrupts deep links (calls, bookings, etc.)
+  const didOpenNativeFeedRef = useRef(false);
+
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    if (didOpenNativeFeedRef.current) return;
+
+    // If we were opened by a deep link, DO NOT steal navigation.
+    // Example: /browse?call=1&room=... (incoming call)
+    const qs = new URLSearchParams(location.search || "");
+    const isCallDeepLink = qs.get("call") === "1" || qs.get("accept") === "1";
+
+    // Also don't override if user is on any non-root path
+    const isNonRootPath =
+      location.pathname &&
+      location.pathname !== "/" &&
+      location.pathname !== "/browse";
+
+    if (isCallDeepLink || isNonRootPath) {
+      return;
+    }
+
+    didOpenNativeFeedRef.current = true;
+
+    // Open native feed; if plugin isn't available it will just fail silently.
+    openNativeFeed({
+      // you can optionally pass lga/token later when you want
+    }).catch(() => {});
+  }, [location.pathname, location.search]);
+
   const hideChatbase =
     location.pathname.startsWith("/chat") ||
     location.pathname.startsWith("/inbox") ||
@@ -569,7 +601,7 @@ export default function App() {
           <Suspense fallback={<RouteLoader full />}>
             <Routes>
               {/* Public routes */}
-              <Route path="/" element={<Navigate to="/browse" replace />} />
+              <Route path="/" element={<Browse />} />
               <Route path="/browse" element={<Browse />} />
               <Route path="/post/:id" element={<PostDetail />} />
               <Route path="/home" element={<Home />} />

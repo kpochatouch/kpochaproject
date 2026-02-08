@@ -50,8 +50,11 @@
       android:theme="@style/AppTheme.NoActionBarLaunch"
       android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
     >
-
-    </activity>
+  <intent-filter>
+    <action android:name="android.intent.action.MAIN" />
+    <category android:name="android.intent.category.LAUNCHER" />
+  </intent-filter>
+</activity>
 
     <!-- Booking ring: actions -->
 <receiver android:name=".BookingActionReceiver" android:exported="false" />
@@ -84,17 +87,12 @@
 
         <activity
       android:name=".NativeFeedActivity"
-      android:exported="true"
+      android:exported="false"
       android:launchMode="singleTask"
       android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen"
       android:screenOrientation="sensor"
       android:configChanges="orientation|screenSize|keyboardHidden"
-    >
-      <intent-filter>
-        <action android:name="android.intent.action.MAIN" />
-        <category android:name="android.intent.category.LAUNCHER" />
-      </intent-filter>
-    </activity>
+    />
 
     <!-- Accept/Decline actions -->
     <receiver android:name=".CallActionReceiver" android:exported="false" />
