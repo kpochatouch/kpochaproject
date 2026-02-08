@@ -21,6 +21,22 @@ export default function Browse() {
   const location = useLocation();
   const { me, isAdmin } = useMe();
 
+  // derive initial tab from URL (?tab=pros) but default to "feed"
+  const [tab, setTab] = useState(() => {
+    const qs = new URLSearchParams(location.search);
+    const t = (qs.get("tab") || "").toLowerCase();
+    return t === "pros" ? "pros" : "feed";
+  });
+
+  const [pros, setPros] = useState([]);
+  const [loadingPros, setLoadingPros] = useState(false);
+  const [errPros, setErrPros] = useState("");
+
+  const [q, setQ] = useState("");
+  const [service, setService] = useState(""); // service NAME
+  const [stateName, setStateName] = useState("");
+  const [lga, setLga] = useState("");
+
   // ✅ Android Native: automatically open NativeFeed instead of React feed
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
@@ -37,22 +53,6 @@ export default function Browse() {
 
     openNativeFeed({ lga }).catch(() => {});
   }, [location.search, lga]);
-
-  // derive initial tab from URL (?tab=pros) but default to "feed"
-  const [tab, setTab] = useState(() => {
-    const qs = new URLSearchParams(location.search);
-    const t = (qs.get("tab") || "").toLowerCase();
-    return t === "pros" ? "pros" : "feed";
-  });
-
-  const [pros, setPros] = useState([]);
-  const [loadingPros, setLoadingPros] = useState(false);
-  const [errPros, setErrPros] = useState("");
-
-  const [q, setQ] = useState("");
-  const [service, setService] = useState(""); // service NAME
-  const [stateName, setStateName] = useState("");
-  const [lga, setLga] = useState("");
 
   const [states, setStates] = useState([]);
   const [lgasByState, setLgasByState] = useState({});
