@@ -966,7 +966,7 @@ export default function PostDetail() {
                 muted={muted}
                 loop
                 playsInline
-                preload="metadata"
+                preload="none"
                 controls={false}
                 onClick={onClickVideo}
                 onPlay={onVideoPlay}

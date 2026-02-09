@@ -1146,7 +1146,7 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
           muted={muted}
           loop
           playsInline
-          preload="metadata"
+          preload="none"
           controls={false}
           onClick={onClickVideo}
           onPlay={onVideoPlay}

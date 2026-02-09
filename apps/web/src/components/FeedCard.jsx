@@ -9,6 +9,7 @@ import CommentToggle from "./CommentToggle.jsx";
 import ActionButton from "./ActionButton.jsx";
 import { openNativeVideoPlayer } from "../lib/nativeVideoPlayer";
 import { Capacitor } from "@capacitor/core";
+import { openNativeFeed } from "../lib/nativeFeed";
 
 // ------------------- Feed: Only one video plays at a time -------------------
 const FEED_ACTIVE_VIDEO_KEY = "__kpocha_feed_active_video_id__";
@@ -106,10 +107,17 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
   const [muted, setMuted] = useState(() => {
     try {
       const v = localStorage.getItem(SOUND_KEY);
-      if (v === null) return false; // default sound ON
-      return v !== "1"; // muted = !soundEnabled
+
+      // First time ever: default MUTED and persist it
+      if (v === null) {
+        localStorage.setItem(SOUND_KEY, "0"); // sound disabled
+        return true; // muted=true
+      }
+
+      // soundEnabled = "1" => muted=false
+      return v !== "1";
     } catch {
-      return false;
+      return true; // safest default: muted
     }
   });
 
@@ -148,29 +156,21 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
   }
 
   async function autoplayTrySoundThenFallbackMuted(v) {
-    // Try sound first (muted=false)
-    v.muted = false;
-    setMuted(false);
-    setSoundEnabled(true);
+    // Respect stored preference:
+    // soundEnabled => unmuted, otherwise muted.
+    const soundEnabled = getSoundEnabled();
 
-    showSpeakerBrief(1500);
+    v.muted = !soundEnabled;
+    setMuted(!soundEnabled);
 
     try {
       await v.play();
-      return;
     } catch {
-      // Fallback: muted autoplay
-      v.muted = true;
-      setMuted(true);
-      setSoundEnabled(false);
-      try {
-        await v.play();
-      } catch {
-        // still can't play
-      }
-      // if muted fallback happened, keep speaker visible
-      setShowSpeaker(true);
+      // If play fails, do nothing (WebView policy)
     }
+
+    // If sound is enabled, briefly show the speaker icon (optional)
+    if (soundEnabled) showSpeakerBrief(1200);
   }
 
   const canComment = useMemo(
@@ -430,22 +430,33 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
   async function onClickVideo() {
     if (!postId) return;
 
-    const url = media?.url;
-    if (Capacitor.isNativePlatform() && url) {
-      // Native full player first (real player)
-      const ok = await openNativeVideoPlayer({
-        url,
-        startMs: 0,
-        muted: false, // or use your global preference
-        loop: true,
+    // If native, open the native feed viewer (portal)
+    if (Capacitor.isNativePlatform()) {
+      // Stop autoplay-count gating: user explicitly tapped
+      setUserHasInteracted(true);
+      playTriggeredByObserverRef.current = false;
+
+      const ok = await openNativeFeed({
+        lga: post?.lga || post?.pro?.lga || "",
       });
       if (ok) return;
+
+      // If native feed fails for any reason, fall back to native video player (single URL)
+      const url = media?.url;
+      if (url) {
+        const ok2 = await openNativeVideoPlayer({
+          url,
+          startMs: 0,
+          muted: false,
+          loop: true,
+        });
+        if (ok2) return;
+      }
     }
 
-    // Web/desktop fallback
-    setUserHasInteracted(true);
-    playTriggeredByObserverRef.current = false;
-    navigate(`/for-you/${encodeURIComponent(postId)}`);
+    // Non-native (web/desktop): do NOT open ForYou anymore.
+    // Safer fallback is PostDetail.
+    navigate(`/post/${encodeURIComponent(postId)}`);
   }
 
   function onVideoPlay() {
@@ -979,7 +990,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
                 muted={muted}
                 loop
                 playsInline
-                preload="metadata"
+                preload="none"
                 controls={false}
                 onClick={onClickVideo}
                 onPlay={onVideoPlay}
