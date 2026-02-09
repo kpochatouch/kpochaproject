@@ -23,6 +23,7 @@ public class MainActivity extends BridgeActivity {
         super.onCreate(savedInstanceState);
         registerPlugin(touch.kpocha.app.NativeVideoPlayerPlugin.class);
         registerPlugin(touch.kpocha.app.NativeFeedPlugin.class);
+        android.util.Log.i("NativeFeed", "✅ NativeFeedPlugin REGISTERED in MainActivity");
 
         // ✅ Allow autoplay (including sound) without user gesture in Android WebView
         try {

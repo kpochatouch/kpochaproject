@@ -89,7 +89,7 @@
       android:name=".NativeFeedActivity"
       android:exported="false"
       android:launchMode="singleTask"
-      android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen"
+      android:theme="@style/Theme.Kpocha.NativeFeed"
       android:screenOrientation="sensor"
       android:configChanges="orientation|screenSize|keyboardHidden"
     />

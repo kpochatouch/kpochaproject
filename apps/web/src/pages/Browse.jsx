@@ -14,7 +14,6 @@ import FeedComposer from "../components/FeedComposer.jsx";
 import { connectSocket, registerSocketHandler } from "../lib/api";
 import NotificationsBell from "../components/NotificationBell.jsx";
 import { Capacitor } from "@capacitor/core";
-import { openNativeFeed } from "../lib/nativeFeed";
 
 /* ---------------- Main Browse page ---------------- */
 export default function Browse() {
@@ -37,23 +36,6 @@ export default function Browse() {
   const [service, setService] = useState(""); // service NAME
   const [stateName, setStateName] = useState("");
   const [lga, setLga] = useState("");
-
-  // ✅ Android Native: automatically open NativeFeed instead of React feed
-  useEffect(() => {
-    if (!Capacitor.isNativePlatform()) return;
-
-    const qs = new URLSearchParams(location.search || "");
-
-    // 🔥 critical: do NOT open native feed during call flows
-    if (qs.get("call") === "1") return;
-
-    // only auto-open if we're on the Feed tab (not Pros)
-    const t = (qs.get("tab") || "").toLowerCase();
-    const isFeed = t !== "pros";
-    if (!isFeed) return;
-
-    openNativeFeed({ lga }).catch(() => {});
-  }, [location.search, lga]);
 
   const [states, setStates] = useState([]);
   const [lgasByState, setLgasByState] = useState({});
@@ -92,6 +74,7 @@ export default function Browse() {
   const isFeedTab = tab === "feed";
   const isProsTab = tab === "pros";
   const isNative = Capacitor.isNativePlatform();
+  const showNativeLoader = false; // ✅ never block Browse UI; native feed is launched only by user action
 
   // helper to sync tab with URL
   function setTabAndUrl(nextTab) {
@@ -481,7 +464,7 @@ export default function Browse() {
 
   return (
     <ErrorBoundary>
-      {isNative && isFeedTab ? (
+      {showNativeLoader && isNative && isFeedTab ? (
         <RouteLoader full />
       ) : (
         <div className="max-w-6xl mx-auto px-4 py-10">

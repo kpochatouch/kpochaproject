@@ -100,9 +100,10 @@ public class NativeFeedActivity extends Activity {
                 return true;
             }
             if (id == 5) {
-                openWebRoute("/browse");
+                openWebRoute("/browse?help=1");
                 return true;
             } // help lives in web for now
+
             return false;
         });
 
