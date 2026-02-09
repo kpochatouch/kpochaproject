@@ -300,6 +300,7 @@ function FindProSmart() {
 /* ---------- App ---------- */
 export default function App() {
   const location = useLocation();
+  const navigate = useNavigate(); // ✅ must be before any useEffect uses it
 
   const hideChatbase =
     location.pathname.startsWith("/chat") ||
@@ -333,8 +334,6 @@ export default function App() {
   // Desktop: keep chatbase as before
   // Mobile: do NOT autoload chatbase
   useChatbase(!hideChatbase && !isMobile);
-
-  const navigate = useNavigate();
 
   const { me } = useMe();
 
