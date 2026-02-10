@@ -61,7 +61,14 @@ function sanitizePostForClient(p) {
             u.includes("/video/upload/") || // ✅ Cloudinary typical
             u.includes("/video/"); // ✅ generic fallback
 
-          return { url, type: isVideo ? "video" : "image" };
+          return {
+            url,
+            type: isVideo ? "video" : "image",
+            thumbnailUrl: String(m?.thumbnailUrl || "").trim(),
+            width: Number(m?.width || 0),
+            height: Number(m?.height || 0),
+            durationSec: Number(m?.durationSec || 0),
+          };
         })
         .filter(Boolean)
     : [];

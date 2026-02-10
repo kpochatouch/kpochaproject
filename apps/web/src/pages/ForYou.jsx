@@ -491,6 +491,7 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
     setMuted(() => !getSoundEnabled());
     setShowControls(false);
     setVideoError("");
+    setHasFirstFrame(false);
   }, [id]);
 
   // click-outside to close menu
@@ -1146,14 +1147,28 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
           muted={muted}
           loop
           playsInline
-          preload="none"
+          preload="metadata"
           controls={false}
           onClick={onClickVideo}
           onPlay={onVideoPlay}
           onLoadedMetadata={onLoadedMetadata}
           onTimeUpdate={onTimeUpdate}
-          onError={handleVideoError}
+          onLoadedData={() => setHasFirstFrame(true)}
+          onPlaying={() => setHasFirstFrame(true)}
+          onError={() => {
+            setHasFirstFrame(true); // remove Android thumbnail overlay
+            handleVideoError(); // try native fallback + show message
+          }}
         />
+
+        {Capacitor.isNativePlatform() && !hasFirstFrame && (
+          <img
+            src={media?.thumbnailUrl || videoSrc}
+            alt=""
+            className="absolute inset-0 w-full h-full object-cover z-[2] pointer-events-none"
+            loading="lazy"
+          />
+        )}
 
         {/* CAPTION INSIDE VIDEO (bottom-left) */}
         {captionText && (

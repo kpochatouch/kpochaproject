@@ -39,6 +39,7 @@ export default function PostDetail() {
   const [loading, setLoading] = useState(true);
   const [post, setPost] = useState(null);
   const [error, setError] = useState("");
+  const [hasFirstFrame, setHasFirstFrame] = useState(false);
 
   // 🆕 next recommended post
   const [nextPost, setNextPost] = useState(null);
@@ -255,6 +256,7 @@ export default function PostDetail() {
     hasAutoJumpedRef.current = false; // 🆕 reset auto jump
     setCurrentTime(0);
     setDuration(0);
+    setHasFirstFrame(false);
   }, [id]);
 
   function mergeStatsFromServer(partial) {
@@ -963,15 +965,21 @@ export default function PostDetail() {
                 ref={videoRef}
                 src={media.url}
                 className="absolute inset-0 w-full h-full object-cover"
+                poster={
+                  Capacitor.isNativePlatform() ? undefined : media?.thumbnailUrl
+                }
                 muted={muted}
                 loop
                 playsInline
-                preload="none"
+                preload="metadata"
                 controls={false}
                 onClick={onClickVideo}
                 onPlay={onVideoPlay}
                 onLoadedMetadata={onLoadedMetadata}
                 onTimeUpdate={onTimeUpdate}
+                onLoadedData={() => setHasFirstFrame(true)} // ✅
+                onPlaying={() => setHasFirstFrame(true)}
+                onError={() => setHasFirstFrame(true)}
               />
               {!userHasInteracted && (
                 <button
@@ -979,6 +987,15 @@ export default function PostDetail() {
                   className="absolute inset-0"
                   aria-label="Play video"
                   type="button"
+                />
+              )}
+
+              {Capacitor.isNativePlatform() && !hasFirstFrame && (
+                <img
+                  src={media?.thumbnailUrl || media?.url}
+                  alt=""
+                  className="absolute inset-0 w-full h-full object-cover z-[2] pointer-events-none"
+                  loading="lazy"
                 />
               )}
 

@@ -7,7 +7,6 @@ import LikeButton from "./LikeButton.jsx";
 import ShareButton from "./ShareButton.jsx";
 import CommentToggle from "./CommentToggle.jsx";
 import ActionButton from "./ActionButton.jsx";
-import { openNativeVideoPlayer } from "../lib/nativeVideoPlayer";
 import { Capacitor } from "@capacitor/core";
 import { openNativeFeed } from "../lib/nativeFeed";
 
@@ -61,6 +60,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
   const [loadingLike, setLoadingLike] = useState(false);
   const [loadingSave, setLoadingSave] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [hasFirstFrame, setHasFirstFrame] = useState(false);
   const [commentsDisabled, setCommentsDisabled] = useState(
     !!post.commentsDisabled,
   );
@@ -251,6 +251,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
   useEffect(() => {
     hasSentViewRef.current = false;
     playTriggeredByObserverRef.current = false;
+    setHasFirstFrame(false);
     if (videoViewTimerRef.current) {
       clearTimeout(videoViewTimerRef.current);
       videoViewTimerRef.current = null;
@@ -427,35 +428,35 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
     };
   }, []);
 
-  async function onClickVideo() {
+  async function onClickMedia() {
     if (!postId) return;
 
-    // If native, open the native feed viewer (portal)
+    console.log("[FeedCard] tap media", {
+      native: Capacitor.isNativePlatform(),
+      isVideo: !!isVideo,
+      url: media?.url,
+    });
+
+    // Mark as intentional user action (stops autoplay gating)
+    setUserHasInteracted(true);
+    playTriggeredByObserverRef.current = false;
+
+    // ✅ FACEBOOK-STYLE ANDROID RULE:
+    // Tapping ANY media opens the mixed NativeFeedActivity.
     if (Capacitor.isNativePlatform()) {
-      // Stop autoplay-count gating: user explicitly tapped
-      setUserHasInteracted(true);
-      playTriggeredByObserverRef.current = false;
-
-      const ok = await openNativeFeed({
+      const okFeed = await openNativeFeed({
         lga: post?.lga || post?.pro?.lga || "",
+        // (Optional future: pass postId to scroll-to item when you add it native-side)
+        // postId,
       });
-      if (ok) return;
+      if (okFeed) return;
 
-      // If native feed fails for any reason, fall back to native video player (single URL)
-      const url = media?.url;
-      if (url) {
-        const ok2 = await openNativeVideoPlayer({
-          url,
-          startMs: 0,
-          muted: false,
-          loop: true,
-        });
-        if (ok2) return;
-      }
+      // If native feed failed, show a visible error so we can diagnose
+      alert("Native feed failed on Android. Check logcat for NativeFeed.");
+      return;
     }
 
-    // Non-native (web/desktop): do NOT open ForYou anymore.
-    // Safer fallback is PostDetail.
+    // ✅ WEB/DESKTOP fallback
     navigate(`/post/${encodeURIComponent(postId)}`);
   }
 
@@ -869,7 +870,6 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
             </div>
           </div>
         </div>
-
         <div className="flex items-center gap-2">
           {post.proId && (
             <Link
@@ -981,27 +981,99 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
       {/* media */}
       {media && (
         <div className="relative w-full bg-black overflow-hidden aspect-[4/5] sm:aspect-[4/5] lg:aspect-[3/4] xl:aspect-[1/1] max-h-[80vh]">
+          {/* ✅ Banner overlay (top) */}
+          <div className="absolute inset-x-0 top-0 z-[40] pointer-events-none">
+            {/* fade so text is readable */}
+            <div className="px-3 pt-3 pb-8 bg-gradient-to-b from-black/75 via-black/25 to-transparent">
+              <div className="flex items-center justify-between gap-2">
+                {/* left: author + time */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    goToProfile();
+                  }}
+                  className="pointer-events-auto flex items-center gap-2"
+                  aria-label="View profile"
+                  title="View profile"
+                >
+                  <div className="w-8 h-8 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center">
+                    {avatar ? (
+                      <img
+                        src={avatar}
+                        alt={proName}
+                        className="w-full h-full object-cover"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <span className="text-xs text-white">
+                        {proName.slice(0, 1).toUpperCase()}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="min-w-0">
+                    <div className="text-xs font-semibold text-white truncate max-w-[220px]">
+                      {proName}
+                    </div>
+                    <div className="text-[10px] text-gray-300">
+                      {lga || "Nigeria"} • {timeAgo(post.createdAt)}
+                    </div>
+                  </div>
+                </button>
+
+                {/* right: open post */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    goToPostDetail();
+                  }}
+                  className="pointer-events-auto text-[11px] text-white/90 bg-black/35 hover:bg-black/50 rounded-full px-3 py-1"
+                >
+                  View post
+                </button>
+              </div>
+            </div>
+          </div>
+
           {isVideo ? (
             <>
               <video
                 ref={videoRef}
                 data-src={media.url}
-                className="absolute inset-0 w-full h-full object-cover"
+                className="absolute inset-0 w-full h-full object-cover z-[1]"
+                poster={
+                  Capacitor.isNativePlatform() ? undefined : media?.thumbnailUrl
+                }
                 muted={muted}
                 loop
                 playsInline
-                preload="none"
+                preload="metadata"
                 controls={false}
-                onClick={onClickVideo}
+                onClick={onClickMedia}
                 onPlay={onVideoPlay}
                 onLoadedMetadata={onLoadedMetadata}
                 onTimeUpdate={onTimeUpdate}
+                onLoadedData={() => setHasFirstFrame(true)}
+                onPlaying={() => setHasFirstFrame(true)}
+                onError={() => setHasFirstFrame(true)}
               />
+
+              {Capacitor.isNativePlatform() && !hasFirstFrame && (
+                <img
+                  src={media?.thumbnailUrl || media?.url}
+                  alt=""
+                  className="absolute inset-0 w-full h-full object-cover z-[2] pointer-events-none"
+                  loading="lazy"
+                />
+              )}
 
               {/* ✅ Speaker icon OVER the video (inside the same relative container) */}
               {(showSpeaker || muted) && (
                 <button
                   type="button"
+                  onMouseDown={(e) => e.stopPropagation()}
                   onClick={(e) => {
                     e.stopPropagation();
 
@@ -1021,7 +1093,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
                     showSpeakerBrief(1200);
                   }}
                   aria-label={muted ? "Unmute" : "Mute"}
-                  className="absolute bottom-3 right-3 z-[3] w-9 h-9 rounded-full bg-black/35 flex items-center justify-center"
+                  className="absolute bottom-3 right-3 z-[50] w-9 h-9 rounded-full bg-black/35 flex items-center justify-center pointer-events-auto transform-gpu"
                 >
                   <span className="text-white text-[16px] leading-none">
                     {muted ? "🔇" : "🔊"}
@@ -1034,7 +1106,8 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
               src={media.url}
               alt=""
               loading="lazy"
-              className="absolute inset-0 w-full h-full object-cover"
+              onClick={onClickMedia}
+              className="absolute inset-0 w-full h-full object-cover cursor-pointer"
             />
           )}
         </div>
