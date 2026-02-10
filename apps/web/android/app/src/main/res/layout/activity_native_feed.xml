@@ -6,11 +6,27 @@
   android:background="@android:color/black"
 >
 
-  <androidx.recyclerview.widget.RecyclerView
-    android:id="@+id/feedRecycler"
+  <LinearLayout
+    android:id="@+id/feedRoot"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-  />
+    android:orientation="vertical"
+  >
+
+    <include
+      android:id="@+id/nativeFeedHeader"
+      layout="@layout/native_feed_header"
+    />
+
+    <androidx.recyclerview.widget.RecyclerView
+      android:id="@+id/feedRecycler"
+      android:layout_width="match_parent"
+      android:layout_height="0dp"
+      android:layout_weight="1"
+      android:overScrollMode="never"
+    />
+
+  </LinearLayout>
 
   <TextView
     android:id="@+id/feedEmpty"

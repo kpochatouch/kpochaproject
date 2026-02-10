@@ -11,6 +11,10 @@ import com.google.android.exoplayer2.ui.PlayerView;
 public class VideoPlaybackManager {
     private static final VideoPlaybackManager INSTANCE = new VideoPlaybackManager();
 
+    private static final String PREFS = "kpocha_prefs";
+    private static final String KEY_MUTED = "feed_muted";
+    private boolean prefLoaded = false;
+
     private ExoPlayer player;
     private PlayerView attachedView;
     private String currentUrl;
@@ -23,9 +27,21 @@ public class VideoPlaybackManager {
     public void ensure(Context ctx) {
         if (player != null)
             return;
+
         player = new ExoPlayer.Builder(ctx.getApplicationContext()).build();
         player.setRepeatMode(com.google.android.exoplayer2.Player.REPEAT_MODE_ONE);
-        setMuted(true);
+
+        // Load saved preference once (default true = muted)
+        boolean savedMuted = true;
+        try {
+            savedMuted = ctx.getApplicationContext()
+                    .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    .getBoolean(KEY_MUTED, true);
+        } catch (Exception ignored) {
+        }
+
+        prefLoaded = true;
+        setMuted(savedMuted);
     }
 
     public void attach(PlayerView view) {
@@ -75,6 +91,18 @@ public class VideoPlaybackManager {
         muted = on;
         if (player != null)
             player.setVolume(on ? 0f : 1f);
+
+        // Persist user preference (once ensure() has a context)
+        if (attachedView != null) {
+            try {
+                Context ctx = attachedView.getContext().getApplicationContext();
+                ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                        .edit()
+                        .putBoolean(KEY_MUTED, on)
+                        .apply();
+            } catch (Exception ignored) {
+            }
+        }
     }
 
     public boolean isMuted() {

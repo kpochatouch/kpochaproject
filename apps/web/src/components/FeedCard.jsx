@@ -150,30 +150,40 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
   }
 
   function showSpeakerBrief(ms = 1200) {
-    // If muted, keep the icon visible (user needs it)
+    // When muted, DO NOT auto-hide — user needs the control
     if (muted) {
       setShowSpeaker(true);
       return;
     }
 
-    // If unmuted, we can hide it after a short moment
     setShowSpeaker(true);
     if (speakerTimerRef.current) clearTimeout(speakerTimerRef.current);
     speakerTimerRef.current = setTimeout(() => setShowSpeaker(false), ms);
   }
 
   async function autoplayTrySoundThenFallbackMuted(v) {
-    // Facebook-style: autoplay muted (most compatible)
-    v.muted = true;
-    setMuted(true);
+    const soundEnabled = getSoundEnabled(); // true => user wants sound
+
+    // 1) Try user preference first
+    v.muted = !soundEnabled;
+    setMuted(!soundEnabled);
 
     try {
       await v.play();
-      // Keep speaker visible while muted
-      showSpeakerBrief(1500);
+      // If user wants sound, show icon briefly; if muted, keep visible
+      showSpeakerBrief(soundEnabled ? 1200 : 999999);
       return true;
-    } catch {
-      return false;
+    } catch (e1) {
+      // 2) Fallback to muted autoplay (most permissive)
+      try {
+        v.muted = true;
+        setMuted(true);
+        await v.play();
+        showSpeakerBrief(999999); // keep icon visible so user can unmute
+        return true;
+      } catch (e2) {
+        return false;
+      }
     }
   }
 
