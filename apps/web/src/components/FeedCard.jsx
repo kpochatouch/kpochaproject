@@ -149,7 +149,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
     } catch {}
   }
 
-  function showSpeakerBrief(ms = 1200) {
+  function showSpeakerBrief(ms = 2500) {
     // When muted, DO NOT auto-hide — user needs the control
     if (muted) {
       setShowSpeaker(true);

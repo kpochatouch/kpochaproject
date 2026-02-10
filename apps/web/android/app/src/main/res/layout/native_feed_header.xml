@@ -156,15 +156,4 @@
 
   </LinearLayout>
 
-  <!-- Stories row (real list, even if empty for now) -->
-  <androidx.recyclerview.widget.RecyclerView
-    android:id="@+id/storiesRecycler"
-    android:layout_width="match_parent"
-    android:layout_height="110dp"
-    android:paddingLeft="12dp"
-    android:paddingRight="12dp"
-    android:paddingTop="10dp"
-    android:clipToPadding="false"
-  />
-
 </LinearLayout>

@@ -8,6 +8,8 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageView;
 import android.widget.TextView;
+import android.content.Intent;
+import android.net.Uri;
 
 import androidx.recyclerview.widget.RecyclerView;
 
@@ -17,6 +19,12 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH> {
+
+    public interface Listener {
+        void onRequestReelsAt(int position);
+
+        void onOpenPost(PostItem item);
+    }
 
     public enum Mode {
         FEED, REELS
@@ -31,11 +39,16 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
     private int activePos = RecyclerView.NO_POSITION;
 
     private Mode mode = Mode.FEED;
+    private Listener listener;
 
     public NativeFeedAdapter(Activity activity, String apiBase, String token) {
         this.activity = activity;
         this.apiBase = apiBase;
         this.token = token;
+    }
+
+    public void setListener(Listener l) {
+        this.listener = l;
     }
 
     public void setMode(Mode m) {
@@ -75,6 +88,10 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
     @Override
     public void onBindViewHolder(VH h, int pos) {
         PostItem p = items.get(pos);
+        final String bindId = p != null ? p.id : null;
+
+        if (p == null)
+            return;
 
         // basic text
         if (h.caption != null)
@@ -118,30 +135,160 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
             }
         }
 
-        // counts/actions are FEED-only for now (views exist via sendViewTick)
+        // ✅ counts/actions (wired to backend + web routes)
         if (h.countsRow != null) {
-            h.countsRow.setText("0 likes • 0 comments • 0 shares");
-        }
-        if (h.btnLike != null) {
-            h.btnLike.setOnClickListener(v -> android.widget.Toast
-                    .makeText(activity, "Like (wire API later)", android.widget.Toast.LENGTH_SHORT).show());
-        }
-        if (h.btnComment != null) {
-            h.btnComment.setOnClickListener(v -> android.widget.Toast
-                    .makeText(activity, "Comment (wire UI later)", android.widget.Toast.LENGTH_SHORT).show());
-        }
-        if (h.btnShare != null) {
-            h.btnShare.setOnClickListener(v -> android.widget.Toast
-                    .makeText(activity, "Share (wire later)", android.widget.Toast.LENGTH_SHORT).show());
+            h.countsRow
+                    .setText(p.likesCount + " likes • " + p.commentsCount + " comments • " + p.sharesCount + " shares");
         }
 
-        // mute toggle (persistent preference is in VideoPlaybackManager)
-        if (h.muteBadge != null) {
-            h.muteBadge.setText(VideoPlaybackManager.get().isMuted() ? "🔇" : "🔊");
-            h.muteBadge.setOnClickListener(v -> {
-                boolean nextMuted = !VideoPlaybackManager.get().isMuted();
-                VideoPlaybackManager.get().setMuted(nextMuted);
-                h.muteBadge.setText(nextMuted ? "🔇" : "🔊");
+        // Load stats (best-effort) — updates UI when it arrives
+        if (bindId != null && bindId.length() > 0 && !p.statsLoaded) {
+            PostApi.fetchStats(apiBase, bindId, token, new PostApi.StatsCallback() {
+                @Override
+                public void onSuccess(PostItem st) {
+
+                    if (st == null)
+                        return;
+
+                    // ✅ Guard: ignore late callback if this ViewHolder is now bound to a different
+                    // post
+                    if (p == null || p.id == null || bindId == null || !p.id.equals(bindId))
+                        return;
+
+                    // ✅ Only mark loaded AFTER we know we got real stats for the right row
+                    p.statsLoaded = true;
+
+                    try {
+                        p.viewsCount = st.viewsCount;
+                        p.likesCount = st.likesCount;
+                        p.commentsCount = st.commentsCount;
+                        p.sharesCount = st.sharesCount;
+                        p.likedByMe = st.likedByMe;
+                    } catch (Exception ignored) {
+                    }
+
+                    activity.runOnUiThread(() -> {
+                        // Holder might have been recycled; verify it still points to same post
+                        int curPos = h.getBindingAdapterPosition();
+                        if (curPos == RecyclerView.NO_POSITION)
+                            return;
+                        if (curPos >= items.size())
+                            return;
+
+                        PostItem cur = items.get(curPos);
+                        if (cur == null || cur.id == null || bindId == null || !cur.id.equals(bindId))
+                            return;
+
+                        if (h.countsRow != null) {
+                            h.countsRow.setText(cur.likesCount + " likes • " + cur.commentsCount + " comments • "
+                                    + cur.sharesCount + " shares");
+                        }
+                        if (h.btnLike != null) {
+                            h.btnLike.setText(cur.likedByMe ? "Liked" : "Like");
+                        }
+                    });
+                }
+
+                @Override
+                public void onError(String message) {
+                }
+            });
+        }
+
+        if (h.btnLike != null) {
+            h.btnLike.setText(p.likedByMe ? "Liked" : "Like");
+            h.btnLike.setOnClickListener(v -> {
+                if (p.id == null || p.id.length() == 0)
+                    return;
+
+                final boolean nextLike = !p.likedByMe;
+
+                // optimistic UI
+                p.likedByMe = nextLike;
+                p.likesCount = Math.max(0, p.likesCount + (nextLike ? 1 : -1));
+                h.btnLike.setText(p.likedByMe ? "Liked" : "Like");
+                if (h.countsRow != null) {
+                    h.countsRow.setText(
+                            p.likesCount + " likes • " + p.commentsCount + " comments • " + p.sharesCount + " shares");
+                }
+
+                PostApi.toggleLike(apiBase, p.id, token, nextLike, new PostApi.ToggleLikeCallback() {
+                    @Override
+                    public void onSuccess(boolean likedNow, int likesCountFromServer) {
+                        try {
+                            if (bindId == null || !bindId.equals(p.id))
+                                return;
+
+                            p.likedByMe = likedNow;
+                            if (likesCountFromServer >= 0)
+                                p.likesCount = likesCountFromServer;
+                        } catch (Exception ignored) {
+                        }
+
+                        activity.runOnUiThread(() -> {
+                            if (h.btnLike != null)
+                                h.btnLike.setText(p.likedByMe ? "Liked" : "Like");
+                            if (h.countsRow != null) {
+                                h.countsRow.setText(p.likesCount + " likes • " + p.commentsCount + " comments • "
+                                        + p.sharesCount + " shares");
+                            }
+                        });
+                    }
+
+                    @Override
+                    public void onError(String message) {
+                        if (p == null || p.id == null || bindId == null || !p.id.equals(bindId))
+                            return;
+
+                        // revert on error
+                        try {
+                            p.likedByMe = !nextLike;
+                            p.likesCount = Math.max(0, p.likesCount + (!nextLike ? 1 : -1));
+                        } catch (Exception ignored) {
+                        }
+
+                        activity.runOnUiThread(() -> {
+                            if (h.btnLike != null)
+                                h.btnLike.setText(p.likedByMe ? "Liked" : "Like");
+                            if (h.countsRow != null) {
+                                h.countsRow.setText(p.likesCount + " likes • " + p.commentsCount + " comments • "
+                                        + p.sharesCount + " shares");
+                            }
+                        });
+                    }
+                });
+            });
+        }
+
+        if (h.btnComment != null) {
+            h.btnComment.setOnClickListener(v -> {
+                if (p.id == null || p.id.length() == 0)
+                    return;
+                NativeNav.open(activity, "/post/" + Uri.encode(p.id));
+            });
+        }
+
+        if (h.btnShare != null) {
+            h.btnShare.setOnClickListener(v -> {
+                if (p.id == null || p.id.length() == 0)
+                    return;
+
+                // notify backend
+                PostApi.sendShareTick(apiBase, p.id, token);
+
+                // Android share sheet
+                try {
+                    String shareUrl = apiBase;
+                    if (shareUrl.endsWith("/"))
+                        shareUrl = shareUrl.substring(0, shareUrl.length() - 1);
+                    shareUrl = shareUrl + "/browse?post=" + Uri.encode(p.id);
+
+                    Intent send = new Intent(Intent.ACTION_SEND);
+                    send.setType("text/plain");
+                    send.putExtra(Intent.EXTRA_TEXT, shareUrl);
+                    activity.startActivity(Intent.createChooser(send, "Share post"));
+                } catch (Exception ignored) {
+                }
             });
         }
 
@@ -149,6 +296,30 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
         if (h.playerView != null && pos != activePos) {
             VideoPlaybackManager.get().detach(h.playerView);
         }
+
+        h.itemView.setOnClickListener(v -> {
+            boolean isVideo2 = "video".equalsIgnoreCase(p.mediaType);
+
+            // FEED mode behavior:
+            if (mode == Mode.FEED) {
+                // Video -> jump into REELS at this position
+                if (isVideo2 && listener != null) {
+                    listener.onRequestReelsAt(pos);
+                    return;
+                }
+
+                // Image/text -> open post detail (web)
+                if (listener != null) {
+                    listener.onOpenPost(p);
+                }
+                return;
+            }
+
+            // REELS mode behavior:
+            // Do nothing on tap (avoid accidental post-detail opens).
+            // Use Comment button (already wired) or a dedicated "View post" button in the
+            // reel layout.
+        });
 
         // Taps: in FEED, tap opens “reels mode at this post” (we’ll implement in
         // Activity later)
@@ -261,10 +432,20 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
 
     private String timeAgo(String iso) {
         try {
-            if (iso == null || iso.trim().length() == 0)
+            if (iso == null || iso.trim().isEmpty())
                 return "";
-            // Very simple fallback (you can improve later)
-            return "";
+            java.time.Instant t = java.time.Instant.parse(iso);
+            long diffMs = java.time.Duration.between(t, java.time.Instant.now()).toMillis();
+            long mins = diffMs / 60000;
+            if (mins < 1)
+                return "just now";
+            if (mins < 60)
+                return mins + "m";
+            long hrs = mins / 60;
+            if (hrs < 24)
+                return hrs + "h";
+            long days = hrs / 24;
+            return days + "d";
         } catch (Exception ignored) {
             return "";
         }

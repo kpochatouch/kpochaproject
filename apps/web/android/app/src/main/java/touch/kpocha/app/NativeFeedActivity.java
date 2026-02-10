@@ -11,6 +11,9 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.PagerSnapHelper;
 import androidx.recyclerview.widget.RecyclerView;
 
+import android.content.Intent;
+import android.net.Uri;
+
 import java.util.List;
 
 public class NativeFeedActivity extends Activity {
@@ -30,6 +33,9 @@ public class NativeFeedActivity extends Activity {
     private LinearLayoutManager layoutManager;
     private View header;
 
+    private RecyclerView storiesRecycler;
+    private StoriesAdapter storiesAdapter;
+
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -41,6 +47,41 @@ public class NativeFeedActivity extends Activity {
 
         header = findViewById(R.id.nativeFeedHeader);
 
+        // ---- Stories (NOT in header; wired here) ----
+        storiesRecycler = findViewById(R.id.storiesRecycler);
+        if (storiesRecycler != null) {
+            storiesRecycler.setLayoutManager(
+                    new androidx.recyclerview.widget.LinearLayoutManager(
+                            this,
+                            androidx.recyclerview.widget.LinearLayoutManager.HORIZONTAL,
+                            false));
+
+            storiesAdapter = new StoriesAdapter(this);
+            storiesRecycler.setAdapter(storiesAdapter);
+
+            storiesAdapter.setListener(new StoriesAdapter.Listener() {
+                @Override
+                public void onCreateStory() {
+                    openWebRoute("/compose"); // or "/compose?mode=story" later
+                }
+
+                @Override
+                public void onStoryClicked(StoryItem item) {
+                    // later: open story viewer
+                    android.widget.Toast.makeText(NativeFeedActivity.this,
+                            "Story: " + (item != null ? item.name : ""),
+                            android.widget.Toast.LENGTH_SHORT).show();
+                }
+            });
+
+            // TEMP demo so it’s not empty (remove later when you load real stories)
+            java.util.ArrayList<StoryItem> demo = new java.util.ArrayList<>();
+            demo.add(new StoryItem("1", "The Beat", ""));
+            demo.add(new StoryItem("2", "Judikay", ""));
+            demo.add(new StoryItem("3", "Trending", ""));
+            storiesAdapter.setItems(demo);
+        }
+
         recycler = findViewById(R.id.feedRecycler);
         layoutManager = new LinearLayoutManager(this, LinearLayoutManager.VERTICAL, false);
         recycler.setLayoutManager(layoutManager);
@@ -48,6 +89,26 @@ public class NativeFeedActivity extends Activity {
         adapter = new NativeFeedAdapter(this, apiBase, token);
         adapter.setMode(NativeFeedAdapter.Mode.FEED);
         recycler.setAdapter(adapter);
+
+        adapter.setListener(new NativeFeedAdapter.Listener() {
+            @Override
+            public void onRequestReelsAt(int position) {
+                setMode(NativeFeedAdapter.Mode.REELS);
+                recycler.post(() -> recycler.scrollToPosition(position));
+            }
+
+            @Override
+            public void onOpenPost(PostItem item) {
+                String id = item != null ? item.id : null;
+                if (id == null || id.trim().isEmpty()) {
+                    android.widget.Toast
+                            .makeText(NativeFeedActivity.this, "Missing post id", android.widget.Toast.LENGTH_SHORT)
+                            .show();
+                    return;
+                }
+                openWebRoute("/post/" + Uri.encode(id));
+            }
+        });
 
         // autoplay handling while scrolling
         recycler.addOnScrollListener(new RecyclerView.OnScrollListener() {
@@ -61,6 +122,28 @@ public class NativeFeedActivity extends Activity {
         // wire header buttons
         TextView btnModeFeed = findViewById(R.id.btnModeFeed);
         TextView btnModeReels = findViewById(R.id.btnModeReels);
+
+        TextView btnHamburger = findViewById(R.id.btnHamburger);
+        TextView btnPlus = findViewById(R.id.btnPlus);
+        TextView btnSearch = findViewById(R.id.btnSearch);
+        TextView btnChat = findViewById(R.id.btnChat);
+
+        TextView btnComposer = findViewById(R.id.btnComposer);
+        TextView btnPhoto = findViewById(R.id.btnPhoto);
+
+        if (btnHamburger != null)
+            btnHamburger.setOnClickListener(v -> NativeNav.open(this, "/browse"));
+        if (btnPlus != null)
+            btnPlus.setOnClickListener(v -> NativeNav.open(this, "/compose"));
+        if (btnSearch != null)
+            btnSearch.setOnClickListener(v -> NativeNav.open(this, "/browse?search=1"));
+        if (btnChat != null)
+            btnChat.setOnClickListener(v -> NativeNav.open(this, "/inbox"));
+
+        if (btnComposer != null)
+            btnComposer.setOnClickListener(v -> NativeNav.open(this, "/compose"));
+        if (btnPhoto != null)
+            btnPhoto.setOnClickListener(v -> NativeNav.open(this, "/compose"));
 
         btnModeFeed.setOnClickListener(v -> setMode(NativeFeedAdapter.Mode.FEED));
         btnModeReels.setOnClickListener(v -> setMode(NativeFeedAdapter.Mode.REELS));
@@ -97,6 +180,9 @@ public class NativeFeedActivity extends Activity {
         adapter.setMode(mode);
         if (header != null) {
             header.setVisibility(mode == NativeFeedAdapter.Mode.REELS ? View.GONE : View.VISIBLE);
+        }
+        if (storiesRecycler != null) {
+            storiesRecycler.setVisibility(mode == NativeFeedAdapter.Mode.REELS ? View.GONE : View.VISIBLE);
         }
 
         int anchor = layoutManager != null ? layoutManager.findFirstVisibleItemPosition() : 0;
@@ -155,4 +241,22 @@ public class NativeFeedActivity extends Activity {
         VideoPlaybackManager.get().release();
         super.onDestroy();
     }
+
+    private void openWebRoute(String path) {
+        try {
+            if (path == null)
+                path = "/browse";
+            if (!path.startsWith("/"))
+                path = "/" + path;
+
+            Intent i = new Intent(this, MainActivity.class);
+            i.setAction(Intent.ACTION_VIEW);
+            i.setData(Uri.parse("capacitor://localhost" + path));
+            i.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            startActivity(i);
+        } catch (Exception e) {
+            android.widget.Toast.makeText(this, "Failed to open route", android.widget.Toast.LENGTH_SHORT).show();
+        }
+    }
+
 }

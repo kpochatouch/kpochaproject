@@ -47,6 +47,15 @@ public class VideoPlaybackManager {
     public void attach(PlayerView view) {
         if (view == null)
             return;
+
+        // ✅ detach old surface first (prevents blank/glitch)
+        if (attachedView != null && attachedView != view) {
+            try {
+                attachedView.setPlayer(null);
+            } catch (Exception ignored) {
+            }
+        }
+
         attachedView = view;
         attachedView.setPlayer(player);
     }
