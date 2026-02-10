@@ -19,6 +19,9 @@ public class NativeFeedPlugin extends Plugin {
             String lga = call.getString("lga", "");
             String token = call.getString("token", ""); // optional
 
+            android.util.Log.i("NativeFeedPlugin",
+                    "open() called apiBase=" + apiBase + " lga=" + lga + " token?=" + (!token.isEmpty()));
+
             Intent i = new Intent(getContext(), NativeFeedActivity.class);
             i.putExtra(NativeFeedActivity.EXTRA_API_BASE, apiBase);
             i.putExtra(NativeFeedActivity.EXTRA_LGA, lga);

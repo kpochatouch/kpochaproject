@@ -1,9 +1,5 @@
 {
   "appId": "touch.kpocha.app",
   "appName": "Kpocha Touch",
-  "webDir": "dist",
-  "server": {
-    "url": "https://kpochatouch.vercel.app",
-    "cleartext": false
-  }
+  "webDir": "dist"
 }

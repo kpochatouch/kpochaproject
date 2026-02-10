@@ -150,27 +150,31 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
   }
 
   function showSpeakerBrief(ms = 1200) {
+    // If muted, keep the icon visible (user needs it)
+    if (muted) {
+      setShowSpeaker(true);
+      return;
+    }
+
+    // If unmuted, we can hide it after a short moment
     setShowSpeaker(true);
     if (speakerTimerRef.current) clearTimeout(speakerTimerRef.current);
     speakerTimerRef.current = setTimeout(() => setShowSpeaker(false), ms);
   }
 
   async function autoplayTrySoundThenFallbackMuted(v) {
-    // Respect stored preference:
-    // soundEnabled => unmuted, otherwise muted.
-    const soundEnabled = getSoundEnabled();
-
-    v.muted = !soundEnabled;
-    setMuted(!soundEnabled);
+    // Facebook-style: autoplay muted (most compatible)
+    v.muted = true;
+    setMuted(true);
 
     try {
       await v.play();
+      // Keep speaker visible while muted
+      showSpeakerBrief(1500);
+      return true;
     } catch {
-      // If play fails, do nothing (WebView policy)
+      return false;
     }
-
-    // If sound is enabled, briefly show the speaker icon (optional)
-    if (soundEnabled) showSpeakerBrief(1200);
   }
 
   const canComment = useMemo(
@@ -451,8 +455,8 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
       });
       if (okFeed) return;
 
-      // If native feed failed, show a visible error so we can diagnose
-      alert("Native feed failed on Android. Check logcat for NativeFeed.");
+      // User-safe fallback: open the normal post page instead of showing a dev message
+      navigate(`/post/${encodeURIComponent(postId)}`);
       return;
     }
 
@@ -834,42 +838,8 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
     >
       {/* header */}
       <div className="flex items-start justify-between px-4 py-3 gap-3">
-        <div className="flex gap-3">
-          <div
-            className="w-10 h-10 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center cursor-pointer"
-            onClick={goToProfile}
-            title="View profile"
-            role="button"
-            aria-label="View profile"
-          >
-            {avatar ? (
-              <img
-                src={avatar}
-                alt={proName}
-                className="w-full h-full object-cover"
-                loading="lazy"
-              />
-            ) : (
-              <span className="text-sm text-white">
-                {proName.slice(0, 1).toUpperCase()}
-              </span>
-            )}
-          </div>
+        <div className="flex-1" />
 
-          <div>
-            <div
-              className="text-sm font-semibold text-white truncate max-w-[120px] cursor-pointer"
-              onClick={goToProfile}
-              title="View profile"
-            >
-              {proName}
-            </div>
-
-            <div className="text-xs text-gray-400">
-              {lga || "Nigeria"} • {timeAgo(post.createdAt)}
-            </div>
-          </div>
-        </div>
         <div className="flex items-center gap-2">
           {post.proId && (
             <Link
@@ -1042,7 +1012,9 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
               <video
                 ref={videoRef}
                 data-src={media.url}
-                className="absolute inset-0 w-full h-full object-cover z-[1]"
+                className={`absolute inset-0 w-full h-full object-cover z-[1] ${
+                  hasFirstFrame ? "opacity-100" : "opacity-0"
+                }`}
                 poster={
                   Capacitor.isNativePlatform() ? undefined : media?.thumbnailUrl
                 }
@@ -1060,7 +1032,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
                 onError={() => setHasFirstFrame(true)}
               />
 
-              {Capacitor.isNativePlatform() && !hasFirstFrame && (
+              {!hasFirstFrame && (
                 <img
                   src={media?.thumbnailUrl || media?.url}
                   alt=""
