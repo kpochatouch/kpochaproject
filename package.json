@@ -1,7 +1,9 @@
 {
   "name": "kpocha-touch-monorepo",
   "private": true,
-  "workspaces": ["apps/*"],
+  "workspaces": [
+    "apps/*"
+  ],
   "scripts": {
     "dev:web": "npm --workspace apps/web run dev",
     "dev:api": "npm --workspace apps/api run dev",
@@ -10,6 +12,8 @@
     "postinstall": "node scripts/postinstall.js"
   },
   "dependencies": {
+    "@ffmpeg/ffmpeg": "^0.12.15",
+    "@ffmpeg/util": "^0.12.2",
     "patch-package": "^8.0.1"
   },
   "engines": {

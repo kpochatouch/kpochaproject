@@ -35,6 +35,7 @@
     android:theme="@style/AppTheme"
   >
 
+
   <!-- ✅ Firebase fallback channel when push includes notification payload -->
     <meta-data
       android:name="com.google.firebase.messaging.default_notification_channel_id"
@@ -94,6 +95,11 @@
       android:configChanges="orientation|screenSize|keyboardHidden"
     />
 
+    <activity android:name=".StoryViewerActivity" android:exported="false" />
+<activity android:name=".StoryComposeActivity" android:exported="false" />
+<activity android:name=".VideoTrimActivity" android:exported="false" />
+
+
     <!-- Accept/Decline actions -->
     <receiver android:name=".CallActionReceiver" android:exported="false" />
 
@@ -121,6 +127,7 @@
         android:name="android.support.FILE_PROVIDER_PATHS"
         android:resource="@xml/file_paths"
       />
+
     </provider>
 
 </application>

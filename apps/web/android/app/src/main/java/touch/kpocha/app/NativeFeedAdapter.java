@@ -13,7 +13,7 @@ import android.net.Uri;
 
 import androidx.recyclerview.widget.RecyclerView;
 
-import com.google.android.exoplayer2.ui.PlayerView;
+import androidx.media3.ui.PlayerView;
 
 import java.util.ArrayList;
 import java.util.List;

@@ -866,13 +866,13 @@ app.get("/api/me", requireAuth, async (req, res) => {
             photoUrl: photoUrl || "",
           }
         : profileDoc?.proId
-          ? {
-              id: profileDoc.proId.toString(),
-              name: displayName,
-              status: profileDoc.proStatus || "approved",
-              photoUrl,
-            }
-          : null,
+        ? {
+            id: profileDoc.proId.toString(),
+            name: displayName,
+            status: profileDoc.proStatus || "approved",
+            photoUrl,
+          }
+        : null,
     };
 
     // make sure we never leak ownerUid
@@ -1234,8 +1234,9 @@ try {
 
 // optional availability
 try {
-  const { default: availabilityRouter } =
-    await import("./routes/availability.js").catch(() => ({ default: null }));
+  const { default: availabilityRouter } = await import(
+    "./routes/availability.js"
+  ).catch(() => ({ default: null }));
   if (availabilityRouter) {
     app.use("/api", availabilityRouter);
     console.log("[api] ✅ Availability routes mounted");

@@ -89,6 +89,8 @@ function sanitizePostForClient(p) {
     text: obj.text,
     media: mediaNorm,
     tags: obj.tags || [],
+    type: obj.type || "post",
+    expiresAt: obj.expiresAt || null,
     lga: obj.lga,
     isPublic: !!obj.isPublic,
     hidden: !!obj.hidden,
@@ -184,8 +186,6 @@ router.post("/posts", requireAuth, async (req, res) => {
       tags,
       lga: lgaFinal,
       isPublic: !!isPublic,
-      // createdBy is handy for older payload shapes
-      createdBy: req.user.uid,
     });
 
     // make sure stats doc exists
@@ -209,7 +209,15 @@ router.post("/posts", requireAuth, async (req, res) => {
 router.get("/posts/public", async (req, res) => {
   try {
     const { lga = "", limit = 20, before = null } = req.query;
-    const q = { isPublic: true, hidden: { $ne: true }, deleted: { $ne: true } };
+    const q = {
+      isPublic: true,
+      hidden: { $ne: true },
+      deleted: { $ne: true },
+
+      // ✅ exclude stories from normal feed
+      $or: [{ type: { $ne: "story" } }, { type: { $exists: false } }],
+    };
+
     if (lga) q.lga = toUpper(String(lga));
     if (before) q.createdAt = { $lt: new Date(before) };
 
@@ -294,6 +302,10 @@ router.get("/posts/:id/next", tryAuth, async (req, res) => {
       isPublic: true,
       hidden: { $ne: true },
       deleted: { $ne: true },
+
+      // ✅ exclude stories from reel queue
+      $or: [{ type: { $ne: "story" } }, { type: { $exists: false } }],
+
       _id: { $ne: current._id }, // never return the same post again
     };
 
@@ -388,6 +400,161 @@ router.get("/posts/:id/next", tryAuth, async (req, res) => {
   } catch (e) {
     console.error("[posts:next] error", e?.message || e);
     return res.json({ next: null, queue: [] });
+  }
+});
+
+/* -------------------------------------------------------------------- */
+/* STORIES (expire after 24h by not being returned)                      */
+/* -------------------------------------------------------------------- */
+
+// GET /stories/public  (active stories only)
+router.get("/stories/public", async (req, res) => {
+  try {
+    const { limit = 50 } = req.query;
+
+    const now = new Date();
+    const cutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+    const q = {
+      isPublic: true,
+      hidden: { $ne: true },
+      deleted: { $ne: true },
+      type: "story",
+
+      // ✅ tolerate legacy stories with no expiresAt:
+      // treat "no expiresAt" as "createdAt within last 24h"
+      $or: [
+        { expiresAt: { $gt: now } },
+        { expiresAt: null, createdAt: { $gt: cutoff } },
+        { expiresAt: { $exists: false }, createdAt: { $gt: cutoff } },
+      ],
+    };
+
+    const items = await Post.find(q)
+      .sort({ createdAt: -1 })
+      .limit(Math.max(1, Math.min(Number(limit) || 50, 200)))
+      .lean();
+
+    return res.json(items.map(sanitizePostForClient));
+  } catch (err) {
+    console.error("[stories:public] error:", err);
+    return res.status(500).json({ error: "stories_load_failed" });
+  }
+});
+
+// GET /stories/me (owner active stories only)
+router.get("/stories/me", requireAuth, async (req, res) => {
+  try {
+    const now = new Date();
+    const cutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+    const items = await Post.find({
+      proOwnerUid: req.user.uid,
+      deleted: { $ne: true },
+      type: "story",
+      $or: [
+        { expiresAt: { $gt: now } },
+        { expiresAt: null, createdAt: { $gt: cutoff } },
+        { expiresAt: { $exists: false }, createdAt: { $gt: cutoff } },
+      ],
+    })
+      .sort({ createdAt: -1 })
+      .limit(200)
+      .lean();
+
+    return res.json(items.map(sanitizePostForClient));
+  } catch (err) {
+    console.error("[stories:me] error:", err);
+    return res.status(500).json({ error: "stories_load_failed" });
+  }
+});
+
+// GET /stories/me/archived (owner expired stories only)
+router.get("/stories/me/archived", requireAuth, async (req, res) => {
+  try {
+    const { limit = 200 } = req.query;
+
+    const now = new Date();
+    const cutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+    const q = {
+      proOwnerUid: req.user.uid,
+      deleted: { $ne: true },
+      type: "story",
+
+      // expired
+      $or: [
+        { expiresAt: { $lte: now } },
+        { expiresAt: null, createdAt: { $lte: cutoff } },
+        { expiresAt: { $exists: false }, createdAt: { $lte: cutoff } },
+      ],
+    };
+
+    const items = await Post.find(q)
+      .sort({ createdAt: -1 })
+      .limit(Math.max(1, Math.min(Number(limit) || 200, 500)))
+      .lean();
+
+    return res.json(items.map(sanitizePostForClient));
+  } catch (err) {
+    console.error("[stories:me:archived] error:", err);
+    return res.status(500).json({ error: "stories_archived_load_failed" });
+  }
+});
+
+// POST /stories (create story)
+router.post("/stories", requireAuth, async (req, res) => {
+  try {
+    const body = req.body || {};
+    let { text = "", media = [], lga = "", isPublic = true, tags = [] } = body;
+
+    const proDoc = await Pro.findOne({ ownerUid: req.user.uid }).lean();
+    if (!proDoc) return res.status(403).json({ error: "not_a_pro" });
+
+    text = trim(text || "");
+    if (!Array.isArray(media)) media = [];
+    media = media
+      .filter((m) => m && typeof m.url === "string" && m.url.trim())
+      .map((m) => ({
+        url: trim(m.url),
+        type: m.type === "video" ? "video" : "image",
+      }));
+
+    tags = Array.isArray(tags)
+      ? tags
+          .map((t) => String(t || "").trim())
+          .filter(Boolean)
+          .slice(0, 10)
+      : [];
+
+    const lgaFinal = toUpper(lga || proDoc.lga || "");
+
+    const story = await Post.create({
+      type: "story", // ✅ key
+      // expiresAt will be auto-set by model pre-save hook
+
+      ownerUid: req.user.uid,
+      proOwnerUid: req.user.uid,
+      createdBy: req.user.uid,
+      proId: proDoc._id,
+      pro: {
+        _id: proDoc._id,
+        name: proDoc.name || "Professional",
+        lga: proDoc.lga || "",
+        photoUrl: proDoc.photoUrl || proDoc.avatarUrl || "",
+      },
+
+      text,
+      media,
+      tags,
+      lga: lgaFinal,
+      isPublic: !!isPublic,
+    });
+
+    return res.json({ ok: true, story: sanitizePostForClient(story) });
+  } catch (err) {
+    console.error("[stories:create] error:", err);
+    return res.status(500).json({ error: "story_create_failed" });
   }
 });
 
@@ -765,6 +932,9 @@ router.get("/posts/for-you/start", tryAuth, async (req, res) => {
       isPublic: true,
       hidden: { $ne: true },
       deleted: { $ne: true },
+
+      // ✅ exclude stories from For You start
+      $or: [{ type: { $ne: "story" } }, { type: { $exists: false } }],
     };
 
     if (lga) baseQuery.lga = toUpper(String(lga));
@@ -842,7 +1012,15 @@ router.get("/posts/trending", async (req, res) => {
   try {
     const { lga = "", limit = 20 } = req.query;
     const lim = Math.max(1, Math.min(Number(limit) || 20, 50));
-    const q = { isPublic: true, hidden: { $ne: true }, deleted: { $ne: true } };
+    const q = {
+      isPublic: true,
+      hidden: { $ne: true },
+      deleted: { $ne: true },
+
+      // ✅ exclude stories from normal feed
+      $or: [{ type: { $ne: "story" } }, { type: { $exists: false } }],
+    };
+
     if (lga) q.lga = toUpper(String(lga));
 
     const topStats = await PostStats.find({})

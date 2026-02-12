@@ -62,24 +62,40 @@ public class NativeFeedActivity extends Activity {
             storiesAdapter.setListener(new StoriesAdapter.Listener() {
                 @Override
                 public void onCreateStory() {
-                    openWebRoute("/compose"); // or "/compose?mode=story" later
+                    Intent i = new Intent(NativeFeedActivity.this, StoryComposeActivity.class);
+                    i.putExtra(StoryComposeActivity.EXTRA_API_BASE, apiBase);
+                    i.putExtra(StoryComposeActivity.EXTRA_TOKEN, token);
+                    i.putExtra(StoryComposeActivity.EXTRA_LGA, lga);
+                    startActivity(i);
+
                 }
 
                 @Override
                 public void onStoryClicked(StoryItem item) {
                     // later: open story viewer
-                    android.widget.Toast.makeText(NativeFeedActivity.this,
-                            "Story: " + (item != null ? item.name : ""),
-                            android.widget.Toast.LENGTH_SHORT).show();
+                    if (item == null || item.id == null || item.id.trim().isEmpty())
+                        return;
+
+                    Intent i = new Intent(NativeFeedActivity.this, StoryViewerActivity.class);
+                    i.putExtra(StoryViewerActivity.EXTRA_API_BASE, apiBase);
+                    i.putExtra(StoryViewerActivity.EXTRA_TOKEN, token);
+                    i.putExtra(StoryViewerActivity.EXTRA_STORY_ID, item.id);
+                    startActivity(i);
                 }
             });
 
-            // TEMP demo so it’s not empty (remove later when you load real stories)
-            java.util.ArrayList<StoryItem> demo = new java.util.ArrayList<>();
-            demo.add(new StoryItem("1", "The Beat", ""));
-            demo.add(new StoryItem("2", "Judikay", ""));
-            demo.add(new StoryItem("3", "Trending", ""));
-            storiesAdapter.setItems(demo);
+            StoriesApi.fetchPublicStories(apiBase, token, new StoriesApi.StoriesCallback() {
+                @Override
+                public void onSuccess(java.util.List<StoryItem> stories) {
+                    runOnUiThread(() -> storiesAdapter.setItems(stories));
+                }
+
+                @Override
+                public void onError(String message) {
+                    // leave shelf empty silently for now
+                }
+            });
+
         }
 
         recycler = findViewById(R.id.feedRecycler);
@@ -228,6 +244,28 @@ public class NativeFeedActivity extends Activity {
             adapter.handleScrollAutoplay(recycler);
         });
 
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        reloadStories();
+    }
+
+    private void reloadStories() {
+        if (storiesAdapter == null)
+            return;
+        StoriesApi.fetchPublicStories(apiBase, token, new StoriesApi.StoriesCallback() {
+            @Override
+            public void onSuccess(java.util.List<StoryItem> stories) {
+                runOnUiThread(() -> storiesAdapter.setItems(stories));
+            }
+
+            @Override
+            public void onError(String message) {
+                // ignore
+            }
+        });
     }
 
     @Override

@@ -24,10 +24,10 @@ export default function uploadsRoutes({ requireAuth }) {
       const public_id = req.body?.public_id
         ? String(req.body.public_id)
         : undefined;
-      const overwrite =
-        typeof req.body?.overwrite === "boolean"
-          ? req.body.overwrite
-          : undefined;
+      // Only include overwrite when true.
+      // If overwrite is false and we sign it but client doesn't send it, Cloudinary returns 401.
+      const overwrite = req.body?.overwrite === true ? true : undefined;
+
       const tags = Array.isArray(req.body?.tags)
         ? req.body.tags.join(",")
         : undefined;

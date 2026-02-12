@@ -4,9 +4,10 @@ package touch.kpocha.app;
 import android.content.Context;
 import android.net.Uri;
 
-import com.google.android.exoplayer2.ExoPlayer;
-import com.google.android.exoplayer2.MediaItem;
-import com.google.android.exoplayer2.ui.PlayerView;
+import androidx.media3.exoplayer.ExoPlayer;
+import androidx.media3.common.MediaItem;
+import androidx.media3.common.Player;
+import androidx.media3.ui.PlayerView;
 
 public class VideoPlaybackManager {
     private static final VideoPlaybackManager INSTANCE = new VideoPlaybackManager();
@@ -29,7 +30,7 @@ public class VideoPlaybackManager {
             return;
 
         player = new ExoPlayer.Builder(ctx.getApplicationContext()).build();
-        player.setRepeatMode(com.google.android.exoplayer2.Player.REPEAT_MODE_ONE);
+        player.setRepeatMode(Player.REPEAT_MODE_ONE);
 
         // Load saved preference once (default true = muted)
         boolean savedMuted = true;

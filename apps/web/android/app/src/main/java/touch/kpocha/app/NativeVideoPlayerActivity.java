@@ -6,9 +6,10 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.view.WindowManager;
 
-import com.google.android.exoplayer2.ExoPlayer;
-import com.google.android.exoplayer2.MediaItem;
-import com.google.android.exoplayer2.ui.PlayerView;
+import androidx.media3.exoplayer.ExoPlayer;
+import androidx.media3.common.MediaItem;
+import androidx.media3.common.Player;
+import androidx.media3.ui.PlayerView;
 
 public class NativeVideoPlayerActivity extends Activity {
     public static final String EXTRA_URL = "url";
@@ -44,8 +45,8 @@ public class NativeVideoPlayerActivity extends Activity {
         }
 
         player.setRepeatMode(loop
-                ? com.google.android.exoplayer2.Player.REPEAT_MODE_ONE
-                : com.google.android.exoplayer2.Player.REPEAT_MODE_OFF);
+                ? Player.REPEAT_MODE_ONE
+                : Player.REPEAT_MODE_OFF);
 
         player.setVolume(muted ? 0f : 1f);
 

@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<LinearLayout
+  xmlns:android="http://schemas.android.com/apk/res/android"
+  xmlns:app="http://schemas.android.com/apk/res-auto"
+  android:orientation="vertical"
+  android:padding="16dp"
+  android:layout_width="match_parent"
+  android:layout_height="match_parent"
+>
+
+    <TextView
+    android:id="@+id/status"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:text="Select start/end (max 30s)"
+    android:textSize="14sp"
+    android:paddingBottom="12dp"
+  />
+
+    <com.google.android.material.slider.RangeSlider
+    android:id="@+id/trimSlider"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    app:labelBehavior="withinBounds"
+  />
+
+    <TextView
+    android:id="@+id/btnDone"
+    android:layout_width="match_parent"
+    android:layout_height="48dp"
+    android:gravity="center"
+    android:text="DONE"
+    android:textStyle="bold"
+    android:layout_marginTop="18dp"
+    android:background="@android:color/holo_green_dark"
+    android:textColor="@android:color/white"
+  />
+
+</LinearLayout>

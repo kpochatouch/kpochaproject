@@ -35,10 +35,21 @@ const PostSchema = new mongoose.Schema(
       index: true,
     },
 
+    ownerUid: { type: String, default: "", index: true }, // canonical owner
+    createdBy: { type: String, default: "", index: true }, // compat
+
     // snapshot of the author (denormalized for speed)
     pro: { type: ProSnapshotSchema, required: true },
 
     // content
+    type: {
+      type: String,
+      enum: ["post", "story"],
+      default: "post",
+      index: true,
+    }, // ✅ NEW
+    expiresAt: { type: Date, default: null, index: true }, // ✅ NEW (do NOT TTL delete)
+
     text: { type: String, default: "" },
     media: { type: [MediaSchema], default: [] },
     tags: { type: [String], default: [], index: true },
@@ -71,6 +82,13 @@ PostSchema.index({ proOwnerUid: 1, createdAt: -1 });
 // normalize LGA casing
 PostSchema.pre("save", function normalize(next) {
   if (this.lga) this.lga = String(this.lga).toUpperCase();
+
+  // ✅ Story expiry: 24h from creation if not set
+  if (this.type === "story" && !this.expiresAt) {
+    const base = this.createdAt ? new Date(this.createdAt) : new Date();
+    this.expiresAt = new Date(base.getTime() + 24 * 60 * 60 * 1000);
+  }
+
   next();
 });
 

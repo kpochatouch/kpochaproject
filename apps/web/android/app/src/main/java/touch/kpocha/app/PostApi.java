@@ -190,7 +190,6 @@ public class PostApi {
 
     public static void fetchStats(String apiBase, String postId, String token, StatsCallback cb) {
         try {
-            final String bindId = p.id;
             if (TextUtils.isEmpty(apiBase) || TextUtils.isEmpty(postId)) {
                 cb.onError("Missing params");
                 return;
