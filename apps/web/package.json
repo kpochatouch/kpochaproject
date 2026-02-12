@@ -18,6 +18,7 @@
     "@capacitor/cli": "^8.0.1",
     "@capacitor/core": "^8.0.1",
     "@capacitor/push-notifications": "^8.0.0",
+    "@ffmpeg/ffmpeg": "^0.12.15",
     "aws-amplify": "^6.15.7",
     "axios": "^1.7.2",
     "capacitor-native-video-player": "^0.0.1",
