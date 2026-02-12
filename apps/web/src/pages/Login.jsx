@@ -4,11 +4,13 @@ import { useNavigate, Link, useLocation } from "react-router-dom";
 import {
   signInWithEmailAndPassword,
   signInWithPopup,
+  signInWithRedirect,
   setPersistence,
   browserLocalPersistence,
   sendPasswordResetEmail,
-  sendEmailVerification, // 👈 added
+  sendEmailVerification,
 } from "firebase/auth";
+import { Capacitor } from "@capacitor/core";
 import { auth, googleProvider } from "../lib/firebase";
 import { useAuth } from "../context/AuthContext";
 import PasswordInput from "../components/PasswordInput";
@@ -30,16 +32,18 @@ export default function Login() {
 
   useEffect(() => {
     setPersistence(auth, browserLocalPersistence).catch(() => {});
-    try {
-      sessionStorage.removeItem("g_state");
-    } catch {}
-    try {
-      localStorage.removeItem("g_state");
-    } catch {}
   }, []);
 
   useEffect(() => {
     if (!user) return;
+
+    const isPasswordUser = user.providerData?.some(
+      (p) => p.providerId === "password",
+    );
+
+    // ✅ Do not auto-redirect unverified password users
+    if (isPasswordUser && !user.emailVerified) return;
+
     const next = qs.get("next") || "/browse";
     nav(next, { replace: true });
   }, [user, nav, qs]);
@@ -103,32 +107,28 @@ export default function Login() {
     setErr("");
     setOk("");
     setBusy(true);
+
     try {
       googleProvider.setCustomParameters({ prompt: "select_account" });
-      const cred = await signInWithPopup(auth, googleProvider);
 
-      if (!cred.user.emailVerified) {
-        const appUrl = window.location.origin;
-        try {
-          await sendEmailVerification(cred.user, {
-            url: `${appUrl}/browse`,
-            handleCodeInApp: true,
-          });
-          setOk(
-            "Verification email sent. Check your inbox/spam folder and come back.",
-          );
-        } catch {
-          setErr(
-            "Your email is not verified. Please check your inbox/spam folder.",
-          );
-        }
-        await auth.signOut();
-        setBusy(false);
+      // On native/in-app browsers, popups often fail → use redirect
+      const isNative = Capacitor?.isNativePlatform?.() === true;
+
+      if (isNative) {
+        await signInWithRedirect(auth, googleProvider);
+        // Redirect will leave the page; no further code needed here
         return;
       }
 
+      const cred = await signInWithPopup(auth, googleProvider);
+
+      // For Google provider, emailVerified is typically true already.
+      // Do NOT gate Google sign-in behind email verification.
       await afterSignInRedirect();
     } catch (e) {
+      // TEMP (keep for now): helps you see the real error code in console
+      console.log("[Google sign-in error]", e);
+
       setErr(friendlyFirebaseError(e) || "Google sign in failed");
     } finally {
       setBusy(false);

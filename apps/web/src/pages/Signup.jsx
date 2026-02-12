@@ -24,7 +24,10 @@ export default function Signup() {
   const nav = useNavigate();
 
   useEffect(() => {
-    if (user) nav("/browse");
+    // ✅ Only auto-redirect when verified.
+    // Unverified users should stay on the Signup screen and see the "verification email sent" message.
+    if (user && user.emailVerified) nav("/browse", { replace: true });
+
     try {
       const cached = JSON.parse(localStorage.getItem("profileDraft") || "{}");
       if (cached.name) setName(cached.name);

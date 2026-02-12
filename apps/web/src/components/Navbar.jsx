@@ -1,16 +1,18 @@
 // apps/web/src/components/Navbar.jsx
 import { Link, NavLink, useLocation } from "react-router-dom";
-import { useEffect, useState } from "react";
-import { getAuth, onIdTokenChanged, signOut } from "firebase/auth";
-import { api } from "../lib/api";
+import { signOut } from "firebase/auth";
+import { auth } from "../lib/firebase";
+import { useAuth } from "../context/AuthContext.jsx";
+import { useMe } from "../context/MeContext.jsx";
 import NotificationBell from "./NotificationBell.jsx";
 import InstallAppButton from "./InstallAppButton.jsx";
 
 export default function Navbar() {
-  const [me, setMe] = useState(null);
-  const [token, setToken] = useState(
-    () => localStorage.getItem("token") || null,
-  );
+  const { user } = useAuth();
+  const { me } = useMe();
+
+  // "logged in" should be Firebase truth, not /api/me truth
+  const token = user ? "1" : null;
 
   const location = useLocation();
   const pathname = location.pathname;
@@ -27,50 +29,17 @@ export default function Navbar() {
   const isProDash = pathname === "/pro-dashboard";
   const isAdminPanel = pathname === "/admin";
 
-  // watch firebase auth → keep token in localStorage
-  useEffect(() => {
-    const auth = getAuth();
-    const unsub = onIdTokenChanged(auth, async (user) => {
-      if (user) {
-        const t = await user.getIdToken();
-        localStorage.setItem("token", t);
-        setToken(t);
-      } else {
-        localStorage.removeItem("token");
-        setToken(null);
-      }
-    });
-    return () => unsub();
-  }, []);
-
-  // fetch /api/me when we have a token
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        if (!token) return alive && setMe(null);
-        const { data } = await api.get("/api/me");
-        if (alive) setMe(data);
-      } catch {
-        if (alive) setMe(null);
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, [token]);
-
   async function handleSignOut() {
     try {
-      const auth = getAuth();
       await signOut(auth);
     } catch {}
+
     try {
-      localStorage.removeItem("token");
       sessionStorage.clear();
       sessionStorage.removeItem("g_state");
       localStorage.removeItem("g_state");
     } catch {}
+
     window.location.assign("/login?signedout=1");
   }
 
