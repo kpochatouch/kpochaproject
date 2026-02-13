@@ -20,9 +20,11 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+
         registerPlugin(touch.kpocha.app.NativeVideoPlayerPlugin.class);
         registerPlugin(touch.kpocha.app.NativeFeedPlugin.class);
-        super.onCreate(savedInstanceState);
+        registerPlugin(io.capawesome.capacitorjs.plugins.firebase.authentication.FirebaseAuthenticationPlugin.class);
 
         // ✅ Allow autoplay (including sound) without user gesture in Android WebView
         try {
@@ -51,7 +53,6 @@ public class MainActivity extends BridgeActivity {
             }
         } catch (Exception ignored) {
         }
-
     }
 
     private void createNotificationChannels() {

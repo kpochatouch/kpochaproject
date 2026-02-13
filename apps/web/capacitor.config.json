@@ -1,5 +1,11 @@
 {
   "appId": "touch.kpocha.app",
   "appName": "Kpocha Touch",
-  "webDir": "dist"
+  "webDir": "dist",
+  "plugins": {
+    "FirebaseAuthentication": {
+      "providers": ["google.com"],
+      "skipNativeAuth": false
+    }
+  }
 }

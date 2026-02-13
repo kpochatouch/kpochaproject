@@ -38,8 +38,21 @@ export default function uploadsRoutes({ requireAuth }) {
         .filter(([, v]) => v !== undefined && v !== "")
         .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
 
+      console.log("[uploads/sign] entries", entries);
+      console.log("[uploads/sign] apiKey/cloudName/folder/overwrite", {
+        cloudName,
+        apiKey: apiKey ? "set" : "missing",
+        folder,
+        overwrite,
+        public_id,
+        tags,
+      });
+
       const toSign = entries.map(([k, v]) => `${k}=${v}`).join("&") + apiSecret; // Cloudinary: sha1 of "<params><api_secret>"
       const signature = crypto.createHash("sha1").update(toSign).digest("hex");
+
+      console.log("[uploads/sign] toSign", toSign);
+      console.log("[uploads/sign] signature", signature);
 
       return res.json({
         ok: true,

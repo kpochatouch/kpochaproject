@@ -65,6 +65,16 @@ export function friendlyFirebaseError(err) {
         return "Google sign-in was closed before finishing. Please try again.";
       if (msg.includes("unauthorized-domain"))
         return "This website isn’t authorized for Google sign-in. Contact support.";
+      if (!code && msg.includes("missing_google_id_token"))
+        return "Google sign-in failed to return a token. Please try again.";
+      if (
+        msg.includes("attempt to invoke virtual method") ||
+        msg.includes(
+          "io.capawesome.capacitorjs.plugins.firebase.authentication",
+        )
+      ) {
+        return "Google sign-in isn’t available right now. Please try again or use email sign-in.";
+      }
 
       return cleaned || "Something went wrong. Please try again.";
     }

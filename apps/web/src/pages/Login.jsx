@@ -4,11 +4,12 @@ import { useNavigate, Link, useLocation } from "react-router-dom";
 import {
   signInWithEmailAndPassword,
   signInWithPopup,
-  signInWithRedirect,
   setPersistence,
   browserLocalPersistence,
   sendPasswordResetEmail,
   sendEmailVerification,
+  GoogleAuthProvider,
+  signInWithCredential,
 } from "firebase/auth";
 import { Capacitor } from "@capacitor/core";
 import { auth, googleProvider } from "../lib/firebase";
@@ -16,6 +17,7 @@ import { useAuth } from "../context/AuthContext";
 import PasswordInput from "../components/PasswordInput";
 import { api, setAuthToken } from "../lib/api";
 import { friendlyFirebaseError } from "../lib/friendlyFirebaseError";
+import { FirebaseAuthentication } from "@capacitor-firebase/authentication";
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -115,9 +117,31 @@ export default function Login() {
       const isNative = Capacitor?.isNativePlatform?.() === true;
 
       if (isNative) {
-        await signInWithRedirect(auth, googleProvider);
-        // Redirect will leave the page; no further code needed here
-        return;
+        try {
+          const result = await FirebaseAuthentication.signInWithGoogle();
+
+          console.log("NATIVE RESULT RAW:", JSON.stringify(result));
+
+          const idToken =
+            result?.credential?.idToken ||
+            result?.credential?.id_token ||
+            result?.idToken;
+
+          console.log("Extracted idToken:", idToken);
+
+          if (!idToken) {
+            throw new Error("missing_google_id_token");
+          }
+
+          const cred = GoogleAuthProvider.credential(idToken);
+          await signInWithCredential(auth, cred);
+
+          await afterSignInRedirect();
+          return;
+        } catch (nativeErr) {
+          console.log("NATIVE GOOGLE THROW:", JSON.stringify(nativeErr));
+          throw nativeErr;
+        }
       }
 
       const cred = await signInWithPopup(auth, googleProvider);
@@ -126,10 +150,15 @@ export default function Login() {
       // Do NOT gate Google sign-in behind email verification.
       await afterSignInRedirect();
     } catch (e) {
-      // TEMP (keep for now): helps you see the real error code in console
-      console.log("[Google sign-in error]", e);
+      console.log("====== GOOGLE NATIVE ERROR ======");
+      console.log("Full error:", e);
+      console.log("Error name:", e?.name);
+      console.log("Error code:", e?.code);
+      console.log("Error message:", e?.message);
+      console.log("Error details:", e?.details);
+      console.log("=================================");
 
-      setErr(friendlyFirebaseError(e) || "Google sign in failed");
+      setErr(e?.message || e?.code || "Google sign in failed (see logcat)");
     } finally {
       setBusy(false);
     }

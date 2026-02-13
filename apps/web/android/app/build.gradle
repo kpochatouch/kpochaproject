@@ -1,4 +1,7 @@
-apply plugin: 'com.android.application'
+plugins {
+    id 'com.android.application'
+    id 'com.google.gms.google-services'
+}
 
 android {
     namespace = "touch.kpocha.app"
@@ -44,6 +47,9 @@ dependencies {
     implementation platform("com.google.firebase:firebase-bom:33.5.1")
     implementation "com.google.firebase:firebase-messaging"
 
+    // ✅ Google Sign-In (required for FirebaseAuthentication.signInWithGoogle on Android)
+    implementation "com.google.android.gms:play-services-auth:21.2.0"
+
     /* ✅ REQUIRED for NativeFeed (RecyclerView, LinearLayoutManager) */
     implementation "androidx.recyclerview:recyclerview:1.3.2"
     implementation "com.google.android.material:material:1.12.0"
@@ -65,12 +71,3 @@ dependencies {
 }
 
 apply from: 'capacitor.build.gradle'
-
-try {
-    def servicesJSON = file('google-services.json')
-    if (servicesJSON.text) {
-        apply plugin: 'com.google.gms.google-services'
-    }
-} catch(Exception e) {
-    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
-}
