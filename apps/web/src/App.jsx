@@ -26,7 +26,6 @@ import usePostPaymentRecovery from "./hooks/usePostPaymentRecovery";
 import { ensurePushSubscribed, getDeviceId } from "./lib/pushClient";
 import MobileTabBar from "./components/MobileTabBar.jsx";
 console.log("[push] App.jsx loaded");
-import FeedComposer from "./components/FeedComposer.jsx";
 
 // ---------- pages (lazy) ----------
 const Home = lazy(() => import("./pages/Home.jsx"));
@@ -54,6 +53,7 @@ const PaymentConfirm = lazy(() => import("./pages/PaymentConfirm.jsx"));
 const AwsLiveness = lazy(() => import("./pages/AwsLiveness.jsx"));
 const RiskLogs = lazy(() => import("./pages/RiskLogs.jsx"));
 const Chat = lazy(() => import("./pages/Chat.jsx"));
+const Compose = lazy(() => import("./pages/Compose.jsx"));
 const PostDetail = lazy(() => import("./pages/PostDetail.jsx"));
 const PublicProfile = lazy(() => import("./pages/PublicProfile.jsx"));
 const ForYou = lazy(() => import("./pages/ForYou.jsx"));
@@ -617,7 +617,7 @@ export default function App() {
                 path="/compose"
                 element={
                   <RequireAuth>
-                    <FeedComposer inline={false} />
+                    <Compose />
                   </RequireAuth>
                 }
               />
