@@ -847,7 +847,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
       className="bg-[#0F0F0F] border border-[#1F1F1F] rounded-xl overflow-hidden"
     >
       {/* header */}
-      <div className="flex items-start justify-between px-4 py-3 gap-3">
+      <div className="relative z-10 flex items-start justify-between px-4 py-3 gap-3">
         <div className="flex-1" />
 
         <div className="flex items-center gap-2">
@@ -960,7 +960,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
 
       {/* media */}
       {media && (
-        <div className="relative w-full bg-black overflow-hidden aspect-[4/5] sm:aspect-[4/5] lg:aspect-[3/4] xl:aspect-[1/1] max-h-[80vh]">
+        <div className="relative z-0 isolate w-full bg-black overflow-hidden aspect-[4/5] sm:aspect-[4/5] lg:aspect-[3/4] xl:aspect-[1/1] max-h-[80vh]">
           {/* ✅ Banner overlay (top) */}
           <div className="absolute inset-x-0 top-0 z-[40] pointer-events-none">
             {/* fade so text is readable */}

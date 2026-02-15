@@ -121,8 +121,15 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
             h.playerView.setVisibility(isVideo ? View.VISIBLE : View.GONE);
         if (h.imageView != null)
             h.imageView.setVisibility(isVideo ? View.GONE : View.VISIBLE);
-        if (h.muteBadge != null)
-            h.muteBadge.setVisibility(isVideo ? View.VISIBLE : View.GONE);
+        // ✅ Facebook rule: FEED shows a mute badge, REELS shows NONE
+        if (h.muteBadge != null) {
+            boolean showMuteInFeedOnly = isVideo && (mode == Mode.FEED);
+            h.muteBadge.setVisibility(showMuteInFeedOnly ? View.VISIBLE : View.GONE);
+        }
+
+        if (h.muteBadge != null && isVideo && mode == Mode.FEED) {
+            h.muteBadge.setText(VideoPlaybackManager.get().isMuted() ? "🔇" : "🔊");
+        }
 
         if (!isVideo && h.imageView != null) {
             try {
@@ -297,6 +304,36 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
             VideoPlaybackManager.get().detach(h.playerView);
         }
 
+        // ✅ FEED: mute badge toggles sound (badge must not trigger itemView click)
+        if (h.muteBadge != null) {
+            h.muteBadge.setClickable(true);
+            h.muteBadge.setOnClickListener(v -> {
+                if (!"video".equalsIgnoreCase(p.mediaType))
+                    return;
+                VideoPlaybackManager.get().toggleMuted();
+                h.muteBadge.setText(VideoPlaybackManager.get().isMuted() ? "🔇" : "🔊");
+            });
+        }
+
+        // ✅ REELS: tap video should work (PlayerView often eats touches)
+        // - No speaker icon in reels, but tap toggles mute/unmute (Facebook-style)
+        // - Also toggle play/pause on tap (Facebook reels behavior)
+        if (h.playerView != null) {
+            h.playerView.setClickable(true);
+            h.playerView.setOnClickListener(v -> {
+                if (!"video".equalsIgnoreCase(p.mediaType))
+                    return;
+
+                if (mode == Mode.REELS) {
+                    // Tap toggles sound; no icon
+                    VideoPlaybackManager.get().toggleMuted();
+
+                    // Optional: tap pauses/plays like FB reels
+                    VideoPlaybackManager.get().togglePlayPause();
+                }
+            });
+        }
+
         h.itemView.setOnClickListener(v -> {
             boolean isVideo2 = "video".equalsIgnoreCase(p.mediaType);
 
@@ -315,10 +352,12 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
                 return;
             }
 
-            // REELS mode behavior:
-            // Do nothing on tap (avoid accidental post-detail opens).
-            // Use Comment button (already wired) or a dedicated "View post" button in the
-            // reel layout.
+            // REELS mode behavior (Facebook-like):
+            // Tap video toggles sound + play/pause (no on-screen speaker icon)
+            if (mode == Mode.REELS && isVideo2) {
+                VideoPlaybackManager.get().toggleMuted();
+                VideoPlaybackManager.get().togglePlayPause();
+            }
         });
 
         // Taps: in FEED, tap opens “reels mode at this post” (we’ll implement in
@@ -423,8 +462,9 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
         if (vh instanceof VH) {
             VH row = (VH) vh;
             if (row.playerView != null) {
-                if (row.muteBadge != null)
+                if (row.muteBadge != null && mode == Mode.FEED) {
                     row.muteBadge.setText(VideoPlaybackManager.get().isMuted() ? "🔇" : "🔊");
+                }
                 VideoPlaybackManager.get().play(activity, p.mediaUrl, row.playerView);
             }
         }

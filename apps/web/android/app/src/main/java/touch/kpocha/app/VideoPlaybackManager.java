@@ -4,9 +4,9 @@ package touch.kpocha.app;
 import android.content.Context;
 import android.net.Uri;
 
-import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.Player;
+import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.ui.PlayerView;
 
 public class VideoPlaybackManager {
@@ -14,12 +14,16 @@ public class VideoPlaybackManager {
 
     private static final String PREFS = "kpocha_prefs";
     private static final String KEY_MUTED = "feed_muted";
-    private boolean prefLoaded = false;
 
     private ExoPlayer player;
     private PlayerView attachedView;
     private String currentUrl;
+
+    // Facebook-style default: muted on first install
     private boolean muted = true;
+
+    // Keep app context so we can persist even when no view is attached
+    private Context appCtx;
 
     public static VideoPlaybackManager get() {
         return INSTANCE;
@@ -29,27 +33,27 @@ public class VideoPlaybackManager {
         if (player != null)
             return;
 
-        player = new ExoPlayer.Builder(ctx.getApplicationContext()).build();
+        appCtx = ctx.getApplicationContext();
+
+        player = new ExoPlayer.Builder(appCtx).build();
         player.setRepeatMode(Player.REPEAT_MODE_ONE);
 
-        // Load saved preference once (default true = muted)
         boolean savedMuted = true;
         try {
-            savedMuted = ctx.getApplicationContext()
-                    .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            savedMuted = appCtx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                     .getBoolean(KEY_MUTED, true);
         } catch (Exception ignored) {
         }
 
-        prefLoaded = true;
         setMuted(savedMuted);
     }
 
     public void attach(PlayerView view) {
         if (view == null)
             return;
+        ensure(view.getContext());
 
-        // ✅ detach old surface first (prevents blank/glitch)
+        // detach old surface first (prevents blank/glitch)
         if (attachedView != null && attachedView != view) {
             try {
                 attachedView.setPlayer(null);
@@ -65,7 +69,10 @@ public class VideoPlaybackManager {
         if (view == null)
             return;
         if (attachedView == view) {
-            attachedView.setPlayer(null);
+            try {
+                attachedView.setPlayer(null);
+            } catch (Exception ignored) {
+            }
             attachedView = null;
         }
     }
@@ -73,6 +80,7 @@ public class VideoPlaybackManager {
     public void play(Context ctx, String url, PlayerView view) {
         if (url == null || url.trim().isEmpty())
             return;
+
         ensure(ctx);
         attach(view);
 
@@ -81,7 +89,45 @@ public class VideoPlaybackManager {
             player.setMediaItem(MediaItem.fromUri(Uri.parse(url)));
             player.prepare();
         }
+
+        // always apply current mute state (prevents “stuck muted/unmuted”)
+        player.setVolume(muted ? 0f : 1f);
         player.play();
+    }
+
+    public void toggleMuted() {
+        setMuted(!muted);
+    }
+
+    public void setMuted(boolean on) {
+        muted = on;
+
+        if (player != null)
+            player.setVolume(on ? 0f : 1f);
+
+        // Persist preference ALWAYS (not only when a view is attached)
+        try {
+            if (appCtx != null) {
+                appCtx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                        .edit()
+                        .putBoolean(KEY_MUTED, on)
+                        .apply();
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    public boolean isMuted() {
+        return muted;
+    }
+
+    public void togglePlayPause() {
+        if (player == null)
+            return;
+        if (player.isPlaying())
+            player.pause();
+        else
+            player.play();
     }
 
     public void pause() {
@@ -97,28 +143,6 @@ public class VideoPlaybackManager {
         currentUrl = null;
     }
 
-    public void setMuted(boolean on) {
-        muted = on;
-        if (player != null)
-            player.setVolume(on ? 0f : 1f);
-
-        // Persist user preference (once ensure() has a context)
-        if (attachedView != null) {
-            try {
-                Context ctx = attachedView.getContext().getApplicationContext();
-                ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                        .edit()
-                        .putBoolean(KEY_MUTED, on)
-                        .apply();
-            } catch (Exception ignored) {
-            }
-        }
-    }
-
-    public boolean isMuted() {
-        return muted;
-    }
-
     public void release() {
         if (player != null) {
             try {
@@ -129,5 +153,6 @@ public class VideoPlaybackManager {
         player = null;
         attachedView = null;
         currentUrl = null;
+        appCtx = null;
     }
 }
