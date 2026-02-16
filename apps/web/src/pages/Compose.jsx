@@ -515,7 +515,15 @@ export default function Compose() {
     }
 
     const uploaded = await uploadRes.json();
-    return uploaded.secure_url || uploaded.url || "";
+
+    // return full metadata (we need width/height/duration/url)
+    return {
+      url: uploaded.secure_url || uploaded.url || "",
+      width: Number(uploaded.width || 0),
+      height: Number(uploaded.height || 0),
+      durationSec: Number(uploaded.duration || 0), // Cloudinary uses "duration" for videos
+      resourceType: uploaded.resource_type || "", // image/video
+    };
   }
 
   async function submit() {
@@ -540,10 +548,27 @@ export default function Compose() {
       setPosting(true);
 
       let uploadedUrl = "";
+      let uploadedMain = null;
+      let uploadedThumb = "";
+
       if (mediaFile) {
         setUploading(true);
         toast.info("Uploading media…");
-        uploadedUrl = await uploadToCloudinary(mediaFile);
+
+        uploadedMain = await uploadToCloudinary(mediaFile);
+        uploadedUrl = uploadedMain?.url || "";
+
+        if (mediaType === "video" && videoThumbUrl) {
+          try {
+            const blob = await fetch(videoThumbUrl).then((r) => r.blob());
+            const thumbFile = new File([blob], "thumb.jpg", {
+              type: blob.type || "image/jpeg",
+            });
+            const uploadedT = await uploadToCloudinary(thumbFile);
+            uploadedThumb = uploadedT?.url || "";
+          } catch {}
+        }
+
         setUploading(false);
       }
 
@@ -551,7 +576,21 @@ export default function Compose() {
 
       await api.post("/api/posts", {
         text: text.trim(),
-        media: uploadedUrl ? [{ url: uploadedUrl, type: mediaType }] : [],
+        media: uploadedUrl
+          ? [
+              {
+                url: uploadedUrl,
+                type: mediaType,
+                thumbnailUrl: uploadedThumb || "",
+                width: Number(uploadedMain?.width || 0),
+                height: Number(uploadedMain?.height || 0),
+                durationSec:
+                  mediaType === "video"
+                    ? Number(uploadedMain?.durationSec || videoDuration || 0)
+                    : 0,
+              },
+            ]
+          : [],
         isPublic: true,
         tags: [],
       });

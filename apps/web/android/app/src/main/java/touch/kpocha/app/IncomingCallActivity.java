@@ -8,9 +8,10 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
+import android.view.MotionEvent;
+
 import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.TextView;

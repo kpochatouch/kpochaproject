@@ -8,6 +8,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageView;
 import android.widget.TextView;
+import android.widget.ProgressBar;
 import android.content.Intent;
 import android.net.Uri;
 
@@ -119,8 +120,17 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
 
         if (h.playerView != null)
             h.playerView.setVisibility(isVideo ? View.VISIBLE : View.GONE);
-        if (h.imageView != null)
-            h.imageView.setVisibility(isVideo ? View.GONE : View.VISIBLE);
+
+        // ✅ For videos, imageView becomes the poster (thumbnail) until first frame
+        if (h.imageView != null) {
+            if (isVideo) {
+                boolean hasThumb = (p.thumbnailUrl != null && p.thumbnailUrl.trim().length() > 0);
+                h.imageView.setVisibility(hasThumb ? View.VISIBLE : View.GONE);
+            } else {
+                h.imageView.setVisibility(View.VISIBLE);
+            }
+        }
+
         // ✅ Facebook rule: FEED shows a mute badge, REELS shows NONE
         if (h.muteBadge != null) {
             boolean showMuteInFeedOnly = isVideo && (mode == Mode.FEED);
@@ -131,12 +141,25 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
             h.muteBadge.setText(VideoPlaybackManager.get().isMuted() ? "🔇" : "🔊");
         }
 
-        if (!isVideo && h.imageView != null) {
+        // ✅ Facebook-style resize mode decision (applies to reels + feed)
+        applyAutoResizeMode(h.playerView, p);
+
+        if (h.imageView != null) {
             try {
-                if (p.mediaUrl != null && !p.mediaUrl.trim().isEmpty()) {
-                    com.bumptech.glide.Glide.with(activity).load(p.mediaUrl).centerCrop().into(h.imageView);
+                if (isVideo) {
+                    // ✅ Video poster
+                    if (p.thumbnailUrl != null && !p.thumbnailUrl.trim().isEmpty()) {
+                        com.bumptech.glide.Glide.with(activity).load(p.thumbnailUrl).centerCrop().into(h.imageView);
+                    } else {
+                        h.imageView.setImageDrawable(null);
+                    }
                 } else {
-                    h.imageView.setImageDrawable(null);
+                    // ✅ Normal image post
+                    if (p.mediaUrl != null && !p.mediaUrl.trim().isEmpty()) {
+                        com.bumptech.glide.Glide.with(activity).load(p.mediaUrl).centerCrop().into(h.imageView);
+                    } else {
+                        h.imageView.setImageDrawable(null);
+                    }
                 }
             } catch (Exception ignored) {
             }
@@ -199,6 +222,54 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
                 @Override
                 public void onError(String message) {
                 }
+            });
+        }
+
+        // ✅ SAVE (independent of Like)
+        if (h.btnSave != null) {
+            h.btnSave.setText(p.savedByMe ? "Saved" : "🔖");
+            h.btnSave.setOnClickListener(v -> {
+                if (p.id == null || p.id.length() == 0)
+                    return;
+
+                final boolean nextSave = !p.savedByMe;
+
+                // optimistic UI
+                p.savedByMe = nextSave;
+                p.savesCount = Math.max(0, p.savesCount + (nextSave ? 1 : -1));
+                h.btnSave.setText(p.savedByMe ? "Saved" : "🔖");
+
+                PostApi.toggleSave(apiBase, p.id, token, nextSave, new PostApi.ToggleSaveCallback() {
+                    @Override
+                    public void onSuccess(boolean savedNow, int savesCountFromServer) {
+                        if (bindId == null || !bindId.equals(p.id))
+                            return;
+
+                        p.savedByMe = savedNow;
+                        if (savesCountFromServer >= 0)
+                            p.savesCount = savesCountFromServer;
+
+                        activity.runOnUiThread(() -> {
+                            if (h.btnSave != null)
+                                h.btnSave.setText(p.savedByMe ? "Saved" : "🔖");
+                        });
+                    }
+
+                    @Override
+                    public void onError(String message) {
+                        if (bindId == null || !bindId.equals(p.id))
+                            return;
+
+                        // revert
+                        p.savedByMe = !nextSave;
+                        p.savesCount = Math.max(0, p.savesCount + (!nextSave ? 1 : -1));
+
+                        activity.runOnUiThread(() -> {
+                            if (h.btnSave != null)
+                                h.btnSave.setText(p.savedByMe ? "Saved" : "🔖");
+                        });
+                    }
+                });
             });
         }
 
@@ -302,6 +373,12 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
         // Not active? detach player from this row
         if (h.playerView != null && pos != activePos) {
             VideoPlaybackManager.get().detach(h.playerView);
+
+            // ✅ if it's a video, restore poster visibility when not active
+            if ("video".equalsIgnoreCase(p.mediaType) && h.imageView != null) {
+                boolean hasThumb = (p.thumbnailUrl != null && p.thumbnailUrl.trim().length() > 0);
+                h.imageView.setVisibility(hasThumb ? View.VISIBLE : View.GONE);
+            }
         }
 
         // ✅ FEED: mute badge toggles sound (badge must not trigger itemView click)
@@ -318,47 +395,41 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
         // ✅ REELS: tap video should work (PlayerView often eats touches)
         // - No speaker icon in reels, but tap toggles mute/unmute (Facebook-style)
         // - Also toggle play/pause on tap (Facebook reels behavior)
-        if (h.playerView != null) {
-            h.playerView.setClickable(true);
-            h.playerView.setOnClickListener(v -> {
-                if (!"video".equalsIgnoreCase(p.mediaType))
+
+        if (h.tapOverlay != null) {
+            h.tapOverlay.setClickable(true);
+            h.tapOverlay.setOnClickListener(v -> {
+                int clickPos = h.getBindingAdapterPosition();
+                if (clickPos == RecyclerView.NO_POSITION)
+                    return;
+                if (clickPos < 0 || clickPos >= items.size())
                     return;
 
-                if (mode == Mode.REELS) {
-                    // Tap toggles sound; no icon
-                    VideoPlaybackManager.get().toggleMuted();
+                PostItem cp = items.get(clickPos);
+                if (cp == null)
+                    return;
 
-                    // Optional: tap pauses/plays like FB reels
+                boolean isVid = "video".equalsIgnoreCase(cp.mediaType);
+
+                if (mode == Mode.FEED) {
+                    if (isVid && listener != null) {
+                        listener.onRequestReelsAt(clickPos);
+                        return;
+                    }
+                    if (!isVid && listener != null) {
+                        listener.onOpenPost(cp);
+                        return;
+                    }
+                    return;
+                }
+
+                // REELS behavior: tap toggles sound + play/pause (no icon)
+                if (mode == Mode.REELS && isVid) {
+                    VideoPlaybackManager.get().toggleMuted();
                     VideoPlaybackManager.get().togglePlayPause();
                 }
             });
         }
-
-        h.itemView.setOnClickListener(v -> {
-            boolean isVideo2 = "video".equalsIgnoreCase(p.mediaType);
-
-            // FEED mode behavior:
-            if (mode == Mode.FEED) {
-                // Video -> jump into REELS at this position
-                if (isVideo2 && listener != null) {
-                    listener.onRequestReelsAt(pos);
-                    return;
-                }
-
-                // Image/text -> open post detail (web)
-                if (listener != null) {
-                    listener.onOpenPost(p);
-                }
-                return;
-            }
-
-            // REELS mode behavior (Facebook-like):
-            // Tap video toggles sound + play/pause (no on-screen speaker icon)
-            if (mode == Mode.REELS && isVideo2) {
-                VideoPlaybackManager.get().toggleMuted();
-                VideoPlaybackManager.get().togglePlayPause();
-            }
-        });
 
         // Taps: in FEED, tap opens “reels mode at this post” (we’ll implement in
         // Activity later)
@@ -465,6 +536,36 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
                 if (row.muteBadge != null && mode == Mode.FEED) {
                     row.muteBadge.setText(VideoPlaybackManager.get().isMuted() ? "🔇" : "🔊");
                 }
+                // show spinner while waiting
+                if (row.loadingSpinner != null) {
+                    row.loadingSpinner.setVisibility(View.VISIBLE);
+                }
+
+                // show poster if available (video thumbnail)
+                if (row.imageView != null) {
+                    boolean hasThumb = (p.thumbnailUrl != null && p.thumbnailUrl.trim().length() > 0);
+                    row.imageView.setVisibility(hasThumb ? View.VISIBLE : View.GONE);
+                }
+
+                // hide spinner on first frame for this URL
+                final String urlNow = p.mediaUrl;
+                VideoPlaybackManager.get().onFirstFrameForUrl(urlNow, (u) -> {
+
+                    if (u == null || urlNow == null)
+                        return;
+                    if (!u.equals(urlNow))
+                        return;
+
+                    activity.runOnUiThread(() -> {
+                        // holder might be recycled; just best-effort hide
+                        if (row.loadingSpinner != null)
+                            row.loadingSpinner.setVisibility(View.GONE);
+                        if (row.imageView != null)
+                            row.imageView.setVisibility(View.GONE);
+
+                    });
+                });
+
                 VideoPlaybackManager.get().play(activity, p.mediaUrl, row.playerView);
             }
         }
@@ -489,6 +590,38 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
         } catch (Exception ignored) {
             return "";
         }
+
+    }
+
+    private void applyAutoResizeMode(PlayerView pv, PostItem p) {
+        if (pv == null || p == null)
+            return;
+
+        // Default: fit (safe)
+        int modeToUse = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT;
+
+        int w = p.mediaWidth;
+        int h = p.mediaHeight;
+
+        // If we have dimensions, decide like Facebook:
+        // - If it's "vertical-ish" (close to 9:16), use ZOOM to fill screen.
+        // - Otherwise use FIT (letterbox).
+        if (w > 0 && h > 0) {
+            float r = (float) w / (float) h; // width/height
+            float nineSixteen = 9f / 16f; // 0.5625
+
+            // tolerance band
+            if (r <= (nineSixteen + 0.10f)) {
+                modeToUse = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM;
+            } else {
+                modeToUse = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT;
+            }
+        }
+
+        try {
+            pv.setResizeMode(modeToUse);
+        } catch (Exception ignored) {
+        }
     }
 
     static class VH extends RecyclerView.ViewHolder {
@@ -501,11 +634,15 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
 
         TextView caption;
         TextView muteBadge;
+        View tapOverlay;
+        ProgressBar loadingSpinner;
 
         TextView countsRow;
+
         TextView btnLike;
         TextView btnComment;
         TextView btnShare;
+        TextView btnSave;
 
         VH(View itemView, int viewType) {
             super(itemView);
@@ -519,11 +656,16 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
 
             caption = itemView.findViewById(R.id.caption);
             muteBadge = itemView.findViewById(R.id.muteBadge);
+            tapOverlay = itemView.findViewById(R.id.tapOverlay);
+            loadingSpinner = itemView.findViewById(R.id.loadingSpinner);
 
             countsRow = itemView.findViewById(R.id.countsRow);
+
             btnLike = itemView.findViewById(R.id.btnLike);
             btnComment = itemView.findViewById(R.id.btnComment);
             btnShare = itemView.findViewById(R.id.btnShare);
+            btnSave = itemView.findViewById(R.id.btnSave);
+
         }
     }
 }

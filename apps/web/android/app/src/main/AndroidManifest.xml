@@ -56,6 +56,14 @@
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
         </intent-filter>
+
+                <!-- ✅ Deep link fallback for NativeNav + notification click -->
+        <intent-filter>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.DEFAULT" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="capacitor" android:host="localhost" />
+        </intent-filter>
     </activity>
 
     <!-- Booking ring: actions -->
@@ -83,7 +91,7 @@
       android:name=".NativeVideoPlayerActivity"
       android:exported="false"
       android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen"
-      android:screenOrientation="portrait"
+      android:screenOrientation="unspecified"
       android:configChanges="orientation|screenSize|keyboardHidden"
     />
 
@@ -91,7 +99,7 @@
       android:name=".NativeFeedActivity"
       android:exported="false"
       android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen"
-      android:screenOrientation="portrait"
+      android:screenOrientation="unspecified"
       android:configChanges="orientation|screenSize|keyboardHidden"
     />
 

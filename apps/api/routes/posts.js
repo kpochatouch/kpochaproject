@@ -157,6 +157,10 @@ router.post("/posts", requireAuth, async (req, res) => {
       .map((m) => ({
         url: trim(m.url),
         type: m.type === "video" ? "video" : "image",
+        thumbnailUrl: trim(m.thumbnailUrl || ""),
+        width: Number(m.width || 0),
+        height: Number(m.height || 0),
+        durationSec: Number(m.durationSec || 0),
       }));
 
     tags = Array.isArray(tags)

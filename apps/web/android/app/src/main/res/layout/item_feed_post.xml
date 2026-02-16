@@ -83,7 +83,7 @@
   />
 
   <!-- Media container -->
-  <FrameLayout
+  <RelativeLayout
     android:layout_width="match_parent"
     android:layout_height="420dp"
     android:background="@android:color/black"
@@ -95,7 +95,7 @@
       android:layout_height="match_parent"
       app:use_controller="false"
       app:resize_mode="zoom"
-      app:surface_type="texture_view"
+      app:surface_type="surface_view"
       android:visibility="gone"
     />
 
@@ -105,6 +105,24 @@
       android:layout_height="match_parent"
       android:scaleType="centerCrop"
       android:visibility="gone"
+    />
+
+    <ProgressBar
+      android:id="@+id/loadingSpinner"
+      style="?android:attr/progressBarStyleLarge"
+      android:layout_width="48dp"
+      android:layout_height="48dp"
+      android:layout_gravity="center"
+      android:visibility="gone"
+    />
+
+    <View
+      android:id="@+id/tapOverlay"
+      android:layout_width="match_parent"
+      android:layout_height="match_parent"
+      android:clickable="true"
+      android:focusable="true"
+      android:background="@android:color/transparent"
     />
 
     <TextView
@@ -120,7 +138,8 @@
       android:visibility="gone"
     />
 
-  </FrameLayout>
+
+  </RelativeLayout>
 
   <!-- Counts -->
   <TextView

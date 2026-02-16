@@ -35,6 +35,7 @@ public class NativeFeedActivity extends Activity {
 
     private RecyclerView storiesRecycler;
     private StoriesAdapter storiesAdapter;
+    private int pendingReelsPos = RecyclerView.NO_POSITION;
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
@@ -109,8 +110,8 @@ public class NativeFeedActivity extends Activity {
         adapter.setListener(new NativeFeedAdapter.Listener() {
             @Override
             public void onRequestReelsAt(int position) {
+                pendingReelsPos = position;
                 setMode(NativeFeedAdapter.Mode.REELS);
-                recycler.post(() -> recycler.scrollToPosition(position));
             }
 
             @Override
@@ -164,6 +165,10 @@ public class NativeFeedActivity extends Activity {
         btnModeFeed.setOnClickListener(v -> setMode(NativeFeedAdapter.Mode.FEED));
         btnModeReels.setOnClickListener(v -> setMode(NativeFeedAdapter.Mode.REELS));
 
+        View modeToggleRow = findViewById(R.id.modeToggleRow);
+        if (modeToggleRow != null)
+            modeToggleRow.setVisibility(View.GONE);
+
         // TODO: wire composer, plus, search, chat to your web routes via deep link if
         // you want.
         // For now they exist as real UI.
@@ -201,9 +206,15 @@ public class NativeFeedActivity extends Activity {
             storiesRecycler.setVisibility(mode == NativeFeedAdapter.Mode.REELS ? View.GONE : View.VISIBLE);
         }
 
-        int anchor = layoutManager != null ? layoutManager.findFirstVisibleItemPosition() : 0;
-        if (anchor == RecyclerView.NO_POSITION)
-            anchor = 0;
+        int anchor;
+
+        if (mode == NativeFeedAdapter.Mode.REELS && pendingReelsPos != RecyclerView.NO_POSITION) {
+            anchor = pendingReelsPos;
+        } else {
+            anchor = layoutManager != null ? layoutManager.findFirstVisibleItemPosition() : 0;
+            if (anchor == RecyclerView.NO_POSITION)
+                anchor = 0;
+        }
 
         if (mode == NativeFeedAdapter.Mode.REELS) {
             // make items full screen + snap like reels
@@ -241,6 +252,7 @@ public class NativeFeedActivity extends Activity {
             if (finalAnchor >= 0 && finalAnchor < adapter.getItemCount()) {
                 recycler.scrollToPosition(finalAnchor);
             }
+            pendingReelsPos = RecyclerView.NO_POSITION;
             adapter.handleScrollAutoplay(recycler);
         });
 

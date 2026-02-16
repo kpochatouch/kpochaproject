@@ -1042,9 +1042,9 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
                 onError={() => setHasFirstFrame(true)}
               />
 
-              {!hasFirstFrame && (
+              {!hasFirstFrame && !!media?.thumbnailUrl && (
                 <img
-                  src={media?.thumbnailUrl || media?.url}
+                  src={media.thumbnailUrl}
                   alt=""
                   className="absolute inset-0 w-full h-full object-cover z-[2] pointer-events-none"
                   loading="lazy"

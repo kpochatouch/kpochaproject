@@ -1,8 +1,11 @@
-//apps/web/android/app/src/main/java/touch/kpocha/app/VideoPlaybackManager.java
+// apps/web/android/app/src/main/java/touch/kpocha/app/VideoPlaybackManager.java
 package touch.kpocha.app;
 
 import android.content.Context;
 import android.net.Uri;
+
+import java.util.HashMap;
+import java.util.Map;
 
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.Player;
@@ -19,14 +22,23 @@ public class VideoPlaybackManager {
     private PlayerView attachedView;
     private String currentUrl;
 
-    // Facebook-style default: muted on first install
     private boolean muted = true;
-
-    // Keep app context so we can persist even when no view is attached
     private Context appCtx;
+
+    public interface FirstFrameListener {
+        void onFirstFrame(String url);
+    }
+
+    private final Map<String, FirstFrameListener> firstFrameByUrl = new HashMap<>();
 
     public static VideoPlaybackManager get() {
         return INSTANCE;
+    }
+
+    public void onFirstFrameForUrl(String url, FirstFrameListener cb) {
+        if (url == null || url.trim().isEmpty() || cb == null)
+            return;
+        firstFrameByUrl.put(url, cb);
     }
 
     public void ensure(Context ctx) {
@@ -37,6 +49,20 @@ public class VideoPlaybackManager {
 
         player = new ExoPlayer.Builder(appCtx).build();
         player.setRepeatMode(Player.REPEAT_MODE_ONE);
+
+        player.addListener(new Player.Listener() {
+            @Override
+            public void onRenderedFirstFrame() {
+                try {
+                    if (currentUrl != null) {
+                        FirstFrameListener cb = firstFrameByUrl.remove(currentUrl);
+                        if (cb != null)
+                            cb.onFirstFrame(currentUrl);
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+        });
 
         boolean savedMuted = true;
         try {
@@ -53,7 +79,6 @@ public class VideoPlaybackManager {
             return;
         ensure(view.getContext());
 
-        // detach old surface first (prevents blank/glitch)
         if (attachedView != null && attachedView != view) {
             try {
                 attachedView.setPlayer(null);
@@ -90,22 +115,21 @@ public class VideoPlaybackManager {
             player.prepare();
         }
 
-        // always apply current mute state (prevents “stuck muted/unmuted”)
         player.setVolume(muted ? 0f : 1f);
         player.play();
     }
 
     public void toggleMuted() {
+        if (player == null && appCtx != null)
+            ensure(appCtx);
         setMuted(!muted);
     }
 
     public void setMuted(boolean on) {
         muted = on;
-
         if (player != null)
             player.setVolume(on ? 0f : 1f);
 
-        // Persist preference ALWAYS (not only when a view is attached)
         try {
             if (appCtx != null) {
                 appCtx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -154,5 +178,6 @@ public class VideoPlaybackManager {
         attachedView = null;
         currentUrl = null;
         appCtx = null;
+        firstFrameByUrl.clear();
     }
 }

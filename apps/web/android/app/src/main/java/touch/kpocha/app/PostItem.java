@@ -11,7 +11,7 @@ public class PostItem {
 
     public String mediaUrl;
     public String mediaType; // "video" or "image"
-
+    public String thumbnailUrl; // ✅ for videos (poster) or images (optional)
     public String createdAt;
 
     // ✅ preference support (NOT a filter)
@@ -26,4 +26,10 @@ public class PostItem {
     // ✅ user state (wired to /stats + /like)
     public boolean likedByMe = false;
     public boolean statsLoaded = false;
+
+    public int mediaWidth = 0;
+    public int mediaHeight = 0;
+
+    public int savesCount = 0;
+    public boolean savedByMe = false;
 }
