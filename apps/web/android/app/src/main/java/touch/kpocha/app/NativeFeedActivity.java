@@ -21,6 +21,8 @@ public class NativeFeedActivity extends Activity {
     public static final String EXTRA_API_BASE = "apiBase";
     public static final String EXTRA_LGA = "lga";
     public static final String EXTRA_TOKEN = "token";
+    public static final String EXTRA_START_POST_ID = "startPostId";
+    public static final String EXTRA_START_MODE = "startMode"; // "feed" or "reels"
 
     private RecyclerView recycler;
     private NativeFeedAdapter adapter;
@@ -28,6 +30,8 @@ public class NativeFeedActivity extends Activity {
     private String apiBase;
     private String lga;
     private String token;
+    private String startPostId = "";
+    private String startMode = "feed";
 
     private PagerSnapHelper snapHelper = null;
     private LinearLayoutManager layoutManager;
@@ -45,6 +49,10 @@ public class NativeFeedActivity extends Activity {
         apiBase = getIntent().getStringExtra(EXTRA_API_BASE);
         lga = getIntent().getStringExtra(EXTRA_LGA);
         token = getIntent().getStringExtra(EXTRA_TOKEN);
+        startPostId = getIntent().getStringExtra(EXTRA_START_POST_ID);
+        startMode = getIntent().getStringExtra(EXTRA_START_MODE);
+        if (startMode == null || startMode.trim().isEmpty())
+            startMode = "feed";
 
         header = findViewById(R.id.nativeFeedHeader);
 
@@ -179,8 +187,37 @@ public class NativeFeedActivity extends Activity {
             public void onSuccess(List<PostItem> posts) {
                 runOnUiThread(() -> {
                     adapter.setItems(posts);
-                    recycler.post(() -> adapter.handleScrollAutoplay(recycler));
+
+                    recycler.post(() -> {
+                        // ✅ If we were launched with a target postId, scroll to it
+                        int targetPos = RecyclerView.NO_POSITION;
+
+                        if (startPostId != null && !startPostId.trim().isEmpty()) {
+                            for (int i = 0; i < posts.size(); i++) {
+                                PostItem it = posts.get(i);
+                                if (it != null && it.id != null && it.id.equals(startPostId)) {
+                                    targetPos = i;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (targetPos != RecyclerView.NO_POSITION) {
+                            recycler.scrollToPosition(targetPos);
+
+                            // ✅ If startMode is reels, switch to REELS anchored on that same item
+                            if ("reels".equalsIgnoreCase(startMode)) {
+                                pendingReelsPos = targetPos;
+                                setMode(NativeFeedAdapter.Mode.REELS);
+                                return; // setMode will call handleScrollAutoplay
+                            }
+                        }
+
+                        // default behavior
+                        adapter.handleScrollAutoplay(recycler);
+                    });
                 });
+
             }
 
             @Override

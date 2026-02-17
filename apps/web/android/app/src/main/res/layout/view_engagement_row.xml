@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<LinearLayout
+  xmlns:android="http://schemas.android.com/apk/res/android"
+  android:layout_width="match_parent"
+  android:layout_height="wrap_content"
+  android:orientation="horizontal"
+  android:gravity="center"
+  android:paddingLeft="12dp"
+  android:paddingRight="12dp"
+  android:paddingTop="8dp"
+  android:paddingBottom="8dp"
+>
+
+  <!-- Like -->
+  <LinearLayout
+    android:id="@+id/engLike"
+    android:layout_width="0dp"
+    android:layout_height="wrap_content"
+    android:layout_weight="1"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:padding="6dp"
+  >
+
+    <ImageView
+      android:id="@+id/engLikeIcon"
+      android:layout_width="@dimen/icon_size"
+      android:layout_height="@dimen/icon_size"
+      android:src="@drawable/ic_like"
+      android:tint="@color/kpocha_icon"
+    />
+
+    <TextView
+      android:id="@+id/engLikeCount"
+      style="@style/Kpocha.CounterText.Muted"
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:text="0"
+    />
+  </LinearLayout>
+
+  <!-- Comment -->
+  <LinearLayout
+    android:id="@+id/engComment"
+    android:layout_width="0dp"
+    android:layout_height="wrap_content"
+    android:layout_weight="1"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:padding="6dp"
+  >
+
+    <ImageView
+      android:id="@+id/engCommentIcon"
+      android:layout_width="@dimen/icon_size"
+      android:layout_height="@dimen/icon_size"
+      android:src="@drawable/ic_comment"
+      android:tint="@color/kpocha_icon"
+    />
+
+    <TextView
+      android:id="@+id/engCommentCount"
+      style="@style/Kpocha.CounterText.Muted"
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:text="0"
+    />
+
+  </LinearLayout>
+
+  <!-- Share -->
+  <LinearLayout
+    android:id="@+id/engShare"
+    android:layout_width="0dp"
+    android:layout_height="wrap_content"
+    android:layout_weight="1"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:padding="6dp"
+  >
+
+    <ImageView
+      android:id="@+id/engShareIcon"
+      android:layout_width="@dimen/icon_size"
+      android:layout_height="@dimen/icon_size"
+      android:src="@drawable/ic_share"
+      android:tint="@color/kpocha_icon"
+    />
+
+    <TextView
+      android:id="@+id/engShareCount"
+      style="@style/Kpocha.CounterText.Muted"
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:text="0"
+    />
+
+  </LinearLayout>
+
+  <!-- Save -->
+  <LinearLayout
+    android:id="@+id/engSave"
+    android:layout_width="0dp"
+    android:layout_height="wrap_content"
+    android:layout_weight="1"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:padding="6dp"
+  >
+
+    <ImageView
+      android:id="@+id/engSaveIcon"
+      android:layout_width="@dimen/icon_size"
+      android:layout_height="@dimen/icon_size"
+      android:src="@drawable/ic_save"
+      android:tint="@color/kpocha_icon"
+    />
+
+    <TextView
+      android:id="@+id/engSaveCount"
+      style="@style/Kpocha.CounterText.Muted"
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:text="0"
+    />
+
+  </LinearLayout>
+
+</LinearLayout>

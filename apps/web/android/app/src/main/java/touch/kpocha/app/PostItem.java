@@ -32,4 +32,8 @@ public class PostItem {
 
     public int savesCount = 0;
     public boolean savedByMe = false;
+
+    // prevents "optimistic + stats overwrite" flicker
+    public long lastLocalEngagementMs = 0;
+    public long lastStatsRequestMs = 0;
 }

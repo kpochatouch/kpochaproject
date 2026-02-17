@@ -145,6 +145,27 @@ public class VideoPlaybackManager {
         return muted;
     }
 
+    public boolean isPlaying() {
+        return player != null && player.isPlaying();
+    }
+
+    /**
+     * Facebook-style reels:
+     * - when playing: unmuted
+     * - when paused: muted
+     */
+    public void setPlayingReelsStyle(boolean play) {
+        if (player == null)
+            return;
+        if (play) {
+            setMuted(false);
+            player.play();
+        } else {
+            player.pause();
+            setMuted(true);
+        }
+    }
+
     public void togglePlayPause() {
         if (player == null)
             return;

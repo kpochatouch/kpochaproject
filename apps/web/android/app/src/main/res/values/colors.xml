@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<resources>
+  <color name="kpocha_bg">#0F0F0F</color>
+  <color name="kpocha_text">#FFFFFF</color>
+  <color name="kpocha_muted">#AAAAAA</color>
+
+  <color name="kpocha_pill">#33000000</color>
+  <color name="kpocha_pill_dark">#55000000</color>
+
+  <color name="kpocha_like_active">#E53935</color>
+  <color name="kpocha_icon">#FFFFFF</color>
+
+  <color name="kpocha_save_active">#F5C542</color>
+</resources>

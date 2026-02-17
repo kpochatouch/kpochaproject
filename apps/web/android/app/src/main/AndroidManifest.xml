@@ -106,7 +106,7 @@
     <activity android:name=".StoryViewerActivity" android:exported="false" />
 <activity android:name=".StoryComposeActivity" android:exported="false" />
 <activity android:name=".VideoTrimActivity" android:exported="false" />
-
+<activity android:name=".NativeCommentsActivity" android:exported="false" />
 
     <!-- Accept/Decline actions -->
     <receiver android:name=".CallActionReceiver" android:exported="false" />

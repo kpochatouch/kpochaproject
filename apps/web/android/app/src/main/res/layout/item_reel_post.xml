@@ -7,7 +7,8 @@
   android:background="@android:color/black"
 >
 
-  <androidx.media3.ui.PlayerView
+    <!-- Video -->
+    <androidx.media3.ui.PlayerView
     android:id="@+id/playerView"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -16,44 +17,39 @@
     app:surface_type="surface_view"
   />
 
-  <ImageView
+    <!-- Poster / thumbnail (video poster OR image post) -->
+    <ImageView
     android:id="@+id/imageView"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:scaleType="fitCenter"
+    android:scaleType="centerCrop"
     android:background="@android:color/black"
     android:visibility="gone"
   />
 
-  <ProgressBar
+    <!-- ✅ Spinner centered (RelativeLayout correct rule) -->
+    <ProgressBar
     android:id="@+id/loadingSpinner"
     style="?android:attr/progressBarStyleLarge"
     android:layout_width="48dp"
     android:layout_height="48dp"
-    android:layout_gravity="center"
+    android:layout_centerInParent="true"
     android:visibility="gone"
   />
 
-  <View
-    android:id="@+id/tapOverlay"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:clickable="true"
-    android:focusable="true"
-    android:background="@android:color/transparent"
-  />
-
-  <!-- Top overlay (author + time) -->
-  <LinearLayout
+    <!-- Top overlay (author + time) -->
+    <LinearLayout
+    android:id="@+id/topOverlay"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:layout_gravity="top"
+    android:layout_alignParentTop="true"
     android:orientation="horizontal"
     android:padding="12dp"
     android:gravity="center_vertical"
     android:background="#33000000"
   >
-    <ImageView
+
+        <ImageView
       android:id="@+id/authorAvatar"
       android:layout_width="36dp"
       android:layout_height="36dp"
@@ -61,27 +57,40 @@
       android:src="@android:drawable/sym_def_app_icon"
     />
 
-    <TextView
+        <TextView
       android:id="@+id/authorName"
       android:layout_width="wrap_content"
       android:layout_height="wrap_content"
       android:text="Author"
       android:textColor="@android:color/white"
       android:textStyle="bold"
-      android:layout_marginLeft="10dp"
+      android:layout_marginStart="10dp"
     />
 
-    <TextView
+        <TextView
       android:id="@+id/postTime"
       android:layout_width="wrap_content"
       android:layout_height="wrap_content"
       android:text=" • 1h"
       android:textColor="#DDDDDD"
     />
-  </LinearLayout>
+    </LinearLayout>
 
-  <!-- Bottom caption -->
-  <TextView
+    <!-- Bottom counts row -->
+    <TextView
+    android:id="@+id/countsRow"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_alignParentBottom="true"
+    android:padding="12dp"
+    android:text="0 likes • 0 comments • 0 shares"
+    android:textColor="#CCCCCC"
+    android:textSize="12sp"
+    android:background="#22000000"
+  />
+
+    <!-- Bottom caption sits ABOVE countsRow -->
+    <TextView
     android:id="@+id/caption"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
@@ -93,78 +102,39 @@
     android:maxLines="3"
   />
 
-  <!-- Right-side actions (Facebook-style) -->
-  <LinearLayout
+       <!-- ✅ Right-side engagement rail -->
+    <LinearLayout
     android:id="@+id/actionsRail"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
-    android:layout_gravity="end|center_vertical"
+    android:layout_alignParentEnd="true"
+    android:layout_centerVertical="true"
+    android:layout_above="@id/caption"
+    android:layout_marginEnd="10dp"
+    android:layout_marginBottom="12dp"
     android:orientation="vertical"
-    android:padding="10dp"
     android:gravity="center_horizontal"
     android:background="@android:color/transparent"
   >
 
-    <TextView
-      android:id="@+id/btnLike"
-      android:layout_width="52dp"
+      <include
+      android:id="@+id/engagementRail"
+      layout="@layout/view_engagement_rail"
+      android:layout_width="wrap_content"
       android:layout_height="wrap_content"
-      android:text="Like"
-      android:textColor="@android:color/white"
-      android:gravity="center"
-      android:padding="10dp"
-      android:background="#33000000"
     />
 
-    <TextView
-      android:id="@+id/btnComment"
-      android:layout_width="52dp"
-      android:layout_height="wrap_content"
-      android:text="💬"
-      android:textColor="@android:color/white"
-      android:gravity="center"
-      android:padding="10dp"
-      android:layout_marginTop="10dp"
-      android:background="#33000000"
-    />
+    </LinearLayout>
 
-    <TextView
-      android:id="@+id/btnShare"
-      android:layout_width="52dp"
-      android:layout_height="wrap_content"
-      android:text="↗"
-      android:textColor="@android:color/white"
-      android:gravity="center"
-      android:padding="10dp"
-      android:layout_marginTop="10dp"
-      android:background="#33000000"
-    />
-
-    <TextView
-      android:id="@+id/btnSave"
-      android:layout_width="52dp"
-      android:layout_height="wrap_content"
-      android:text="🔖"
-      android:textColor="@android:color/white"
-      android:gravity="center"
-      android:padding="10dp"
-      android:layout_marginTop="10dp"
-      android:background="#33000000"
-    />
-
-  </LinearLayout>
-
-  <!-- Counts row (optional, small) -->
-  <TextView
-    android:id="@+id/countsRow"
+    <!-- ✅ Tap overlay: covers video area but NOT the right rail (so buttons stay clickable) -->
+    <View
+    android:id="@+id/tapOverlay"
     android:layout_width="match_parent"
-    android:layout_height="wrap_content"
-    android:layout_alignParentBottom="true"
-    android:padding="12dp"
-    android:text="0 likes • 0 comments • 0 shares"
-    android:textColor="#CCCCCC"
-    android:textSize="12sp"
-    android:background="#22000000"
+    android:layout_height="match_parent"
+    android:layout_marginEnd="90dp"
+    android:clickable="true"
+    android:focusable="true"
+    android:background="@android:color/transparent"
   />
 
 </RelativeLayout>

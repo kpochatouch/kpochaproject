@@ -86,10 +86,15 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
         return new VH(v, viewType);
     }
 
+    private EngagementBinder.Row pickEngRow(VH h) {
+        return (mode == Mode.REELS) ? h.railEng : h.feedEng;
+    }
+
     @Override
     public void onBindViewHolder(VH h, int pos) {
         PostItem p = items.get(pos);
         final String bindId = p != null ? p.id : null;
+        final String rowId = bindId;
 
         if (p == null)
             return;
@@ -165,27 +170,184 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
             }
         }
 
-        // ✅ counts/actions (wired to backend + web routes)
+        // ✅ counts row text
         if (h.countsRow != null) {
-            h.countsRow
-                    .setText(p.likesCount + " likes • " + p.commentsCount + " comments • " + p.sharesCount + " shares");
+            h.countsRow.setText(
+                    p.likesCount + " likes • " + p.commentsCount + " comments • " + p.sharesCount + " shares");
+        }
+
+        // ✅ engagement (render + click handlers)
+        EngagementBinder.Row r = pickEngRow(h);
+        EngagementBinder.render(r, p);
+
+        if (r != null) {
+
+            // LIKE
+            if (r.like != null) {
+                r.like.setOnClickListener(v -> {
+                    if (p.id == null || p.id.length() == 0)
+                        return;
+
+                    final boolean nextLike = !p.likedByMe;
+                    p.lastLocalEngagementMs = System.currentTimeMillis();
+
+                    // optimistic
+                    p.likedByMe = nextLike;
+                    p.likesCount = Math.max(0, p.likesCount + (nextLike ? 1 : -1));
+                    EngagementBinder.render(r, p);
+
+                    if (h.countsRow != null) {
+                        h.countsRow.setText(
+                                p.likesCount + " likes • " + p.commentsCount + " comments • " + p.sharesCount
+                                        + " shares");
+                    }
+
+                    PostApi.toggleLike(apiBase, p.id, token, nextLike, new PostApi.ToggleLikeCallback() {
+                        @Override
+                        public void onSuccess(boolean likedNow, int likesCountFromServer) {
+                            if (rowId == null || !rowId.equals(p.id))
+                                return;
+                            p.likedByMe = likedNow;
+                            if (likesCountFromServer >= 0)
+                                p.likesCount = likesCountFromServer;
+
+                            activity.runOnUiThread(() -> {
+                                EngagementBinder.render(r, p);
+                                if (h.countsRow != null) {
+                                    h.countsRow.setText(
+                                            p.likesCount + " likes • " + p.commentsCount + " comments • "
+                                                    + p.sharesCount + " shares");
+                                }
+                            });
+                        }
+
+                        @Override
+                        public void onError(String message) {
+                            if (rowId == null || !rowId.equals(p.id))
+                                return;
+
+                            p.likedByMe = !nextLike;
+                            p.likesCount = Math.max(0, p.likesCount + (!nextLike ? 1 : -1));
+
+                            activity.runOnUiThread(() -> {
+                                EngagementBinder.render(r, p);
+                                if (h.countsRow != null) {
+                                    h.countsRow.setText(
+                                            p.likesCount + " likes • " + p.commentsCount + " comments • "
+                                                    + p.sharesCount + " shares");
+                                }
+                            });
+                        }
+
+                    });
+                });
+            }
+
+            // SAVE
+            if (r.save != null) {
+                r.save.setOnClickListener(v -> {
+                    if (p.id == null || p.id.length() == 0)
+                        return;
+
+                    final boolean nextSave = !p.savedByMe;
+                    p.lastLocalEngagementMs = System.currentTimeMillis();
+
+                    // optimistic
+                    p.savedByMe = nextSave;
+                    p.savesCount = Math.max(0, p.savesCount + (nextSave ? 1 : -1));
+                    EngagementBinder.render(r, p);
+
+                    PostApi.toggleSave(apiBase, p.id, token, nextSave, new PostApi.ToggleSaveCallback() {
+
+                        @Override
+                        public void onSuccess(boolean savedNow, int savesCountFromServer) {
+                            if (rowId == null || !rowId.equals(p.id))
+                                return;
+
+                            p.savedByMe = savedNow;
+                            if (savesCountFromServer >= 0)
+                                p.savesCount = savesCountFromServer;
+
+                            activity.runOnUiThread(() -> EngagementBinder.render(r, p));
+                        }
+
+                        @Override
+                        public void onError(String message) {
+                            if (rowId == null || !rowId.equals(p.id))
+                                return;
+
+                            p.savedByMe = !nextSave;
+                            p.savesCount = Math.max(0, p.savesCount + (!nextSave ? 1 : -1));
+
+                            activity.runOnUiThread(() -> EngagementBinder.render(r, p));
+                        }
+
+                    });
+                });
+            }
+
+            // COMMENT (native)
+            if (r.comment != null) {
+                r.comment.setOnClickListener(v -> {
+                    if (p.id == null || p.id.trim().isEmpty())
+                        return;
+
+                    Intent i = new Intent(activity, NativeCommentsActivity.class);
+                    i.putExtra(NativeCommentsActivity.EXTRA_API_BASE, apiBase);
+                    i.putExtra(NativeCommentsActivity.EXTRA_TOKEN, token);
+                    i.putExtra(NativeCommentsActivity.EXTRA_POST_ID, p.id);
+                    activity.startActivity(i);
+                });
+            }
+
+            // SHARE
+            if (r.share != null) {
+                r.share.setOnClickListener(v -> {
+                    if (p.id == null || p.id.length() == 0)
+                        return;
+
+                    PostApi.sendShareTick(apiBase, p.id, token);
+
+                    try {
+                        String shareUrl = apiBase;
+                        if (shareUrl.endsWith("/"))
+                            shareUrl = shareUrl.substring(0, shareUrl.length() - 1);
+                        shareUrl = shareUrl + "/browse?post=" + Uri.encode(p.id);
+
+                        Intent send = new Intent(Intent.ACTION_SEND);
+                        send.setType("text/plain");
+                        send.putExtra(Intent.EXTRA_TEXT, shareUrl);
+                        activity.startActivity(Intent.createChooser(send, "Share post"));
+                    } catch (Exception ignored) {
+                    }
+                });
+            }
         }
 
         // Load stats (best-effort) — updates UI when it arrives
         if (bindId != null && bindId.length() > 0 && !p.statsLoaded) {
+
+            // mark when THIS stats request started
+            final long requestMs = System.currentTimeMillis();
+            p.lastStatsRequestMs = requestMs;
+
             PostApi.fetchStats(apiBase, bindId, token, new PostApi.StatsCallback() {
                 @Override
                 public void onSuccess(PostItem st) {
-
                     if (st == null)
                         return;
 
-                    // ✅ Guard: ignore late callback if this ViewHolder is now bound to a different
-                    // post
-                    if (p == null || p.id == null || bindId == null || !p.id.equals(bindId))
+                    // ✅ Guard: ignore late callback if this row is now a different post
+                    if (rowId == null || p == null || p.id == null || !rowId.equals(p.id))
                         return;
 
-                    // ✅ Only mark loaded AFTER we know we got real stats for the right row
+                    // ✅ If user tapped like/save AFTER this request started, ignore stale stats
+                    if (p.lastLocalEngagementMs > 0 && p.lastLocalEngagementMs > requestMs) {
+                        // do not overwrite optimistic UI
+                        p.statsLoaded = true; // still mark loaded so we don't spam requests
+                        return;
+                    }
+
                     p.statsLoaded = true;
 
                     try {
@@ -193,12 +355,13 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
                         p.likesCount = st.likesCount;
                         p.commentsCount = st.commentsCount;
                         p.sharesCount = st.sharesCount;
+                        p.savesCount = st.savesCount;
                         p.likedByMe = st.likedByMe;
+                        p.savedByMe = st.savedByMe;
                     } catch (Exception ignored) {
                     }
 
                     activity.runOnUiThread(() -> {
-                        // Holder might have been recycled; verify it still points to same post
                         int curPos = h.getBindingAdapterPosition();
                         if (curPos == RecyclerView.NO_POSITION)
                             return;
@@ -210,162 +373,20 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
                             return;
 
                         if (h.countsRow != null) {
-                            h.countsRow.setText(cur.likesCount + " likes • " + cur.commentsCount + " comments • "
-                                    + cur.sharesCount + " shares");
+                            h.countsRow.setText(
+                                    cur.likesCount + " likes • " +
+                                            cur.commentsCount + " comments • " +
+                                            cur.sharesCount + " shares • " +
+                                            cur.savesCount + " saves");
                         }
-                        if (h.btnLike != null) {
-                            h.btnLike.setText(cur.likedByMe ? "Liked" : "Like");
-                        }
+
+                        EngagementBinder.Row rr = pickEngRow(h);
+                        EngagementBinder.render(rr, cur);
                     });
                 }
 
                 @Override
                 public void onError(String message) {
-                }
-            });
-        }
-
-        // ✅ SAVE (independent of Like)
-        if (h.btnSave != null) {
-            h.btnSave.setText(p.savedByMe ? "Saved" : "🔖");
-            h.btnSave.setOnClickListener(v -> {
-                if (p.id == null || p.id.length() == 0)
-                    return;
-
-                final boolean nextSave = !p.savedByMe;
-
-                // optimistic UI
-                p.savedByMe = nextSave;
-                p.savesCount = Math.max(0, p.savesCount + (nextSave ? 1 : -1));
-                h.btnSave.setText(p.savedByMe ? "Saved" : "🔖");
-
-                PostApi.toggleSave(apiBase, p.id, token, nextSave, new PostApi.ToggleSaveCallback() {
-                    @Override
-                    public void onSuccess(boolean savedNow, int savesCountFromServer) {
-                        if (bindId == null || !bindId.equals(p.id))
-                            return;
-
-                        p.savedByMe = savedNow;
-                        if (savesCountFromServer >= 0)
-                            p.savesCount = savesCountFromServer;
-
-                        activity.runOnUiThread(() -> {
-                            if (h.btnSave != null)
-                                h.btnSave.setText(p.savedByMe ? "Saved" : "🔖");
-                        });
-                    }
-
-                    @Override
-                    public void onError(String message) {
-                        if (bindId == null || !bindId.equals(p.id))
-                            return;
-
-                        // revert
-                        p.savedByMe = !nextSave;
-                        p.savesCount = Math.max(0, p.savesCount + (!nextSave ? 1 : -1));
-
-                        activity.runOnUiThread(() -> {
-                            if (h.btnSave != null)
-                                h.btnSave.setText(p.savedByMe ? "Saved" : "🔖");
-                        });
-                    }
-                });
-            });
-        }
-
-        if (h.btnLike != null) {
-            h.btnLike.setText(p.likedByMe ? "Liked" : "Like");
-            h.btnLike.setOnClickListener(v -> {
-                if (p.id == null || p.id.length() == 0)
-                    return;
-
-                final boolean nextLike = !p.likedByMe;
-
-                // optimistic UI
-                p.likedByMe = nextLike;
-                p.likesCount = Math.max(0, p.likesCount + (nextLike ? 1 : -1));
-                h.btnLike.setText(p.likedByMe ? "Liked" : "Like");
-                if (h.countsRow != null) {
-                    h.countsRow.setText(
-                            p.likesCount + " likes • " + p.commentsCount + " comments • " + p.sharesCount + " shares");
-                }
-
-                PostApi.toggleLike(apiBase, p.id, token, nextLike, new PostApi.ToggleLikeCallback() {
-                    @Override
-                    public void onSuccess(boolean likedNow, int likesCountFromServer) {
-                        try {
-                            if (bindId == null || !bindId.equals(p.id))
-                                return;
-
-                            p.likedByMe = likedNow;
-                            if (likesCountFromServer >= 0)
-                                p.likesCount = likesCountFromServer;
-                        } catch (Exception ignored) {
-                        }
-
-                        activity.runOnUiThread(() -> {
-                            if (h.btnLike != null)
-                                h.btnLike.setText(p.likedByMe ? "Liked" : "Like");
-                            if (h.countsRow != null) {
-                                h.countsRow.setText(p.likesCount + " likes • " + p.commentsCount + " comments • "
-                                        + p.sharesCount + " shares");
-                            }
-                        });
-                    }
-
-                    @Override
-                    public void onError(String message) {
-                        if (p == null || p.id == null || bindId == null || !p.id.equals(bindId))
-                            return;
-
-                        // revert on error
-                        try {
-                            p.likedByMe = !nextLike;
-                            p.likesCount = Math.max(0, p.likesCount + (!nextLike ? 1 : -1));
-                        } catch (Exception ignored) {
-                        }
-
-                        activity.runOnUiThread(() -> {
-                            if (h.btnLike != null)
-                                h.btnLike.setText(p.likedByMe ? "Liked" : "Like");
-                            if (h.countsRow != null) {
-                                h.countsRow.setText(p.likesCount + " likes • " + p.commentsCount + " comments • "
-                                        + p.sharesCount + " shares");
-                            }
-                        });
-                    }
-                });
-            });
-        }
-
-        if (h.btnComment != null) {
-            h.btnComment.setOnClickListener(v -> {
-                if (p.id == null || p.id.length() == 0)
-                    return;
-                NativeNav.open(activity, "/post/" + Uri.encode(p.id));
-            });
-        }
-
-        if (h.btnShare != null) {
-            h.btnShare.setOnClickListener(v -> {
-                if (p.id == null || p.id.length() == 0)
-                    return;
-
-                // notify backend
-                PostApi.sendShareTick(apiBase, p.id, token);
-
-                // Android share sheet
-                try {
-                    String shareUrl = apiBase;
-                    if (shareUrl.endsWith("/"))
-                        shareUrl = shareUrl.substring(0, shareUrl.length() - 1);
-                    shareUrl = shareUrl + "/browse?post=" + Uri.encode(p.id);
-
-                    Intent send = new Intent(Intent.ACTION_SEND);
-                    send.setType("text/plain");
-                    send.putExtra(Intent.EXTRA_TEXT, shareUrl);
-                    activity.startActivity(Intent.createChooser(send, "Share post"));
-                } catch (Exception ignored) {
                 }
             });
         }
@@ -376,7 +397,9 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
 
             // ✅ if it's a video, restore poster visibility when not active
             if ("video".equalsIgnoreCase(p.mediaType) && h.imageView != null) {
-                boolean hasThumb = (p.thumbnailUrl != null && p.thumbnailUrl.trim().length() > 0);
+
+                boolean hasThumb = (p.thumbnailUrl != null
+                        && p.thumbnailUrl.trim().length() > 0);
                 h.imageView.setVisibility(hasThumb ? View.VISIBLE : View.GONE);
             }
         }
@@ -399,7 +422,8 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
         if (h.tapOverlay != null) {
             h.tapOverlay.setClickable(true);
             h.tapOverlay.setOnClickListener(v -> {
-                int clickPos = h.getBindingAdapterPosition();
+                int clickPos = h
+                        .getBindingAdapterPosition();
                 if (clickPos == RecyclerView.NO_POSITION)
                     return;
                 if (clickPos < 0 || clickPos >= items.size())
@@ -423,11 +447,13 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
                     return;
                 }
 
-                // REELS behavior: tap toggles sound + play/pause (no icon)
+                // REELS behavior (Facebook-style):
+                // tap toggles play/pause, and sound follows play state
                 if (mode == Mode.REELS && isVid) {
-                    VideoPlaybackManager.get().toggleMuted();
-                    VideoPlaybackManager.get().togglePlayPause();
+                    boolean playing = VideoPlaybackManager.get().isPlaying();
+                    VideoPlaybackManager.get().setPlayingReelsStyle(!playing);
                 }
+
             });
         }
 
@@ -567,6 +593,17 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
                 });
 
                 VideoPlaybackManager.get().play(activity, p.mediaUrl, row.playerView);
+                // Safety: never spin forever if video is already READY/playing
+                row.itemView.postDelayed(() -> {
+                    try {
+                        if (row.loadingSpinner != null)
+                            row.loadingSpinner.setVisibility(View.GONE);
+                        // keep poster if you want; or hide it if you prefer:
+                        // if (row.imageView != null) row.imageView.setVisibility(View.GONE);
+                    } catch (Exception ignored) {
+                    }
+                }, 1200);
+
             }
         }
     }
@@ -639,10 +676,8 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
 
         TextView countsRow;
 
-        TextView btnLike;
-        TextView btnComment;
-        TextView btnShare;
-        TextView btnSave;
+        EngagementBinder.Row feedEng = null;
+        EngagementBinder.Row railEng = null;
 
         VH(View itemView, int viewType) {
             super(itemView);
@@ -661,10 +696,47 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
 
             countsRow = itemView.findViewById(R.id.countsRow);
 
-            btnLike = itemView.findViewById(R.id.btnLike);
-            btnComment = itemView.findViewById(R.id.btnComment);
-            btnShare = itemView.findViewById(R.id.btnShare);
-            btnSave = itemView.findViewById(R.id.btnSave);
+            // FEED engagement row (view_engagement_row.xml)
+            View engLike = itemView.findViewById(R.id.engLike);
+            if (engLike != null) {
+                feedEng = new EngagementBinder.Row();
+                feedEng.like = engLike;
+                feedEng.likeIcon = itemView.findViewById(R.id.engLikeIcon);
+                feedEng.likeCount = itemView.findViewById(R.id.engLikeCount);
+
+                feedEng.comment = itemView.findViewById(R.id.engComment);
+                feedEng.commentIcon = itemView.findViewById(R.id.engCommentIcon);
+                feedEng.commentCount = itemView.findViewById(R.id.engCommentCount);
+
+                feedEng.share = itemView.findViewById(R.id.engShare);
+                feedEng.shareIcon = itemView.findViewById(R.id.engShareIcon);
+                feedEng.shareCount = itemView.findViewById(R.id.engShareCount);
+
+                feedEng.save = itemView.findViewById(R.id.engSave);
+                feedEng.saveIcon = itemView.findViewById(R.id.engSaveIcon);
+                feedEng.saveCount = itemView.findViewById(R.id.engSaveCount);
+            }
+
+            // REELS engagement rail (view_engagement_rail.xml)
+            View railLike = itemView.findViewById(R.id.railLike);
+            if (railLike != null) {
+                railEng = new EngagementBinder.Row();
+                railEng.like = railLike;
+                railEng.likeIcon = itemView.findViewById(R.id.railLikeIcon);
+                railEng.likeCount = itemView.findViewById(R.id.railLikeCount);
+
+                railEng.comment = itemView.findViewById(R.id.railComment);
+                railEng.commentIcon = itemView.findViewById(R.id.railCommentIcon);
+                railEng.commentCount = itemView.findViewById(R.id.railCommentCount);
+
+                railEng.share = itemView.findViewById(R.id.railShare);
+                railEng.shareIcon = itemView.findViewById(R.id.railShareIcon);
+                railEng.shareCount = itemView.findViewById(R.id.railShareCount);
+
+                railEng.save = itemView.findViewById(R.id.railSave);
+                railEng.saveIcon = itemView.findViewById(R.id.railSaveIcon);
+                railEng.saveCount = itemView.findViewById(R.id.railSaveCount);
+            }
 
         }
     }

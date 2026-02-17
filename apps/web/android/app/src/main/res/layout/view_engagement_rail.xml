@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<LinearLayout
+  xmlns:android="http://schemas.android.com/apk/res/android"
+  android:layout_width="wrap_content"
+  android:layout_height="wrap_content"
+  android:orientation="vertical"
+  android:gravity="center_horizontal"
+>
+
+  <!-- Like -->
+  <LinearLayout
+    android:id="@+id/railLike"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:gravity="center_horizontal"
+  >
+
+    <FrameLayout
+      android:layout_width="@dimen/tap_target"
+      android:layout_height="@dimen/tap_target"
+      android:background="@drawable/bg_circle"
+    >
+
+      <ImageView
+        android:id="@+id/railLikeIcon"
+        android:layout_width="@dimen/icon_size_rail"
+        android:layout_height="@dimen/icon_size_rail"
+        android:layout_gravity="center"
+        android:src="@drawable/ic_like"
+        android:tint="@color/kpocha_icon"
+      />
+    </FrameLayout>
+
+    <TextView
+      android:id="@+id/railLikeCount"
+      style="@style/Kpocha.CounterText"
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:text="0"
+      android:layout_marginTop="4dp"
+    />
+
+  </LinearLayout>
+
+  <!-- Comment -->
+  <LinearLayout
+    android:id="@+id/railComment"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:gravity="center_horizontal"
+    android:layout_marginTop="@dimen/rail_spacing"
+  >
+
+    <FrameLayout
+      android:layout_width="@dimen/tap_target"
+      android:layout_height="@dimen/tap_target"
+      android:background="@drawable/bg_circle"
+    >
+
+      <ImageView
+        android:id="@+id/railCommentIcon"
+        android:layout_width="@dimen/icon_size_rail"
+        android:layout_height="@dimen/icon_size_rail"
+        android:layout_gravity="center"
+        android:src="@drawable/ic_comment"
+        android:tint="@color/kpocha_icon"
+      />
+    </FrameLayout>
+
+    <TextView
+      android:id="@+id/railCommentCount"
+      style="@style/Kpocha.CounterText"
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:text="0"
+      android:layout_marginTop="4dp"
+    />
+
+  </LinearLayout>
+
+  <!-- Share -->
+  <LinearLayout
+    android:id="@+id/railShare"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:gravity="center_horizontal"
+    android:layout_marginTop="@dimen/rail_spacing"
+  >
+
+    <FrameLayout
+      android:layout_width="@dimen/tap_target"
+      android:layout_height="@dimen/tap_target"
+      android:background="@drawable/bg_circle"
+    >
+
+      <ImageView
+        android:id="@+id/railShareIcon"
+        android:layout_width="@dimen/icon_size_rail"
+        android:layout_height="@dimen/icon_size_rail"
+        android:layout_gravity="center"
+        android:src="@drawable/ic_share"
+        android:tint="@color/kpocha_icon"
+      />
+    </FrameLayout>
+
+    <TextView
+      android:id="@+id/railShareCount"
+      style="@style/Kpocha.CounterText"
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:text="0"
+      android:layout_marginTop="4dp"
+    />
+
+  </LinearLayout>
+
+  <!-- Save -->
+  <LinearLayout
+    android:id="@+id/railSave"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:gravity="center_horizontal"
+    android:layout_marginTop="@dimen/rail_spacing"
+  >
+
+    <FrameLayout
+      android:layout_width="@dimen/tap_target"
+      android:layout_height="@dimen/tap_target"
+      android:background="@drawable/bg_circle"
+    >
+
+      <ImageView
+        android:id="@+id/railSaveIcon"
+        android:layout_width="@dimen/icon_size_rail"
+        android:layout_height="@dimen/icon_size_rail"
+        android:layout_gravity="center"
+        android:src="@drawable/ic_save"
+        android:tint="@color/kpocha_icon"
+      />
+    </FrameLayout>
+
+    <TextView
+      android:id="@+id/railSaveCount"
+      style="@style/Kpocha.CounterText"
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:text="0"
+      android:layout_marginTop="4dp"
+    />
+
+  </LinearLayout>
+
+</LinearLayout>

@@ -83,7 +83,7 @@
   />
 
   <!-- Media container -->
-  <RelativeLayout
+  <FrameLayout
     android:layout_width="match_parent"
     android:layout_height="420dp"
     android:background="@android:color/black"
@@ -107,6 +107,7 @@
       android:visibility="gone"
     />
 
+    <!-- ✅ spinner truly centered -->
     <ProgressBar
       android:id="@+id/loadingSpinner"
       style="?android:attr/progressBarStyleLarge"
@@ -116,15 +117,7 @@
       android:visibility="gone"
     />
 
-    <View
-      android:id="@+id/tapOverlay"
-      android:layout_width="match_parent"
-      android:layout_height="match_parent"
-      android:clickable="true"
-      android:focusable="true"
-      android:background="@android:color/transparent"
-    />
-
+    <!-- ✅ mute badge truly bottom-right -->
     <TextView
       android:id="@+id/muteBadge"
       android:layout_width="wrap_content"
@@ -138,8 +131,19 @@
       android:visibility="gone"
     />
 
+    <!-- ✅ tap overlay LAST, but it should not block mute badge -->
+    <View
+      android:id="@+id/tapOverlay"
+      android:layout_width="match_parent"
+      android:layout_height="match_parent"
+      android:layout_marginBottom="52dp"
+      android:layout_marginEnd="72dp"
+      android:clickable="true"
+      android:focusable="true"
+      android:background="@android:color/transparent"
+    />
 
-  </RelativeLayout>
+  </FrameLayout>
 
   <!-- Counts -->
   <TextView
@@ -154,54 +158,12 @@
     android:paddingTop="10dp"
   />
 
-  <!-- Actions -->
-  <LinearLayout
+    <!-- Actions (Facebook-style icons + counts) -->
+  <include
+    android:id="@+id/engagementRow"
+    layout="@layout/view_engagement_row"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:orientation="horizontal"
-    android:paddingLeft="12dp"
-    android:paddingRight="12dp"
-    android:paddingTop="8dp"
-  >
-
-    <TextView
-      android:id="@+id/btnLike"
-      android:layout_width="0dp"
-      android:layout_height="wrap_content"
-      android:layout_weight="1"
-      android:text="Like"
-      android:textColor="@android:color/white"
-      android:padding="10dp"
-      android:gravity="center"
-      android:background="#1A1A1A"
-    />
-
-    <TextView
-      android:id="@+id/btnComment"
-      android:layout_width="0dp"
-      android:layout_height="wrap_content"
-      android:layout_weight="1"
-      android:text="Comment"
-      android:textColor="@android:color/white"
-      android:padding="10dp"
-      android:gravity="center"
-      android:background="#1A1A1A"
-      android:layout_marginLeft="8dp"
-    />
-
-    <TextView
-      android:id="@+id/btnShare"
-      android:layout_width="0dp"
-      android:layout_height="wrap_content"
-      android:layout_weight="1"
-      android:text="Share"
-      android:textColor="@android:color/white"
-      android:padding="10dp"
-      android:gravity="center"
-      android:background="#1A1A1A"
-      android:layout_marginLeft="8dp"
-    />
-
-  </LinearLayout>
+  />
 
 </LinearLayout>

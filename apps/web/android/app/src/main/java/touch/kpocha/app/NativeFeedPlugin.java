@@ -19,13 +19,25 @@ public class NativeFeedPlugin extends Plugin {
             String lga = call.getString("lga", "");
             String token = call.getString("token", ""); // optional
 
+            // ✅ new: scroll + start mode
+            String postId = call.getString("postId", "");
+            String startMode = call.getString("startMode", "feed"); // "feed" or "reels"
+
             android.util.Log.i("NativeFeedPlugin",
-                    "open() called apiBase=" + apiBase + " lga=" + lga + " token?=" + (!token.isEmpty()));
+                    "open() called apiBase=" + apiBase
+                            + " lga=" + lga
+                            + " token?=" + (!token.isEmpty())
+                            + " postId?=" + (!postId.isEmpty())
+                            + " startMode=" + startMode);
 
             Intent i = new Intent(getContext(), NativeFeedActivity.class);
             i.putExtra(NativeFeedActivity.EXTRA_API_BASE, apiBase);
             i.putExtra(NativeFeedActivity.EXTRA_LGA, lga);
             i.putExtra(NativeFeedActivity.EXTRA_TOKEN, token);
+
+            // ✅ start at tapped post
+            i.putExtra(NativeFeedActivity.EXTRA_START_POST_ID, postId);
+            i.putExtra(NativeFeedActivity.EXTRA_START_MODE, startMode);
 
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             getContext().startActivity(i);

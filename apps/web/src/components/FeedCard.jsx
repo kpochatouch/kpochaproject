@@ -460,9 +460,10 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
     if (Capacitor.isNativePlatform()) {
       const okFeed = await openNativeFeed({
         lga: post?.lga || post?.pro?.lga || "",
-        // (Optional future: pass postId to scroll-to item when you add it native-side)
-        // postId,
+        postId,
+        startMode: isVideo ? "reels" : "feed",
       });
+
       if (okFeed) return;
 
       // User-safe fallback: open the normal post page instead of showing a dev message
