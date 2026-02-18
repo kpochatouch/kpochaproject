@@ -33,3 +33,12 @@ apps/web/android/app/google-services.json
 *.jks
 apps/web/android/gradle.properties
 apps/web/android/keystore.properties
+
+# iOS build output (do not commit)
+apps/web/ios/App/build/
+apps/web/ios/App/Pods/
+apps/web/ios/App/Podfile.lock
+
+# Xcode user state
+**/xcuserdata/
+**/*.xcuserstate

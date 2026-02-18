@@ -18,6 +18,7 @@
     "@capacitor/app": "^8.0.0",
     "@capacitor/cli": "^8.0.1",
     "@capacitor/core": "^8.0.1",
+    "@capacitor/ios": "^8.1.0",
     "@capacitor/push-notifications": "^8.0.0",
     "@ffmpeg/core": "^0.12.6",
     "@ffmpeg/core-mt": "^0.12.6",
