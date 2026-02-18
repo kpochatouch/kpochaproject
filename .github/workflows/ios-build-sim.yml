@@ -1,0 +1,48 @@
+name: iOS Build (Simulator, no signing)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["reset/nativefeed-at-birth"]
+
+jobs:
+  build-ios-sim:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install JS deps
+        working-directory: apps/web
+        run: npm ci
+
+      - name: Build web
+        working-directory: apps/web
+        run: npm run build
+
+      - name: Sync Capacitor iOS
+        working-directory: apps/web
+        run: npx cap sync ios
+
+      - name: Install CocoaPods
+        working-directory: apps/web/ios/App
+        run: pod install
+
+      - name: Build for iOS Simulator (no signing)
+        working-directory: apps/web/ios/App
+        run: |
+          set -e
+          xcodebuild \
+            -workspace App.xcworkspace \
+            -scheme App \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination "platform=iOS Simulator,name=iPhone 15" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
