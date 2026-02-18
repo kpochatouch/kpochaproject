@@ -27,3 +27,9 @@ apps/api/dist/
 
 # Firebase Android
 apps/web/android/app/google-services.json
+
+# 🔐 Android signing secrets
+*.keystore
+*.jks
+apps/web/android/gradle.properties
+apps/web/android/keystore.properties

@@ -1,5 +1,6 @@
 //apps/web/src/components/InstallPWAButton.jsx
 import { useEffect, useMemo, useState } from "react";
+import { Capacitor } from "@capacitor/core";
 
 const KEY_LAST_NAG = "kpocha:pwaLastNagAt";
 const NAG_EVERY_MS = 12 * 60 * 60 * 1000;
@@ -17,12 +18,16 @@ export default function InstallPWAButton() {
     return !!(standaloneMatchMedia || iosStandalone);
   }, []);
 
+  const isNative = useMemo(() => {
+    return Capacitor?.isNativePlatform?.() === true;
+  }, []);
+
   const isIOS = useMemo(() => {
     return /iphone|ipad|ipod/i.test(navigator.userAgent);
   }, []);
 
   useEffect(() => {
-    if (isStandalone) return;
+    if (isStandalone || isNative) return;
 
     const onBip = (e) => {
       e.preventDefault();
@@ -57,9 +62,9 @@ export default function InstallPWAButton() {
       window.removeEventListener("beforeinstallprompt", onBip);
       window.removeEventListener("appinstalled", onInstalled);
     };
-  }, [isStandalone]);
+  }, [isStandalone, isNative]);
 
-  if (isStandalone) return null;
+  if (isStandalone || isNative) return null;
   if (!open) return null;
 
   async function handleInstall() {
