@@ -30,16 +30,12 @@ jobs:
         working-directory: apps/web
         run: npx cap sync ios
 
-      - name: Install CocoaPods
-        working-directory: apps/web/ios/App
-        run: pod install
-
       - name: Build for iOS Simulator (no signing)
         working-directory: apps/web/ios/App
         run: |
           set -e
           xcodebuild \
-            -workspace App.xcworkspace \
+            -project App.xcodeproj \
             -scheme App \
             -configuration Debug \
             -sdk iphonesimulator \
