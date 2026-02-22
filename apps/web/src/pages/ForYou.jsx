@@ -4,7 +4,7 @@ import { useParams, Link, useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import { useMe } from "../context/MeContext.jsx";
 import { Capacitor } from "@capacitor/core";
-import { openNativeVideoPlayer } from "../lib/nativeVideoPlayer";
+import { openNativeFeed } from "../lib/nativeFeed";
 import RouteLoader from "../components/RouteLoader.jsx";
 
 function timeAgo(ts) {
@@ -240,7 +240,7 @@ export default function ForYou() {
 
   return (
     <div
-      className="max-w-xl mx-auto h-[100dvh] overflow-y-auto snap-y snap-mandatory"
+      className="w-full h-[100dvh] overflow-y-auto snap-y snap-mandatory bg-black"
       style={{ WebkitOverflowScrolling: "touch" }}
     >
       {feedPosts.map((post, index) => (
@@ -363,6 +363,7 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
   const [showControls, setShowControls] = useState(false);
   const [videoError, setVideoError] = useState("");
   const [broken, setBroken] = useState(false);
+  const [hasFirstFrame, setHasFirstFrame] = useState(false);
   // Flip rule: play ONLY when this page is snapped (nearly full-screen visible)
   useEffect(() => {
     const el = pageRef.current;
@@ -721,20 +722,18 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
 
   // VIDEO CONTROLS
   async function onClickVideo() {
-    // 1) If native platform, open native ExoPlayer
-    const url = videoSrc;
-    if (Capacitor.isNativePlatform() && url) {
-      const wantSound = getSoundEnabled();
-      const ok = await openNativeVideoPlayer({
-        url,
-        startMs: 0,
-        muted: !wantSound,
-        loop: true,
+    // ✅ Native: open Native REELS (Facebook-style), not NativeVideoPlayer
+    if (Capacitor.isNativePlatform() && id) {
+      const ok = await openNativeFeed({
+        lga: post?.lga || post?.pro?.lga || "",
+        postId: id,
+        startMode: "reels",
       });
-      if (ok) return; // ✅ native player took over
+      if (ok) return;
+      // fallback: do nothing special, keep web player
     }
 
-    // 2) Web fallback (desktop / browser)
+    // ✅ Web fallback: play/pause inside <video>
     const vid = videoRef.current;
     if (!vid) return;
 
@@ -898,25 +897,19 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
   async function handleVideoError() {
     console.warn("Video failed to load in <video>, trying fallback...");
 
-    // If native app, try opening ExoPlayer immediately (often plays what WebView can't).
+    // ✅ Native fallback: open Native REELS (often plays what WebView can't)
     try {
-      const url = videoSrc;
-      if (Capacitor.isNativePlatform() && url) {
-        const wantSound = getSoundEnabled();
-        const ok = await openNativeVideoPlayer({
-          url,
-          startMs: 0,
-          muted: !wantSound,
-          loop: true,
+      if (Capacitor.isNativePlatform() && id) {
+        const ok = await openNativeFeed({
+          lga: post?.lga || post?.pro?.lga || "",
+          postId: id,
+          startMode: "reels",
         });
-        if (ok) return; // ✅ native player handled it
+        if (ok) return;
       }
     } catch {}
 
-    // If fallback didn't work, show a softer message
-    setVideoError(
-      "This video couldn't play in the embedded player. Tap the video to open it.",
-    );
+    setVideoError("This video couldn't play here. Tap the video to open it.");
   }
 
   function handleMouseEnter() {
@@ -939,6 +932,11 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
   const videoSrc =
     (media && (media.url || media.secure_url || media.path)) ||
     post.videoUrl ||
+    "";
+
+  const thumbSrc =
+    (media && (media.thumbnailUrl || media.thumb || media.poster)) ||
+    post?.thumbnailUrl ||
     "";
 
   const isVideo = (() => {
@@ -1022,7 +1020,10 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
   }
 
   return (
-    <article ref={pageRef} className="h-[100dvh] snap-start snap-always">
+    <article
+      ref={pageRef}
+      className="h-[100dvh] snap-start snap-always bg-black md:flex md:items-center md:justify-center"
+    >
       {/* header (profile + book) */}
       <div className="px-4 pt-4 pb-2 flex items-start justify-between gap-3">
         <div className="flex gap-3">
@@ -1136,14 +1137,19 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
 
       {/* VIDEO + SIDE ACTIONS */}
       <div
-        className="relative w-full bg-black overflow-hidden h-[100dvh]"
+        className="relative w-full bg-black overflow-hidden h-[100dvh]
+             md:h-[78vh] md:max-h-[760px] md:w-[420px]
+             md:rounded-2xl md:overflow-hidden md:shadow-lg"
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
       >
         <video
           ref={videoRef}
           src={videoSrc}
-          className="absolute inset-0 w-full h-full object-cover"
+          className={`absolute inset-0 w-full h-full object-cover ${
+            hasFirstFrame ? "opacity-100" : "opacity-0"
+          }`}
+          poster={thumbSrc || undefined}
           muted={muted}
           loop
           playsInline
@@ -1156,14 +1162,14 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
           onLoadedData={() => setHasFirstFrame(true)}
           onPlaying={() => setHasFirstFrame(true)}
           onError={() => {
-            setHasFirstFrame(true); // remove Android thumbnail overlay
-            handleVideoError(); // try native fallback + show message
+            setHasFirstFrame(true); // remove overlay attempt
+            handleVideoError();
           }}
         />
 
-        {Capacitor.isNativePlatform() && !hasFirstFrame && (
+        {!hasFirstFrame && !!thumbSrc && (
           <img
-            src={media?.thumbnailUrl || videoSrc}
+            src={thumbSrc}
             alt=""
             className="absolute inset-0 w-full h-full object-cover z-[2] pointer-events-none"
             loading="lazy"

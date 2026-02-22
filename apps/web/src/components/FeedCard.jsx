@@ -461,7 +461,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
       const okFeed = await openNativeFeed({
         lga: post?.lga || post?.pro?.lga || "",
         postId,
-        startMode: isVideo ? "reels" : "feed",
+        startMode: "feed",
       });
 
       if (okFeed) return;
