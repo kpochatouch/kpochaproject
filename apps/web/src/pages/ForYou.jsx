@@ -27,6 +27,22 @@ function formatTime(sec = 0) {
   return `${m}:${s < 10 ? "0" : ""}${s}`;
 }
 
+function isVideoPost(p) {
+  const m = Array.isArray(p?.media) && p.media.length ? p.media[0] : null;
+  if (!m) return false;
+
+  if (m.type === "video") return true;
+
+  const u = String(m.url || "").toLowerCase();
+  return (
+    u.endsWith(".mp4") ||
+    u.endsWith(".mov") ||
+    u.endsWith(".webm") ||
+    u.endsWith(".mkv") ||
+    u.includes("/video/")
+  );
+}
+
 /**
  * PARENT: vertical "For You" feed
  * - Loads first post (from :id or /for-you/start)
@@ -67,14 +83,38 @@ export default function ForYou() {
           firstPost = data || null;
         } else {
           const { data } = await api.get("/api/posts/for-you/start");
-          firstPost = data?.post || data?.start || null;
+          const primary = data?.post || data?.start || null;
+          const serverNext = data?.next || null;
+
+          firstPost = primary;
+
+          // ✅ seed the second item from server immediately (no extra /next call)
+          if (primary && primary._id) {
+            const posts = [];
+            if (isVideoPost(primary)) posts.push(primary);
+            if (
+              serverNext &&
+              serverNext._id &&
+              serverNext._id !== primary._id
+            ) {
+              if (isVideoPost(serverNext)) posts.push(serverNext);
+            }
+
+            // store for later below
+            // (we’ll still do the extra /next call only if we got < 2 videos)
+            firstPost.__seededVideos = posts;
+          }
         }
 
         if (!firstPost || !firstPost._id) {
           throw new Error("No videos available right now.");
         }
 
-        const posts = [firstPost];
+        const posts = Array.isArray(firstPost?.__seededVideos)
+          ? firstPost.__seededVideos
+          : isVideoPost(firstPost)
+          ? [firstPost]
+          : [];
 
         // try to pre-fetch the very next post
         try {
@@ -88,9 +128,15 @@ export default function ForYou() {
         }
 
         if (!cancelled) {
-          setFeedPosts(posts);
-          // cursor is the last item we have
-          lastCursorIdRef.current = posts[posts.length - 1]?._id || null;
+          const onlyVideos = posts.filter(isVideoPost);
+
+          if (!onlyVideos.length) {
+            throw new Error("No videos available right now.");
+          }
+
+          setFeedPosts(onlyVideos);
+          lastCursorIdRef.current =
+            onlyVideos[onlyVideos.length - 1]?._id || null;
         }
       } catch (err) {
         if (!cancelled) {
@@ -134,6 +180,12 @@ export default function ForYou() {
           params: exclude ? { exclude } : {},
         });
         const nxt = res?.data?.next || null;
+
+        // If backend returns image, skip it and try next
+        if (nxt && nxt._id && !isVideoPost(nxt)) {
+          cursorId = nxt._id;
+          continue;
+        }
 
         if (!nxt || !nxt._id) {
           // river never dries: don’t end the feed; just stop this attempt

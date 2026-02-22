@@ -319,6 +319,9 @@ router.get("/posts/:id/next", tryAuth, async (req, res) => {
       hidden: { $ne: true },
       deleted: { $ne: true },
 
+      // ✅ For You queue is video-only
+      media: { $elemMatch: { type: "video" } },
+
       // ✅ exclude stories from reel queue
       $or: [{ type: { $ne: "story" } }, { type: { $exists: false } }],
 
@@ -414,6 +417,9 @@ router.get("/posts/:id/next", tryAuth, async (req, res) => {
         isPublic: true,
         hidden: { $ne: true },
         deleted: { $ne: true },
+
+        media: { $elemMatch: { type: "video" } },
+
         $or: [{ type: { $ne: "story" } }, { type: { $exists: false } }],
         _id: { $ne: current._id },
       })
@@ -965,6 +971,9 @@ router.get("/posts/for-you/start", tryAuth, async (req, res) => {
       isPublic: true,
       hidden: { $ne: true },
       deleted: { $ne: true },
+
+      // ✅ FOR YOU is video-only
+      media: { $elemMatch: { type: "video" } },
 
       // ✅ exclude stories from For You start
       $or: [{ type: { $ne: "story" } }, { type: { $exists: false } }],
