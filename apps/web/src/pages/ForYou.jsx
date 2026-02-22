@@ -124,12 +124,19 @@ export default function ForYou() {
       while (attempts < 6 && cursorId) {
         attempts += 1;
 
-        const res = await api.get(`/api/posts/${cursorId}/next`);
+        const exclude = feedPosts
+          .map((p) => p?._id)
+          .filter(Boolean)
+          .slice(-80) // keep URL reasonable
+          .join(",");
+
+        const res = await api.get(`/api/posts/${cursorId}/next`, {
+          params: exclude ? { exclude } : {},
+        });
         const nxt = res?.data?.next || null;
 
-        // If server says no next, only then we end.
         if (!nxt || !nxt._id) {
-          setEndOfFeed(true);
+          // river never dries: don’t end the feed; just stop this attempt
           return;
         }
 
@@ -896,18 +903,6 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
 
   async function handleVideoError() {
     console.warn("Video failed to load in <video>, trying fallback...");
-
-    // ✅ Native fallback: open Native REELS (often plays what WebView can't)
-    try {
-      if (Capacitor.isNativePlatform() && id) {
-        const ok = await openNativeFeed({
-          lga: post?.lga || post?.pro?.lga || "",
-          postId: id,
-          startMode: "reels",
-        });
-        if (ok) return;
-      }
-    } catch {}
 
     setVideoError("This video couldn't play here. Tap the video to open it.");
   }

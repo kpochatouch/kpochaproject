@@ -298,9 +298,21 @@ router.get("/posts/:id/next", tryAuth, async (req, res) => {
   try {
     const id = req.params.id;
     const current = await Post.findById(id).lean();
-    if (!current) return res.json({ next: null, queue: [] });
+    if (!current) return res.json({ next: null });
 
     const viewerUid = req.user?.uid || null;
+
+    // NEW: exclude list from client (?exclude=comma,comma,...)
+    const excludeRaw = String(req.query.exclude || "");
+    const excludeIds = excludeRaw
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => /^[0-9a-fA-F]{24}$/.test(s))
+      .slice(0, 200); // safety cap
+
+    const excludeObjectIds = excludeIds.map(
+      (x) => new mongoose.Types.ObjectId(x),
+    );
 
     const baseFilter = {
       isPublic: true,
@@ -310,53 +322,52 @@ router.get("/posts/:id/next", tryAuth, async (req, res) => {
       // ✅ exclude stories from reel queue
       $or: [{ type: { $ne: "story" } }, { type: { $exists: false } }],
 
-      _id: { $ne: current._id }, // never return the same post again
+      // ✅ exclude current + anything already shown
+      _id: { $nin: [current._id, ...excludeObjectIds] },
     };
 
-    // 1. Same pro (other videos from this stylist)
+    // 1) Same pro
     const samePro = await Post.find({
       ...baseFilter,
       proOwnerUid: current.proOwnerUid,
     })
       .sort({ createdAt: -1 })
-      .limit(5)
+      .limit(10)
       .lean();
 
-    // 2. Same LGA (local content)
+    // 2) Same LGA
     const sameLga = await Post.find({
       ...baseFilter,
       lga: current.lga,
     })
       .sort({ createdAt: -1 })
-      .limit(10)
+      .limit(20)
       .lean();
 
-    // 3. Videos this viewer has liked (from stats)
+    // 3) Viewer liked
     let likedPosts = [];
     if (viewerUid) {
-      const likedStats = await PostStats.find({
-        likedBy: viewerUid,
-      })
+      const likedStats = await PostStats.find({ likedBy: viewerUid })
         .sort({ updatedAt: -1 })
-        .limit(50)
+        .limit(200)
         .lean();
 
-      const likedIds = likedStats.map((s) => s.postId);
+      const likedIds = likedStats.map((s) => s.postId).filter(Boolean);
       if (likedIds.length) {
         likedPosts = await Post.find({
           ...baseFilter,
-          _id: { $in: likedIds, $ne: current._id },
+          _id: { $in: likedIds }, // baseFilter already excludes current/exclude
         }).lean();
       }
     }
 
-    // 4. Global trending (by trendingScore)
+    // 4) Trending
     const topStats = await PostStats.find({})
       .sort({ trendingScore: -1 })
-      .limit(100)
+      .limit(300)
       .lean();
 
-    const trendingIds = topStats.map((s) => s.postId);
+    const trendingIds = topStats.map((s) => s.postId).filter(Boolean);
     let trendingPosts = [];
     if (trendingIds.length) {
       trendingPosts = await Post.find({
@@ -371,17 +382,16 @@ router.get("/posts/:id/next", tryAuth, async (req, res) => {
       );
     }
 
-    // 5. Global recent fallback (in case stats are empty)
+    // 5) Recent global fallback (unseen)
     const recentGlobal = await Post.find(baseFilter)
       .sort({ createdAt: -1 })
-      .limit(50)
+      .limit(200)
       .lean();
 
-    // Build final queue (dedup by _id, keep order)
     const queueRaw = [
+      ...likedPosts,
       ...samePro,
       ...sameLga,
-      ...likedPosts,
       ...trendingPosts,
       ...recentGlobal,
     ];
@@ -397,13 +407,32 @@ router.get("/posts/:id/next", tryAuth, async (req, res) => {
 
     const next = queue[0] || null;
 
+    // NEW: "river never dries" fallback — if truly no unseen exists,
+    // return ANY other post (excluding current only), to loop.
+    if (!next) {
+      const loopPick = await Post.findOne({
+        isPublic: true,
+        hidden: { $ne: true },
+        deleted: { $ne: true },
+        $or: [{ type: { $ne: "story" } }, { type: { $exists: false } }],
+        _id: { $ne: current._id },
+      })
+        .sort({ createdAt: -1 })
+        .lean();
+
+      return res.json({
+        next: loopPick ? sanitizePostForClient(loopPick) : null,
+        looped: !!loopPick,
+      });
+    }
+
     return res.json({
-      next: next ? sanitizePostForClient(next) : null,
-      queue: queue.map(sanitizePostForClient),
+      next: sanitizePostForClient(next),
+      looped: false,
     });
   } catch (e) {
     console.error("[posts:next] error", e?.message || e);
-    return res.json({ next: null, queue: [] });
+    return res.json({ next: null, looped: false });
   }
 });
 
