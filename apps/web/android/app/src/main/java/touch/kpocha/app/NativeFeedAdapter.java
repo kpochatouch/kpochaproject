@@ -42,6 +42,19 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
     private Mode mode = Mode.FEED;
     private Listener listener;
 
+    private static final int VT_FEED_POST = 0;
+    private static final int VT_REEL_POST = 1;
+    private static final int VT_STORIES_SHELF = 2;
+
+    // Stories data
+    private final List<StoryItem> stories = new ArrayList<>();
+    private StoriesAdapter.Listener storiesListener;
+
+    // Insert shelves: top + after some scroll.
+    // These are POST INDEXES after which we insert a shelf.
+    // -1 means "before first post" (top).
+    private final int[] shelfAfterPostIndex = new int[] { -1, 7, 18 };
+
     public NativeFeedAdapter(Activity activity, String apiBase, String token) {
         this.activity = activity;
         this.apiBase = apiBase;
@@ -74,14 +87,34 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
         activePos = RecyclerView.NO_POSITION;
     }
 
+    public void setStories(List<StoryItem> next) {
+        stories.clear();
+        if (next != null)
+            stories.addAll(next);
+        notifyDataSetChanged();
+    }
+
+    public void setStoriesListener(StoriesAdapter.Listener l) {
+        this.storiesListener = l;
+    }
+
     @Override
     public int getItemViewType(int position) {
-        return mode == Mode.REELS ? 1 : 0;
+        if (mode == Mode.REELS)
+            return VT_REEL_POST;
+        return isStoriesShelfPosition(position) ? VT_STORIES_SHELF : VT_FEED_POST;
     }
 
     @Override
     public VH onCreateViewHolder(ViewGroup parent, int viewType) {
-        int layout = (viewType == 1) ? R.layout.item_reel_post : R.layout.item_feed_post;
+        int layout;
+        if (viewType == VT_REEL_POST)
+            layout = R.layout.item_reel_post;
+        else if (viewType == VT_STORIES_SHELF)
+            layout = R.layout.item_feed_stories_shelf;
+        else
+            layout = R.layout.item_feed_post;
+
         View v = LayoutInflater.from(parent.getContext()).inflate(layout, parent, false);
         return new VH(v, viewType);
     }
@@ -92,7 +125,20 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
 
     @Override
     public void onBindViewHolder(VH h, int pos) {
-        PostItem p = items.get(pos);
+
+        int vt = getItemViewType(pos);
+        if (vt == VT_STORIES_SHELF) {
+            h.bindStoriesShelf(activity, stories, storiesListener);
+            return;
+        }
+
+        // Map adapter position -> post index (FEED includes shelves; REELS does not)
+        int postIndex = (mode == Mode.REELS) ? pos : postIndexForAdapterPos(pos);
+        if (postIndex < 0 || postIndex >= items.size())
+            return;
+
+        PostItem p = items.get(postIndex);
+
         final String bindId = p != null ? p.id : null;
         final String rowId = bindId;
 
@@ -362,13 +408,19 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
                     }
 
                     activity.runOnUiThread(() -> {
-                        int curPos = h.getBindingAdapterPosition();
-                        if (curPos == RecyclerView.NO_POSITION)
-                            return;
-                        if (curPos >= items.size())
+                        int curAdapterPos = h.getBindingAdapterPosition();
+                        if (curAdapterPos == RecyclerView.NO_POSITION)
                             return;
 
-                        PostItem cur = items.get(curPos);
+                        // If this holder is now a shelf, ignore
+                        if (mode == Mode.FEED && getItemViewType(curAdapterPos) == VT_STORIES_SHELF)
+                            return;
+
+                        int curPostIndex = (mode == Mode.REELS) ? curAdapterPos : postIndexForAdapterPos(curAdapterPos);
+                        if (curPostIndex < 0 || curPostIndex >= items.size())
+                            return;
+
+                        PostItem cur = items.get(curPostIndex);
                         if (cur == null || cur.id == null || bindId == null || !cur.id.equals(bindId))
                             return;
 
@@ -426,10 +478,16 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
                         .getBindingAdapterPosition();
                 if (clickPos == RecyclerView.NO_POSITION)
                     return;
-                if (clickPos < 0 || clickPos >= items.size())
+
+                // If user taps a shelf row, do nothing
+                if (mode == Mode.FEED && getItemViewType(clickPos) == VT_STORIES_SHELF)
                     return;
 
-                PostItem cp = items.get(clickPos);
+                int clickPostIndex = (mode == Mode.REELS) ? clickPos : postIndexForAdapterPos(clickPos);
+                if (clickPostIndex < 0 || clickPostIndex >= items.size())
+                    return;
+
+                PostItem cp = items.get(clickPostIndex);
                 if (cp == null)
                     return;
 
@@ -437,7 +495,7 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
 
                 if (mode == Mode.FEED) {
                     if (isVid && listener != null) {
-                        listener.onRequestReelsAt(clickPos);
+                        listener.onRequestReelsAt(clickPostIndex);
                         return;
                     }
                     if (!isVid && listener != null) {
@@ -464,7 +522,9 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
 
     @Override
     public int getItemCount() {
-        return items.size();
+        if (mode == Mode.REELS)
+            return items.size();
+        return items.size() + getShelfCountFor(items.size());
     }
 
     @Override
@@ -484,14 +544,24 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
         if (items.isEmpty())
             return;
 
-        int bestPos = RecyclerView.NO_POSITION;
+        int bestAdapterPos = RecyclerView.NO_POSITION;
         float bestVisible = 0f;
 
         Rect parentRect = new Rect();
         rv.getGlobalVisibleRect(parentRect);
 
+        // Pick most visible CHILD, but skip shelves in FEED mode
         for (int i = 0; i < rv.getChildCount(); i++) {
             View child = rv.getChildAt(i);
+
+            int adapterPos = rv.getChildAdapterPosition(child);
+            if (adapterPos == RecyclerView.NO_POSITION)
+                continue;
+
+            if (mode == Mode.FEED && getItemViewType(adapterPos) == VT_STORIES_SHELF) {
+                continue; // shelves never autoplay
+            }
+
             Rect r = new Rect();
             boolean vis = child.getGlobalVisibleRect(r);
             if (!vis)
@@ -500,17 +570,13 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
             int visibleH = Math.min(r.bottom, parentRect.bottom) - Math.max(r.top, parentRect.top);
             float pct = visibleH / (float) child.getHeight();
 
-            int pos = rv.getChildAdapterPosition(child);
-            if (pos == RecyclerView.NO_POSITION)
-                continue;
-
             if (pct > bestVisible) {
                 bestVisible = pct;
-                bestPos = pos;
+                bestAdapterPos = adapterPos;
             }
         }
 
-        if (bestPos == RecyclerView.NO_POSITION)
+        if (bestAdapterPos == RecyclerView.NO_POSITION)
             return;
 
         // threshold: require ~60% visible
@@ -520,7 +586,12 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
             return;
         }
 
-        PostItem p = items.get(bestPos);
+        // Map adapter position -> post index (FEED only)
+        int bestPostIndex = (mode == Mode.REELS) ? bestAdapterPos : postIndexForAdapterPos(bestAdapterPos);
+        if (bestPostIndex < 0 || bestPostIndex >= items.size())
+            return;
+
+        PostItem p = items.get(bestPostIndex);
         if (p == null)
             return;
 
@@ -531,11 +602,11 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
             return;
         }
 
-        if (activePos != bestPos) {
+        // Active row tracking uses ADAPTER POS (not post index)
+        if (activePos != bestAdapterPos) {
             final int prev = activePos;
-            activePos = bestPos;
+            activePos = bestAdapterPos;
 
-            // Avoid notifyDataSetChanged inside scroll/layout
             final int nextPos = activePos;
             rv.post(() -> {
                 if (prev != RecyclerView.NO_POSITION)
@@ -546,7 +617,7 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
 
             // view tick: count once when new video becomes active
             try {
-                PostItem ap = items.get(activePos);
+                PostItem ap = items.get(bestPostIndex);
                 if (ap != null && ap.id != null && !ap.id.equals(lastViewedPostId)) {
                     lastViewedPostId = ap.id;
                     PostApi.sendViewTick(apiBase, ap.id, token);
@@ -555,57 +626,106 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
             }
         }
 
-        RecyclerView.ViewHolder vh = rv.findViewHolderForAdapterPosition(bestPos);
+        RecyclerView.ViewHolder vh = rv.findViewHolderForAdapterPosition(bestAdapterPos);
         if (vh instanceof VH) {
             VH row = (VH) vh;
             if (row.playerView != null) {
+
                 if (row.muteBadge != null && mode == Mode.FEED) {
                     row.muteBadge.setText(VideoPlaybackManager.get().isMuted() ? "🔇" : "🔊");
                 }
-                // show spinner while waiting
-                if (row.loadingSpinner != null) {
-                    row.loadingSpinner.setVisibility(View.VISIBLE);
-                }
 
-                // show poster if available (video thumbnail)
+                if (row.loadingSpinner != null)
+                    row.loadingSpinner.setVisibility(View.VISIBLE);
+
                 if (row.imageView != null) {
                     boolean hasThumb = (p.thumbnailUrl != null && p.thumbnailUrl.trim().length() > 0);
                     row.imageView.setVisibility(hasThumb ? View.VISIBLE : View.GONE);
                 }
 
-                // hide spinner on first frame for this URL
                 final String urlNow = p.mediaUrl;
                 VideoPlaybackManager.get().onFirstFrameForUrl(urlNow, (u) -> {
-
                     if (u == null || urlNow == null)
                         return;
                     if (!u.equals(urlNow))
                         return;
 
                     activity.runOnUiThread(() -> {
-                        // holder might be recycled; just best-effort hide
                         if (row.loadingSpinner != null)
                             row.loadingSpinner.setVisibility(View.GONE);
                         if (row.imageView != null)
                             row.imageView.setVisibility(View.GONE);
-
                     });
                 });
 
                 VideoPlaybackManager.get().play(activity, p.mediaUrl, row.playerView);
-                // Safety: never spin forever if video is already READY/playing
+
                 row.itemView.postDelayed(() -> {
                     try {
                         if (row.loadingSpinner != null)
                             row.loadingSpinner.setVisibility(View.GONE);
-                        // keep poster if you want; or hide it if you prefer:
-                        // if (row.imageView != null) row.imageView.setVisibility(View.GONE);
                     } catch (Exception ignored) {
                     }
                 }, 1200);
-
             }
         }
+    }
+
+    private int getShelfCountFor(int postCount) {
+        int c = 0;
+        for (int idx : shelfAfterPostIndex) {
+            if (idx == -1) {
+                c++;
+                continue;
+            }
+            if (idx < postCount)
+                c++;
+        }
+        return c;
+    }
+
+    private boolean isStoriesShelfPosition(int adapterPos) {
+        // adapterPos positions where shelves land, computed by simulating merge.
+        int shelvesSoFar = 0;
+
+        // Top shelf lands at adapterPos 0 if -1 exists.
+        for (int idx : shelfAfterPostIndex) {
+            if (idx == -1) {
+                if (adapterPos == 0)
+                    return true;
+                shelvesSoFar++;
+                continue;
+            }
+
+            // shelf appears AFTER post idx, so it lands at:
+            // (posts up to idx inclusive) + shelvesSoFar
+            int shelfPos = (idx + 1) + shelvesSoFar;
+            if (adapterPos == shelfPos)
+                return true;
+            shelvesSoFar++;
+        }
+        return false;
+    }
+
+    private int postIndexForAdapterPos(int adapterPos) {
+        // Number of shelves that appear at positions <= adapterPos determines offset.
+        int shelvesBefore = 0;
+        int shelvesSoFar = 0;
+
+        for (int idx : shelfAfterPostIndex) {
+            if (idx == -1) {
+                int shelfPos = 0;
+                if (shelfPos < adapterPos)
+                    shelvesBefore++;
+                shelvesSoFar++;
+                continue;
+            }
+            int shelfPos = (idx + 1) + shelvesSoFar;
+            if (shelfPos < adapterPos)
+                shelvesBefore++;
+            shelvesSoFar++;
+        }
+        return adapterPos - shelvesBefore;
     }
 
     private String timeAgo(String iso) {
@@ -676,6 +796,9 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
 
         TextView countsRow;
 
+        RecyclerView storiesShelfRecycler;
+        StoriesAdapter storiesShelfAdapter;
+
         EngagementBinder.Row feedEng = null;
         EngagementBinder.Row railEng = null;
 
@@ -695,6 +818,18 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
             loadingSpinner = itemView.findViewById(R.id.loadingSpinner);
 
             countsRow = itemView.findViewById(R.id.countsRow);
+
+            // Stories shelf row (only exists in item_feed_stories_shelf.xml)
+            storiesShelfRecycler = itemView.findViewById(R.id.storiesRecycler);
+            if (storiesShelfRecycler != null) {
+                storiesShelfRecycler.setLayoutManager(
+                        new androidx.recyclerview.widget.LinearLayoutManager(
+                                itemView.getContext(),
+                                androidx.recyclerview.widget.LinearLayoutManager.HORIZONTAL,
+                                false));
+                storiesShelfAdapter = new StoriesAdapter((Activity) itemView.getContext());
+                storiesShelfRecycler.setAdapter(storiesShelfAdapter);
+            }
 
             // FEED engagement row (view_engagement_row.xml)
             View engLike = itemView.findViewById(R.id.engLike);
@@ -737,7 +872,14 @@ public class NativeFeedAdapter extends RecyclerView.Adapter<NativeFeedAdapter.VH
                 railEng.saveIcon = itemView.findViewById(R.id.railSaveIcon);
                 railEng.saveCount = itemView.findViewById(R.id.railSaveCount);
             }
-
         }
+
+        void bindStoriesShelf(Activity a, List<StoryItem> items, StoriesAdapter.Listener l) {
+            if (storiesShelfAdapter == null)
+                return;
+            storiesShelfAdapter.setListener(l);
+            storiesShelfAdapter.setItems(items);
+        }
+
     }
 }

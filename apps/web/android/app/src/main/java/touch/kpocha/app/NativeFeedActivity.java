@@ -37,8 +37,6 @@ public class NativeFeedActivity extends Activity {
     private LinearLayoutManager layoutManager;
     private View header;
 
-    private RecyclerView storiesRecycler;
-    private StoriesAdapter storiesAdapter;
     private int pendingReelsPos = RecyclerView.NO_POSITION;
 
     @Override
@@ -56,57 +54,6 @@ public class NativeFeedActivity extends Activity {
 
         header = findViewById(R.id.nativeFeedHeader);
 
-        // ---- Stories (NOT in header; wired here) ----
-        storiesRecycler = findViewById(R.id.storiesRecycler);
-        if (storiesRecycler != null) {
-            storiesRecycler.setLayoutManager(
-                    new androidx.recyclerview.widget.LinearLayoutManager(
-                            this,
-                            androidx.recyclerview.widget.LinearLayoutManager.HORIZONTAL,
-                            false));
-
-            storiesAdapter = new StoriesAdapter(this);
-            storiesRecycler.setAdapter(storiesAdapter);
-
-            storiesAdapter.setListener(new StoriesAdapter.Listener() {
-                @Override
-                public void onCreateStory() {
-                    Intent i = new Intent(NativeFeedActivity.this, StoryComposeActivity.class);
-                    i.putExtra(StoryComposeActivity.EXTRA_API_BASE, apiBase);
-                    i.putExtra(StoryComposeActivity.EXTRA_TOKEN, token);
-                    i.putExtra(StoryComposeActivity.EXTRA_LGA, lga);
-                    startActivity(i);
-
-                }
-
-                @Override
-                public void onStoryClicked(StoryItem item) {
-                    // later: open story viewer
-                    if (item == null || item.id == null || item.id.trim().isEmpty())
-                        return;
-
-                    Intent i = new Intent(NativeFeedActivity.this, StoryViewerActivity.class);
-                    i.putExtra(StoryViewerActivity.EXTRA_API_BASE, apiBase);
-                    i.putExtra(StoryViewerActivity.EXTRA_TOKEN, token);
-                    i.putExtra(StoryViewerActivity.EXTRA_STORY_ID, item.id);
-                    startActivity(i);
-                }
-            });
-
-            StoriesApi.fetchPublicStories(apiBase, token, new StoriesApi.StoriesCallback() {
-                @Override
-                public void onSuccess(java.util.List<StoryItem> stories) {
-                    runOnUiThread(() -> storiesAdapter.setItems(stories));
-                }
-
-                @Override
-                public void onError(String message) {
-                    // leave shelf empty silently for now
-                }
-            });
-
-        }
-
         recycler = findViewById(R.id.feedRecycler);
         layoutManager = new LinearLayoutManager(this, LinearLayoutManager.VERTICAL, false);
         recycler.setLayoutManager(layoutManager);
@@ -114,6 +61,29 @@ public class NativeFeedActivity extends Activity {
         adapter = new NativeFeedAdapter(this, apiBase, token);
         adapter.setMode(NativeFeedAdapter.Mode.FEED);
         recycler.setAdapter(adapter);
+
+        adapter.setStoriesListener(new StoriesAdapter.Listener() {
+            @Override
+            public void onCreateStory() {
+                Intent i = new Intent(NativeFeedActivity.this, StoryComposeActivity.class);
+                i.putExtra(StoryComposeActivity.EXTRA_API_BASE, apiBase);
+                i.putExtra(StoryComposeActivity.EXTRA_TOKEN, token);
+                i.putExtra(StoryComposeActivity.EXTRA_LGA, lga);
+                startActivity(i);
+            }
+
+            @Override
+            public void onStoryClicked(StoryItem item) {
+                if (item == null || item.id == null || item.id.trim().isEmpty())
+                    return;
+
+                Intent i = new Intent(NativeFeedActivity.this, StoryViewerActivity.class);
+                i.putExtra(StoryViewerActivity.EXTRA_API_BASE, apiBase);
+                i.putExtra(StoryViewerActivity.EXTRA_TOKEN, token);
+                i.putExtra(StoryViewerActivity.EXTRA_STORY_ID, item.id);
+                startActivity(i);
+            }
+        });
 
         adapter.setListener(new NativeFeedAdapter.Listener() {
             @Override
@@ -239,9 +209,6 @@ public class NativeFeedActivity extends Activity {
         if (header != null) {
             header.setVisibility(mode == NativeFeedAdapter.Mode.REELS ? View.GONE : View.VISIBLE);
         }
-        if (storiesRecycler != null) {
-            storiesRecycler.setVisibility(mode == NativeFeedAdapter.Mode.REELS ? View.GONE : View.VISIBLE);
-        }
 
         int anchor;
 
@@ -302,12 +269,13 @@ public class NativeFeedActivity extends Activity {
     }
 
     private void reloadStories() {
-        if (storiesAdapter == null)
-            return;
         StoriesApi.fetchPublicStories(apiBase, token, new StoriesApi.StoriesCallback() {
             @Override
             public void onSuccess(java.util.List<StoryItem> stories) {
-                runOnUiThread(() -> storiesAdapter.setItems(stories));
+                runOnUiThread(() -> {
+                    if (adapter != null)
+                        adapter.setStories(stories);
+                });
             }
 
             @Override
