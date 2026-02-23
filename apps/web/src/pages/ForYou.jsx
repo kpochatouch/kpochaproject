@@ -1071,8 +1071,8 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
       ref={pageRef}
       className="h-[100dvh] snap-start snap-always bg-black md:flex md:items-center md:justify-center"
     >
-      {/* header (profile + book) */}
-      <div className="px-4 pt-4 pb-2 flex items-start justify-between gap-3">
+      {/* header (DESKTOP ONLY) – keep your current desktop layout */}
+      <div className="hidden md:flex px-4 pt-4 pb-2 items-start justify-between gap-3 w-full md:max-w-[560px]">
         <div className="flex gap-3">
           <div
             className="w-10 h-10 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center cursor-pointer"
@@ -1095,7 +1095,7 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
           </div>
           <div>
             <div
-              className="text-sm font-semibold text-white truncate max-w-[120px] cursor-pointer"
+              className="text-sm font-semibold text-white truncate max-w-[180px] cursor-pointer"
               onClick={goToProfile}
               title="View profile"
             >
@@ -1190,6 +1190,63 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
       >
+        {/* header (MOBILE ONLY) – overlay so each post stays exactly 100dvh */}
+        <div className="md:hidden absolute top-0 left-0 right-0 z-[4] px-3 pt-3 pb-2 flex items-start justify-between gap-3 bg-gradient-to-b from-black/70 via-black/20 to-transparent">
+          <div className="flex gap-3 min-w-0">
+            <div
+              className="w-10 h-10 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center cursor-pointer shrink-0"
+              onClick={goToProfile}
+              title="View profile"
+              role="button"
+              aria-label="View profile"
+            >
+              {avatar ? (
+                <img
+                  src={avatar}
+                  alt={proName}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <span className="text-sm text-white">
+                  {proName.slice(0, 1).toUpperCase()}
+                </span>
+              )}
+            </div>
+
+            <div className="min-w-0">
+              <div
+                className="text-sm font-semibold text-white truncate max-w-[220px] cursor-pointer"
+                onClick={goToProfile}
+                title="View profile"
+              >
+                {proName}
+              </div>
+              <div className="text-xs text-gray-300">
+                {lga || "Nigeria"} • {timeAgo(post.createdAt)}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            {post.proId && (
+              <Link
+                to={`/book/${post.proId}`}
+                className="rounded-md bg-gold text-black px-3 py-1 text-sm font-semibold"
+              >
+                Book
+              </Link>
+            )}
+            <button
+              onClick={() => setMenuOpen((v) => !v)}
+              aria-label="Open post menu"
+              className="w-8 h-8 flex items-center justify-center rounded-full bg-black/40 text-white"
+              type="button"
+            >
+              ⋯
+            </button>
+          </div>
+        </div>
+
         <video
           ref={videoRef}
           src={videoSrc}

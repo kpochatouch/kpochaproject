@@ -101,6 +101,24 @@ function sanitizePostForClient(p) {
   };
 }
 
+function videoElemMatch() {
+  return {
+    $elemMatch: {
+      $or: [
+        { type: "video" },
+        {
+          url: {
+            $regex: "(\\.mp4|\\.mov|\\.webm|\\.mkv)(\\?|$)",
+            $options: "i",
+          },
+        },
+        { url: { $regex: "/video/", $options: "i" } },
+        { url: { $regex: "/video/upload/", $options: "i" } },
+      ],
+    },
+  };
+}
+
 /* ============================== ROUTER ============================== */
 const router = express.Router();
 
@@ -319,8 +337,8 @@ router.get("/posts/:id/next", tryAuth, async (req, res) => {
       hidden: { $ne: true },
       deleted: { $ne: true },
 
-      // ✅ For You queue is video-only
-      media: { $elemMatch: { type: "video" } },
+      // ✅ For You queue is video-only (type OR URL looks like video)
+      media: videoElemMatch(),
 
       // ✅ exclude stories from reel queue
       $or: [{ type: { $ne: "story" } }, { type: { $exists: false } }],
@@ -418,7 +436,7 @@ router.get("/posts/:id/next", tryAuth, async (req, res) => {
         hidden: { $ne: true },
         deleted: { $ne: true },
 
-        media: { $elemMatch: { type: "video" } },
+        media: videoElemMatch(),
 
         $or: [{ type: { $ne: "story" } }, { type: { $exists: false } }],
         _id: { $ne: current._id },
@@ -972,8 +990,8 @@ router.get("/posts/for-you/start", tryAuth, async (req, res) => {
       hidden: { $ne: true },
       deleted: { $ne: true },
 
-      // ✅ FOR YOU is video-only
-      media: { $elemMatch: { type: "video" } },
+      // ✅ FOR YOU is video-only (type OR URL looks like video)
+      media: videoElemMatch(),
 
       // ✅ exclude stories from For You start
       $or: [{ type: { $ne: "story" } }, { type: { $exists: false } }],
