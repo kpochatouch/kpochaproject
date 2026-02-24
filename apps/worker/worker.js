@@ -13,13 +13,6 @@ function mustEnv(name) {
 
 console.log("[worker] booting…");
 console.log("[worker] node", process.version);
-console.log("[worker] bullRedis", {
-  host: bullRedis?.host,
-  port: bullRedis?.port,
-  username: bullRedis?.username ? "set" : "unset",
-  password: bullRedis?.password ? "set" : "unset",
-  tls: bullRedis?.tls ? "on" : "off",
-});
 
 console.log("[worker] has MONGODB_URI?", !!process.env.MONGODB_URI);
 
