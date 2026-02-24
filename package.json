@@ -20,6 +20,6 @@
     "patch-package": "^8.0.1"
   },
   "engines": {
-    "node": ">=18"
-  }
+  "node": "22.x"
+}
 }
