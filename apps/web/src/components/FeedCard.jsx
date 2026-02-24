@@ -9,6 +9,7 @@ import CommentToggle from "./CommentToggle.jsx";
 import ActionButton from "./ActionButton.jsx";
 import { Capacitor } from "@capacitor/core";
 import { openNativeFeed } from "../lib/nativeFeed";
+import { attachHlsToVideo, isHlsUrl } from "../lib/hlsAttach";
 
 // ------------------- Feed: Only one video plays at a time -------------------
 const FEED_ACTIVE_VIDEO_KEY = "__kpocha_feed_active_video_id__";
@@ -71,6 +72,10 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
   const cardRef = useRef(null);
   const menuRef = useRef(null);
 
+  // HLS.js lifecycle (web only)
+  const hlsCleanupRef = useRef(null);
+  const hlsSrcRef = useRef("");
+
   const [inView, setInView] = useState(false);
   const hasSentViewRef = useRef(false); // for non-video cards only
   const videoViewTimerRef = useRef(null); // 3s in-view -> send view
@@ -128,25 +133,65 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
   const [userHasInteracted, setUserHasInteracted] = useState(false);
 
   // ----- Lazy video src loader (data-src -> src) -----
-  function ensureVideoSrcLoaded() {
+  async function ensureVideoSrcLoaded() {
     const el = videoRef.current;
     if (!el) return;
 
     const ds = (el.getAttribute("data-src") || "").trim();
     if (!ds) return;
 
+    // If this is HLS and already attached to same src, do nothing
+    if (isHlsUrl(ds) && hlsSrcRef.current === ds) return;
+
     const attrSrc = (el.getAttribute("src") || "").trim();
 
-    // If src is already set correctly, do nothing
-    if (attrSrc && attrSrc === ds) return;
+    // For non-HLS, keep your old fast path
+    if (!isHlsUrl(ds)) {
+      // If src is already set correctly, do nothing
+      if (attrSrc && attrSrc === ds) return;
 
-    // Set both attribute and property (WebView needs this sometimes)
-    el.setAttribute("src", ds);
-    el.src = ds;
+      // If we previously attached HLS, clean it up
+      if (hlsCleanupRef.current) {
+        try {
+          hlsCleanupRef.current();
+        } catch {}
+        hlsCleanupRef.current = null;
+        hlsSrcRef.current = "";
+      }
 
+      // Set both attribute and property (WebView needs this sometimes)
+      el.setAttribute("src", ds);
+      el.src = ds;
+
+      try {
+        el.load();
+      } catch {}
+
+      return;
+    }
+
+    // HLS (.m3u8)
+    // Always cleanup old attachment before re-attaching
+    if (hlsCleanupRef.current) {
+      try {
+        hlsCleanupRef.current();
+      } catch {}
+      hlsCleanupRef.current = null;
+      hlsSrcRef.current = "";
+    }
+
+    // Clear existing src to avoid mixed states
     try {
-      el.load();
+      el.removeAttribute("src");
     } catch {}
+    try {
+      el.src = "";
+    } catch {}
+
+    // Attach HLS (native or hls.js)
+    const cleanup = await attachHlsToVideo(el, ds);
+    hlsCleanupRef.current = cleanup;
+    hlsSrcRef.current = ds;
   }
 
   function showSpeakerBrief(ms = 2500) {
@@ -272,7 +317,28 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
     }
     watchAccumRef.current = 0;
     lastWatchTsRef.current = 0;
+
+    // cleanup HLS instance when switching posts
+    if (hlsCleanupRef.current) {
+      try {
+        hlsCleanupRef.current();
+      } catch {}
+      hlsCleanupRef.current = null;
+      hlsSrcRef.current = "";
+    }
   }, [postId]);
+
+  useEffect(() => {
+    return () => {
+      if (hlsCleanupRef.current) {
+        try {
+          hlsCleanupRef.current();
+        } catch {}
+        hlsCleanupRef.current = null;
+        hlsSrcRef.current = "";
+      }
+    };
+  }, []);
 
   function mergeStatsFromServer(partial) {
     if (!partial || typeof partial !== "object") return;
@@ -385,7 +451,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
           }
 
           // Ensure src is loaded
-          ensureVideoSrcLoaded();
+          await ensureVideoSrcLoaded();
 
           // mark as autoplay-triggered (so 10s engagement won't count until interaction)
           playTriggeredByObserverRef.current = true;

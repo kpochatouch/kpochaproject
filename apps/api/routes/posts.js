@@ -55,11 +55,12 @@ function sanitizePostForClient(p) {
 
           const isVideo =
             m?.type === "video" ||
+            u.endsWith(".m3u8") || // ✅ HLS
             u.endsWith(".mp4") ||
             u.endsWith(".mov") ||
             u.endsWith(".webm") ||
-            u.includes("/video/upload/") || // ✅ Cloudinary typical
-            u.includes("/video/"); // ✅ generic fallback
+            u.includes("/video/upload/") || // Cloudinary legacy
+            u.includes("/video/"); // generic legacy
 
           return {
             url,

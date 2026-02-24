@@ -54,6 +54,7 @@ import callRoutes from "./routes/call.js";
 import webrtcRoutes from "./routes/webrtc.js";
 import { getIO } from "./sockets/index.js";
 import pushRoutes from "./routes/push.js";
+import mediaRoutes from "./routes/media.js";
 
 dotenv.config();
 
@@ -1208,6 +1209,7 @@ app.use("/api", chatRoutes({ requireAuth }));
 app.use("/api", callRoutes({ requireAuth }));
 app.use("/api", webrtcRoutes);
 app.use("/api", pushRoutes);
+app.use("/api", mediaRoutes({ requireAuth }));
 
 // admin pros
 try {

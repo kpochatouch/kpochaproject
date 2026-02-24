@@ -1,0 +1,15 @@
+{
+  "name": "kpocha-touch-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node worker.js"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.995.0",
+    "bullmq": "^5.70.1",
+    "dotenv": "^16.6.1",
+    "ioredis": "^5.9.3",
+    "mongoose": "^8.19.0"
+  }
+}
