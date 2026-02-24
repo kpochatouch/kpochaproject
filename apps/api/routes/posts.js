@@ -2,9 +2,12 @@
 import express from "express";
 import mongoose from "mongoose";
 import admin from "firebase-admin";
+
 import { Pro } from "../models.js";
 import Post from "../models/Post.js";
 import PostStats from "../models/PostStats.js";
+import MediaAsset from "../models/MediaAsset.js";
+
 import redisClient from "../redis.js";
 import { scoreFrom } from "../services/postScoring.js";
 
@@ -14,6 +17,7 @@ async function requireAuth(req, res, next) {
     const h = req.headers.authorization || "";
     const token = h.startsWith("Bearer ") ? h.slice(7) : null;
     if (!token) return res.status(401).json({ error: "Missing token" });
+
     const decoded = await admin.auth().verifyIdToken(token);
     req.user = { uid: decoded.uid, email: decoded.email || null };
     next();
@@ -41,44 +45,132 @@ const toUpper = (v) => (typeof v === "string" ? v.trim().toUpperCase() : v);
 const trim = (v) => (typeof v === "string" ? v.trim() : v);
 const todayStr = () => new Date().toISOString().slice(0, 10); // YYYY-MM-DD
 
+function videoElemMatch() {
+  return {
+    $elemMatch: {
+      $or: [
+        // ✅ new asset-based
+        { assetId: { $exists: true, $ne: "" } },
+
+        // ✅ explicit typing (works for both legacy + new)
+        { type: "video" },
+
+        // legacy url heuristics
+        {
+          url: {
+            $regex: "(\\.mp4|\\.mov|\\.webm|\\.mkv|\\.m3u8)(\\?|$)",
+            $options: "i",
+          },
+        },
+        { url: { $regex: "/video/", $options: "i" } },
+        { url: { $regex: "/video/upload/", $options: "i" } },
+      ],
+    },
+  };
+}
+
+const R2_PUBLIC_BASE_URL = (process.env.R2_PUBLIC_BASE_URL || "").replace(
+  /\/+$/,
+  "",
+);
+
+function assetKeyToPublicUrl(key) {
+  if (!key) return "";
+  if (!R2_PUBLIC_BASE_URL) return "";
+  return `${R2_PUBLIC_BASE_URL}/${String(key).replace(/^\/+/, "")}`;
+}
+
+async function expandMediaForClient(mediaArr) {
+  const media = Array.isArray(mediaArr) ? mediaArr : [];
+
+  const ids = media
+    .map((m) => m?.assetId)
+    .filter((x) => typeof x === "string" && x.length === 24);
+
+  if (!ids.length) {
+    // legacy passthrough
+    return media
+      .map((m) => {
+        const url = String(m?.url || "").trim();
+        if (!url) return null;
+        return {
+          url,
+          type: m?.type === "video" ? "video" : "image",
+          thumbnailUrl: String(m?.thumbnailUrl || "").trim(),
+          width: Number(m?.width || 0),
+          height: Number(m?.height || 0),
+          durationSec: Number(m?.durationSec || 0),
+          status: "ready",
+        };
+      })
+      .filter(Boolean);
+  }
+
+  const assets = await MediaAsset.find({ _id: { $in: ids } }).lean();
+  const map = new Map(assets.map((a) => [String(a._id), a]));
+
+  return media
+    .map((m) => {
+      // new asset-based media
+      if (m?.assetId && map.has(String(m.assetId))) {
+        const a = map.get(String(m.assetId));
+        const isVideo = a.type === "video";
+
+        const hlsUrl = isVideo
+          ? assetKeyToPublicUrl(a?.hls?.masterPlaylistKey)
+          : "";
+
+        const originalUrl = assetKeyToPublicUrl(a?.original?.key);
+
+        const thumb =
+          (m.thumbnailAssetId && map.get(String(m.thumbnailAssetId))) || null;
+
+        const thumbnailUrl = thumb
+          ? assetKeyToPublicUrl(thumb?.original?.key || thumb?.thumbnail?.key)
+          : "";
+
+        return {
+          assetId: String(a._id),
+          url: isVideo ? hlsUrl || originalUrl : originalUrl,
+          hlsUrl,
+          type: isVideo ? "video" : "image",
+          thumbnailUrl,
+          width: Number(a?.original?.width || 0),
+          height: Number(a?.original?.height || 0),
+          durationSec: Number(a?.original?.durationSec || 0),
+          status: a.status || "uploaded",
+          error: a.error || null,
+        };
+      }
+
+      // legacy fallback (url)
+      const url = String(m?.url || "").trim();
+      if (!url) return null;
+
+      return {
+        url,
+        type: m?.type === "video" ? "video" : "image",
+        thumbnailUrl: String(m?.thumbnailUrl || "").trim(),
+        width: Number(m?.width || 0),
+        height: Number(m?.height || 0),
+        durationSec: Number(m?.durationSec || 0),
+        status: "ready",
+      };
+    })
+    .filter(Boolean);
+}
+
 // what we send to frontend
-function sanitizePostForClient(p) {
+async function sanitizePostForClient(p) {
   const obj = typeof p.toObject === "function" ? p.toObject() : { ...p };
-
-  const mediaNorm = Array.isArray(obj.media)
-    ? obj.media
-        .map((m) => {
-          const url = String(m?.url || m?.secure_url || m?.path || "").trim();
-          if (!url) return null;
-
-          const u = url.toLowerCase();
-
-          const isVideo =
-            m?.type === "video" ||
-            u.endsWith(".m3u8") || // ✅ HLS
-            u.endsWith(".mp4") ||
-            u.endsWith(".mov") ||
-            u.endsWith(".webm") ||
-            u.includes("/video/upload/") || // Cloudinary legacy
-            u.includes("/video/"); // generic legacy
-
-          return {
-            url,
-            type: isVideo ? "video" : "image",
-            thumbnailUrl: String(m?.thumbnailUrl || "").trim(),
-            width: Number(m?.width || 0),
-            height: Number(m?.height || 0),
-            durationSec: Number(m?.durationSec || 0),
-          };
-        })
-        .filter(Boolean)
-    : [];
+  const mediaNorm = await expandMediaForClient(obj.media);
 
   return {
     _id: obj._id,
     pro: obj.pro,
     proId: obj.proId,
     proOwnerUid: obj.proOwnerUid,
+
     // canonical ownerUid (preferred by frontend)
     ownerUid:
       obj.ownerUid ||
@@ -97,33 +189,18 @@ function sanitizePostForClient(p) {
     hidden: !!obj.hidden,
     commentsDisabled: !!obj.commentsDisabled,
     createdAt: obj.createdAt,
+
     authorName: obj.pro?.name || "Professional",
     authorAvatar: obj.pro?.photoUrl || "",
-  };
-}
-
-function videoElemMatch() {
-  return {
-    $elemMatch: {
-      $or: [
-        { type: "video" },
-        {
-          url: {
-            $regex: "(\\.mp4|\\.mov|\\.webm|\\.mkv)(\\?|$)",
-            $options: "i",
-          },
-        },
-        { url: { $regex: "/video/", $options: "i" } },
-        { url: { $regex: "/video/upload/", $options: "i" } },
-      ],
-    },
   };
 }
 
 /* ============================== ROUTER ============================== */
 const router = express.Router();
 
-// GET /posts?ownerUid=...  (compat for public profile pages)
+/* -------------------------------------------------------------------- */
+/* GET /posts?ownerUid=... (compat for public profile pages) */
+/* -------------------------------------------------------------------- */
 router.get("/posts", async (req, res) => {
   try {
     const { ownerUid = "", limit = 50, before = null } = req.query;
@@ -150,7 +227,8 @@ router.get("/posts", async (req, res) => {
       .limit(Math.max(1, Math.min(Number(limit) || 20, 200)))
       .lean();
 
-    return res.json(items.map(sanitizePostForClient));
+    const out = await Promise.all(items.map(sanitizePostForClient));
+    return res.json(out);
   } catch (err) {
     console.error("[posts:get?ownerUid] error:", err);
     return res.status(500).json({ error: "posts_load_failed" });
@@ -158,45 +236,54 @@ router.get("/posts", async (req, res) => {
 });
 
 /* -------------------------------------------------------------------- */
-/* CREATE                                                               */
+/* CREATE */
 /* -------------------------------------------------------------------- */
 router.post("/posts", requireAuth, async (req, res) => {
   try {
     const body = req.body || {};
     let { text = "", media = [], lga = "", isPublic = true, tags = [] } = body;
 
-    // find pro profile for this uid
     const proDoc = await Pro.findOne({ ownerUid: req.user.uid }).lean();
     if (!proDoc) return res.status(403).json({ error: "not_a_pro" });
 
     text = trim(text || "");
     if (!Array.isArray(media)) media = [];
-    media = media
-      .filter((m) => m && typeof m.url === "string" && m.url.trim())
-      .map((m) => ({
-        url: trim(m.url),
-        type: m.type === "video" ? "video" : "image",
-        thumbnailUrl: trim(m.thumbnailUrl || ""),
-        width: Number(m.width || 0),
-        height: Number(m.height || 0),
-        durationSec: Number(m.durationSec || 0),
-      }));
 
-    tags = Array.isArray(tags)
-      ? tags
-          .map((t) => String(t || "").trim())
-          .filter(Boolean)
-          .slice(0, 10)
-      : [];
+    media = media
+      .map((m) => {
+        // NEW: asset-based
+        if (m && typeof m.assetId === "string" && isObjId(m.assetId)) {
+          return {
+            assetId: String(m.assetId),
+            thumbnailAssetId: isObjId(m.thumbnailAssetId)
+              ? String(m.thumbnailAssetId)
+              : "",
+            type: m.type === "video" ? "video" : "image",
+          };
+        }
+
+        // LEGACY: url-based
+        if (m && typeof m.url === "string" && m.url.trim()) {
+          return {
+            url: trim(m.url),
+            type: m.type === "video" ? "video" : "image",
+            thumbnailUrl: trim(m.thumbnailUrl || ""),
+            width: Number(m.width || 0),
+            height: Number(m.height || 0),
+            durationSec: Number(m.durationSec || 0),
+          };
+        }
+        return null;
+      })
+      .filter(Boolean);
 
     const lgaFinal = toUpper(lga || proDoc.lga || "");
 
     const post = await Post.create({
-      // canonical owner UID — used by profile pages & follow logic
       ownerUid: req.user.uid,
-      // for backward compatibility / pro-specific fields
       proOwnerUid: req.user.uid,
       createdBy: req.user.uid,
+
       proId: proDoc._id,
       pro: {
         _id: proDoc._id,
@@ -204,6 +291,7 @@ router.post("/posts", requireAuth, async (req, res) => {
         lga: proDoc.lga || "",
         photoUrl: proDoc.photoUrl || proDoc.avatarUrl || "",
       },
+
       text,
       media,
       tags,
@@ -211,14 +299,13 @@ router.post("/posts", requireAuth, async (req, res) => {
       isPublic: !!isPublic,
     });
 
-    // make sure stats doc exists
     await PostStats.findOneAndUpdate(
       { postId: post._id },
       { $setOnInsert: { postId: post._id, trendingScore: 0 } },
       { upsert: true, new: true },
     );
 
-    return res.json({ ok: true, post: sanitizePostForClient(post) });
+    return res.json({ ok: true, post: await sanitizePostForClient(post) });
   } catch (err) {
     console.error("[posts:create] error:", err);
     return res.status(500).json({ error: "post_create_failed" });
@@ -226,18 +313,18 @@ router.post("/posts", requireAuth, async (req, res) => {
 });
 
 /* -------------------------------------------------------------------- */
-/* PUBLIC FEED                                                          */
+/* PUBLIC FEED */
 /* -------------------------------------------------------------------- */
-// NOTE: path changed from "/feed/public" → "/posts/public" to match frontend
+// NOTE: path changed from "/feed/public" → "/posts/public"
 router.get("/posts/public", async (req, res) => {
   try {
     const { lga = "", limit = 20, before = null } = req.query;
+
     const q = {
       isPublic: true,
       hidden: { $ne: true },
       deleted: { $ne: true },
-
-      // ✅ exclude stories from normal feed
+      // exclude stories
       $or: [{ type: { $ne: "story" } }, { type: { $exists: false } }],
     };
 
@@ -249,7 +336,8 @@ router.get("/posts/public", async (req, res) => {
       .limit(Math.max(1, Math.min(Number(limit) || 20, 50)))
       .lean();
 
-    return res.json(items.map(sanitizePostForClient));
+    const out = await Promise.all(items.map(sanitizePostForClient));
+    return res.json(out);
   } catch (err) {
     console.error("[feed:public] error:", err);
     return res.status(500).json({ error: "feed_load_failed" });
@@ -271,7 +359,8 @@ router.get("/posts/author/:uid", async (req, res) => {
       .limit(200)
       .lean();
 
-    return res.json(items.map(sanitizePostForClient));
+    const out = await Promise.all(items.map(sanitizePostForClient));
+    return res.json(out);
   } catch (err) {
     console.error("[posts:author] error:", err);
     return res.status(500).json({ error: "author_load_failed" });
@@ -288,14 +377,16 @@ router.get("/posts/me", requireAuth, async (req, res) => {
       .sort({ createdAt: -1 })
       .limit(100)
       .lean();
-    return res.json(items.map(sanitizePostForClient));
+
+    const out = await Promise.all(items.map(sanitizePostForClient));
+    return res.json(out);
   } catch (err) {
     console.error("[posts:me] error:", err);
     return res.status(500).json({ error: "posts_load_failed" });
   }
 });
 
-// ── READ: single post (public) ─────────────────────────────────────────
+// READ: single post (public)
 router.get("/posts/:id", tryAuth, async (req, res) => {
   try {
     const { id } = req.params;
@@ -305,7 +396,8 @@ router.get("/posts/:id", tryAuth, async (req, res) => {
     if (!p || p.hidden || p.deleted) {
       return res.status(404).json({ error: "not_found" });
     }
-    return res.json(sanitizePostForClient(p));
+
+    return res.json(await sanitizePostForClient(p));
   } catch (err) {
     console.error("[posts:read] error:", err);
     return res.status(500).json({ error: "post_load_failed" });
@@ -321,13 +413,12 @@ router.get("/posts/:id/next", tryAuth, async (req, res) => {
 
     const viewerUid = req.user?.uid || null;
 
-    // NEW: exclude list from client (?exclude=comma,comma,...)
     const excludeRaw = String(req.query.exclude || "");
     const excludeIds = excludeRaw
       .split(",")
       .map((s) => s.trim())
       .filter((s) => /^[0-9a-fA-F]{24}$/.test(s))
-      .slice(0, 200); // safety cap
+      .slice(0, 200);
 
     const excludeObjectIds = excludeIds.map(
       (x) => new mongoose.Types.ObjectId(x),
@@ -338,13 +429,9 @@ router.get("/posts/:id/next", tryAuth, async (req, res) => {
       hidden: { $ne: true },
       deleted: { $ne: true },
 
-      // ✅ For You queue is video-only (type OR URL looks like video)
       media: videoElemMatch(),
-
-      // ✅ exclude stories from reel queue
       $or: [{ type: { $ne: "story" } }, { type: { $exists: false } }],
 
-      // ✅ exclude current + anything already shown
       _id: { $nin: [current._id, ...excludeObjectIds] },
     };
 
@@ -358,10 +445,7 @@ router.get("/posts/:id/next", tryAuth, async (req, res) => {
       .lean();
 
     // 2) Same LGA
-    const sameLga = await Post.find({
-      ...baseFilter,
-      lga: current.lga,
-    })
+    const sameLga = await Post.find({ ...baseFilter, lga: current.lga })
       .sort({ createdAt: -1 })
       .limit(20)
       .lean();
@@ -378,7 +462,7 @@ router.get("/posts/:id/next", tryAuth, async (req, res) => {
       if (likedIds.length) {
         likedPosts = await Post.find({
           ...baseFilter,
-          _id: { $in: likedIds }, // baseFilter already excludes current/exclude
+          _id: { $in: likedIds },
         }).lean();
       }
     }
@@ -388,8 +472,8 @@ router.get("/posts/:id/next", tryAuth, async (req, res) => {
       .sort({ trendingScore: -1 })
       .limit(300)
       .lean();
-
     const trendingIds = topStats.map((s) => s.postId).filter(Boolean);
+
     let trendingPosts = [];
     if (trendingIds.length) {
       trendingPosts = await Post.find({
@@ -404,7 +488,7 @@ router.get("/posts/:id/next", tryAuth, async (req, res) => {
       );
     }
 
-    // 5) Recent global fallback (unseen)
+    // 5) Recent global fallback
     const recentGlobal = await Post.find(baseFilter)
       .sort({ createdAt: -1 })
       .limit(200)
@@ -429,16 +513,13 @@ router.get("/posts/:id/next", tryAuth, async (req, res) => {
 
     const next = queue[0] || null;
 
-    // NEW: "river never dries" fallback — if truly no unseen exists,
-    // return ANY other post (excluding current only), to loop.
+    // "river never dries" fallback
     if (!next) {
       const loopPick = await Post.findOne({
         isPublic: true,
         hidden: { $ne: true },
         deleted: { $ne: true },
-
         media: videoElemMatch(),
-
         $or: [{ type: { $ne: "story" } }, { type: { $exists: false } }],
         _id: { $ne: current._id },
       })
@@ -446,13 +527,13 @@ router.get("/posts/:id/next", tryAuth, async (req, res) => {
         .lean();
 
       return res.json({
-        next: loopPick ? sanitizePostForClient(loopPick) : null,
+        next: loopPick ? await sanitizePostForClient(loopPick) : null,
         looped: !!loopPick,
       });
     }
 
     return res.json({
-      next: sanitizePostForClient(next),
+      next: await sanitizePostForClient(next),
       looped: false,
     });
   } catch (e) {
@@ -462,14 +543,11 @@ router.get("/posts/:id/next", tryAuth, async (req, res) => {
 });
 
 /* -------------------------------------------------------------------- */
-/* STORIES (expire after 24h by not being returned)                      */
+/* STORIES */
 /* -------------------------------------------------------------------- */
-
-// GET /stories/public  (active stories only)
 router.get("/stories/public", async (req, res) => {
   try {
     const { limit = 50 } = req.query;
-
     const now = new Date();
     const cutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
@@ -478,9 +556,6 @@ router.get("/stories/public", async (req, res) => {
       hidden: { $ne: true },
       deleted: { $ne: true },
       type: "story",
-
-      // ✅ tolerate legacy stories with no expiresAt:
-      // treat "no expiresAt" as "createdAt within last 24h"
       $or: [
         { expiresAt: { $gt: now } },
         { expiresAt: null, createdAt: { $gt: cutoff } },
@@ -493,14 +568,14 @@ router.get("/stories/public", async (req, res) => {
       .limit(Math.max(1, Math.min(Number(limit) || 50, 200)))
       .lean();
 
-    return res.json(items.map(sanitizePostForClient));
+    const out = await Promise.all(items.map(sanitizePostForClient));
+    return res.json(out);
   } catch (err) {
     console.error("[stories:public] error:", err);
     return res.status(500).json({ error: "stories_load_failed" });
   }
 });
 
-// GET /stories/me (owner active stories only)
 router.get("/stories/me", requireAuth, async (req, res) => {
   try {
     const now = new Date();
@@ -520,18 +595,17 @@ router.get("/stories/me", requireAuth, async (req, res) => {
       .limit(200)
       .lean();
 
-    return res.json(items.map(sanitizePostForClient));
+    const out = await Promise.all(items.map(sanitizePostForClient));
+    return res.json(out);
   } catch (err) {
     console.error("[stories:me] error:", err);
     return res.status(500).json({ error: "stories_load_failed" });
   }
 });
 
-// GET /stories/me/archived (owner expired stories only)
 router.get("/stories/me/archived", requireAuth, async (req, res) => {
   try {
     const { limit = 200 } = req.query;
-
     const now = new Date();
     const cutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
@@ -539,8 +613,6 @@ router.get("/stories/me/archived", requireAuth, async (req, res) => {
       proOwnerUid: req.user.uid,
       deleted: { $ne: true },
       type: "story",
-
-      // expired
       $or: [
         { expiresAt: { $lte: now } },
         { expiresAt: null, createdAt: { $lte: cutoff } },
@@ -553,14 +625,14 @@ router.get("/stories/me/archived", requireAuth, async (req, res) => {
       .limit(Math.max(1, Math.min(Number(limit) || 200, 500)))
       .lean();
 
-    return res.json(items.map(sanitizePostForClient));
+    const out = await Promise.all(items.map(sanitizePostForClient));
+    return res.json(out);
   } catch (err) {
     console.error("[stories:me:archived] error:", err);
     return res.status(500).json({ error: "stories_archived_load_failed" });
   }
 });
 
-// POST /stories (create story)
 router.post("/stories", requireAuth, async (req, res) => {
   try {
     const body = req.body || {};
@@ -570,13 +642,37 @@ router.post("/stories", requireAuth, async (req, res) => {
     if (!proDoc) return res.status(403).json({ error: "not_a_pro" });
 
     text = trim(text || "");
-    if (!Array.isArray(media)) media = [];
+
+    media = Array.isArray(media) ? media : [];
     media = media
-      .filter((m) => m && typeof m.url === "string" && m.url.trim())
-      .map((m) => ({
-        url: trim(m.url),
-        type: m.type === "video" ? "video" : "image",
-      }));
+      .map((m) => {
+        // NEW: asset-based (same as posts)
+        if (m && typeof m.assetId === "string" && isObjId(m.assetId)) {
+          return {
+            assetId: String(m.assetId),
+            thumbnailAssetId: isObjId(m.thumbnailAssetId)
+              ? String(m.thumbnailAssetId)
+              : "",
+            type: m.type === "video" ? "video" : "image",
+          };
+        }
+
+        // LEGACY: url-based
+        if (m && typeof m.url === "string" && m.url.trim()) {
+          return {
+            url: trim(m.url),
+            type: m.type === "video" ? "video" : "image",
+            thumbnailUrl: trim(m.thumbnailUrl || ""),
+            width: Number(m.width || 0),
+            height: Number(m.height || 0),
+            durationSec: Number(m.durationSec || 0),
+          };
+        }
+
+        return null;
+      })
+
+      .filter(Boolean);
 
     tags = Array.isArray(tags)
       ? tags
@@ -588,9 +684,7 @@ router.post("/stories", requireAuth, async (req, res) => {
     const lgaFinal = toUpper(lga || proDoc.lga || "");
 
     const story = await Post.create({
-      type: "story", // ✅ key
-      // expiresAt will be auto-set by model pre-save hook
-
+      type: "story",
       ownerUid: req.user.uid,
       proOwnerUid: req.user.uid,
       createdBy: req.user.uid,
@@ -601,7 +695,6 @@ router.post("/stories", requireAuth, async (req, res) => {
         lga: proDoc.lga || "",
         photoUrl: proDoc.photoUrl || proDoc.avatarUrl || "",
       },
-
       text,
       media,
       tags,
@@ -609,7 +702,7 @@ router.post("/stories", requireAuth, async (req, res) => {
       isPublic: !!isPublic,
     });
 
-    return res.json({ ok: true, story: sanitizePostForClient(story) });
+    return res.json({ ok: true, story: await sanitizePostForClient(story) });
   } catch (err) {
     console.error("[stories:create] error:", err);
     return res.status(500).json({ error: "story_create_failed" });
@@ -617,10 +710,8 @@ router.post("/stories", requireAuth, async (req, res) => {
 });
 
 /* -------------------------------------------------------------------- */
-/* OWNER / MODERATION ACTIONS                                           */
+/* OWNER / MODERATION ACTIONS */
 /* -------------------------------------------------------------------- */
-
-// hide post
 router.patch("/posts/:id/hide", requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
@@ -635,14 +726,13 @@ router.patch("/posts/:id/hide", requireAuth, async (req, res) => {
     p.hiddenBy = req.user.uid;
     await p.save();
 
-    return res.json({ ok: true, post: sanitizePostForClient(p) });
+    return res.json({ ok: true, post: await sanitizePostForClient(p) });
   } catch (err) {
     console.error("[posts:hide] error:", err);
     return res.status(500).json({ error: "hide_failed" });
   }
 });
 
-// unhide post
 router.patch("/posts/:id/unhide", requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
@@ -656,14 +746,13 @@ router.patch("/posts/:id/unhide", requireAuth, async (req, res) => {
     p.hidden = false;
     await p.save();
 
-    return res.json({ ok: true, post: sanitizePostForClient(p) });
+    return res.json({ ok: true, post: await sanitizePostForClient(p) });
   } catch (err) {
     console.error("[posts:unhide] error:", err);
     return res.status(500).json({ error: "unhide_failed" });
   }
 });
 
-// disable comments
 router.patch("/posts/:id/comments/disable", requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
@@ -677,14 +766,13 @@ router.patch("/posts/:id/comments/disable", requireAuth, async (req, res) => {
     p.commentsDisabled = true;
     await p.save();
 
-    return res.json({ ok: true, post: sanitizePostForClient(p) });
+    return res.json({ ok: true, post: await sanitizePostForClient(p) });
   } catch (err) {
     console.error("[posts:comments:disable] error:", err);
     return res.status(500).json({ error: "comments_disable_failed" });
   }
 });
 
-// enable comments
 router.patch("/posts/:id/comments/enable", requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
@@ -698,7 +786,7 @@ router.patch("/posts/:id/comments/enable", requireAuth, async (req, res) => {
     p.commentsDisabled = false;
     await p.save();
 
-    return res.json({ ok: true, post: sanitizePostForClient(p) });
+    return res.json({ ok: true, post: await sanitizePostForClient(p) });
   } catch (err) {
     console.error("[posts:comments:enable] error:", err);
     return res.status(500).json({ error: "comments_enable_failed" });
@@ -706,10 +794,8 @@ router.patch("/posts/:id/comments/enable", requireAuth, async (req, res) => {
 });
 
 /* -------------------------------------------------------------------- */
-/* INTERACTIONS                                                         */
+/* INTERACTIONS */
 /* -------------------------------------------------------------------- */
-
-// like
 router.post("/posts/:id/like", requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
@@ -746,6 +832,7 @@ router.post("/posts/:id/like", requireAuth, async (req, res) => {
       { postId: new mongoose.Types.ObjectId(id) },
       { $set: { trendingScore } },
     );
+
     return res.json({
       ok: true,
       changed: upd.modifiedCount > 0 || upd.upsertedCount > 0,
@@ -758,7 +845,6 @@ router.post("/posts/:id/like", requireAuth, async (req, res) => {
   }
 });
 
-// unlike
 router.delete("/posts/:id/like", requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
@@ -774,6 +860,7 @@ router.delete("/posts/:id/like", requireAuth, async (req, res) => {
     }).lean();
     const likesCount = Math.max(0, Number(stats?.likesCount || 0));
     const trendingScore = scoreFrom({ ...stats, likesCount });
+
     await PostStats.updateOne(
       { postId: new mongoose.Types.ObjectId(id) },
       { $set: { likesCount, trendingScore } },
@@ -786,9 +873,7 @@ router.delete("/posts/:id/like", requireAuth, async (req, res) => {
   }
 });
 
-/**
- * VIEW with Redis de-dup
- */
+/** VIEW with Redis de-dup */
 router.post("/posts/:id/view", tryAuth, async (req, res) => {
   try {
     const { id } = req.params;
@@ -807,9 +892,7 @@ router.post("/posts/:id/view", tryAuth, async (req, res) => {
           EX: 10,
           NX: true,
         });
-        if (setRes !== "OK") {
-          shouldIncrement = false;
-        }
+        if (setRes !== "OK") shouldIncrement = false;
       } catch (e) {
         console.warn("[posts:view] redis set failed:", e?.message || e);
         shouldIncrement = true;
@@ -817,7 +900,6 @@ router.post("/posts/:id/view", tryAuth, async (req, res) => {
     }
 
     const update = { $setOnInsert: { postId: postObjectId } };
-
     if (shouldIncrement) {
       update.$inc = { viewsCount: 1 };
       update.$push = {
@@ -838,10 +920,12 @@ router.post("/posts/:id/view", tryAuth, async (req, res) => {
 
     const stats = await PostStats.findOne({ postId: postObjectId }).lean();
     const trendingScore = scoreFrom(stats);
+
     await PostStats.updateOne(
       { postId: new mongoose.Types.ObjectId(id) },
       { $set: { trendingScore } },
     );
+
     return res.json({
       ok: true,
       deduped: !shouldIncrement,
@@ -884,6 +968,7 @@ router.post("/posts/:id/share", requireAuth, async (req, res) => {
       postId: new mongoose.Types.ObjectId(id),
     }).lean();
     const trendingScore = scoreFrom(stats);
+
     await PostStats.updateOne(
       { postId: new mongoose.Types.ObjectId(id) },
       { $set: { trendingScore } },
@@ -933,6 +1018,7 @@ router.post("/posts/:id/save", requireAuth, async (req, res) => {
       postId: new mongoose.Types.ObjectId(id),
     }).lean();
     const trendingScore = scoreFrom(stats);
+
     await PostStats.updateOne(
       { postId: new mongoose.Types.ObjectId(id) },
       { $set: { trendingScore } },
@@ -966,6 +1052,7 @@ router.delete("/posts/:id/save", requireAuth, async (req, res) => {
     }).lean();
     const savesCount = Math.max(0, Number(stats?.savesCount || 0));
     const trendingScore = scoreFrom({ ...stats, savesCount });
+
     await PostStats.updateOne(
       { postId: new mongoose.Types.ObjectId(id) },
       { $set: { savesCount, trendingScore } },
@@ -978,9 +1065,9 @@ router.delete("/posts/:id/save", requireAuth, async (req, res) => {
   }
 });
 
-// --------------------------------------------------------------------
-// FOR YOU START (first video for /for-you without :id)
-// --------------------------------------------------------------------
+/* -------------------------------------------------------------------- */
+/* FOR YOU START */
+/* -------------------------------------------------------------------- */
 router.get("/posts/for-you/start", tryAuth, async (req, res) => {
   try {
     const { lga = "" } = req.query;
@@ -990,11 +1077,7 @@ router.get("/posts/for-you/start", tryAuth, async (req, res) => {
       isPublic: true,
       hidden: { $ne: true },
       deleted: { $ne: true },
-
-      // ✅ FOR YOU is video-only (type OR URL looks like video)
       media: videoElemMatch(),
-
-      // ✅ exclude stories from For You start
       $or: [{ type: { $ne: "story" } }, { type: { $exists: false } }],
     };
 
@@ -1002,7 +1085,7 @@ router.get("/posts/for-you/start", tryAuth, async (req, res) => {
 
     let candidateIds = [];
 
-    // 1. videos this viewer has liked
+    // 1) videos this viewer has liked
     if (viewerUid) {
       const likedStats = await PostStats.find({ likedBy: viewerUid })
         .sort({ updatedAt: -1 })
@@ -1011,7 +1094,7 @@ router.get("/posts/for-you/start", tryAuth, async (req, res) => {
       candidateIds.push(...likedStats.map((s) => s.postId));
     }
 
-    // 2. top trending videos
+    // 2) top trending videos
     const topStats = await PostStats.find({})
       .sort({ trendingScore: -1 })
       .limit(100)
@@ -1041,7 +1124,7 @@ router.get("/posts/for-you/start", tryAuth, async (req, res) => {
       );
     }
 
-    // 3. fallback – newest video posts if nothing matched
+    // 3) fallback – newest video posts
     if (!posts.length) {
       posts = await Post.find(baseQuery)
         .sort({ createdAt: -1 })
@@ -1057,8 +1140,8 @@ router.get("/posts/for-you/start", tryAuth, async (req, res) => {
     const next = posts[1] || null;
 
     return res.json({
-      post: sanitizePostForClient(primary),
-      next: next ? sanitizePostForClient(next) : null,
+      post: await sanitizePostForClient(primary),
+      next: next ? await sanitizePostForClient(next) : null,
     });
   } catch (err) {
     console.error("[posts:for-you:start] error:", err);
@@ -1067,18 +1150,17 @@ router.get("/posts/for-you/start", tryAuth, async (req, res) => {
 });
 
 /* -------------------------------------------------------------------- */
-/* TRENDING                                                             */
+/* TRENDING */
 /* -------------------------------------------------------------------- */
 router.get("/posts/trending", async (req, res) => {
   try {
     const { lga = "", limit = 20 } = req.query;
     const lim = Math.max(1, Math.min(Number(limit) || 20, 50));
+
     const q = {
       isPublic: true,
       hidden: { $ne: true },
       deleted: { $ne: true },
-
-      // ✅ exclude stories from normal feed
       $or: [{ type: { $ne: "story" } }, { type: { $exists: false } }],
     };
 
@@ -1098,7 +1180,10 @@ router.get("/posts/trending", async (req, res) => {
         (order.get(String(a._id)) ?? 0) - (order.get(String(b._id)) ?? 0),
     );
 
-    return res.json(posts.slice(0, lim).map(sanitizePostForClient));
+    const out = await Promise.all(
+      posts.slice(0, lim).map(sanitizePostForClient),
+    );
+    return res.json(out);
   } catch (err) {
     console.error("[posts:trending] error:", err);
     return res.status(500).json({ error: "trending_failed" });
@@ -1106,7 +1191,7 @@ router.get("/posts/trending", async (req, res) => {
 });
 
 /* -------------------------------------------------------------------- */
-/* DELETE                                                               */
+/* DELETE */
 /* -------------------------------------------------------------------- */
 router.delete("/posts/:id", requireAuth, async (req, res) => {
   try {
@@ -1120,6 +1205,7 @@ router.delete("/posts/:id", requireAuth, async (req, res) => {
 
     await Post.deleteOne({ _id: p._id });
     await PostStats.deleteOne({ postId: p._id }).catch(() => {});
+
     return res.json({ ok: true });
   } catch (err) {
     console.error("[posts:delete] error:", err);

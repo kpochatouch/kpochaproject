@@ -12,7 +12,9 @@ const TMP = process.env.TMPDIR || process.env.TEMP || process.env.TMP || "/tmp";
 
 export async function processVideo(asset) {
   // Use asset id as stable folder name
-  const input = path.join(TMP, `${asset._id}-original.mp4`);
+  const origKey = String(asset?.original?.key || "");
+  const ext = (origKey.split(".").pop() || "mp4").replace(/[^a-z0-9]/gi, "");
+  const input = path.join(TMP, `${asset._id}-original.${ext || "mp4"}`);
   const outputDir = path.join(TMP, `${asset._id}-hls`);
 
   // Ensure output folders exist

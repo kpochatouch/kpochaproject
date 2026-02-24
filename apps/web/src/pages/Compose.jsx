@@ -472,58 +472,36 @@ export default function Compose() {
     }
   }
 
-  async function uploadToCloudinary(file) {
-    const signRes = await api.post("/api/uploads/sign", {
-      folder: "kpocha-feed",
-      overwrite: true,
+  async function uploadViaR2(file, type) {
+    // 1) init
+    const initRes = await api.post("/api/media/init", {
+      type,
+      contentType: file.type || (type === "video" ? "video/mp4" : "image/jpeg"),
+      filename: file.name || "",
     });
 
-    const {
-      cloudName,
-      apiKey,
-      timestamp,
-      signature,
-      folder,
-      public_id,
-      overwrite,
-      tags,
-    } = signRes.data || {};
+    const { assetId, uploadUrl } = initRes.data || {};
+    if (!assetId || !uploadUrl) throw new Error("Media init failed");
 
-    if (!cloudName || !apiKey || !timestamp || !signature) {
-      throw new Error("Upload signing failed");
+    // 2) upload directly to R2 (PUT)
+    const putRes = await fetch(uploadUrl, {
+      method: "PUT",
+      body: file,
+      headers: {
+        "Content-Type":
+          file.type || (type === "video" ? "video/mp4" : "image/jpeg"),
+      },
+    });
+
+    if (!putRes.ok) {
+      const t = await putRes.text().catch(() => "");
+      throw new Error(`R2 upload failed: ${t || putRes.status}`);
     }
 
-    const form = new FormData();
-    form.append("file", file);
-    form.append("api_key", apiKey);
-    form.append("timestamp", timestamp);
-    form.append("folder", folder);
-    form.append("signature", signature);
-    if (public_id) form.append("public_id", public_id);
-    if (typeof overwrite !== "undefined")
-      form.append("overwrite", String(overwrite));
-    if (tags) form.append("tags", tags);
+    // 3) complete (enqueue if video)
+    await api.post("/api/media/complete", { assetId });
 
-    const uploadRes = await fetch(
-      `https://api.cloudinary.com/v1_1/${cloudName}/auto/upload`,
-      { method: "POST", body: form },
-    );
-
-    if (!uploadRes.ok) {
-      const t = await uploadRes.text().catch(() => "");
-      throw new Error(`Cloudinary upload failed: ${t || uploadRes.status}`);
-    }
-
-    const uploaded = await uploadRes.json();
-
-    // return full metadata (we need width/height/duration/url)
-    return {
-      url: uploaded.secure_url || uploaded.url || "",
-      width: Number(uploaded.width || 0),
-      height: Number(uploaded.height || 0),
-      durationSec: Number(uploaded.duration || 0), // Cloudinary uses "duration" for videos
-      resourceType: uploaded.resource_type || "", // image/video
-    };
+    return { assetId };
   }
 
   async function submit() {
@@ -547,25 +525,25 @@ export default function Compose() {
     try {
       setPosting(true);
 
-      let uploadedUrl = "";
-      let uploadedMain = null;
-      let uploadedThumb = "";
+      let mediaAssetId = "";
+      let thumbAssetId = "";
 
       if (mediaFile) {
         setUploading(true);
         toast.info("Uploading media…");
 
-        uploadedMain = await uploadToCloudinary(mediaFile);
-        uploadedUrl = uploadedMain?.url || "";
+        const main = await uploadViaR2(mediaFile, mediaType);
+        mediaAssetId = main.assetId;
 
+        // optional thumbnail upload (image asset)
         if (mediaType === "video" && videoThumbUrl) {
           try {
             const blob = await fetch(videoThumbUrl).then((r) => r.blob());
             const thumbFile = new File([blob], "thumb.jpg", {
               type: blob.type || "image/jpeg",
             });
-            const uploadedT = await uploadToCloudinary(thumbFile);
-            uploadedThumb = uploadedT?.url || "";
+            const t = await uploadViaR2(thumbFile, "image");
+            thumbAssetId = t.assetId;
           } catch {}
         }
 
@@ -576,18 +554,12 @@ export default function Compose() {
 
       await api.post("/api/posts", {
         text: text.trim(),
-        media: uploadedUrl
+        media: mediaAssetId
           ? [
               {
-                url: uploadedUrl,
+                assetId: mediaAssetId,
                 type: mediaType,
-                thumbnailUrl: uploadedThumb || "",
-                width: Number(uploadedMain?.width || 0),
-                height: Number(uploadedMain?.height || 0),
-                durationSec:
-                  mediaType === "video"
-                    ? Number(uploadedMain?.durationSec || videoDuration || 0)
-                    : 0,
+                thumbnailAssetId: thumbAssetId || "",
               },
             ]
           : [],

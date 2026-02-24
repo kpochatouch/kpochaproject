@@ -9,7 +9,7 @@ export default function mediaRoutes({ requireAuth }) {
 
   // INIT
   r.post("/media/init", requireAuth, async (req, res) => {
-    const { type, contentType } = req.body;
+    const { type, contentType, filename } = req.body;
 
     if (!["video", "image"].includes(type)) {
       return res.status(400).json({ error: "invalid_type" });
@@ -18,25 +18,47 @@ export default function mediaRoutes({ requireAuth }) {
       return res.status(400).json({ error: "contentType_required" });
     }
 
+    // file extension (best-effort)
+    const safeName = String(filename || "").toLowerCase();
+    const extFromName = safeName.includes(".") ? safeName.split(".").pop() : "";
+    const extFromType =
+      type === "image"
+        ? contentType.includes("png")
+          ? "png"
+          : contentType.includes("webp")
+          ? "webp"
+          : "jpg"
+        : contentType.includes("webm")
+        ? "webm"
+        : contentType.includes("quicktime")
+        ? "mov"
+        : "mp4";
+
+    const ext = (
+      extFromName ||
+      extFromType ||
+      (type === "image" ? "jpg" : "mp4")
+    ).replace(/[^a-z0-9]/g, "");
+
     const asset = await MediaAsset.create({
       ownerUid: req.user.uid,
       type,
       status: "uploading",
     });
 
-    const key = `media/${req.user.uid}/${asset._id}/original.mp4`;
-
+    const key = `media/${req.user.uid}/${asset._id}/original.${ext}`;
     const uploadUrl = await getUploadUrl(key, contentType);
 
-    asset.original = {
-      key,
-      contentType,
-    };
-
+    asset.original = { key, contentType };
     await asset.save();
 
     return res.json({
+      ok: true,
       assetId: asset._id,
+      key,
+      type,
+      contentType,
+      status: asset.status,
       uploadUrl,
     });
   });
@@ -48,21 +70,60 @@ export default function mediaRoutes({ requireAuth }) {
     const asset = await MediaAsset.findById(assetId);
     if (!asset) return res.status(404).json({ error: "not_found" });
 
+    // only owner can complete
+    if (String(asset.ownerUid) !== String(req.user.uid)) {
+      return res.status(403).json({ error: "forbidden" });
+    }
+
     asset.status = "uploaded";
     await asset.save();
 
-    await mediaQueue.add(
-      "process",
-      { assetId: asset._id.toString() },
-      {
-        attempts: 5,
-        backoff: { type: "exponential", delay: 5000 },
-        removeOnComplete: 100,
-        removeOnFail: 100,
-      },
-    );
+    // Only videos get queued for transcoding
+    if (asset.type === "video") {
+      await mediaQueue.add(
+        "process",
+        { assetId: asset._id.toString() },
+        {
+          attempts: 5,
+          backoff: { type: "exponential", delay: 5000 },
+          removeOnComplete: 100,
+          removeOnFail: 100,
+        },
+      );
+    } else {
+      // images become ready immediately (no worker needed)
+      asset.status = "ready";
+      await asset.save();
+    }
 
-    return res.json({ ok: true });
+    return res.json({
+      ok: true,
+      assetId: asset._id,
+      status: asset.status,
+    });
+  });
+
+  // STATUS
+  r.get("/media/:id", requireAuth, async (req, res) => {
+    const asset = await MediaAsset.findById(req.params.id);
+    if (!asset) return res.status(404).json({ error: "not_found" });
+
+    if (String(asset.ownerUid) !== String(req.user.uid)) {
+      return res.status(403).json({ error: "forbidden" });
+    }
+
+    return res.json({
+      ok: true,
+      asset: {
+        id: asset._id,
+        type: asset.type,
+        status: asset.status,
+        original: asset.original || null,
+        playback: asset.playback || null,
+        thumbnail: asset.thumbnail || null,
+        error: asset.error || null,
+      },
+    });
   });
 
   return r;
