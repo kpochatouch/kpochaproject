@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import ImageCropperModal from "../components/ImageCropper.jsx";
 import { useToast } from "../components/Toast.jsx";
+import { uploadMediaAsset } from "../lib/r2Upload";
 
 const MAX_WORDS = 500;
 
@@ -472,38 +473,6 @@ export default function Compose() {
     }
   }
 
-  async function uploadViaR2(file, type) {
-    // 1) init
-    const initRes = await api.post("/api/media/init", {
-      type,
-      contentType: file.type || (type === "video" ? "video/mp4" : "image/jpeg"),
-      filename: file.name || "",
-    });
-
-    const { assetId, uploadUrl } = initRes.data || {};
-    if (!assetId || !uploadUrl) throw new Error("Media init failed");
-
-    // 2) upload directly to R2 (PUT)
-    const putRes = await fetch(uploadUrl, {
-      method: "PUT",
-      body: file,
-      headers: {
-        "Content-Type":
-          file.type || (type === "video" ? "video/mp4" : "image/jpeg"),
-      },
-    });
-
-    if (!putRes.ok) {
-      const t = await putRes.text().catch(() => "");
-      throw new Error(`R2 upload failed: ${t || putRes.status}`);
-    }
-
-    // 3) complete (enqueue if video)
-    await api.post("/api/media/complete", { assetId });
-
-    return { assetId };
-  }
-
   async function submit() {
     // messages go to toast now
 
@@ -532,7 +501,11 @@ export default function Compose() {
         setUploading(true);
         toast.info("Uploading media…");
 
-        const main = await uploadViaR2(mediaFile, mediaType);
+        const main = await uploadMediaAsset({
+          api,
+          file: mediaFile,
+          type: mediaType,
+        });
         mediaAssetId = main.assetId;
 
         // optional thumbnail upload (image asset)
@@ -542,7 +515,11 @@ export default function Compose() {
             const thumbFile = new File([blob], "thumb.jpg", {
               type: blob.type || "image/jpeg",
             });
-            const t = await uploadViaR2(thumbFile, "image");
+            const t = await uploadMediaAsset({
+              api,
+              file: thumbFile,
+              type: "image",
+            });
             thumbAssetId = t.assetId;
           } catch {}
         }

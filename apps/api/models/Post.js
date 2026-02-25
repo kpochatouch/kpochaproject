@@ -3,15 +3,34 @@ import mongoose from "mongoose";
 
 const MediaSchema = new mongoose.Schema(
   {
+    // explicit typing
     type: { type: String, enum: ["image", "video"], required: true },
-    url: { type: String, required: true },
+
+    // ✅ NEW pipeline (canonical)
+    assetId: { type: mongoose.Schema.Types.ObjectId, ref: "MediaAsset" },
+    thumbnailAssetId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "MediaAsset",
+    },
+
+    // ✅ LEGACY pipeline (temporary)
+    url: { type: String, default: "" },
     thumbnailUrl: { type: String, default: "" },
+
+    // optional cached dims/duration for legacy or when available
     width: { type: Number, default: 0 },
     height: { type: Number, default: 0 },
-    durationSec: { type: Number, default: 0 }, // for videos
+    durationSec: { type: Number, default: 0 },
   },
   { _id: false },
 );
+
+// ✅ Guard: require either assetId OR url (prevents empty media items)
+MediaSchema.path("url").validate(function validateMediaUrlOrAssetId() {
+  const hasAsset = !!this.assetId;
+  const hasUrl = typeof this.url === "string" && this.url.trim().length > 0;
+  return hasAsset || hasUrl;
+}, "Media item must have either assetId or url");
 
 // cached author snapshot for fast feed rendering
 const ProSnapshotSchema = new mongoose.Schema(

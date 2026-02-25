@@ -2,7 +2,7 @@
 import express from "express";
 import MediaAsset from "../models/MediaAsset.js";
 import { mediaQueue } from "../queues/mediaQueue.js";
-import { getUploadUrl } from "../r2.js";
+import { getUploadUrl, getDownloadUrl } from "../r2.js";
 
 export default function mediaRoutes({ requireAuth }) {
   const r = express.Router();
@@ -119,11 +119,38 @@ export default function mediaRoutes({ requireAuth }) {
         type: asset.type,
         status: asset.status,
         original: asset.original || null,
-        playback: asset.playback || null,
+        hls: asset.hls || null,
+        renditions: asset.renditions || [],
         thumbnail: asset.thumbnail || null,
         error: asset.error || null,
       },
     });
+  });
+
+  // DELIVERY URL (signed GET)
+  // GET /api/media/:id/url?variant=original|thumbnail|hls
+  r.get("/media/:id/url", requireAuth, async (req, res) => {
+    const asset = await MediaAsset.findById(req.params.id);
+    if (!asset) return res.status(404).json({ error: "not_found" });
+
+    // Only owner can get signed URL (you can loosen this later for public posts)
+    if (String(asset.ownerUid) !== String(req.user.uid)) {
+      return res.status(403).json({ error: "forbidden" });
+    }
+
+    const variant = String(req.query.variant || "original");
+
+    let key = "";
+    if (variant === "original") key = asset.original?.key || "";
+    else if (variant === "thumbnail") key = asset.thumbnail?.key || "";
+    else if (variant === "hls") key = asset.hls?.masterPlaylistKey || "";
+    else return res.status(400).json({ error: "invalid_variant" });
+
+    if (!key) return res.status(409).json({ error: "not_ready" });
+
+    const url = await getDownloadUrl(key, { expiresIn: 300 });
+
+    return res.json({ ok: true, id: asset._id, variant, key, url });
   });
 
   return r;

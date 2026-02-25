@@ -6,10 +6,10 @@ import admin from "firebase-admin";
 import { Pro } from "../models.js";
 import Post from "../models/Post.js";
 import PostStats from "../models/PostStats.js";
-import MediaAsset from "../models/MediaAsset.js";
 
 import redisClient from "../redis.js";
 import { scoreFrom } from "../services/postScoring.js";
+import { expandMediaForClient } from "../services/mediaResolver.js";
 
 /* --------------------------- Auth middleware --------------------------- */
 async function requireAuth(req, res, next) {
@@ -67,97 +67,6 @@ function videoElemMatch() {
       ],
     },
   };
-}
-
-const R2_PUBLIC_BASE_URL = (process.env.R2_PUBLIC_BASE_URL || "").replace(
-  /\/+$/,
-  "",
-);
-
-function assetKeyToPublicUrl(key) {
-  if (!key) return "";
-  if (!R2_PUBLIC_BASE_URL) return "";
-  return `${R2_PUBLIC_BASE_URL}/${String(key).replace(/^\/+/, "")}`;
-}
-
-async function expandMediaForClient(mediaArr) {
-  const media = Array.isArray(mediaArr) ? mediaArr : [];
-
-  const ids = media
-    .map((m) => m?.assetId)
-    .filter((x) => typeof x === "string" && x.length === 24);
-
-  if (!ids.length) {
-    // legacy passthrough
-    return media
-      .map((m) => {
-        const url = String(m?.url || "").trim();
-        if (!url) return null;
-        return {
-          url,
-          type: m?.type === "video" ? "video" : "image",
-          thumbnailUrl: String(m?.thumbnailUrl || "").trim(),
-          width: Number(m?.width || 0),
-          height: Number(m?.height || 0),
-          durationSec: Number(m?.durationSec || 0),
-          status: "ready",
-        };
-      })
-      .filter(Boolean);
-  }
-
-  const assets = await MediaAsset.find({ _id: { $in: ids } }).lean();
-  const map = new Map(assets.map((a) => [String(a._id), a]));
-
-  return media
-    .map((m) => {
-      // new asset-based media
-      if (m?.assetId && map.has(String(m.assetId))) {
-        const a = map.get(String(m.assetId));
-        const isVideo = a.type === "video";
-
-        const hlsUrl = isVideo
-          ? assetKeyToPublicUrl(a?.hls?.masterPlaylistKey)
-          : "";
-
-        const originalUrl = assetKeyToPublicUrl(a?.original?.key);
-
-        const thumb =
-          (m.thumbnailAssetId && map.get(String(m.thumbnailAssetId))) || null;
-
-        const thumbnailUrl = thumb
-          ? assetKeyToPublicUrl(thumb?.original?.key || thumb?.thumbnail?.key)
-          : "";
-
-        return {
-          assetId: String(a._id),
-          url: isVideo ? hlsUrl || originalUrl : originalUrl,
-          hlsUrl,
-          type: isVideo ? "video" : "image",
-          thumbnailUrl,
-          width: Number(a?.original?.width || 0),
-          height: Number(a?.original?.height || 0),
-          durationSec: Number(a?.original?.durationSec || 0),
-          status: a.status || "uploaded",
-          error: a.error || null,
-        };
-      }
-
-      // legacy fallback (url)
-      const url = String(m?.url || "").trim();
-      if (!url) return null;
-
-      return {
-        url,
-        type: m?.type === "video" ? "video" : "image",
-        thumbnailUrl: String(m?.thumbnailUrl || "").trim(),
-        width: Number(m?.width || 0),
-        height: Number(m?.height || 0),
-        durationSec: Number(m?.durationSec || 0),
-        status: "ready",
-      };
-    })
-    .filter(Boolean);
 }
 
 // what we send to frontend

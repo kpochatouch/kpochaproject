@@ -1,5 +1,9 @@
 //apps/api/r2.js
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import {
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+} from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 const s3 = new S3Client({
@@ -19,6 +23,25 @@ export async function getUploadUrl(key, contentType) {
   });
 
   return await getSignedUrl(s3, command, { expiresIn: 900 });
+}
+
+// ✅ NEW: signed GET (delivery)
+export async function getDownloadUrl(key, opts = {}) {
+  const command = new GetObjectCommand({
+    Bucket: process.env.R2_BUCKET,
+    Key: key,
+    // optional: force download/inline behavior
+    ...(opts.responseContentType
+      ? { ResponseContentType: opts.responseContentType }
+      : {}),
+    ...(opts.responseContentDisposition
+      ? { ResponseContentDisposition: opts.responseContentDisposition }
+      : {}),
+  });
+
+  // short-lived is good security; bump if you want
+  const expiresIn = Number(opts.expiresIn || 300);
+  return await getSignedUrl(s3, command, { expiresIn });
 }
 
 export { s3 };
