@@ -536,7 +536,7 @@ export default function Compose() {
               {
                 assetId: mediaAssetId,
                 type: mediaType,
-                thumbnailAssetId: thumbAssetId || "",
+                ...(thumbAssetId ? { thumbnailAssetId: thumbAssetId } : {}),
               },
             ]
           : [],

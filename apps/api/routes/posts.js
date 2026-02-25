@@ -164,9 +164,9 @@ router.post("/posts", requireAuth, async (req, res) => {
         if (m && typeof m.assetId === "string" && isObjId(m.assetId)) {
           return {
             assetId: String(m.assetId),
-            thumbnailAssetId: isObjId(m.thumbnailAssetId)
-              ? String(m.thumbnailAssetId)
-              : "",
+            ...(isObjId(m.thumbnailAssetId)
+              ? { thumbnailAssetId: String(m.thumbnailAssetId) }
+              : {}),
             type: m.type === "video" ? "video" : "image",
           };
         }
@@ -559,9 +559,9 @@ router.post("/stories", requireAuth, async (req, res) => {
         if (m && typeof m.assetId === "string" && isObjId(m.assetId)) {
           return {
             assetId: String(m.assetId),
-            thumbnailAssetId: isObjId(m.thumbnailAssetId)
-              ? String(m.thumbnailAssetId)
-              : "",
+            ...(isObjId(m.thumbnailAssetId)
+              ? { thumbnailAssetId: String(m.thumbnailAssetId) }
+              : {}),
             type: m.type === "video" ? "video" : "image",
           };
         }

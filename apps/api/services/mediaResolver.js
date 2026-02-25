@@ -48,9 +48,18 @@ export async function expandMediaForClient(mediaArr) {
   const media = Array.isArray(mediaArr) ? mediaArr : [];
 
   // Collect both assetId and thumbnailAssetId so thumbnail resolution works
+  const toIdString = (v) => {
+    if (!v) return "";
+    // Handles ObjectId objects from Mongoose lean() as well as strings
+    if (typeof v === "string") return v;
+    if (typeof v === "object" && typeof v.toString === "function")
+      return v.toString();
+    return "";
+  };
+
   const ids = media
-    .flatMap((m) => [m?.assetId, m?.thumbnailAssetId])
-    .filter((x) => typeof x === "string" && x.length === 24);
+    .flatMap((m) => [toIdString(m?.assetId), toIdString(m?.thumbnailAssetId)])
+    .filter((x) => typeof x === "string" && /^[0-9a-fA-F]{24}$/.test(x));
 
   if (!ids.length) {
     // legacy passthrough
@@ -77,15 +86,17 @@ export async function expandMediaForClient(mediaArr) {
   return media
     .map((m) => {
       // Asset-based
-      if (m?.assetId && map.has(String(m.assetId))) {
-        const a = map.get(String(m.assetId));
+      const assetIdStr = toIdString(m?.assetId);
+      const thumbIdStr = toIdString(m?.thumbnailAssetId);
+
+      if (assetIdStr && map.has(assetIdStr)) {
+        const a = map.get(assetIdStr);
 
         const base = resolveAssetDocToClient(a);
         if (!base) return null;
 
         // Prefer explicit thumbnail asset if provided
-        const thumb =
-          (m.thumbnailAssetId && map.get(String(m.thumbnailAssetId))) || null;
+        const thumb = (thumbIdStr && map.get(thumbIdStr)) || null;
 
         const thumbnailUrl = thumb
           ? assetKeyToPublicUrl(thumb?.original?.key || thumb?.thumbnail?.key)
