@@ -105,10 +105,13 @@ const ProSchema = new mongoose.Schema(
 
     deviceId: { type: String, default: "", index: true },
 
-name: { type: String, required: true },
+    name: { type: String, required: true },
 
-// main display image for barber card
+    // main display image for barber card
     photoUrl: { type: String, default: "" },
+
+    // ✅ asset pipeline (R2/S3 key in MediaAsset)
+    photoAssetId: { type: String, default: "" },
 
     // geo filters
     lga: { type: String, index: true },

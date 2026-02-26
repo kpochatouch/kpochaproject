@@ -1,16 +1,6 @@
 // apps/api/services/mediaResolver.js
 import MediaAsset from "../models/MediaAsset.js";
-
-const R2_PUBLIC_BASE_URL = (process.env.R2_PUBLIC_BASE_URL || "").replace(
-  /\/+$/,
-  "",
-);
-
-function assetKeyToPublicUrl(key) {
-  if (!key) return "";
-  if (!R2_PUBLIC_BASE_URL) return "";
-  return `${R2_PUBLIC_BASE_URL}/${String(key).replace(/^\/+/, "")}`;
-}
+import { keyToPublicUrl } from "../r2.js";
 
 /**
  * Resolve ONE asset doc (already loaded) into client-ready urls
@@ -19,11 +9,11 @@ export function resolveAssetDocToClient(a) {
   if (!a) return null;
 
   const isVideo = a.type === "video";
-  const originalUrl = assetKeyToPublicUrl(a?.original?.key);
+  const originalUrl = keyToPublicUrl(a?.original?.key);
 
-  const hlsUrl = isVideo ? assetKeyToPublicUrl(a?.hls?.masterPlaylistKey) : "";
+  const hlsUrl = isVideo ? keyToPublicUrl(a?.hls?.masterPlaylistKey) : "";
 
-  const thumbnailUrl = assetKeyToPublicUrl(a?.thumbnail?.key || "");
+  const thumbnailUrl = keyToPublicUrl(a?.thumbnail?.key || "");
 
   return {
     assetId: String(a._id),
@@ -99,7 +89,7 @@ export async function expandMediaForClient(mediaArr) {
         const thumb = (thumbIdStr && map.get(thumbIdStr)) || null;
 
         const thumbnailUrl = thumb
-          ? assetKeyToPublicUrl(thumb?.original?.key || thumb?.thumbnail?.key)
+          ? keyToPublicUrl(thumb?.original?.key || thumb?.thumbnail?.key)
           : base.thumbnailUrl;
 
         return { ...base, thumbnailUrl };

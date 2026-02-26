@@ -37,7 +37,7 @@ export async function uploadMediaAsset({ api, file, type }) {
     filename: file.name || "",
   });
 
-  const { assetId, uploadUrl } = initRes?.data || {};
+  const { assetId, uploadUrl, publicUrl, key } = initRes?.data || {};
   if (!assetId || !uploadUrl) throw new Error("Media init failed");
 
   // 2) direct PUT to R2
@@ -58,7 +58,12 @@ export async function uploadMediaAsset({ api, file, type }) {
   // 3) complete (enqueue if video)
   await api.post("/api/media/complete", { assetId });
 
-  return { assetId, type: finalType };
+  return {
+    assetId,
+    type: finalType,
+    publicUrl: publicUrl || "",
+    key: key || "",
+  };
 }
 
 /**

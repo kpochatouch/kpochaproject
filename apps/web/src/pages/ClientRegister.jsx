@@ -8,72 +8,11 @@ import {
   ensureClientProfile,
 } from "../lib/api";
 import NgGeoPicker from "../components/NgGeoPicker.jsx";
-
-// same env as BecomePro
-const CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || "";
-const UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET || "";
-
-/* ---------- Cloudinary widget (same pattern as BecomePro) ---------- */
-function useCloudinaryWidget() {
-  const [ready, setReady] = useState(!!window.cloudinary?.createUploadWidget);
-
-  useEffect(() => {
-    if (ready) return;
-    if (!document.querySelector('script[data-cld="1"]')) {
-      const s = document.createElement("script");
-      s.src = "https://widget.cloudinary.com/v2.0/global/all.js";
-      s.async = true;
-      s.defer = true;
-      s.setAttribute("data-cld", "1");
-      s.onload = () => setReady(!!window.cloudinary?.createUploadWidget);
-      document.body.appendChild(s);
-    }
-    const t = setInterval(() => {
-      if (window.cloudinary?.createUploadWidget) {
-        setReady(true);
-        clearInterval(t);
-      }
-    }, 200);
-    const stopAfter = setTimeout(() => clearInterval(t), 10000);
-    return () => {
-      clearInterval(t);
-      clearTimeout(stopAfter);
-    };
-  }, [ready]);
-
-  const factory = (onSuccess, folder = "kpocha/clients") => {
-    if (!ready || !CLOUD_NAME || !UPLOAD_PRESET) return null;
-    try {
-      return window.cloudinary.createUploadWidget(
-        {
-          cloudName: CLOUD_NAME,
-          uploadPreset: UPLOAD_PRESET,
-          multiple: false,
-          maxFiles: 1,
-          clientAllowedFormats: ["jpg", "jpeg", "png", "webp"],
-          maxImageFileSize: 5 * 1024 * 1024,
-          sources: ["local", "camera", "url"],
-          showPoweredBy: false,
-          folder,
-        },
-        (err, res) => {
-          if (!err && res && res.event === "success") {
-            onSuccess(res.info.secure_url);
-          }
-        },
-      );
-    } catch {
-      return null;
-    }
-  };
-
-  return { ready, factory };
-}
+import { uploadMediaAsset } from "../lib/r2Upload";
 
 /* ======================= Client Register Page ======================= */
 export default function ClientRegister() {
   const nav = useNavigate();
-  const { ready: widgetReady, factory: widgetFactory } = useCloudinaryWidget();
 
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
@@ -88,12 +27,13 @@ export default function ClientRegister() {
   const [lga, setLga] = useState("");
   const [address, setAddress] = useState("");
   const [photoUrl, setPhotoUrl] = useState("");
+  const [photoAssetId, setPhotoAssetId] = useState("");
 
-  // optional KYC
-  const [verifyNow, setVerifyNow] = useState(false);
-  const [idType, setIdType] = useState("");
-  const [idUrl, setIdUrl] = useState("");
-  const [selfieWithIdUrl, setSelfieWithIdUrl] = useState("");
+  // face verification (AWS liveness)
+  const [verification, setVerification] = useState({
+    faceVerificationVideoUrl: "",
+    livenessMetrics: {},
+  });
 
   // agreements
   const [agreements, setAgreements] = useState({
@@ -117,6 +57,32 @@ export default function ClientRegister() {
     okTimerRef.current = setTimeout(() => setOk(""), 2200);
   }
 
+  /* ---------- Face verification storage (AWS liveness) ---------- */
+  function checkVerificationStorage() {
+    try {
+      const metricsRaw = localStorage.getItem("kpocha:livenessMetrics");
+      const videoUrl = localStorage.getItem("kpocha:livenessVideoUrl") || "";
+
+      const hasMetrics = !!metricsRaw;
+      const hasVideo = !!videoUrl;
+
+      if (hasMetrics || hasVideo) {
+        setVerification((v) => ({
+          ...v,
+          livenessMetrics: metricsRaw
+            ? JSON.parse(metricsRaw)
+            : v.livenessMetrics || {},
+          faceVerificationVideoUrl:
+            videoUrl || v.faceVerificationVideoUrl || "",
+        }));
+
+        // one-time consume
+        localStorage.removeItem("kpocha:livenessMetrics");
+        localStorage.removeItem("kpocha:livenessVideoUrl");
+      }
+    } catch {}
+  }
+
   // ===== Prefill =====
   useEffect(() => {
     let alive = true;
@@ -136,6 +102,9 @@ export default function ClientRegister() {
           setLga((data.lga || "").toString().toUpperCase());
           setAddress(data.address || "");
           setPhotoUrl(data.photoUrl || "");
+          setPhotoAssetId(
+            data.photoAssetId || data?.identity?.photoAssetId || "",
+          );
 
           if (data.lat != null) setLat(data.lat);
           if (data.lon != null) setLon(data.lon);
@@ -150,14 +119,6 @@ export default function ClientRegister() {
               privacy: acceptedPrivacy,
             });
           }
-
-          const kyc = data.kyc || {};
-          if (kyc?.idType || kyc?.idUrl || kyc?.selfieWithIdUrl) {
-            setVerifyNow(true);
-            setIdType(kyc.idType || "");
-            setIdUrl(kyc.idUrl || "");
-            setSelfieWithIdUrl(kyc.selfieWithIdUrl || "");
-          }
         }
       } catch {
         if (alive) setErr("Unable to load your profile.");
@@ -171,24 +132,29 @@ export default function ClientRegister() {
     };
   }, []);
 
+  useEffect(() => {
+    const onFocus = () => checkVerificationStorage();
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") checkVerificationStorage();
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+
+    // also run once on mount
+    checkVerificationStorage();
+
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, []);
+
   // ===== Can save? =====
   const canSave = useMemo(() => {
     const base = !!fullName && !!phone && (!!stateVal || !!lga) && !!address;
     const agreed = agreements.terms && agreements.privacy;
-    if (!verifyNow) return base && agreed;
-    return base && agreed && !!idType && !!idUrl && !!selfieWithIdUrl;
-  }, [
-    fullName,
-    phone,
-    stateVal,
-    lga,
-    address,
-    verifyNow,
-    idType,
-    idUrl,
-    selfieWithIdUrl,
-    agreements,
-  ]);
+    return base && agreed;
+  }, [fullName, phone, stateVal, lga, address, agreements]);
 
   // ===== Save =====
   async function save() {
@@ -210,18 +176,26 @@ export default function ClientRegister() {
         lga: lgaUP,
         address: address?.trim(),
         photoUrl: photoUrl?.trim(),
+        photoAssetId,
         acceptedTerms: !!agreements.terms,
         acceptedPrivacy: !!agreements.privacy,
         agreements: {
           terms: !!agreements.terms,
           privacy: !!agreements.privacy,
         },
+
+        ...(verification?.faceVerificationVideoUrl ||
+        Object.keys(verification?.livenessMetrics || {}).length > 0
+          ? { verification }
+          : {}),
+
         // keep identity in sync like other settings pages
         identity: {
           phone: phone?.trim(),
           state: stateUP,
           city: lgaUP,
           photoUrl: photoUrl?.trim(),
+          photoAssetId,
         },
       };
 
@@ -235,20 +209,40 @@ export default function ClientRegister() {
         payload.lon = lonClean;
       }
 
-      if (verifyNow) {
-        payload.kyc = {
-          idType,
-          idUrl,
-          selfieWithIdUrl,
-          status: "pending",
-        };
-      }
-
       await updateClientProfile(payload);
       flashOK("Saved!");
       nav("/browse", { replace: true });
     } catch (e) {
       setErr(e?.response?.data?.error || "Failed to save profile.");
+    }
+  }
+
+  async function uploadImageToR2(file) {
+    if (!file) return { url: "", assetId: "" };
+
+    setErr("");
+    flashOK("Uploading image...");
+
+    try {
+      const res = await uploadMediaAsset({
+        api,
+        file,
+        type: "image",
+      });
+
+      if (!res?.publicUrl) {
+        setErr("Upload succeeded but public URL is missing.");
+        return { url: "", assetId: "" };
+      }
+
+      flashOK("Uploaded ✓");
+      return {
+        url: res.publicUrl,
+        assetId: res.assetId || "",
+      };
+    } catch (e) {
+      setErr(e?.message || "Upload failed.");
+      return { url: "", assetId: "" };
     }
   }
 
@@ -365,13 +359,24 @@ export default function ClientRegister() {
                   value={photoUrl}
                   onChange={(e) => setPhotoUrl(e.target.value)}
                 />
-                <UploadButton
-                  title={widgetReady ? "Upload" : "Upload (loading…)"}
-                  onUploaded={(url) => setPhotoUrl(url)}
-                  widgetFactory={widgetFactory}
-                  disabled={!widgetReady || !CLOUD_NAME || !UPLOAD_PRESET}
-                  folder="kpocha/clients"
-                />
+                <label className="px-3 py-1.5 rounded-lg border border-yellow-500 text-yellow-300 text-sm hover:bg-yellow-500/10 cursor-pointer">
+                  Upload
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      e.target.value = "";
+                      const out = await uploadImageToR2(file);
+                      if (out.url) {
+                        setPhotoUrl(out.url);
+                        setPhotoAssetId(out.assetId || "");
+                      }
+                    }}
+                  />
+                </label>
+
                 {photoUrl && (
                   <button
                     type="button"
@@ -383,19 +388,23 @@ export default function ClientRegister() {
                 )}
               </div>
 
-              <button
-                type="button"
-                onClick={() => nav("/aws-liveness?back=/client/register")}
-                className="px-3 py-1.5 rounded-lg border border-yellow-500/80 text-yellow-200 text-sm hover:bg-yellow-500/10"
-              >
-                Start Face Verification
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => nav("/aws-liveness?back=/client/register")}
+                  className="px-3 py-1.5 rounded-lg border border-yellow-500/80 text-yellow-200 text-sm hover:bg-yellow-500/10"
+                >
+                  Start Face Verification
+                </button>
 
-              {(!CLOUD_NAME || !UPLOAD_PRESET) && (
-                <p className="text-xs text-zinc-500">
-                  Upload widget not configured — use URL.
-                </p>
-              )}
+                {verification.faceVerificationVideoUrl ? (
+                  <span className="text-xs text-emerald-400">Verified ✓</span>
+                ) : (
+                  <span className="text-xs text-zinc-500">
+                    Not verified yet
+                  </span>
+                )}
+              </div>
             </div>
           </Section>
 
@@ -430,7 +439,7 @@ export default function ClientRegister() {
               className="grid grid-cols-1 gap-3"
             />
 
-            <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="mt-3 grid grid-cols-1 md:grid-cols-4 gap-3">
               <Input
                 label="Address / Landmark *"
                 value={address}
@@ -441,6 +450,12 @@ export default function ClientRegister() {
                 value={lat ?? ""}
                 onChange={(e) => setLat(e.target.value)}
                 placeholder="6.5244"
+              />
+              <Input
+                label="Longitude (optional)"
+                value={lon ?? ""}
+                onChange={(e) => setLon(e.target.value)}
+                placeholder="3.3792"
               />
               <div className="flex items-end">
                 <button
@@ -453,62 +468,6 @@ export default function ClientRegister() {
                 </button>
               </div>
             </div>
-          </Section>
-
-          {/* KYC */}
-          <Section title="Optional Verification (KYC)">
-            <label className="flex items-center gap-2 text-sm text-yellow-200 mb-3">
-              <input
-                type="checkbox"
-                checked={verifyNow}
-                onChange={(e) => setVerifyNow(e.target.checked)}
-              />
-              Verify my identity now (recommended)
-            </label>
-
-            {verifyNow && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
-                  <Label>ID Type *</Label>
-                  <select
-                    className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-200"
-                    value={idType}
-                    onChange={(e) => setIdType(e.target.value)}
-                  >
-                    <option value="">Select…</option>
-                    {[
-                      "National ID",
-                      "Voter’s Card",
-                      "Driver’s License",
-                      "International Passport",
-                    ].map((o) => (
-                      <option key={o} value={o}>
-                        {o}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <UploadRow
-                  label="Government ID image *"
-                  value={idUrl}
-                  onChange={setIdUrl}
-                  widgetFactory={widgetFactory}
-                  widgetReady={widgetReady}
-                  folder="kpocha/client-kyc"
-                />
-
-                <UploadRow
-                  label="Selfie with ID *"
-                  value={selfieWithIdUrl}
-                  onChange={setSelfieWithIdUrl}
-                  widgetFactory={widgetFactory}
-                  widgetReady={widgetReady}
-                  folder="kpocha/client-kyc"
-                  className="md:col-span-2"
-                />
-              </div>
-            )}
           </Section>
 
           {/* Agreements */}
@@ -634,68 +593,5 @@ function Input({ label, ...props }) {
         className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-200"
       />
     </label>
-  );
-}
-
-function UploadButton({
-  title = "Upload",
-  onUploaded,
-  widgetFactory,
-  disabled,
-  folder,
-}) {
-  function open() {
-    const widget = widgetFactory?.(onUploaded, folder);
-    if (!widget) {
-      alert("Upload unavailable. Enter a URL manually.");
-      return;
-    }
-    widget.open();
-  }
-  return (
-    <button
-      type="button"
-      onClick={open}
-      disabled={disabled}
-      className="px-3 py-1.5 rounded-lg border border-yellow-500 text-yellow-300 text-sm hover:bg-yellow-500/10 disabled:opacity-50"
-    >
-      {title}
-    </button>
-  );
-}
-
-function UploadRow({
-  label,
-  value,
-  onChange,
-  widgetFactory,
-  widgetReady,
-  folder,
-  className = "",
-}) {
-  return (
-    <div className={className}>
-      <Label>{label}</Label>
-      <div className="flex gap-2">
-        <input
-          className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-200"
-          placeholder="Paste image URL"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-        />
-        <UploadButton
-          title={widgetReady ? "Upload" : "Upload (loading…)"}
-          onUploaded={(url) => onChange(url)}
-          widgetFactory={widgetFactory}
-          disabled={!widgetReady || !CLOUD_NAME || !UPLOAD_PRESET}
-          folder={folder}
-        />
-      </div>
-      {(!CLOUD_NAME || !UPLOAD_PRESET) && (
-        <p className="text-xs text-zinc-500 mt-1">
-          Upload widget not configured — the URL field is the fallback.
-        </p>
-      )}
-    </div>
   );
 }

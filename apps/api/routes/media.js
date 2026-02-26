@@ -2,7 +2,7 @@
 import express from "express";
 import MediaAsset from "../models/MediaAsset.js";
 import { mediaQueue } from "../queues/mediaQueue.js";
-import { getUploadUrl, getDownloadUrl } from "../r2.js";
+import { getUploadUrl, getDownloadUrl, keyToPublicUrl } from "../r2.js";
 
 export default function mediaRoutes({ requireAuth }) {
   const r = express.Router();
@@ -56,6 +56,7 @@ export default function mediaRoutes({ requireAuth }) {
       ok: true,
       assetId: asset._id,
       key,
+      publicUrl: keyToPublicUrl(key),
       type,
       contentType,
       status: asset.status,

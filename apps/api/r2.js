@@ -15,6 +15,16 @@ const s3 = new S3Client({
   },
 });
 
+export const R2_PUBLIC_BASE_URL = (
+  process.env.R2_PUBLIC_BASE_URL || ""
+).replace(/\/+$/, "");
+
+export function keyToPublicUrl(key) {
+  if (!key) return "";
+  if (!R2_PUBLIC_BASE_URL) return "";
+  return `${R2_PUBLIC_BASE_URL}/${String(key).replace(/^\/+/, "")}`;
+}
+
 export async function getUploadUrl(key, contentType) {
   const command = new PutObjectCommand({
     Bucket: process.env.R2_BUCKET,

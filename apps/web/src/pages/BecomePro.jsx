@@ -7,12 +7,9 @@ import {
   listBanksNG,
   submitProApplication,
 } from "../lib/api";
+import { uploadMediaAsset } from "../lib/r2Upload";
 import NgGeoPicker from "../components/NgGeoPicker.jsx";
 import ServicePicker from "../components/ServicePicker.jsx";
-
-/* ---------- Cloudinary (frontend env) ---------- */
-const CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || "";
-const UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET || "";
 
 /* ---------- Utils ---------- */
 function digitsOnly(s = "") {
@@ -38,65 +35,9 @@ function normName(s = "") {
     .trim();
 }
 
-/* ---------- Upload widget helper ---------- */
-function useCloudinaryWidget() {
-  const [ready, setReady] = useState(!!window.cloudinary?.createUploadWidget);
-  useEffect(() => {
-    if (ready) return;
-    if (!document.querySelector('script[data-cld="1"]')) {
-      const s = document.createElement("script");
-      s.src = "https://widget.cloudinary.com/v2.0/global/all.js";
-      s.async = true;
-      s.defer = true;
-      s.setAttribute("data-cld", "1");
-      s.onload = () => setReady(!!window.cloudinary?.createUploadWidget);
-      document.body.appendChild(s);
-    }
-    const t = setInterval(() => {
-      if (window.cloudinary?.createUploadWidget) {
-        setReady(true);
-        clearInterval(t);
-      }
-    }, 200);
-    const stopAfter = setTimeout(() => clearInterval(t), 10000);
-    return () => {
-      clearInterval(t);
-      clearTimeout(stopAfter);
-    };
-  }, [ready]);
-
-  const factory = (onSuccess, folder = "kpocha/pro-apps") => {
-    if (!ready || !CLOUD_NAME || !UPLOAD_PRESET) return null;
-    try {
-      return window.cloudinary.createUploadWidget(
-        {
-          cloudName: CLOUD_NAME,
-          uploadPreset: UPLOAD_PRESET,
-          multiple: false,
-          maxFiles: 1,
-          clientAllowedFormats: ["jpg", "jpeg", "png", "webp"],
-          maxImageFileSize: 5 * 1024 * 1024,
-          sources: ["local", "camera", "url"],
-          showPoweredBy: false,
-          folder,
-        },
-        (err, res) => {
-          if (!err && res && res.event === "success")
-            onSuccess(res.info.secure_url);
-        },
-      );
-    } catch {
-      return null;
-    }
-  };
-
-  return { ready, factory };
-}
-
 /* ======================= BecomePro Page ======================= */
 export default function BecomePro() {
   const nav = useNavigate();
-  const { ready: widgetReady, factory: widgetFactory } = useCloudinaryWidget();
 
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
@@ -145,7 +86,6 @@ export default function BecomePro() {
   // we keep these so we know what user already has
   const [me, setMe] = useState(null);
   const [clientProfile, setClientProfile] = useState(null);
-  const [existingPro, setExistingPro] = useState(null);
 
   // ===== Identity
   const [identity, setIdentity] = useState({
@@ -160,6 +100,7 @@ export default function BecomePro() {
     state: "",
     lga: "",
     photoUrl: "",
+    photoAssetId: "",
     lat: "",
     lon: "",
   });
@@ -167,9 +108,6 @@ export default function BecomePro() {
   // ===== Professional meta
   const [professional, setProfessional] = useState({
     years: "",
-    workPhotos: [""],
-    hasCert: "no",
-    certUrl: "",
     profileVisible: true,
     nationwide: false,
   });
@@ -240,6 +178,32 @@ export default function BecomePro() {
   // ===== Pull Nigeria states for picker + nationwide logic
   const [allStates, setAllStates] = useState([]);
 
+  async function uploadImageToR2(file) {
+    if (!file) return { url: "", assetId: "" };
+
+    setBusy(true);
+    setMsg("Uploading image...");
+
+    try {
+      const res = await uploadMediaAsset({ api, file, type: "image" });
+      const url = res?.publicUrl || "";
+      const assetId = res?.assetId || "";
+
+      if (!url) {
+        setMsg("Upload succeeded but public URL is missing.");
+        return { url: "", assetId };
+      }
+
+      setMsg("");
+      return { url, assetId };
+    } catch (e) {
+      setMsg(e?.message || "Upload failed.");
+      return { url: "", assetId: "" };
+    } finally {
+      setBusy(false);
+    }
+  }
+
   // ✅ Load me + client + (maybe) existing pro + geo, and PREFILL
   useEffect(() => {
     let alive = true;
@@ -277,7 +241,6 @@ export default function BecomePro() {
 
         setMe(meData);
         setClientProfile(clientData);
-        setExistingPro(proData);
         setAllStates(states);
 
         // PRIORITY for identity: client → pro → me
@@ -313,6 +276,13 @@ export default function BecomePro() {
           meData?.identity?.photoUrl ||
           "";
 
+        const basePhotoAssetId =
+          clientData?.photoAssetId ||
+          clientData?.identity?.photoAssetId ||
+          proData?.identity?.photoAssetId ||
+          meData?.identity?.photoAssetId ||
+          "";
+
         // Try to split client full name
         let firstName = "";
         let lastName = "";
@@ -346,6 +316,7 @@ export default function BecomePro() {
           state: prev.state || baseState,
           lga: prev.lga || baseLga,
           photoUrl: prev.photoUrl || basePhoto,
+          photoAssetId: prev.photoAssetId || basePhotoAssetId,
         }));
 
         // If user is already pro and has availability states, keep it
@@ -393,7 +364,9 @@ export default function BecomePro() {
 
         try {
           const { data } = await api.get(
-            `/api/geo/rev?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`,
+            `/api/geo/rev?lat=${encodeURIComponent(
+              lat,
+            )}&lon=${encodeURIComponent(lon)}`,
           );
           const props = data?.features?.[0]?.properties || {};
           const guessedState = String(
@@ -819,21 +792,27 @@ export default function BecomePro() {
                       setIdentity({ ...identity, photoUrl: e.target.value })
                     }
                   />
-                  <UploadButton
-                    title={widgetReady ? "Upload" : "Upload (loading…)"}
-                    onUploaded={(url) =>
-                      setIdentity({ ...identity, photoUrl: url })
-                    }
-                    widgetFactory={widgetFactory}
-                    disabled={!widgetReady || !CLOUD_NAME || !UPLOAD_PRESET}
-                  />
+                  <label className="px-3 py-2 rounded-lg border border-yellow-500 text-yellow-300 text-sm hover:bg-yellow-500/10 cursor-pointer">
+                    Upload
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        e.target.value = "";
+                        const out = await uploadImageToR2(file);
+                        if (out.url) {
+                          setIdentity({
+                            ...identity,
+                            photoUrl: out.url,
+                            photoAssetId: out.assetId || "",
+                          });
+                        }
+                      }}
+                    />
+                  </label>
                 </div>
-                {(!CLOUD_NAME || !UPLOAD_PRESET) && (
-                  <p className="text-xs text-zinc-500 mt-1">
-                    Upload widget not configured — the URL field is the
-                    fallback.
-                  </p>
-                )}
               </div>
             </div>
 
@@ -1025,26 +1004,74 @@ export default function BecomePro() {
                   }
                 />
 
-                <UploadRow
-                  label="Photo (outside)"
-                  value={business.shopPhotoOutside}
-                  onChange={(v) =>
-                    setBusiness({ ...business, shopPhotoOutside: v })
-                  }
-                  widgetFactory={widgetFactory}
-                  widgetReady={widgetReady}
-                  folder="kpocha/pro-apps/shops"
-                />
-                <UploadRow
-                  label="Photo (inside)"
-                  value={business.shopPhotoInside}
-                  onChange={(v) =>
-                    setBusiness({ ...business, shopPhotoInside: v })
-                  }
-                  widgetFactory={widgetFactory}
-                  widgetReady={widgetReady}
-                  folder="kpocha/pro-apps/shops"
-                />
+                <div>
+                  <Label>Photo (outside)</Label>
+                  <div className="flex gap-2">
+                    <input
+                      className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-200"
+                      placeholder="Paste image URL"
+                      value={business.shopPhotoOutside}
+                      onChange={(e) =>
+                        setBusiness({
+                          ...business,
+                          shopPhotoOutside: e.target.value,
+                        })
+                      }
+                    />
+                    <label className="px-3 py-2 rounded-lg border border-yellow-500 text-yellow-300 text-sm hover:bg-yellow-500/10 cursor-pointer">
+                      Upload
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          e.target.value = "";
+                          const out = await uploadImageToR2(file);
+                          if (out.url)
+                            setBusiness({
+                              ...business,
+                              shopPhotoOutside: out.url,
+                            });
+                        }}
+                      />
+                    </label>
+                  </div>
+                </div>
+                <div>
+                  <Label>Photo (inside)</Label>
+                  <div className="flex gap-2">
+                    <input
+                      className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-200"
+                      placeholder="Paste image URL"
+                      value={business.shopPhotoInside}
+                      onChange={(e) =>
+                        setBusiness({
+                          ...business,
+                          shopPhotoInside: e.target.value,
+                        })
+                      }
+                    />
+                    <label className="px-3 py-2 rounded-lg border border-yellow-500 text-yellow-300 text-sm hover:bg-yellow-500/10 cursor-pointer">
+                      Upload
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          e.target.value = "";
+                          const out = await uploadImageToR2(file);
+                          if (out.url)
+                            setBusiness({
+                              ...business,
+                              shopPhotoInside: out.url,
+                            });
+                        }}
+                      />
+                    </label>
+                  </div>
+                </div>
               </div>
             )}
           </Section>
@@ -1396,67 +1423,6 @@ function Check({ label, ...props }) {
       <input type="checkbox" {...props} />
       <span>{label}</span>
     </label>
-  );
-}
-function UploadButton({
-  title = "Upload",
-  onUploaded,
-  widgetFactory,
-  disabled,
-  folder,
-}) {
-  function open() {
-    const widget = widgetFactory?.(onUploaded, folder);
-    if (!widget) {
-      alert("Upload unavailable. Enter a URL manually.");
-      return;
-    }
-    widget.open();
-  }
-  return (
-    <button
-      type="button"
-      onClick={open}
-      disabled={disabled}
-      className="px-3 py-2 rounded-lg border border-yellow-500 text-yellow-300 text-sm hover:bg-yellow-500/10 disabled:opacity-50"
-      title="Upload with Cloudinary"
-    >
-      {title}
-    </button>
-  );
-}
-function UploadRow({
-  label,
-  value,
-  onChange,
-  widgetFactory,
-  widgetReady,
-  folder,
-}) {
-  return (
-    <div>
-      <Label>{label}</Label>
-      <div className="flex gap-2">
-        <input
-          className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-200"
-          placeholder="Paste image URL"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-        />
-        <UploadButton
-          title={widgetReady ? "Upload" : "Upload (loading…)"}
-          onUploaded={(url) => onChange(url)}
-          widgetFactory={widgetFactory}
-          disabled={!widgetReady || !CLOUD_NAME || !UPLOAD_PRESET}
-          folder={folder}
-        />
-      </div>
-      {(!CLOUD_NAME || !UPLOAD_PRESET) && (
-        <p className="text-xs text-zinc-500 mt-1">
-          Upload widget not configured — the URL field is the fallback.
-        </p>
-      )}
-    </div>
   );
 }
 

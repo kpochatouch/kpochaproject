@@ -94,12 +94,24 @@ export default function adminProsRoutes({
           ...(fresh.identity || {}),
         };
 
-        // also pull photo if present
+        // legacy url (still supported)
         const photoUrl =
           fresh.photoUrl ||
           (fresh.identity && fresh.identity.photoUrl) ||
           pro.photoUrl ||
           "";
+
+        // ✅ asset pipeline
+        const photoAssetId =
+          fresh.photoAssetId ||
+          (fresh.identity && fresh.identity.photoAssetId) ||
+          pro.photoAssetId ||
+          null;
+
+        // keep identity mirror too (optional but safe)
+        if (photoAssetId) {
+          identity.photoAssetId = String(photoAssetId).trim();
+        }
 
         const proSet = {};
         if (name) proSet.name = name;
@@ -107,6 +119,7 @@ export default function adminProsRoutes({
         if (lga) proSet.lga = lga;
         if (state) proSet.state = state;
         if (photoUrl) proSet.photoUrl = photoUrl;
+        if (photoAssetId) proSet.photoAssetId = String(photoAssetId).trim();
         if (Object.keys(identity).length > 0) proSet.identity = identity;
 
         // 4) update Pro

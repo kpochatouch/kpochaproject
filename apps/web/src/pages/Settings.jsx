@@ -11,10 +11,7 @@ import {
 import { useToast } from "../components/Toast.jsx";
 import NgGeoPicker from "../components/NgGeoPicker.jsx";
 import ServicePicker from "../components/ServicePicker.jsx";
-
-/* ---------- Cloudinary config ---------- */
-const CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || "";
-const UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET || "";
+import { uploadMediaAsset } from "../lib/r2Upload";
 
 /* ---------- username cooldown (3 months) ---------- */
 // Change USERNAME_COOLDOWN_DAYS to 180 if you want 6 months instead
@@ -80,7 +77,7 @@ export default function SettingsPage() {
   const { success, error, info } = useToast();
 
   // step-by-step view (like BookingDetails “wrapped”)
-  const [step, setStep] = useState("general"); // "general" | "pro" | "payments" | "system" | "advanced"
+  const [step, setStep] = useState("general"); // "general" | "pro" | "payments" | "advanced"
 
   // main docs
   const [me, setMe] = useState(null);
@@ -96,6 +93,7 @@ export default function SettingsPage() {
   const [displayName, setDisplayName] = useState("");
   const [phone, setPhone] = useState("");
   const [avatarUrl, setAvatarUrl] = useState("");
+  const [avatarAssetId, setAvatarAssetId] = useState("");
   const [clientBio, setClientBio] = useState("");
   const [username, setUsername] = useState("");
   const [usernameLastChangedAt, setUsernameLastChangedAt] = useState(null);
@@ -114,13 +112,16 @@ export default function SettingsPage() {
   const [years, setYears] = useState("");
   const [hasCert, setHasCert] = useState("no");
   const [certUrl, setCertUrl] = useState("");
+  const [certAssetId, setCertAssetId] = useState("");
 
   // pro public
   const [proBio, setProBio] = useState("");
   const [proPhotoUrl, setProPhotoUrl] = useState("");
+  const [proPhotoAssetId, setProPhotoAssetId] = useState("");
 
   // gallery
   const [workPhotos, setWorkPhotos] = useState([""]);
+  const [workPhotoAssetIds, setWorkPhotoAssetIds] = useState([""]);
 
   // bank
   const [bankName, setBankName] = useState("");
@@ -218,64 +219,6 @@ export default function SettingsPage() {
     );
   }
 
-  /* ---------- cloudinary ---------- */
-  const [widgetReady, setWidgetReady] = useState(
-    typeof window !== "undefined" && !!window.cloudinary?.createUploadWidget,
-  );
-  useEffect(() => {
-    if (widgetReady) return;
-    if (typeof window === "undefined") return;
-
-    if (!document.querySelector('script[data-cld="1"]')) {
-      const s = document.createElement("script");
-      s.src = "https://widget.cloudinary.com/v2.0/global/all.js";
-      s.async = true;
-      s.defer = true;
-      s.setAttribute("data-cld", "1");
-      s.onload = () => setWidgetReady(!!window.cloudinary?.createUploadWidget);
-      document.body.appendChild(s);
-    }
-    const poll = setInterval(() => {
-      if (window.cloudinary?.createUploadWidget) {
-        setWidgetReady(true);
-        clearInterval(poll);
-      }
-    }, 200);
-    const timeout = setTimeout(() => clearInterval(poll), 10000);
-    return () => {
-      clearInterval(poll);
-      clearTimeout(timeout);
-    };
-  }, [widgetReady]);
-
-  const widgetFactory = useMemo(() => {
-    return (onSuccess, folder = "kpocha/pro-apps") => {
-      if (!widgetReady || !CLOUD_NAME || !UPLOAD_PRESET) return null;
-      try {
-        return window.cloudinary.createUploadWidget(
-          {
-            cloudName: CLOUD_NAME,
-            uploadPreset: UPLOAD_PRESET,
-            multiple: false,
-            maxFiles: 1,
-            clientAllowedFormats: ["jpg", "jpeg", "png", "webp"],
-            maxImageFileSize: 5 * 1024 * 1024,
-            sources: ["local", "camera", "url"],
-            showPoweredBy: false,
-            folder,
-          },
-          (err, res) => {
-            if (!err && res && res.event === "success") {
-              onSuccess(res.info.secure_url);
-            }
-          },
-        );
-      } catch {
-        return null;
-      }
-    };
-  }, [widgetReady]);
-
   /* ---------- load data ---------- */
   useEffect(() => {
     let alive = true;
@@ -347,6 +290,16 @@ export default function SettingsPage() {
             proData?.identity?.photoUrl ||
             meData?.photoUrl ||
             meData?.identity?.photoUrl ||
+            "",
+        );
+
+        setAvatarAssetId(
+          clientData?.photoAssetId ||
+            clientData?.identity?.photoAssetId ||
+            proData?.photoAssetId ||
+            proData?.identity?.photoAssetId ||
+            meData?.photoAssetId ||
+            meData?.identity?.photoAssetId ||
             "",
         );
 
@@ -441,6 +394,7 @@ export default function SettingsPage() {
           const hc = String(proData?.professional?.hasCert || "no");
           setHasCert(hc === "yes" ? "yes" : "no");
           setCertUrl(proData?.professional?.certUrl || "");
+          setCertAssetId(proData?.professional?.certAssetId || "");
           setWorkPhotos(
             Array.isArray(proData?.professional?.workPhotos) &&
               proData.professional.workPhotos.length
@@ -457,6 +411,8 @@ export default function SettingsPage() {
               proData?.contactPublic?.shopPhoto ||
               "",
           );
+
+          setProPhotoAssetId(proData?.photoAssetId || "");
 
           if (
             Array.isArray(proData?.servicesDetailed) &&
@@ -511,6 +467,16 @@ export default function SettingsPage() {
             lon: proData?.business?.lon || proData?.lon || "",
           });
 
+          setWorkPhotoAssetIds(
+            Array.isArray(proData?.professional?.workPhotoAssetIds) &&
+              proData.professional.workPhotoAssetIds.length
+              ? proData.professional.workPhotoAssetIds
+              : Array.isArray(proData?.workPhotoAssetIds) &&
+                proData.workPhotoAssetIds.length
+              ? proData.workPhotoAssetIds
+              : [""],
+          );
+
           const av = proData?.availability || {};
           setAvailability({
             days: {
@@ -544,6 +510,9 @@ export default function SettingsPage() {
           setWorkPhotos([""]);
           setProBio("");
           setProPhotoUrl("");
+          setCertAssetId("");
+          setWorkPhotoAssetIds([""]);
+          setProPhotoAssetId("");
           setServicesDetailed([
             { id: "", name: "", price: "", promoPrice: "", otherText: "" },
           ]);
@@ -594,6 +563,7 @@ export default function SettingsPage() {
             setStateVal((draft.payload.state || "").toUpperCase());
             setLga((draft.payload.lga || "").toUpperCase());
             setAvatarUrl(draft.payload.avatarUrl || "");
+            setAvatarAssetId(draft.payload.avatarAssetId || "");
             setClientBio(draft.payload.bio || "");
           } else if (draft.section === "pro") {
             setProBio(draft.payload.proBio || "");
@@ -714,8 +684,10 @@ export default function SettingsPage() {
     years,
     hasCert,
     workPhotos,
+    workPhotoAssetIds,
     proBio,
     proPhotoUrl,
+    proPhotoAssetId,
   ]);
   const canSaveBank = useMemo(
     () => hasPro && !!bankCode && digitsOnly(accountNumber).length === 10,
@@ -797,8 +769,14 @@ export default function SettingsPage() {
         phone,
         state: stateVal.toUpperCase(),
         lga: lga.toUpperCase(),
+
+        // legacy (temporary)
         avatarUrl,
         photoUrl: avatarUrl,
+
+        // ✅ new asset-based (Phase 1)
+        ...(avatarAssetId ? { photoAssetId: avatarAssetId } : {}),
+
         bio: clientBio,
       };
 
@@ -837,6 +815,7 @@ export default function SettingsPage() {
           state: stateVal.toUpperCase(),
           city: lga.toUpperCase(),
           photoUrl: avatarUrl,
+          ...(avatarAssetId ? { photoAssetId: avatarAssetId } : {}),
         },
       }));
 
@@ -875,6 +854,7 @@ export default function SettingsPage() {
           state: stateVal,
           lga,
           avatarUrl,
+          avatarAssetId,
           bio: clientBio,
         });
         await startAwsLivenessFlow();
@@ -892,6 +872,7 @@ export default function SettingsPage() {
     stateVal,
     lga,
     avatarUrl,
+    avatarAssetId,
     clientBio,
     client,
     me,
@@ -934,11 +915,26 @@ export default function SettingsPage() {
           services: serviceNames,
           years,
           hasCert,
+
+          // legacy (temporary)
           certUrl,
+
+          // ✅ new asset-based (Phase 1)
+          ...(certAssetId ? { certAssetId } : {}),
+
           profileVisible,
           nationwide,
+
+          // legacy (temporary)
           workPhotos,
+
+          // ✅ new asset-based (Phase 1)
+          ...(Array.isArray(workPhotoAssetIds) &&
+          workPhotoAssetIds.filter(Boolean).length
+            ? { workPhotoAssetIds: workPhotoAssetIds.filter(Boolean) }
+            : {}),
         },
+
         availability: {
           ...(appDoc?.availability || {}),
           statesCovered: nationwide
@@ -954,13 +950,23 @@ export default function SettingsPage() {
           homeService: availability.homeService,
           homeServicePrice: cleanMoney(availability.homeServicePrice),
         },
+
         bio: proBio,
+
+        // legacy (temporary)
         photoUrl: proPhotoUrl,
+
+        // ✅ new asset-based (Phase 1)
+        ...(proPhotoAssetId ? { photoAssetId: proPhotoAssetId } : {}),
+
         servicesDetailed: normalizedDetailed,
+
         business: {
           ...(appDoc?.business || {}),
           ...business,
+          // (we’ll migrate shopPhotoOutside/shopPhotoInside in a later pass; they’re URLs for now)
         },
+
         status: appDoc?.status || "submitted",
       };
 
@@ -982,6 +988,7 @@ export default function SettingsPage() {
         stashSettingsDraft("pro", {
           proBio,
           proPhotoUrl,
+          proPhotoAssetId,
           profileVisible,
           nationwide,
           statesCovered,
@@ -1007,6 +1014,7 @@ export default function SettingsPage() {
     years,
     hasCert,
     certUrl,
+    certAssetId,
     profileVisible,
     nationwide,
     workPhotos,
@@ -1015,6 +1023,7 @@ export default function SettingsPage() {
     hasPro,
     proBio,
     proPhotoUrl,
+    proPhotoAssetId,
     availability,
     business,
   ]);
@@ -1105,11 +1114,6 @@ export default function SettingsPage() {
           onClick={() => setStep("payments")}
         />
         <StepTab
-          label="System"
-          active={step === "system"}
-          onClick={() => setStep("system")}
-        />
-        <StepTab
           label="Advanced"
           active={step === "advanced"}
           onClick={() => setStep("advanced")}
@@ -1136,7 +1140,6 @@ export default function SettingsPage() {
               .
             </div>
           )}
-
           {/* GENERAL */}
           {step === "general" && (
             <section className="rounded-xl border border-zinc-800 p-4 bg-black/30">
@@ -1149,15 +1152,19 @@ export default function SettingsPage() {
                 />
                 <div className="flex items-center gap-2">
                   <UploadButton
-                    title={widgetReady ? "Upload Photo" : "Upload (loading…)"}
-                    widgetFactory={widgetFactory}
-                    onUploaded={setAvatarUrl}
-                    disabled={!widgetReady}
+                    title="Upload Photo"
+                    onUploaded={(url, assetId) => {
+                      setAvatarUrl(url);
+                      setAvatarAssetId(assetId || "");
+                    }}
                   />
                   {avatarUrl && (
                     <button
                       className="text-xs text-red-300 border border-red-800 rounded px-2 py-1"
-                      onClick={() => setAvatarUrl("")}
+                      onClick={() => {
+                        setAvatarUrl("");
+                        setAvatarAssetId("");
+                      }}
                     >
                       Remove
                     </button>
@@ -1245,7 +1252,6 @@ export default function SettingsPage() {
               </div>
             </section>
           )}
-
           {/* PROFESSIONAL */}
           {step === "pro" && (
             <section className="rounded-xl border border-zinc-800 p-4 bg-black/30">
@@ -1261,17 +1267,20 @@ export default function SettingsPage() {
                     onClick={() => proPhotoUrl && setLightboxUrl(proPhotoUrl)}
                   />
                   <UploadButton
-                    title={
-                      widgetReady ? "Upload Pro Photo" : "Upload (loading…)"
-                    }
-                    widgetFactory={widgetFactory}
-                    onUploaded={setProPhotoUrl}
-                    disabled={!widgetReady || !hasPro}
+                    title="Upload Pro Photo"
+                    disabled={!hasPro}
+                    onUploaded={(url, assetId) => {
+                      setProPhotoUrl(url);
+                      setProPhotoAssetId(assetId || "");
+                    }}
                   />
                   {proPhotoUrl && (
                     <button
                       className="text-xs text-red-300 border border-red-800 rounded px-2 py-1"
-                      onClick={() => setProPhotoUrl("")}
+                      onClick={() => {
+                        setProPhotoUrl("");
+                        setProPhotoAssetId("");
+                      }}
                       disabled={!hasPro}
                     >
                       Remove
@@ -1332,10 +1341,11 @@ export default function SettingsPage() {
                         onChange={(e) => setCertUrl(e.target.value)}
                       />
                       <UploadButton
-                        title={widgetReady ? "Upload" : "Upload (loading…)"}
-                        onUploaded={setCertUrl}
-                        widgetFactory={widgetFactory}
-                        disabled={!widgetReady}
+                        title="Upload"
+                        onUploaded={(url, assetId) => {
+                          setCertUrl(url);
+                          setCertAssetId(assetId || "");
+                        }}
                       />
                     </div>
                   </div>
@@ -1517,10 +1527,7 @@ export default function SettingsPage() {
                         onChange={(v) =>
                           setBusiness({ ...business, shopPhotoOutside: v })
                         }
-                        widgetFactory={widgetFactory}
-                        widgetReady={widgetReady}
                         disabled={!hasPro}
-                        folder="kpocha/pro-apps/shops"
                       />
                       <UploadRow
                         label="Photo (inside)"
@@ -1528,10 +1535,7 @@ export default function SettingsPage() {
                         onChange={(v) =>
                           setBusiness({ ...business, shopPhotoInside: v })
                         }
-                        widgetFactory={widgetFactory}
-                        widgetReady={widgetReady}
                         disabled={!hasPro}
-                        folder="kpocha/pro-apps/shops"
                       />
                     </div>
                   </>
@@ -1692,22 +1696,31 @@ export default function SettingsPage() {
                       disabled={!hasPro}
                     />
                     <UploadButton
-                      title={widgetReady ? "Upload" : "Upload (loading…)"}
-                      onUploaded={(url) => {
+                      title="Upload"
+                      disabled={!hasPro}
+                      onUploaded={(url, assetId) => {
                         const arr = [...workPhotos];
                         arr[idx] = url;
                         setWorkPhotos(arr);
+
+                        const ids = [...(workPhotoAssetIds || [])];
+                        while (ids.length < arr.length) ids.push("");
+                        ids[idx] = assetId || "";
+                        setWorkPhotoAssetIds(ids);
                       }}
-                      widgetFactory={widgetFactory}
-                      disabled={!widgetReady || !hasPro}
                     />
                     {idx > 0 && (
                       <button
                         type="button"
                         className="text-sm text-red-400"
-                        onClick={() =>
-                          setWorkPhotos(workPhotos.filter((_, i) => i !== idx))
-                        }
+                        onClick={() => {
+                          setWorkPhotos((prev) =>
+                            prev.filter((_, i) => i !== idx),
+                          );
+                          setWorkPhotoAssetIds((prev) =>
+                            (prev || []).filter((_, i) => i !== idx),
+                          );
+                        }}
                         disabled={!hasPro}
                       >
                         Remove
@@ -1718,7 +1731,10 @@ export default function SettingsPage() {
                 <button
                   type="button"
                   className="text-sm text-gold underline"
-                  onClick={() => setWorkPhotos([...workPhotos, ""])}
+                  onClick={() => {
+                    setWorkPhotos((prev) => [...prev, ""]);
+                    setWorkPhotoAssetIds((prev) => [...(prev || []), ""]);
+                  }}
                   disabled={!hasPro}
                 >
                   + Add another
@@ -1802,48 +1818,6 @@ export default function SettingsPage() {
               </div>
             </section>
           )}
-
-          {/* SYSTEM */}
-          {step === "system" && (
-            <section className="rounded-xl border border-zinc-800 p-4 bg-black/30">
-              <h2 className="text-lg font-semibold mb-2">System</h2>
-              <p className="text-sm text-zinc-400 mb-4">
-                Control notification behavior on this device.
-              </p>
-
-              <button
-                type="button"
-                className="w-full px-4 py-2 rounded-lg border border-zinc-700 hover:bg-zinc-900 text-sm"
-                onClick={async () => {
-                  // Disable ALL browser/PWA web-push subscriptions for this user
-                  try {
-                    await api.post("/api/push/unsubscribe");
-                  } catch {}
-
-                  // Also attempt to unsubscribe the local browser push subscription (best effort)
-                  try {
-                    if ("serviceWorker" in navigator) {
-                      const reg = await navigator.serviceWorker.ready;
-                      const sub = await reg.pushManager.getSubscription();
-                      if (sub) await sub.unsubscribe();
-                    }
-                  } catch {}
-
-                  alert(
-                    "Browser (Chrome/PWA) notifications disabled for this account on this device.",
-                  );
-                }}
-              >
-                Disable Chrome / Browser notifications
-              </button>
-
-              <div className="text-xs text-zinc-500 mt-3">
-                This stops Chrome/PWA push for <b>your account</b>. It does not
-                affect other users.
-              </div>
-            </section>
-          )}
-
           {/* ADVANCED */}
           {step === "advanced" && (
             <div className="space-y-4">
@@ -1945,41 +1919,53 @@ function Select({ label, options = [], required, disabled, ...props }) {
     </label>
   );
 }
-function UploadButton({
-  title = "Upload",
-  onUploaded,
-  widgetFactory,
-  disabled,
-}) {
-  function open() {
-    const widget = widgetFactory?.(onUploaded);
-    if (!widget) {
-      alert("Upload unavailable. Enter a URL manually.");
-      return;
+function UploadButton({ title = "Upload", onUploaded, disabled, accept }) {
+  const inputRef = useRef(null);
+  const [busy, setBusy] = useState(false);
+
+  async function onPick(e) {
+    const file = e.target.files?.[0] || null;
+    // reset so picking same file again still triggers change
+    e.target.value = "";
+    if (!file) return;
+
+    try {
+      setBusy(true);
+      const out = await uploadMediaAsset({ api, file, type: "image" });
+      // out: { assetId, type, publicUrl, key }
+      const url = out?.publicUrl || "";
+      const assetId = out?.assetId || "";
+      if (typeof onUploaded === "function") onUploaded(url, assetId);
+    } catch (err) {
+      alert(err?.message || "Upload failed");
+    } finally {
+      setBusy(false);
     }
-    widget.open();
   }
+
   return (
-    <button
-      type="button"
-      onClick={open}
-      disabled={disabled}
-      className="px-3 py-2 rounded-lg border border-zinc-700 text-sm hover:bg-zinc-900 disabled:opacity-50"
-      title="Upload with Cloudinary"
-    >
-      {title}
-    </button>
+    <>
+      <input
+        ref={inputRef}
+        type="file"
+        accept={accept || "image/*"}
+        className="hidden"
+        onChange={onPick}
+        disabled={disabled || busy}
+      />
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        disabled={disabled || busy}
+        className="px-3 py-2 rounded-lg border border-zinc-700 text-sm hover:bg-zinc-900 disabled:opacity-50"
+        title="Upload to R2"
+      >
+        {busy ? "Uploading…" : title}
+      </button>
+    </>
   );
 }
-function UploadRow({
-  label,
-  value,
-  onChange,
-  widgetFactory,
-  widgetReady,
-  disabled,
-  folder,
-}) {
+function UploadRow({ label, value, onChange, disabled }) {
   return (
     <div>
       <Label>{label}</Label>
@@ -1992,10 +1978,9 @@ function UploadRow({
           disabled={disabled}
         />
         <UploadButton
-          title={widgetReady ? "Upload" : "Upload (loading…)"}
+          title="Upload"
           onUploaded={(url) => onChange(url)}
-          widgetFactory={(onU) => widgetFactory?.(onU, folder)}
-          disabled={!widgetReady || disabled}
+          disabled={disabled}
         />
       </div>
     </div>

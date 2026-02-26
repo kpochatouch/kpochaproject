@@ -13,6 +13,7 @@ import PostStats from "../models/PostStats.js";
 import { proToBarber } from "../models.js";
 import { getIO } from "../sockets/index.js";
 import { computeProfileStats } from "../services/profileStatsService.js";
+import { expandMediaForClient } from "../services/mediaResolver.js";
 
 const router = express.Router();
 
@@ -95,22 +96,49 @@ function filterProPublic(p) {
 
 function buildProfilesSetFromPayload(payload = {}) {
   const set = {};
+
   if (payload.fullName) set.fullName = payload.fullName;
   if (payload.phone) set.phone = payload.phone;
   if (payload.state) set.state = String(payload.state).toUpperCase();
   if (payload.lga) set.lga = String(payload.lga).toUpperCase();
   if (payload.address) set.address = payload.address;
+
   if (payload.photoUrl) set.photoUrl = payload.photoUrl;
+
   if (payload.identity && typeof payload.identity === "object") {
     set.identity = payload.identity;
     if (payload.identity.photoUrl) set.photoUrl = payload.identity.photoUrl;
   }
+
   if (payload.kyc) set.kyc = payload.kyc;
   if (typeof payload.acceptedTerms === "boolean")
     set.acceptedTerms = payload.acceptedTerms;
   if (typeof payload.acceptedPrivacy === "boolean")
     set.acceptedPrivacy = payload.acceptedPrivacy;
   if (payload.agreements) set.agreements = payload.agreements;
+
+  // ✅ Asset-based fields (matches your frontend payload)
+  if (payload.photoAssetId) set.photoAssetId = payload.photoAssetId;
+
+  if (payload.identity && typeof payload.identity === "object") {
+    if (payload.identity.photoAssetId) {
+      set.identity = set.identity || payload.identity;
+      set.identity.photoAssetId = payload.identity.photoAssetId;
+    }
+  }
+
+  if (payload.application && typeof payload.application === "object") {
+    if (Array.isArray(payload.application.documentAssetIds)) {
+      set.application = set.application || payload.application;
+      set.application.documentAssetIds = payload.application.documentAssetIds;
+    }
+  }
+
+  if (Array.isArray(payload.documentAssetIds)) {
+    set.application = set.application || {};
+    set.application.documentAssetIds = payload.documentAssetIds;
+  }
+
   return set;
 }
 
@@ -225,11 +253,16 @@ async function handleGetClientMe(req, res) {
 
     const masked = maskClientProfileForClientView(p) || {};
 
+    const [avatarResolved] = await expandMediaForClient([
+      { assetId: p?.photoAssetId, url: p?.photoUrl, type: "image" },
+    ]);
+
     return res.json({
       ...masked,
       email: req.user.email || "",
       // expose liveness to frontend so it can decide to reopen AWS
       livenessVerifiedAt: p?.livenessVerifiedAt || null,
+      photoUrlResolved: avatarResolved?.url || "",
       pro: pro
         ? {
             id: pro._id.toString(),
@@ -312,6 +345,37 @@ async function handlePutClientMe(req, res) {
         clientSet.photoUrl = payload.identity.photoUrl.trim();
       }
     }
+
+    // ✅ Asset IDs (R2 pipeline)
+    if (payload.photoAssetId && String(payload.photoAssetId).trim()) {
+      clientSet.photoAssetId = String(payload.photoAssetId).trim();
+    }
+
+    if (payload.identity && typeof payload.identity === "object") {
+      if (
+        payload.identity.photoAssetId &&
+        String(payload.identity.photoAssetId).trim()
+      ) {
+        clientSet.identity = clientSet.identity || payload.identity || {};
+        clientSet.identity.photoAssetId = String(
+          payload.identity.photoAssetId,
+        ).trim();
+      }
+    }
+
+    // (Optional but supported) application docs
+    if (payload.application && typeof payload.application === "object") {
+      if (Array.isArray(payload.application.documentAssetIds)) {
+        clientSet.application =
+          clientSet.application || payload.application || {};
+        clientSet.application.documentAssetIds =
+          payload.application.documentAssetIds;
+      }
+    }
+    if (Array.isArray(payload.documentAssetIds)) {
+      clientSet.application = clientSet.application || {};
+      clientSet.application.documentAssetIds = payload.documentAssetIds;
+    }
     if (payload.kyc) clientSet.kyc = payload.kyc;
     if (typeof payload.acceptedTerms === "boolean")
       clientSet.acceptedTerms = payload.acceptedTerms;
@@ -389,7 +453,9 @@ async function handlePutClientMe(req, res) {
       const usernameToInvalidate =
         (updated && updated.username) || (payload && payload.username);
       if (redisClient && usernameToInvalidate) {
-        const key = `public:profile:${String(usernameToInvalidate).toLowerCase()}`;
+        const key = `public:profile:${String(
+          usernameToInvalidate,
+        ).toLowerCase()}`;
         await redisClient.del(key);
       }
     } catch (err) {
@@ -535,6 +601,10 @@ async function handleGetPublicProfile(req, res) {
         .catch(() => null));
     const publicFromPro = proDoc ? proToBarber(proDoc) : null;
 
+    const [clientAvatarResolved] = await expandMediaForClient([
+      { assetId: client?.photoAssetId, url: client?.photoUrl, type: "image" },
+    ]);
+
     // 3) Merge identity fields (client is primary for identity)
     const profilePublic = {
       ownerUid,
@@ -547,8 +617,9 @@ async function handleGetPublicProfile(req, res) {
         (publicFromPro && publicFromPro.name) ||
         "",
       avatarUrl:
-        (client && client.photoUrl) ||
+        (clientAvatarResolved && clientAvatarResolved.url) ||
         (publicFromPro && publicFromPro.photoUrl) ||
+        (client && client.photoUrl) ||
         "",
       coverUrl:
         (client && client.coverUrl) || (proDoc && proDoc.coverUrl) || "",
@@ -570,55 +641,12 @@ async function handleGetPublicProfile(req, res) {
       ),
     };
 
-    // 4) Counts: prefer pro.metrics, fall back to client or aggregate
-    profilePublic.followersCount = Number(
-      proDoc?.metrics?.followers || (client && client.followersCount) || 0,
-    );
-
-    try {
-      profilePublic.postsCount = await Post.countDocuments({
-        $and: [
-          { isPublic: true, hidden: { $ne: true }, deleted: { $ne: true } },
-          {
-            $or: [
-              { proOwnerUid: ownerUid },
-              { ownerUid: ownerUid },
-              { proUid: ownerUid },
-              { createdBy: ownerUid },
-            ],
-          },
-        ],
-      });
-    } catch (e) {
-      profilePublic.postsCount = Number(proDoc?.metrics?.postsCount || 0);
-    }
-
-    // JOBS COMPLETED
-    if (proDoc?.metrics?.jobsCompleted) {
-      profilePublic.jobsCompleted = Number(proDoc.metrics.jobsCompleted || 0);
-    } else {
-      try {
-        const bookingQueryOr = [
-          { proOwnerUid: ownerUid },
-          { proUid: ownerUid },
-        ];
-        if (proDoc && proDoc._id) {
-          try {
-            bookingQueryOr.push({
-              proId: new mongoose.Types.ObjectId(proDoc._id),
-            });
-          } catch {}
-        }
-        profilePublic.jobsCompleted = await Booking.countDocuments({
-          $and: [{ status: "completed" }, { $or: bookingQueryOr }],
-        });
-      } catch (e) {
-        profilePublic.jobsCompleted = 0;
-      }
-    }
-
-    if (proDoc?.metrics?.avgRating)
-      profilePublic.ratingAverage = Number(proDoc.metrics.avgRating);
+    // 4) Counts (canonical service)
+    const stats = await computeProfileStats(ownerUid);
+    profilePublic.followersCount = stats.followers;
+    profilePublic.postsCount = stats.postsCount;
+    profilePublic.jobsCompleted = stats.jobsCompleted;
+    profilePublic.ratingAverage = stats.avgRating;
 
     // 5) Recent public posts (small page) — tolerant owner-fields query
     const postsRaw = await Post.find({
@@ -740,14 +768,12 @@ router.get("/profile/public-by-uid/:uid", async (req, res) => {
         gallery: Array.isArray(pro.gallery) ? pro.gallery : [],
         followersCount: (pro.metrics && Number(pro.metrics.followers)) || 0,
       };
-
-      // set `pro` and `publicFromPro` for later merging below
-      const publicFromPro = pro ? proToBarber(pro) : null;
-      // keep the original `pro` variable name used later by the handler:
-      // (we'll overwrite the later 'const pro = await Pro.findOne...' or adapt below)
-      // NOTE: We'll still run the standard merging code below which expects `pro` variable,
-      // so if the code later does `const pro = await Pro.findOne({ ownerUid }).lean()` you can skip that part.
     }
+
+    const [clientAvatarResolved] = await expandMediaForClient([
+      { assetId: client?.photoAssetId, url: client?.photoUrl, type: "image" },
+    ]);
+
     const ownerUid = client.uid;
 
     // 2) pro doc if exists
@@ -766,7 +792,10 @@ router.get("/profile/public-by-uid/:uid", async (req, res) => {
         (publicFromPro && publicFromPro.name) ||
         "",
       avatarUrl:
-        client.photoUrl || (publicFromPro && publicFromPro.photoUrl) || "",
+        (clientAvatarResolved && clientAvatarResolved.url) ||
+        (publicFromPro && publicFromPro.photoUrl) ||
+        client.photoUrl ||
+        "",
       coverUrl: client.coverUrl || pro?.coverUrl || "",
       bio: client.bio || pro?.bio || "" || "",
       isPro: Boolean(pro),
@@ -781,47 +810,12 @@ router.get("/profile/public-by-uid/:uid", async (req, res) => {
       ratingAverage: Number((pro && pro.metrics && pro.metrics.avgRating) || 0),
     };
 
-    // counts & posts (same logic as username route)
-    profilePublic.followersCount = Number(
-      pro?.metrics?.followers || client.followersCount || 0,
-    );
-
-    try {
-      profilePublic.postsCount = await Post.countDocuments({
-        proOwnerUid: ownerUid,
-        isPublic: true,
-        hidden: { $ne: true },
-        deleted: { $ne: true },
-      });
-    } catch (e) {
-      profilePublic.postsCount = Number(pro?.metrics?.postsCount || 0);
-    }
-
-    if (pro?.metrics?.jobsCompleted) {
-      profilePublic.jobsCompleted = Number(pro.metrics.jobsCompleted || 0);
-    } else {
-      try {
-        const bookingQueryOr = [
-          { proOwnerUid: ownerUid },
-          { proUid: ownerUid },
-        ];
-        if (pro && pro._id) {
-          try {
-            bookingQueryOr.push({
-              proId: new mongoose.Types.ObjectId(pro._id),
-            });
-          } catch {}
-        }
-        profilePublic.jobsCompleted = await Booking.countDocuments({
-          $and: [{ status: "completed" }, { $or: bookingQueryOr }],
-        });
-      } catch (e) {
-        profilePublic.jobsCompleted = 0;
-      }
-    }
-
-    if (pro?.metrics?.avgRating)
-      profilePublic.ratingAverage = Number(pro.metrics.avgRating);
+    // counts (canonical service)
+    const stats = await computeProfileStats(ownerUid);
+    profilePublic.followersCount = stats.followers;
+    profilePublic.postsCount = stats.postsCount;
+    profilePublic.jobsCompleted = stats.jobsCompleted;
+    profilePublic.ratingAverage = stats.avgRating;
 
     const postsRaw = await Post.find({
       isPublic: true,

@@ -727,6 +727,8 @@ async function getVerifiedClientIdentity(uid) {
           phone: 1,
           identity: 1,
           photoUrl: 1,
+          photoAssetId: 1,
+          "identity.photoAssetId": 1,
         },
       },
     );
@@ -776,7 +778,14 @@ app.get("/api/me", requireAuth, async (req, res) => {
             name: 1,
             fullName: 1,
             identity: 1,
+
+            // legacy url
             photoUrl: 1,
+
+            // ✅ asset pipeline
+            photoAssetId: 1,
+            "identity.photoAssetId": 1,
+
             hasPro: 1,
             proId: 1,
             proStatus: 1,
@@ -856,7 +865,14 @@ app.get("/api/me", requireAuth, async (req, res) => {
       email: req.user.email || "",
       displayName,
       identity,
+
+      // legacy (still supported)
       photoUrl,
+
+      // ✅ asset pipeline (frontend can resolve via resolver)
+      photoAssetId: profileDoc?.photoAssetId || null,
+      identityPhotoAssetId: profileDoc?.identity?.photoAssetId || null,
+
       isAdmin,
       isPro,
       pro: proDoc
@@ -927,6 +943,32 @@ async function rememberLivenessToday(uid) {
   } catch (e) {
     console.warn("[liveness:remember] skipped:", e?.message || e);
   }
+}
+
+// ✅ liveness gate: ONLY when changing bank/account number
+function bodyTouchesSensitivePro(body = {}) {
+  if (!body || typeof body !== "object") return false;
+
+  const bank = body.bank;
+  if (!bank || typeof bank !== "object") return false;
+
+  // trigger ONLY if account-related fields are being changed
+  const sensitiveKeys = [
+    "accountNumber",
+    "accountNo",
+    "account_number",
+    "acctNumber",
+    "bankCode",
+    "bankName",
+    "recipientCode",
+  ];
+
+  for (const k of sensitiveKeys) {
+    const v = bank[k];
+    if (v !== undefined && v !== null && String(v).trim() !== "") return true;
+  }
+
+  return false;
 }
 
 // keep service edits working after your migration
@@ -1015,6 +1057,12 @@ app.put("/api/pros/me", requireAuth, async (req, res) => {
 
     if (hasVal(body.name)) proSet.name = body.name.trim();
     if (hasVal(body.photoUrl)) proSet.photoUrl = body.photoUrl.trim();
+    if (hasVal(body.photoAssetId))
+      proSet.photoAssetId = String(body.photoAssetId).trim();
+    // also accept photoAssetId under identity payload
+    if (hasVal(body?.identity?.photoAssetId)) {
+      proSet.photoAssetId = String(body.identity.photoAssetId).trim();
+    }
     if (hasVal(body.phone)) proSet.phone = body.phone.trim();
     if (hasVal(body.state)) proSet.state = body.state.toString().toUpperCase();
     if (hasVal(body.lga)) proSet.lga = body.lga.toString().toUpperCase();
@@ -1075,6 +1123,12 @@ app.put("/api/pros/me", requireAuth, async (req, res) => {
       }
       if (hasVal(body.photoUrl)) {
         toSet.photoUrl = body.photoUrl.trim();
+      }
+      if (hasVal(body.photoAssetId)) {
+        toSet.photoAssetId = String(body.photoAssetId).trim();
+      }
+      if (hasVal(body?.identity?.photoAssetId)) {
+        toSet.photoAssetId = String(body.identity.photoAssetId).trim();
       }
       if (hasVal(body.phone)) {
         toSet.phone = body.phone.trim();
@@ -1529,6 +1583,16 @@ app.post(
           base.photoUrl = freshProfile.identity.photoUrl;
         }
 
+        // ✅ asset pipeline photo id
+        if (!hasVal(base.photoAssetId) && hasVal(freshProfile.photoAssetId)) {
+          base.photoAssetId = String(freshProfile.photoAssetId).trim();
+        } else if (
+          !hasVal(base.photoAssetId) &&
+          hasVal(freshProfile.identity?.photoAssetId)
+        ) {
+          base.photoAssetId = String(freshProfile.identity.photoAssetId).trim();
+        }
+
         // state / lga
         if (!hasVal(base.state) && hasVal(freshProfile.state)) {
           base.state = freshProfile.state;
@@ -1557,6 +1621,7 @@ app.post(
               proId: pro._id,
               proStatus: "approved",
               ...(pro.photoUrl ? { photoUrl: pro.photoUrl } : {}),
+              ...(pro.photoAssetId ? { photoAssetId: pro.photoAssetId } : {}),
             },
           },
           { upsert: true },

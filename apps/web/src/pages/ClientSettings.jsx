@@ -1,10 +1,7 @@
 // apps/web/src/pages/ClientSettings.jsx
 import { useEffect, useMemo, useState } from "react";
 import { api, ensureClientProfile } from "../lib/api";
-
-/* ---------- Cloudinary config ---------- */
-const CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || "";
-const UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET || "";
+import { uploadMediaAsset } from "../lib/r2Upload";
 
 /* ---------- localStorage keys ---------- */
 const DRAFT_KEY = "kpocha:clientSettingsDraft";
@@ -39,11 +36,6 @@ export default function ClientSettings() {
   // geo
   const [geo, setGeo] = useState({ states: [], lgas: {} });
 
-  // upload widget
-  const [widgetReady, setWidgetReady] = useState(
-    typeof window !== "undefined" && !!window.cloudinary?.createUploadWidget,
-  );
-
   // form state
   const [form, setForm] = useState({
     displayName: "",
@@ -52,43 +44,10 @@ export default function ClientSettings() {
     lga: "",
     address: "",
     photoUrl: "",
+    photoAssetId: "",
     agreeTerms: false,
     agreePrivacy: false,
-    kycEnabled: false,
-    kycIdType: "",
-    kycIdUrl: "",
-    kycSelfieUrl: "",
   });
-
-  /* ---------- load cloudinary script (same pattern as other pages) ---------- */
-  useEffect(() => {
-    if (widgetReady) return;
-    if (typeof window === "undefined") return;
-
-    if (!document.querySelector('script[data-cld="1"]')) {
-      const s = document.createElement("script");
-      s.src = "https://widget.cloudinary.com/v2.0/global/all.js";
-      s.async = true;
-      s.defer = true;
-      s.setAttribute("data-cld", "1");
-      s.onload = () => setWidgetReady(!!window.cloudinary?.createUploadWidget);
-      document.body.appendChild(s);
-    }
-
-    const poll = setInterval(() => {
-      if (window.cloudinary?.createUploadWidget) {
-        setWidgetReady(true);
-        clearInterval(poll);
-      }
-    }, 200);
-
-    const timeout = setTimeout(() => clearInterval(poll), 10000);
-
-    return () => {
-      clearInterval(poll);
-      clearTimeout(timeout);
-    };
-  }, [widgetReady]);
 
   // helper: save draft
   function saveDraft(nextForm) {
@@ -175,7 +134,6 @@ export default function ClientSettings() {
           !!clientData?.acceptedTerms || !!clientData?.agreements?.terms;
         const alreadyPrivacy =
           !!clientData?.acceptedPrivacy || !!clientData?.agreements?.privacy;
-        const kyc = clientData?.kyc || {};
 
         // start from server data
         let nextForm = {
@@ -201,12 +159,12 @@ export default function ClientSettings() {
             meData?.photoUrl ||
             meData?.identity?.photoUrl ||
             "",
+          photoAssetId:
+            clientData?.photoAssetId ||
+            clientData?.identity?.photoAssetId ||
+            "",
           agreeTerms: alreadyTerms,
           agreePrivacy: alreadyPrivacy,
-          kycEnabled: !!(kyc?.idType || kyc?.idUrl || kyc?.selfieWithIdUrl),
-          kycIdType: kyc?.idType || "",
-          kycIdUrl: kyc?.idUrl || "",
-          kycSelfieUrl: kyc?.selfieWithIdUrl || "",
         };
 
         // if we have draft, overlay it (so user doesn't lose typing)
@@ -236,42 +194,6 @@ export default function ClientSettings() {
       const next = { ...f, [key]: val };
       return next;
     });
-  }
-
-  // create a widget on click
-  function openUpload(onUploaded, folder = "kpocha/clients") {
-    if (
-      !widgetReady ||
-      !CLOUD_NAME ||
-      !UPLOAD_PRESET ||
-      typeof window === "undefined"
-    ) {
-      alert("Upload unavailable. Enter a URL manually.");
-      return;
-    }
-    try {
-      const w = window.cloudinary.createUploadWidget(
-        {
-          cloudName: CLOUD_NAME,
-          uploadPreset: UPLOAD_PRESET,
-          multiple: false,
-          maxFiles: 1,
-          clientAllowedFormats: ["jpg", "jpeg", "png", "webp"],
-          maxImageFileSize: 5 * 1024 * 1024,
-          sources: ["local", "camera", "url"],
-          showPoweredBy: false,
-          folder,
-        },
-        (err, res) => {
-          if (!err && res && res.event === "success") {
-            onUploaded(res.info.secure_url);
-          }
-        },
-      );
-      w.open();
-    } catch {
-      alert("Upload not available right now.");
-    }
   }
 
   // ---------- AWS Liveness launcher (auto, but save form first) ----------
@@ -307,6 +229,32 @@ export default function ClientSettings() {
     }
   }
 
+  async function uploadImageToR2(file) {
+    if (!file) return { url: "", assetId: "" };
+
+    setError("");
+    setOk("Uploading image...");
+
+    try {
+      const res = await uploadMediaAsset({ api, file, type: "image" });
+      const url = res?.publicUrl || "";
+      const assetId = res?.assetId || "";
+
+      if (!url) {
+        setError("Upload succeeded but public URL is missing.");
+        return { url: "", assetId };
+      }
+
+      setOk("Uploaded ✓");
+      setTimeout(() => setOk(""), 1200);
+
+      return { url, assetId };
+    } catch (e) {
+      setError(e?.message || "Upload failed.");
+      return { url: "", assetId: "" };
+    }
+  }
+
   async function onSave(e) {
     e?.preventDefault?.();
     try {
@@ -326,22 +274,21 @@ export default function ClientSettings() {
         lga: lgaUP,
         address: form.address?.trim(),
         photoUrl: form.photoUrl || "",
+        photoAssetId: form.photoAssetId || "",
         acceptedTerms: !!form.agreeTerms,
         acceptedPrivacy: !!form.agreePrivacy,
         agreements: {
           terms: !!form.agreeTerms,
           privacy: !!form.agreePrivacy,
         },
+        identity: {
+          phone: form.phone?.trim(),
+          state: stateUP,
+          city: lgaUP,
+          photoUrl: form.photoUrl || "",
+          photoAssetId: form.photoAssetId || "",
+        },
       };
-
-      if (form.kycEnabled) {
-        payload.kyc = {
-          idType: form.kycIdType,
-          idUrl: form.kycIdUrl,
-          selfieWithIdUrl: form.kycSelfieUrl,
-          status: "pending",
-        };
-      }
 
       // attach the "remember" flag if we just returned from AWS
       const livenessProof = takeAwsLivenessProof();
@@ -371,6 +318,7 @@ export default function ClientSettings() {
           state: payload.state,
           city: payload.lga,
           photoUrl: payload.photoUrl,
+          photoAssetId: payload.photoAssetId,
         },
       }));
 
@@ -450,20 +398,30 @@ export default function ClientSettings() {
                 value={form.photoUrl}
                 onChange={(e) => onChangeField("photoUrl", e.target.value)}
               />
-              <button
-                type="button"
-                onClick={() =>
-                  openUpload((url) => onChangeField("photoUrl", url))
-                }
-                disabled={!widgetReady}
-                className="px-3 py-2 rounded-lg border border-zinc-700 text-sm hover:bg-zinc-900 disabled:opacity-50"
-              >
-                {widgetReady ? "Upload" : "Upload (loading…)"}
-              </button>
+              <label className="px-3 py-2 rounded-lg border border-zinc-700 text-sm hover:bg-zinc-900 cursor-pointer">
+                Upload
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = "";
+                    const out = await uploadImageToR2(file);
+                    if (out.url) {
+                      onChangeField("photoUrl", out.url);
+                      onChangeField("photoAssetId", out.assetId || "");
+                    }
+                  }}
+                />
+              </label>
               {form.photoUrl && (
                 <button
                   type="button"
-                  onClick={() => onChangeField("photoUrl", "")}
+                  onClick={() => {
+                    onChangeField("photoUrl", "");
+                    onChangeField("photoAssetId", "");
+                  }}
                   className="px-3 py-2 rounded-lg border border-red-800 text-red-200 text-sm hover:bg-red-900/20"
                 >
                   Remove
@@ -567,58 +525,6 @@ export default function ClientSettings() {
             <p className="text-xs text-zinc-500 mt-1">
               Old accounts can use this page to accept current terms.
             </p>
-          </section>
-
-          {/* Optional KYC */}
-          <section>
-            <h2 className="text-lg font-semibold mb-3">
-              Optional Identity / KYC
-            </h2>
-            <label className="flex items-center gap-2 text-sm text-zinc-200 mb-3">
-              <input
-                type="checkbox"
-                checked={form.kycEnabled}
-                onChange={(e) => onChangeField("kycEnabled", e.target.checked)}
-              />
-              Add / update my ID details now
-            </label>
-            {form.kycEnabled && (
-              <div className="grid sm:grid-cols-2 gap-4">
-                <Field label="ID Type">
-                  <select
-                    className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2"
-                    value={form.kycIdType}
-                    onChange={(e) => onChangeField("kycIdType", e.target.value)}
-                  >
-                    <option value="">Select…</option>
-                    <option value="National ID">National ID</option>
-                    <option value="Voter’s Card">Voter’s Card</option>
-                    <option value="Driver’s License">Driver’s License</option>
-                    <option value="International Passport">
-                      International Passport
-                    </option>
-                  </select>
-                </Field>
-                <Field label="ID Image URL">
-                  <input
-                    className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2"
-                    value={form.kycIdUrl}
-                    onChange={(e) => onChangeField("kycIdUrl", e.target.value)}
-                    placeholder="https://…"
-                  />
-                </Field>
-                <Field label="Selfie with ID URL">
-                  <input
-                    className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2"
-                    value={form.kycSelfieUrl}
-                    onChange={(e) =>
-                      onChangeField("kycSelfieUrl", e.target.value)
-                    }
-                    placeholder="https://…"
-                  />
-                </Field>
-              </div>
-            )}
           </section>
 
           <div className="pt-2">

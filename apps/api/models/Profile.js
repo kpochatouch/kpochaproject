@@ -25,10 +25,40 @@ const ClientProfileSchema = new mongoose.Schema(
     lga: { type: String, default: "" },
     address: { type: String, default: "" },
     photoUrl: { type: String, default: "" },
+    photoAssetId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "MediaAsset",
+      index: true,
+    },
     isStub: { type: Boolean, default: false },
     fieldSources: { type: mongoose.Schema.Types.Mixed, default: () => ({}) },
 
     id: { type: ClientIDSchema, default: () => ({}) },
+
+    // identity bundle (explicit fields we rely on)
+    identity: {
+      phone: { type: String, default: "" },
+      state: { type: String, default: "" },
+      city: { type: String, default: "" },
+      photoUrl: { type: String, default: "" },
+      photoAssetId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "MediaAsset",
+        index: true,
+      },
+    },
+
+    // application bundle (explicit document fields)
+    application: {
+      documentUrls: { type: [String], default: [] }, // legacy fallback
+      documentAssetIds: [
+        {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "MediaAsset",
+          index: true,
+        },
+      ],
+    },
 
     // we keep strict:false so older payloads with identity, kyc, agreements
     // don’t crash — server.js already reads some of those keys.
