@@ -46,7 +46,7 @@ export default function Navbar() {
 
   async function handleTestFaceGate() {
     try {
-      const res = await api.get("/face/gate-test");
+      const res = await api.get("/api/face/gate-test");
       alert("✅ " + (res.data?.message || "FaceGate passed"));
     } catch (err) {
       const msg =
