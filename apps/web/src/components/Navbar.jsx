@@ -6,6 +6,7 @@ import { useAuth } from "../context/AuthContext.jsx";
 import { useMe } from "../context/MeContext.jsx";
 import NotificationBell from "./NotificationBell.jsx";
 import InstallAppButton from "./InstallAppButton.jsx";
+import { api } from "../lib/api";
 
 export default function Navbar() {
   const { user } = useAuth();
@@ -45,21 +46,15 @@ export default function Navbar() {
 
   async function handleTestFaceGate() {
     try {
-      const res = await fetch("/api/face/gate-test", {
-        headers: {
-          Authorization: `Bearer ${await auth.currentUser?.getIdToken()}`,
-        },
-      });
-
-      const data = await res.json();
-
-      if (res.ok) {
-        alert("✅ " + (data?.message || "FaceGate passed"));
-      } else {
-        alert("❌ " + (data?.error || "Failed"));
-      }
+      const res = await api.get("/face/gate-test");
+      alert("✅ " + (res.data?.message || "FaceGate passed"));
     } catch (err) {
-      alert("❌ " + (err?.message || "Network error"));
+      const msg =
+        err?.response?.data?.error ||
+        err?.response?.data?.message ||
+        err?.message ||
+        "Failed";
+      alert("❌ " + msg);
     }
   }
 
