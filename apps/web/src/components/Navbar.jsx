@@ -43,6 +43,26 @@ export default function Navbar() {
     window.location.assign("/login?signedout=1");
   }
 
+  async function handleTestFaceGate() {
+    try {
+      const res = await fetch("/api/face/gate-test", {
+        headers: {
+          Authorization: `Bearer ${await auth.currentUser?.getIdToken()}`,
+        },
+      });
+
+      const data = await res.json();
+
+      if (res.ok) {
+        alert("✅ " + (data?.message || "FaceGate passed"));
+      } else {
+        alert("❌ " + (data?.error || "Failed"));
+      }
+    } catch (err) {
+      alert("❌ " + (err?.message || "Network error"));
+    }
+  }
+
   const isAdmin = !!me?.isAdmin;
   const isPro = !!me?.isPro;
 
@@ -128,9 +148,18 @@ export default function Navbar() {
             </NavLink>
           )}
           {isAdmin && (
-            <NavLink to="/admin" className={navLinkClass}>
-              Admin
-            </NavLink>
+            <>
+              <NavLink to="/admin" className={navLinkClass}>
+                Admin
+              </NavLink>
+
+              <button
+                onClick={handleTestFaceGate}
+                className="rounded-lg border border-red-500 px-3 py-1 text-red-400 hover:bg-red-500 hover:text-black"
+              >
+                FaceGate Test
+              </button>
+            </>
           )}
 
           {/* notification bell + signout */}
@@ -258,9 +287,18 @@ export default function Navbar() {
             ) : null}
 
             {isAdmin ? (
-              <NavLink to="/admin" className={() => chipClass(isAdminPanel)}>
-                Admin
-              </NavLink>
+              <>
+                <NavLink to="/admin" className={() => chipClass(isAdminPanel)}>
+                  Admin
+                </NavLink>
+
+                <button
+                  onClick={handleTestFaceGate}
+                  className={chipClass(false)}
+                >
+                  FaceGate
+                </button>
+              </>
             ) : null}
           </div>
         </div>

@@ -1,6 +1,7 @@
 // apps/api/routes/pin.js
 import express from "express";
 import bcrypt from "bcryptjs";
+import { requireFaceGate } from "../services/faceGate.js";
 
 /**
  * Mount with:
@@ -114,6 +115,21 @@ export default function pinRoutes({ requireAuth, Application }) {
       const newPin = String(req.body?.newPin || "").trim();
 
       if (!uid) return res.status(401).json({ error: "unauthorized" });
+      // ✅ FaceGate for PIN changes
+      let passed = false;
+      await new Promise((resolve) => {
+        requireFaceGate(
+          req,
+          res,
+          () => {
+            passed = true;
+            resolve();
+          },
+          { reason: "pin_forgot" },
+        );
+      });
+      if (!passed) return;
+
       if (!isValidPin(newPin))
         return res.status(400).json({ error: "invalid_pin_format" });
       if (hitLimit(uid))
@@ -136,6 +152,7 @@ export default function pinRoutes({ requireAuth, Application }) {
     try {
       const uid = req.user?.uid;
       if (!uid) return res.status(401).json({ error: "unauthorized" });
+
       const doc = await Application.findOne({ uid }).lean();
       res.json({ hasPin: !!doc?.withdrawPinHash });
     } catch (e) {

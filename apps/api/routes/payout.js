@@ -5,6 +5,7 @@ import fetch from "node-fetch";
 import { Booking } from "../models/Booking.js";
 import { withdrawPendingWithFee } from "../services/walletService.js";
 import { WalletTx } from "../models/wallet.js";
+import { requireFaceGate } from "../services/faceGate.js";
 
 export default function payoutRoutes({ requireAuth, Application }) {
   const router = express.Router();
@@ -87,6 +88,21 @@ export default function payoutRoutes({ requireAuth, Application }) {
       if (!accountName) {
         return res.status(400).json({ error: "account_name_missing" });
       }
+
+      // ✅ FaceGate before changing payout destination
+      let passed = false;
+      await new Promise((resolve) => {
+        requireFaceGate(
+          req,
+          res,
+          () => {
+            passed = true;
+            resolve();
+          },
+          { reason: "payout_bank_change" },
+        );
+      });
+      if (!passed) return;
 
       // 2) Reuse existing recipientCode if same bank details; otherwise create once
       const existing = await Application.findOne({ uid: req.user.uid }).lean();

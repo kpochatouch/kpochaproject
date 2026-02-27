@@ -103,11 +103,12 @@ function buildProfilesSetFromPayload(payload = {}) {
   if (payload.lga) set.lga = String(payload.lga).toUpperCase();
   if (payload.address) set.address = payload.address;
 
-  if (payload.photoUrl) set.photoUrl = payload.photoUrl;
-
   if (payload.identity && typeof payload.identity === "object") {
-    set.identity = payload.identity;
-    if (payload.identity.photoUrl) set.photoUrl = payload.identity.photoUrl;
+    // ✅ strict Option A: never write identity.photoUrl (raw) again
+    const identityClean = { ...payload.identity };
+    if ("photoUrl" in identityClean) delete identityClean.photoUrl;
+
+    set.identity = identityClean;
   }
 
   if (payload.kyc) set.kyc = payload.kyc;
@@ -122,7 +123,7 @@ function buildProfilesSetFromPayload(payload = {}) {
 
   if (payload.identity && typeof payload.identity === "object") {
     if (payload.identity.photoAssetId) {
-      set.identity = set.identity || payload.identity;
+      set.identity = set.identity || {};
       set.identity.photoAssetId = payload.identity.photoAssetId;
     }
   }
@@ -142,29 +143,10 @@ function buildProfilesSetFromPayload(payload = {}) {
   return set;
 }
 
-// ✅ only these fields should force “verify today”
-function bodyTouchesSensitiveClient(body = {}) {
-  if (!body || typeof body !== "object") return false;
-  // Only truly sensitive on CLIENT profile:
-  // - identity/KYC bundle (IDs, real-name proofs, ID photos, etc.)
-  // If you want address to be sensitive, uncomment the next line.
-  if (body.identity) return true;
-  // if (body.address) return true;
+// ✅ Liveness is NOT enforced by /profile routes.
+// Liveness is ONLY for bank/payout editing (wallet routes).
+function bodyTouchesSensitiveClient(_body = {}) {
   return false;
-}
-
-// ✅ allow frontend to tell us “I just did liveness, remember it”
-async function rememberLivenessToday(uid) {
-  try {
-    const col = mongoose.connection.db.collection("profiles");
-    await col.updateOne(
-      { uid },
-      { $set: { livenessVerifiedAt: new Date() } },
-      { upsert: true },
-    );
-  } catch (e) {
-    console.warn("[profile:liveness:remember] skipped:", e?.message || e);
-  }
 }
 
 /* ------------------------------------------------------------------
@@ -293,27 +275,6 @@ async function handlePutClientMe(req, res) {
       return res.status(404).json({ error: "profile_not_found" });
     }
 
-    // did frontend just tell us to remember?
-    const wantsRemember =
-      payload.liveness && payload.liveness.remember === true;
-
-    if (wantsRemember) {
-      await rememberLivenessToday(uid);
-    }
-
-    // do we need liveness for THIS payload?
-    const touchesSensitive = bodyTouchesSensitiveClient(payload);
-
-    // what do we currently have on record?
-    const verifiedToday = existing.livenessVerifiedAt
-      ? isSameDay(existing.livenessVerifiedAt, new Date())
-      : false;
-
-    // if they touch sensitive AND we don't have today AND they didn't just send remember → block
-    if (touchesSensitive && !verifiedToday && !wantsRemember) {
-      return res.status(403).json({ error: "liveness_required" });
-    }
-
     // normalize casing only if present
     if (payload.lga) payload.lga = String(payload.lga).toUpperCase();
     if (payload.state) payload.state = String(payload.state).toUpperCase();
@@ -336,14 +297,14 @@ async function handlePutClientMe(req, res) {
     if (typeof payload.address === "string" && payload.address.trim()) {
       clientSet.address = payload.address.trim();
     }
-    if (payload.photoUrl && payload.photoUrl.trim()) {
-      clientSet.photoUrl = payload.photoUrl.trim();
-    }
+    // 🚫 Do not store raw photo URLs anymore.
+    // Only store asset IDs. Legacy photoUrl stays only for old accounts.
     if (payload.identity && typeof payload.identity === "object") {
-      clientSet.identity = payload.identity;
-      if (payload.identity.photoUrl && payload.identity.photoUrl.trim()) {
-        clientSet.photoUrl = payload.identity.photoUrl.trim();
-      }
+      // ✅ strict Option A: store identity but strip any raw photoUrl
+      const identityClean = { ...payload.identity };
+      if ("photoUrl" in identityClean) delete identityClean.photoUrl;
+
+      clientSet.identity = identityClean;
     }
 
     // ✅ Asset IDs (R2 pipeline)
@@ -399,13 +360,6 @@ async function handlePutClientMe(req, res) {
       const fromPayload = buildProfilesSetFromPayload(payload);
       Object.assign($set, fromPayload);
 
-      // keep the old stamp, or write a new one if they said remember
-      if (wantsRemember) {
-        $set.livenessVerifiedAt = new Date();
-      } else if (existing.livenessVerifiedAt) {
-        $set.livenessVerifiedAt = existing.livenessVerifiedAt;
-      }
-
       await col.updateOne({ uid }, { $set }, { upsert: true });
     } catch (e) {
       console.warn("[profile->profiles col sync] skipped:", e?.message || e);
@@ -423,16 +377,19 @@ async function handlePutClientMe(req, res) {
         if (payload.phone && payload.phone.trim()) {
           proSet.phone = payload.phone.trim();
         }
-        if (payload.photoUrl && payload.photoUrl.trim()) {
-          proSet.photoUrl = payload.photoUrl.trim();
+
+        // ✅ strict Option A: keep Pro avatar asset-based
+        if (payload.photoAssetId && String(payload.photoAssetId).trim()) {
+          proSet.photoAssetId = String(payload.photoAssetId).trim();
         } else if (
           payload.identity &&
           typeof payload.identity === "object" &&
-          payload.identity.photoUrl &&
-          payload.identity.photoUrl.trim()
+          payload.identity.photoAssetId &&
+          String(payload.identity.photoAssetId).trim()
         ) {
-          proSet.photoUrl = payload.identity.photoUrl.trim();
+          proSet.photoAssetId = String(payload.identity.photoAssetId).trim();
         }
+
         if (payload.state) {
           proSet.state = payload.state;
         }
@@ -483,9 +440,7 @@ async function handlePutClientMe(req, res) {
       ...masked,
       email: req.user.email || "",
       // return the latest known stamp
-      livenessVerifiedAt: wantsRemember
-        ? new Date()
-        : existing.livenessVerifiedAt || null,
+      livenessVerifiedAt: existing.livenessVerifiedAt || null,
     });
   } catch (e) {
     console.warn("[profile:put/me] error", e?.message || e);

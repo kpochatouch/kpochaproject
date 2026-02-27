@@ -94,12 +94,14 @@ export default function adminProsRoutes({
           ...(fresh.identity || {}),
         };
 
-        // legacy url (still supported)
-        const photoUrl =
-          fresh.photoUrl ||
-          (fresh.identity && fresh.identity.photoUrl) ||
-          pro.photoUrl ||
-          "";
+        // ✅ strict Option A: never copy raw photoUrl into Pro.identity
+        if (
+          identity &&
+          typeof identity === "object" &&
+          "photoUrl" in identity
+        ) {
+          delete identity.photoUrl;
+        }
 
         // ✅ asset pipeline
         const photoAssetId =
@@ -118,7 +120,6 @@ export default function adminProsRoutes({
         if (phone) proSet.phone = phone;
         if (lga) proSet.lga = lga;
         if (state) proSet.state = state;
-        if (photoUrl) proSet.photoUrl = photoUrl;
         if (photoAssetId) proSet.photoAssetId = String(photoAssetId).trim();
         if (Object.keys(identity).length > 0) proSet.identity = identity;
 

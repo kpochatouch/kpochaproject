@@ -10,16 +10,27 @@ import express from "express";
  */
 function scoreFromMetrics(metrics = {}) {
   try {
+    // ✅ AWS: FaceLivenessDetector gives a confidence score (0..1 usually, but we clamp)
+    const conf =
+      typeof metrics?.confidence === "number"
+        ? metrics.confidence
+        : typeof metrics?.score === "number"
+        ? metrics.score
+        : null;
+
+    if (conf != null) {
+      return Math.max(0, Math.min(1, conf));
+    }
+
+    // Legacy (mediapipe challenges)
     const steps = Array.isArray(metrics.steps) ? metrics.steps.length : 0;
     const passed = Array.isArray(metrics.passed) ? metrics.passed.length : 0;
 
-    // base score: how many challenges were completed
     let score = steps ? passed / steps : 0;
 
-    // slight bonus if uploads were via Cloudinary (client indicated)
+    // legacy bonus if uploads were via Cloudinary (client indicated)
     if (metrics.cloudinary) score += 0.05;
 
-    // clamp 0..1
     return Math.max(0, Math.min(1, score));
   } catch {
     return 0;
@@ -56,15 +67,19 @@ export default function riskRoutes({ requireAuth, requireAdmin, Application }) {
       const {
         reason = "unspecified",
         context = {},
+        // legacy
         selfieUrl = "",
         videoUrl = "",
+        // ✅ AWS
+        sessionId = "",
+        provider = "", // optional: "aws"
         metrics = {},
         applicationId = "",
       } = req.body || {};
 
-      // minimal validation (don’t over-block)
-      if (!selfieUrl) {
-        return res.status(400).json({ error: "selfie_required" });
+      // ✅ AWS-only now: require sessionId (do NOT accept selfieUrl/videoUrl anymore)
+      if (!sessionId) {
+        return res.status(400).json({ error: "missing_session" });
       }
 
       const score = scoreFromMetrics(metrics);
@@ -74,14 +89,18 @@ export default function riskRoutes({ requireAuth, requireAdmin, Application }) {
 
       const doc = {
         type: "liveness",
+        provider: provider || (sessionId ? "aws" : "legacy"),
         uid: req.user.uid,
         email: req.user.email || "",
         reason,
         context,
-        selfieUrl,
-        videoUrl,
+
+        // ✅ AWS fields (optional)
+        sessionId,
+
         metrics,
         score,
+
         ip:
           req.headers["x-forwarded-for"]?.split(",")[0]?.trim() ||
           req.socket?.remoteAddress ||
@@ -100,10 +119,22 @@ export default function riskRoutes({ requireAuth, requireAdmin, Application }) {
             applicationId,
             {
               $set: {
-                "verification.selfieWithIdUrl": selfieUrl,
-                "verification.livenessVideoUrl": videoUrl || "",
+                // ✅ AWS-only audit pointer (no URLs)
+                "verification.livenessProvider": sessionId ? "aws" : "legacy",
+                ...(sessionId
+                  ? { "verification.awsLivenessSessionId": sessionId }
+                  : {}),
+
+                // ✅ always store metrics + audit pointer
                 "verification.livenessMetrics": metrics,
-                "risk.liveness": { riskId, score, at: now, reason },
+                "risk.liveness": {
+                  riskId,
+                  score,
+                  at: now,
+                  reason,
+                  provider: sessionId ? "aws" : "legacy",
+                  ...(sessionId ? { sessionId } : {}),
+                },
               },
             },
             { new: false },

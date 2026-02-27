@@ -218,31 +218,30 @@ export default function ClientRegister() {
   }
 
   async function uploadImageToR2(file) {
-    if (!file) return { url: "", assetId: "" };
+    if (!file) return { previewUrl: "", assetId: "" };
 
-    setErr("");
-    flashOK("Uploading image...");
+    setError("");
+    setOk("Uploading image...");
 
     try {
-      const res = await uploadMediaAsset({
-        api,
-        file,
-        type: "image",
-      });
+      const res = await uploadMediaAsset({ api, file, type: "image" });
+      const previewUrl = res?.publicUrl || "";
+      const assetId = res?.assetId || "";
 
-      if (!res?.publicUrl) {
-        setErr("Upload succeeded but public URL is missing.");
-        return { url: "", assetId: "" };
+      if (!assetId) {
+        setOk("");
+        setError("Upload succeeded but assetId is missing.");
+        return { previewUrl, assetId: "" };
       }
 
-      flashOK("Uploaded ✓");
-      return {
-        url: res.publicUrl,
-        assetId: res.assetId || "",
-      };
+      setOk("Uploaded ✓ (click Save changes)");
+      setTimeout(() => setOk(""), 1500);
+
+      return { previewUrl, assetId };
     } catch (e) {
-      setErr(e?.message || "Upload failed.");
-      return { url: "", assetId: "" };
+      setOk("");
+      setError(e?.message || "Upload failed.");
+      return { previewUrl: "", assetId: "" };
     }
   }
 
@@ -369,9 +368,11 @@ export default function ClientRegister() {
                       const file = e.target.files?.[0];
                       e.target.value = "";
                       const out = await uploadImageToR2(file);
-                      if (out.url) {
-                        setPhotoUrl(out.url);
-                        setPhotoAssetId(out.assetId || "");
+                      if (out.assetId) {
+                        onChangeField("photoAssetId", out.assetId);
+                        // optimistic preview: keep showing the current preview until save reloads resolved URL
+                        setOk("Uploaded ✓ (click Save changes)");
+                        setTimeout(() => setOk(""), 1500);
                       }
                     }}
                   />

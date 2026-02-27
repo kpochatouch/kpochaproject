@@ -7,8 +7,8 @@ import {
   listBanksNG,
   submitProApplication,
 } from "../lib/api";
-import { uploadMediaAsset } from "../lib/r2Upload";
 import NgGeoPicker from "../components/NgGeoPicker.jsx";
+import MediaUploader from "../components/MediaUploader.jsx";
 import ServicePicker from "../components/ServicePicker.jsx";
 
 /* ---------- Utils ---------- */
@@ -99,8 +99,11 @@ export default function BecomePro() {
     email: "",
     state: "",
     lga: "",
-    photoUrl: "",
     photoAssetId: "",
+
+    // UI-only preview (NOT persisted)
+    photoPreviewUrl: "",
+
     lat: "",
     lon: "",
   });
@@ -122,8 +125,15 @@ export default function BecomePro() {
     mode: "shop",
     shopName: "",
     shopAddress: "",
-    shopPhotoOutside: "",
-    shopPhotoInside: "",
+
+    // store only assetIds (persisted)
+    shopPhotoOutsideAssetId: "",
+    shopPhotoInsideAssetId: "",
+
+    // UI-only previews (NOT persisted)
+    shopPhotoOutsidePreviewUrl: "",
+    shopPhotoInsidePreviewUrl: "",
+
     lat: "",
     lon: "",
   });
@@ -178,31 +188,31 @@ export default function BecomePro() {
   // ===== Pull Nigeria states for picker + nationwide logic
   const [allStates, setAllStates] = useState([]);
 
-  async function uploadImageToR2(file) {
-    if (!file) return { url: "", assetId: "" };
+  useEffect(() => {
+    return () => {
+      try {
+        if (identity.photoPreviewUrl?.startsWith("blob:")) {
+          URL.revokeObjectURL(identity.photoPreviewUrl);
+        }
+      } catch {}
 
-    setBusy(true);
-    setMsg("Uploading image...");
+      try {
+        if (business.shopPhotoOutsidePreviewUrl?.startsWith("blob:")) {
+          URL.revokeObjectURL(business.shopPhotoOutsidePreviewUrl);
+        }
+      } catch {}
 
-    try {
-      const res = await uploadMediaAsset({ api, file, type: "image" });
-      const url = res?.publicUrl || "";
-      const assetId = res?.assetId || "";
-
-      if (!url) {
-        setMsg("Upload succeeded but public URL is missing.");
-        return { url: "", assetId };
-      }
-
-      setMsg("");
-      return { url, assetId };
-    } catch (e) {
-      setMsg(e?.message || "Upload failed.");
-      return { url: "", assetId: "" };
-    } finally {
-      setBusy(false);
-    }
-  }
+      try {
+        if (business.shopPhotoInsidePreviewUrl?.startsWith("blob:")) {
+          URL.revokeObjectURL(business.shopPhotoInsidePreviewUrl);
+        }
+      } catch {}
+    };
+  }, [
+    identity.photoPreviewUrl,
+    business.shopPhotoOutsidePreviewUrl,
+    business.shopPhotoInsidePreviewUrl,
+  ]);
 
   // ✅ Load me + client + (maybe) existing pro + geo, and PREFILL
   useEffect(() => {
@@ -315,8 +325,8 @@ export default function BecomePro() {
           phone: prev.phone || basePhone,
           state: prev.state || baseState,
           lga: prev.lga || baseLga,
-          photoUrl: prev.photoUrl || basePhoto,
           photoAssetId: prev.photoAssetId || basePhotoAssetId,
+          photoPreviewUrl: prev.photoPreviewUrl || basePhoto,
         }));
 
         // If user is already pro and has availability states, keep it
@@ -584,6 +594,7 @@ export default function BecomePro() {
         ...(topLat && topLon ? { lat: topLat, lon: topLon } : {}),
         identity: {
           ...identity,
+          photoPreviewUrl: undefined, // UI-only: DO NOT STORE
           ...(topLat && topLon ? { lat: topLat, lon: topLon } : {}),
           // 👇 make sure backend can map this to client later
           email: identity.email || me?.email || "",
@@ -598,6 +609,8 @@ export default function BecomePro() {
         },
         business: {
           ...business,
+          shopPhotoOutsidePreviewUrl: undefined, // UI-only
+          shopPhotoInsidePreviewUrl: undefined, // UI-only
           ...(topLat && topLon ? { lat: topLat, lon: topLon } : {}),
         },
         availability: {
@@ -783,36 +796,29 @@ export default function BecomePro() {
 
               <div>
                 <Label>Profile Photo (optional)</Label>
-                <div className="flex gap-2">
-                  <input
-                    className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-200"
-                    placeholder="Photo URL"
-                    value={identity.photoUrl}
-                    onChange={(e) =>
-                      setIdentity({ ...identity, photoUrl: e.target.value })
-                    }
-                  />
-                  <label className="px-3 py-2 rounded-lg border border-yellow-500 text-yellow-300 text-sm hover:bg-yellow-500/10 cursor-pointer">
-                    Upload
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={async (e) => {
-                        const file = e.target.files?.[0];
-                        e.target.value = "";
-                        const out = await uploadImageToR2(file);
-                        if (out.url) {
-                          setIdentity({
-                            ...identity,
-                            photoUrl: out.url,
-                            photoAssetId: out.assetId || "",
-                          });
+
+                <MediaUploader
+                  api={api}
+                  type="image"
+                  valueUrl={identity.photoPreviewUrl}
+                  valueAssetId={identity.photoAssetId}
+                  onChange={({ previewUrl, assetId }) =>
+                    setIdentity((prev) => {
+                      // cleanup old blob preview
+                      try {
+                        if (prev.photoPreviewUrl?.startsWith("blob:")) {
+                          URL.revokeObjectURL(prev.photoPreviewUrl);
                         }
-                      }}
-                    />
-                  </label>
-                </div>
+                      } catch {}
+
+                      return {
+                        ...prev,
+                        photoAssetId: assetId || "",
+                        photoPreviewUrl: previewUrl || "",
+                      };
+                    })
+                  }
+                />
               </div>
             </div>
 
@@ -1006,71 +1012,62 @@ export default function BecomePro() {
 
                 <div>
                   <Label>Photo (outside)</Label>
-                  <div className="flex gap-2">
-                    <input
-                      className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-200"
-                      placeholder="Paste image URL"
-                      value={business.shopPhotoOutside}
-                      onChange={(e) =>
-                        setBusiness({
-                          ...business,
-                          shopPhotoOutside: e.target.value,
-                        })
-                      }
-                    />
-                    <label className="px-3 py-2 rounded-lg border border-yellow-500 text-yellow-300 text-sm hover:bg-yellow-500/10 cursor-pointer">
-                      Upload
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={async (e) => {
-                          const file = e.target.files?.[0];
-                          e.target.value = "";
-                          const out = await uploadImageToR2(file);
-                          if (out.url)
-                            setBusiness({
-                              ...business,
-                              shopPhotoOutside: out.url,
-                            });
-                        }}
-                      />
-                    </label>
-                  </div>
+
+                  <MediaUploader
+                    api={api}
+                    type="image"
+                    valueUrl={business.shopPhotoOutsidePreviewUrl}
+                    valueAssetId={business.shopPhotoOutsideAssetId}
+                    onChange={({ previewUrl, assetId }) =>
+                      setBusiness((prev) => {
+                        // cleanup old blob preview
+                        try {
+                          if (
+                            prev.shopPhotoOutsidePreviewUrl?.startsWith("blob:")
+                          ) {
+                            URL.revokeObjectURL(
+                              prev.shopPhotoOutsidePreviewUrl,
+                            );
+                          }
+                        } catch {}
+
+                        return {
+                          ...prev,
+                          shopPhotoOutsideAssetId: assetId || "",
+                          shopPhotoOutsidePreviewUrl: previewUrl || "",
+                        };
+                      })
+                    }
+                  />
                 </div>
+
                 <div>
                   <Label>Photo (inside)</Label>
-                  <div className="flex gap-2">
-                    <input
-                      className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-200"
-                      placeholder="Paste image URL"
-                      value={business.shopPhotoInside}
-                      onChange={(e) =>
-                        setBusiness({
-                          ...business,
-                          shopPhotoInside: e.target.value,
-                        })
-                      }
-                    />
-                    <label className="px-3 py-2 rounded-lg border border-yellow-500 text-yellow-300 text-sm hover:bg-yellow-500/10 cursor-pointer">
-                      Upload
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={async (e) => {
-                          const file = e.target.files?.[0];
-                          e.target.value = "";
-                          const out = await uploadImageToR2(file);
-                          if (out.url)
-                            setBusiness({
-                              ...business,
-                              shopPhotoInside: out.url,
-                            });
-                        }}
-                      />
-                    </label>
-                  </div>
+
+                  <MediaUploader
+                    api={api}
+                    type="image"
+                    valueUrl={business.shopPhotoInsidePreviewUrl}
+                    valueAssetId={business.shopPhotoInsideAssetId}
+                    onChange={({ previewUrl, assetId }) =>
+                      setBusiness((prev) => {
+                        // cleanup old blob preview
+                        try {
+                          if (
+                            prev.shopPhotoInsidePreviewUrl?.startsWith("blob:")
+                          ) {
+                            URL.revokeObjectURL(prev.shopPhotoInsidePreviewUrl);
+                          }
+                        } catch {}
+
+                        return {
+                          ...prev,
+                          shopPhotoInsideAssetId: assetId || "",
+                          shopPhotoInsidePreviewUrl: previewUrl || "",
+                        };
+                      })
+                    }
+                  />
                 </div>
               </div>
             )}

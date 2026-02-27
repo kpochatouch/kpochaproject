@@ -184,6 +184,11 @@ export default function RiskLogs() {
                     <div>
                       <div className="text-sm font-medium text-white">
                         {item.reason || "liveness"}
+                        {item.provider ? (
+                          <span className="ml-2 text-xs text-zinc-400">
+                            ({item.provider})
+                          </span>
+                        ) : null}
                       </div>
                       <div className="text-xs text-zinc-500">
                         {item.email || item.uid || "unknown"} •{" "}
@@ -252,6 +257,19 @@ export default function RiskLogs() {
                     {typeof selected.score === "number"
                       ? selected.score.toFixed(3)
                       : "—"}
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <div className="text-zinc-500 text-xs mb-1">Provider</div>
+                  <div>{selected.provider || "—"}</div>
+                </div>
+                <div>
+                  <div className="text-zinc-500 text-xs mb-1">AWS Session</div>
+                  <div className="font-mono text-xs break-all">
+                    {selected.sessionId || "—"}
                   </div>
                 </div>
               </div>

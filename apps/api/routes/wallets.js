@@ -13,6 +13,7 @@ import {
 } from "../services/walletService.js";
 import { createNotification } from "../services/notificationService.js";
 import { getIO } from "../sockets/index.js";
+import { requireFaceGate } from "../services/faceGate.js";
 
 /* ----------------------------- helpers ----------------------------- */
 const isPosInt = (n) => Number.isInteger(n) && n > 0;
@@ -552,6 +553,28 @@ export function withAuth(requireAuth, requireAdmin) {
       const pinRes = await verifyPinForUid(req.user.uid, pin);
       if (!pinRes.ok) {
         return res.status(400).json({ error: pinRes.code });
+      }
+
+      // ✅ FaceGate ONLY for big withdrawals (not annoying for small ones)
+      const minKobo = Math.max(
+        0,
+        Number(process.env.FACE_GATE_WITHDRAW_MIN_KOBO || 0),
+      );
+
+      if (minKobo > 0 && amt >= minKobo) {
+        let passed = false;
+        await new Promise((resolve) => {
+          requireFaceGate(
+            req,
+            res,
+            () => {
+              passed = true;
+              resolve();
+            },
+            { reason: "withdraw_big" },
+          );
+        });
+        if (!passed) return; // requireFaceGate already responded
       }
 
       const PAYSTACK_SECRET_KEY = requirePaystackKey(res);

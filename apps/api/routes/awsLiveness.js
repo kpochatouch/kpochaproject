@@ -64,7 +64,16 @@ export default function awsLivenessRoutes({ requireAuth }) {
           $set: {
             uid,
             livenessVerifiedAt: now,
-            // you can also store the raw AWS result if you want:
+
+            // ✅ canonical liveness pointer (used by FaceGate)
+            liveness: {
+              lastSessionId: sessionId,
+              lastVerifiedAt: now,
+              lastStatus: status,
+              lastConfidence: out?.Confidence ?? null,
+            },
+
+            // keep legacy/raw if you still want it
             livenessRaw: {
               sessionId,
               auditImage: out.AuditImages || [],

@@ -6,19 +6,6 @@ import { uploadMediaAsset } from "../lib/r2Upload";
 /* ---------- localStorage keys ---------- */
 const DRAFT_KEY = "kpocha:clientSettingsDraft";
 
-/* ---------- one-shot liveness helper (same idea as Settings.jsx) ---------- */
-function takeAwsLivenessProof() {
-  try {
-    const raw = localStorage.getItem("kpocha:livenessMetrics");
-    if (!raw) return null;
-    localStorage.removeItem("kpocha:livenessMetrics"); // one-time
-    const parsed = JSON.parse(raw);
-    return parsed && parsed.ok ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
 export default function ClientSettings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -28,10 +15,6 @@ export default function ClientSettings() {
   const [me, setMe] = useState(null);
   const [client, setClient] = useState(null);
   const [pro, setPro] = useState(null);
-
-  // liveness
-  const [livenessVerifiedAt, setLivenessVerifiedAt] = useState(null);
-  const [showLivenessNotice, setShowLivenessNotice] = useState(false);
 
   // geo
   const [geo, setGeo] = useState({ states: [], lgas: {} });
@@ -43,8 +26,8 @@ export default function ClientSettings() {
     state: "",
     lga: "",
     address: "",
-    photoUrl: "",
     photoAssetId: "",
+    photoPreviewUrl: "", // UI only, not saved
     agreeTerms: false,
     agreePrivacy: false,
   });
@@ -87,11 +70,6 @@ export default function ClientSettings() {
         setClient(clientData);
         setPro(proData);
         setGeo({ states: statesRaw, lgas: lgasRaw });
-
-        // keep client-side liveness
-        if (clientData?.livenessVerifiedAt) {
-          setLivenessVerifiedAt(clientData.livenessVerifiedAt);
-        }
 
         // load any draft we saved before liveness
         let draft = null;
@@ -151,13 +129,10 @@ export default function ClientSettings() {
           state: normalizedState || "",
           lga: normalizedLga || "",
           address: clientData?.address || "",
-          photoUrl:
+          photoPreviewUrl:
+            clientData?.photoUrlResolved ||
             clientData?.photoUrl ||
-            clientData?.identity?.photoUrl ||
             proData?.photoUrl ||
-            proData?.identity?.photoUrl ||
-            meData?.photoUrl ||
-            meData?.identity?.photoUrl ||
             "",
           photoAssetId:
             clientData?.photoAssetId ||
@@ -196,62 +171,31 @@ export default function ClientSettings() {
     });
   }
 
-  // ---------- AWS Liveness launcher (auto, but save form first) ----------
-  async function startAwsLivenessFlow() {
-    setError("");
-    setShowLivenessNotice(false);
-    try {
-      // save current form so we can restore after liveness
-      saveDraft(form);
-
-      const { data } = await api.post("/api/aws-liveness/session");
-      const sessionId =
-        data?.sessionId || data?.SessionId || data?.sessionID || "";
-
-      if (sessionId && typeof window !== "undefined") {
-        window.dispatchEvent(
-          new CustomEvent("aws-liveness:start", {
-            detail: {
-              sessionId,
-              back: "/settings", // come back here (SettingsSmart will route to ClientSettings)
-            },
-          }),
-        );
-        setShowLivenessNotice(true);
-      } else {
-        setError("Could not start face verification. Try again.");
-      }
-    } catch (e) {
-      setError(
-        e?.response?.data?.error ||
-          "Face verification is required before you can save these changes.",
-      );
-    }
-  }
-
   async function uploadImageToR2(file) {
-    if (!file) return { url: "", assetId: "" };
+    if (!file) return { previewUrl: "", assetId: "" };
 
     setError("");
     setOk("Uploading image...");
 
     try {
       const res = await uploadMediaAsset({ api, file, type: "image" });
-      const url = res?.publicUrl || "";
+      const previewUrl = res?.publicUrl || "";
       const assetId = res?.assetId || "";
 
-      if (!url) {
-        setError("Upload succeeded but public URL is missing.");
-        return { url: "", assetId };
+      if (!assetId) {
+        setOk("");
+        setError("Upload succeeded but assetId is missing.");
+        return { previewUrl, assetId: "" };
       }
 
-      setOk("Uploaded ✓");
-      setTimeout(() => setOk(""), 1200);
+      setOk("Uploaded ✓ (click Save changes)");
+      setTimeout(() => setOk(""), 1500);
 
-      return { url, assetId };
+      return { previewUrl, assetId };
     } catch (e) {
+      setOk("");
       setError(e?.message || "Upload failed.");
-      return { url: "", assetId: "" };
+      return { previewUrl: "", assetId: "" };
     }
   }
 
@@ -261,7 +205,6 @@ export default function ClientSettings() {
       setSaving(true);
       setError("");
       setOk("");
-      setShowLivenessNotice(false);
 
       const stateUP = (form.state || "").toUpperCase();
       const lgaUP = (form.lga || "").toUpperCase();
@@ -273,7 +216,6 @@ export default function ClientSettings() {
         state: stateUP,
         lga: lgaUP,
         address: form.address?.trim(),
-        photoUrl: form.photoUrl || "",
         photoAssetId: form.photoAssetId || "",
         acceptedTerms: !!form.agreeTerms,
         acceptedPrivacy: !!form.agreePrivacy,
@@ -285,16 +227,9 @@ export default function ClientSettings() {
           phone: form.phone?.trim(),
           state: stateUP,
           city: lgaUP,
-          photoUrl: form.photoUrl || "",
           photoAssetId: form.photoAssetId || "",
         },
       };
-
-      // attach the "remember" flag if we just returned from AWS
-      const livenessProof = takeAwsLivenessProof();
-      if (livenessProof) {
-        payload.liveness = { remember: true };
-      }
 
       const res = await api.put("/api/profile/me", payload);
       const updated = res?.data || payload;
@@ -305,10 +240,6 @@ export default function ClientSettings() {
         localStorage.removeItem(DRAFT_KEY);
       } catch (_) {}
 
-      if (updated?.livenessVerifiedAt) {
-        setLivenessVerifiedAt(updated.livenessVerifiedAt);
-      }
-
       setMe((prev) => ({
         ...(prev || {}),
         displayName: payload.displayName,
@@ -317,7 +248,6 @@ export default function ClientSettings() {
           phone: payload.phone,
           state: payload.state,
           city: payload.lga,
-          photoUrl: payload.photoUrl,
           photoAssetId: payload.photoAssetId,
         },
       }));
@@ -325,14 +255,6 @@ export default function ClientSettings() {
       setOk("Saved!");
       setTimeout(() => setOk(""), 2000);
     } catch (e) {
-      // backend says we need liveness → auto-launch
-      if (
-        e?.response?.status === 403 &&
-        e?.response?.data?.error === "liveness_required"
-      ) {
-        // launch liveness, but make sure form is stored
-        await startAwsLivenessFlow();
-      }
       setError(e?.response?.data?.error || "Could not save your changes.");
     } finally {
       setSaving(false);
@@ -356,17 +278,6 @@ export default function ClientSettings() {
           {ok}
         </div>
       )}
-      {showLivenessNotice && (
-        <div className="rounded-md border border-amber-700 bg-amber-900/30 text-amber-100 px-3 py-2 mb-4 text-sm">
-          Please complete face verification in the popup, then click “Save”
-          again.
-        </div>
-      )}
-      {livenessVerifiedAt && (
-        <div className="rounded-md border border-emerald-700 bg-emerald-900/10 text-emerald-100 px-3 py-2 mb-4 text-xs">
-          Face verification on: {new Date(livenessVerifiedAt).toLocaleString()}
-        </div>
-      )}
 
       {loading ? (
         <div className="text-zinc-400">Loading…</div>
@@ -380,9 +291,9 @@ export default function ClientSettings() {
             <h2 className="text-lg font-semibold mb-3">Photo</h2>
             <div className="flex items-center gap-3 flex-wrap">
               <div className="w-14 h-14 rounded-full overflow-hidden border border-zinc-700 bg-zinc-900">
-                {form.photoUrl ? (
+                {form.photoPreviewUrl ? (
                   <img
-                    src={form.photoUrl}
+                    src={form.photoPreviewUrl}
                     alt="avatar"
                     className="w-full h-full object-cover"
                   />
@@ -392,12 +303,6 @@ export default function ClientSettings() {
                   </div>
                 )}
               </div>
-              <input
-                className="flex-1 min-w-[180px] rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm"
-                placeholder="Photo URL"
-                value={form.photoUrl}
-                onChange={(e) => onChangeField("photoUrl", e.target.value)}
-              />
               <label className="px-3 py-2 rounded-lg border border-zinc-700 text-sm hover:bg-zinc-900 cursor-pointer">
                 Upload
                 <input
@@ -408,19 +313,20 @@ export default function ClientSettings() {
                     const file = e.target.files?.[0];
                     e.target.value = "";
                     const out = await uploadImageToR2(file);
-                    if (out.url) {
-                      onChangeField("photoUrl", out.url);
-                      onChangeField("photoAssetId", out.assetId || "");
+                    if (out.assetId) {
+                      onChangeField("photoAssetId", out.assetId);
+                      if (out.previewUrl)
+                        onChangeField("photoPreviewUrl", out.previewUrl);
                     }
                   }}
                 />
               </label>
-              {form.photoUrl && (
+              {(form.photoPreviewUrl || form.photoAssetId) && (
                 <button
                   type="button"
                   onClick={() => {
-                    onChangeField("photoUrl", "");
                     onChangeField("photoAssetId", "");
+                    onChangeField("photoPreviewUrl", "");
                   }}
                   className="px-3 py-2 rounded-lg border border-red-800 text-red-200 text-sm hover:bg-red-900/20"
                 >

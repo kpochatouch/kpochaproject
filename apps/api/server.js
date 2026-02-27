@@ -18,6 +18,7 @@ import cron from "node-cron";
 import { Application, Pro, proToBarber } from "./models.js";
 import bookingsRouter from "./routes/bookings.js";
 import { Booking } from "./models/Booking.js";
+import { expandMediaForClient } from "./services/mediaResolver.js";
 
 // Wallet & Ledger
 import { withAuth as walletWithAuth } from "./routes/wallets.js";
@@ -41,6 +42,8 @@ import adminProsRoutes from "./routes/adminPros.js";
 import geoRouter from "./routes/geo.js";
 import riskRoutes from "./routes/risk.js";
 import awsLivenessRoutes from "./routes/awsLiveness.js";
+import faceRoutes from "./routes/face.js";
+import { requireFaceGate } from "./services/faceGate.js";
 import redis from "./redis.js";
 import postStatsRouter from "./routes/postStats.js";
 import followRoutes from "./routes/follow.js";
@@ -55,6 +58,7 @@ import webrtcRoutes from "./routes/webrtc.js";
 import { getIO } from "./sockets/index.js";
 import pushRoutes from "./routes/push.js";
 import mediaRoutes from "./routes/media.js";
+import faceGateTestRoutes from "./routes/faceGateTest.js";
 
 dotenv.config();
 
@@ -727,6 +731,7 @@ async function getVerifiedClientIdentity(uid) {
           phone: 1,
           identity: 1,
           photoUrl: 1,
+          "identity.photoUrl": 1,
           photoAssetId: 1,
           "identity.photoAssetId": 1,
         },
@@ -745,7 +750,17 @@ async function getVerifiedClientIdentity(uid) {
       "";
 
     const phone = p.phone || p?.identity?.phone || "";
-    const photoUrl = p.photoUrl || p?.identity?.photoUrl || "";
+    const legacy = p.photoUrl || p?.identity?.photoUrl || "";
+
+    const [resolved] = await expandMediaForClient([
+      {
+        assetId: p?.photoAssetId || p?.identity?.photoAssetId || null,
+        url: legacy,
+        type: "image",
+      },
+    ]);
+
+    const photoUrl = resolved?.url || legacy || "";
 
     return { fullName, phone, photoUrl };
   } catch {
@@ -802,17 +817,11 @@ app.get("/api/me", requireAuth, async (req, res) => {
     let proDoc = null;
     try {
       proDoc = await Pro.findOne({ ownerUid: uid })
-        .select("_id name photoUrl status updatedAt")
+        .select(
+          "_id name photoUrl photoAssetId identity.photoAssetId status updatedAt",
+        )
         .lean();
     } catch {}
-
-    // normalize times for comparison
-    const profileUpdatedAt = profileDoc?.updatedAt
-      ? new Date(profileDoc.updatedAt).getTime()
-      : 0;
-    const proUpdatedAt = proDoc?.updatedAt
-      ? new Date(proDoc.updatedAt).getTime()
-      : 0;
 
     // helper: pick non-empty value, prefer profile
     function pickName() {
@@ -838,24 +847,37 @@ app.get("/api/me", requireAuth, async (req, res) => {
       return req.user.email || "";
     }
 
-    function pickPhoto() {
+    function pickPhotoLegacyFallback() {
       const identity = profileDoc?.identity || {};
 
       const profilePhoto = profileDoc?.photoUrl || identity?.photoUrl;
+      if (profilePhoto && String(profilePhoto).trim())
+        return String(profilePhoto).trim();
 
-      if (profilePhoto && profilePhoto.trim()) {
-        return profilePhoto.trim();
-      }
-
-      if (proDoc?.photoUrl && proDoc.photoUrl.trim()) {
-        return proDoc.photoUrl.trim();
-      }
+      if (proDoc?.photoUrl && String(proDoc.photoUrl).trim())
+        return String(proDoc.photoUrl).trim();
 
       return "";
     }
 
     const displayName = pickName();
-    const photoUrl = pickPhoto();
+    // ✅ Option A: resolve assetId → usable URL for /api/me
+    const photoLegacy = pickPhotoLegacyFallback();
+
+    const [meAvatarResolved] = await expandMediaForClient([
+      {
+        assetId:
+          profileDoc?.photoAssetId ||
+          profileDoc?.identity?.photoAssetId ||
+          proDoc?.photoAssetId ||
+          proDoc?.identity?.photoAssetId ||
+          null,
+        url: photoLegacy,
+        type: "image",
+      },
+    ]);
+
+    const photoUrl = meAvatarResolved?.url || photoLegacy || "";
     const identity = profileDoc?.identity || {};
     const isAdmin = isAdminUid(uid);
     const isPro = !!proDoc || !!profileDoc?.hasPro;
@@ -1056,7 +1078,6 @@ app.put("/api/pros/me", requireAuth, async (req, res) => {
     const proSet = {};
 
     if (hasVal(body.name)) proSet.name = body.name.trim();
-    if (hasVal(body.photoUrl)) proSet.photoUrl = body.photoUrl.trim();
     if (hasVal(body.photoAssetId))
       proSet.photoAssetId = String(body.photoAssetId).trim();
     // also accept photoAssetId under identity payload
@@ -1120,9 +1141,6 @@ app.put("/api/pros/me", requireAuth, async (req, res) => {
         toSet.displayName = body.name.trim();
         toSet.fullName = body.name.trim();
         toSet.name = body.name.trim();
-      }
-      if (hasVal(body.photoUrl)) {
-        toSet.photoUrl = body.photoUrl.trim();
       }
       if (hasVal(body.photoAssetId)) {
         toSet.photoAssetId = String(body.photoAssetId).trim();
@@ -1257,6 +1275,7 @@ app.use("/api", uploadsRoutes({ requireAuth }));
 app.use("/api", payoutRoutes({ requireAuth, Application }));
 app.use("/api", riskRoutes({ requireAuth, requireAdmin, Application }));
 app.use("/api", awsLivenessRoutes({ requireAuth }));
+app.use("/api", faceRoutes({ requireAuth }));
 app.use("/api", notificationsRoutes);
 app.use("/api", activityRoutes);
 app.use("/api", chatRoutes({ requireAuth }));
@@ -1264,6 +1283,7 @@ app.use("/api", callRoutes({ requireAuth }));
 app.use("/api", webrtcRoutes);
 app.use("/api", pushRoutes);
 app.use("/api", mediaRoutes({ requireAuth }));
+app.use("/api", faceGateTestRoutes({ requireAuth, requireAdmin }));
 
 // admin pros
 try {
@@ -1449,11 +1469,6 @@ app.post(
             ...(appDoc.identity || {}),
             ...(freshProfile.identity || {}),
           };
-          // keep photo too
-          if (freshProfile.photoUrl || freshProfile?.identity?.photoUrl) {
-            appDoc.identity.photoUrl =
-              freshProfile.photoUrl || freshProfile?.identity?.photoUrl;
-          }
         }
       } catch (e) {
         console.warn("[approve:profile sync] skipped:", e?.message || e);
@@ -1573,16 +1588,6 @@ app.post(
           base.phone = freshProfile.phone;
         }
 
-        // photo
-        if (!hasVal(base.photoUrl) && hasVal(freshProfile.photoUrl)) {
-          base.photoUrl = freshProfile.photoUrl;
-        } else if (
-          !hasVal(base.photoUrl) &&
-          hasVal(freshProfile.identity?.photoUrl)
-        ) {
-          base.photoUrl = freshProfile.identity.photoUrl;
-        }
-
         // ✅ asset pipeline photo id
         if (!hasVal(base.photoAssetId) && hasVal(freshProfile.photoAssetId)) {
           base.photoAssetId = String(freshProfile.photoAssetId).trim();
@@ -1620,7 +1625,6 @@ app.post(
               hasPro: true,
               proId: pro._id,
               proStatus: "approved",
-              ...(pro.photoUrl ? { photoUrl: pro.photoUrl } : {}),
               ...(pro.photoAssetId ? { photoAssetId: pro.photoAssetId } : {}),
             },
           },
@@ -1729,8 +1733,24 @@ app.get("/api/barbers", async (req, res) => {
     const query = and.length ? { $and: and } : {};
 
     const docs = await Pro.find(query).lean();
-    // scrub public so phone/address don't leak
-    const shaped = docs.map((d) => scrubPublicPro(proToBarber(d)));
+
+    // 1) shape first (may still include legacy photoUrl)
+    let shaped = docs.map((d) => scrubPublicPro(proToBarber(d)));
+
+    // 2) resolve avatars from assetIds (fallback to legacy url)
+    const avatarInputs = docs.map((d) => ({
+      assetId: d?.photoAssetId || d?.identity?.photoAssetId || null,
+      url: d?.photoUrl || d?.identity?.photoUrl || "",
+      type: "image",
+    }));
+
+    const resolved = await expandMediaForClient(avatarInputs);
+
+    shaped = shaped.map((p, i) => ({
+      ...p,
+      photoUrl: resolved?.[i]?.url || p.photoUrl || "",
+    }));
+
     return res.json(shaped);
   } catch (err) {
     console.error("[barbers] DB error:", err);
@@ -1774,7 +1794,17 @@ app.get("/api/barbers/:id", async (req, res) => {
     if (!doc) return res.status(404).json({ error: "Not found" });
 
     // Convert to public shape
-    const shaped = scrubPublicPro(proToBarber(doc));
+    let shaped = scrubPublicPro(proToBarber(doc));
+
+    const [resolved] = await expandMediaForClient([
+      {
+        assetId: doc?.photoAssetId || doc?.identity?.photoAssetId || null,
+        url: doc?.photoUrl || doc?.identity?.photoUrl || "",
+        type: "image",
+      },
+    ]);
+
+    shaped.photoUrl = resolved?.url || shaped.photoUrl || "";
 
     // *** FIX: always include actual ownerUid ***
     shaped.ownerUid = doc.ownerUid;
@@ -1905,9 +1935,21 @@ app.get("/api/barbers/nearby", async (req, res) => {
         },
         { $limit: 100 },
       ]);
-      items = agg.map((d) => {
+      const avatarInputs = agg.map((d) => ({
+        assetId: d?.photoAssetId || d?.identity?.photoAssetId || null,
+        url: d?.photoUrl || d?.identity?.photoUrl || "",
+        type: "image",
+      }));
+
+      const resolved = await expandMediaForClient(avatarInputs);
+
+      items = agg.map((d, i) => {
         const shaped = scrubPublicPro(proToBarber(d));
-        return { ...shaped, distanceKm: Math.round((d.dist / 1000) * 10) / 10 };
+        return {
+          ...shaped,
+          photoUrl: resolved?.[i]?.url || shaped.photoUrl || "",
+          distanceKm: Math.round((d.dist / 1000) * 10) / 10,
+        };
       });
     } catch {
       used = "lga";
@@ -1920,8 +1962,19 @@ app.get("/api/barbers/nearby", async (req, res) => {
       if (lga) q.lga = lga;
 
       const docs = await Pro.find(q).limit(100).lean();
-      items = docs.map((d) => ({
+
+      const avatarInputs = docs.map((d) => ({
+        assetId: d?.photoAssetId || d?.identity?.photoAssetId || null,
+        url: d?.photoUrl || d?.identity?.photoUrl || "",
+        type: "image",
+      }));
+
+      const resolved = await expandMediaForClient(avatarInputs);
+
+      items = docs.map((d, i) => ({
         ...scrubPublicPro(proToBarber(d)),
+        photoUrl:
+          resolved?.[i]?.url || d?.photoUrl || d?.identity?.photoUrl || "",
         distanceKm: null,
       }));
     }

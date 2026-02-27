@@ -168,7 +168,7 @@ export default function Compose() {
   const [videoThumbUrl, setVideoThumbUrl] = useState("");
 
   const fileInputRef = useRef(null);
-
+  const cameraInputRef = useRef(null);
   const [videoPreviewError, setVideoPreviewError] = useState("");
 
   // FFmpeg lazy refs
@@ -845,6 +845,17 @@ export default function Compose() {
 
         {/* Controls */}
         <div className="flex items-center gap-2 mb-3">
+          {/* Camera */}
+          <button
+            type="button"
+            onClick={() => cameraInputRef.current?.click()}
+            className="rounded-md border border-emerald-600 px-3 py-1.5 text-xs hover:bg-emerald-900/30"
+            disabled={uploading || posting}
+          >
+            Camera
+          </button>
+
+          {/* Gallery */}
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
@@ -858,6 +869,15 @@ export default function Compose() {
             ref={fileInputRef}
             type="file"
             accept="image/*,video/*"
+            className="hidden"
+            onChange={(e) => onPickFile(e.target.files?.[0])}
+          />
+
+          <input
+            ref={cameraInputRef}
+            type="file"
+            accept="image/*,video/*"
+            capture="environment"
             className="hidden"
             onChange={(e) => onPickFile(e.target.files?.[0])}
           />
