@@ -6,7 +6,6 @@ import { useAuth } from "../context/AuthContext.jsx";
 import { useMe } from "../context/MeContext.jsx";
 import NotificationBell from "./NotificationBell.jsx";
 import InstallAppButton from "./InstallAppButton.jsx";
-import { api } from "../lib/api";
 
 export default function Navbar() {
   const { user } = useAuth();
@@ -42,20 +41,6 @@ export default function Navbar() {
     } catch {}
 
     window.location.assign("/login?signedout=1");
-  }
-
-  async function handleTestFaceGate() {
-    try {
-      const res = await api.get("/api/face/gate-test");
-      alert("✅ " + (res.data?.message || "FaceGate passed"));
-    } catch (err) {
-      const msg =
-        err?.response?.data?.error ||
-        err?.response?.data?.message ||
-        err?.message ||
-        "Failed";
-      alert("❌ " + msg);
-    }
   }
 
   const isAdmin = !!me?.isAdmin;
@@ -143,18 +128,9 @@ export default function Navbar() {
             </NavLink>
           )}
           {isAdmin && (
-            <>
-              <NavLink to="/admin" className={navLinkClass}>
-                Admin
-              </NavLink>
-
-              <button
-                onClick={handleTestFaceGate}
-                className="rounded-lg border border-red-500 px-3 py-1 text-red-400 hover:bg-red-500 hover:text-black"
-              >
-                FaceGate Test
-              </button>
-            </>
+            <NavLink to="/admin" className={navLinkClass}>
+              Admin
+            </NavLink>
           )}
 
           {/* notification bell + signout */}
@@ -282,18 +258,9 @@ export default function Navbar() {
             ) : null}
 
             {isAdmin ? (
-              <>
-                <NavLink to="/admin" className={() => chipClass(isAdminPanel)}>
-                  Admin
-                </NavLink>
-
-                <button
-                  onClick={handleTestFaceGate}
-                  className={chipClass(false)}
-                >
-                  FaceGate
-                </button>
-              </>
+              <NavLink to="/admin" className={() => chipClass(isAdminPanel)}>
+                Admin
+              </NavLink>
             ) : null}
           </div>
         </div>

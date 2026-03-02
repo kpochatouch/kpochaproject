@@ -22,6 +22,17 @@ export default function AwsLiveness() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
 
+  function readAfterLivenessOnce() {
+    try {
+      const raw = localStorage.getItem("kpocha:afterLiveness");
+      if (!raw) return null;
+      localStorage.removeItem("kpocha:afterLiveness"); // ✅ one-shot
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+
   useEffect(() => {
     (async () => {
       try {
@@ -99,7 +110,13 @@ export default function AwsLiveness() {
       console.error("[AwsLiveness] verify POST failed:", e);
       // even if this fails, the backup (remember flag) on next save will work
     } finally {
-      nav(back);
+      const cont = readAfterLivenessOnce();
+      if (cont?.next) {
+        // keep payload for the destination page to consume once
+        nav(cont.next);
+      } else {
+        nav(back);
+      }
     }
   };
 

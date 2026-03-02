@@ -9,7 +9,7 @@ export default function mediaRoutes({ requireAuth }) {
 
   // INIT
   r.post("/media/init", requireAuth, async (req, res) => {
-    const { type, contentType, filename } = req.body;
+    const { type, contentType, filename, visibility } = req.body;
 
     if (!["video", "image"].includes(type)) {
       return res.status(400).json({ error: "invalid_type" });
@@ -17,6 +17,9 @@ export default function mediaRoutes({ requireAuth }) {
     if (!contentType || typeof contentType !== "string") {
       return res.status(400).json({ error: "contentType_required" });
     }
+
+    // ✅ Visibility gate (default private)
+    const vis = visibility === "public" ? "public" : "private";
 
     // file extension (best-effort)
     const safeName = String(filename || "").toLowerCase();
@@ -44,6 +47,7 @@ export default function mediaRoutes({ requireAuth }) {
       ownerUid: req.user.uid,
       type,
       status: "uploading",
+      visibility: vis, // ✅ persist visibility
     });
 
     const key = `media/${req.user.uid}/${asset._id}/original.${ext}`;
@@ -56,10 +60,13 @@ export default function mediaRoutes({ requireAuth }) {
       ok: true,
       assetId: asset._id,
       key,
-      publicUrl: keyToPublicUrl(key),
+      // ✅ Only return a CDN-style url if the asset is public.
+      // For private, the client must use /api/media/:id/url
+      publicUrl: vis === "public" ? keyToPublicUrl(key) : "",
       type,
       contentType,
       status: asset.status,
+      visibility: vis,
       uploadUrl,
     });
   });
@@ -119,6 +126,7 @@ export default function mediaRoutes({ requireAuth }) {
         id: asset._id,
         type: asset.type,
         status: asset.status,
+        visibility: asset.visibility || "private",
         original: asset.original || null,
         hls: asset.hls || null,
         renditions: asset.renditions || [],
@@ -134,9 +142,12 @@ export default function mediaRoutes({ requireAuth }) {
     const asset = await MediaAsset.findById(req.params.id);
     if (!asset) return res.status(404).json({ error: "not_found" });
 
-    // Only owner can get signed URL (you can loosen this later for public posts)
-    if (String(asset.ownerUid) !== String(req.user.uid)) {
-      return res.status(403).json({ error: "forbidden" });
+    // ✅ Private assets: owner-only signed URL
+    // ✅ Public assets: still allow signed URL for owner (fine), but ALSO return CDN url elsewhere via resolvers.
+    if (asset.visibility !== "public") {
+      if (String(asset.ownerUid) !== String(req.user.uid)) {
+        return res.status(403).json({ error: "forbidden" });
+      }
     }
 
     const variant = String(req.query.variant || "original");

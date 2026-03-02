@@ -409,8 +409,8 @@ export default function ServicePicker({
         typeof raw.price === "number"
           ? raw.price
           : Number.isFinite(Number(raw.price))
-            ? Number(raw.price)
-            : undefined;
+          ? Number(raw.price)
+          : undefined;
 
       map.set(key, {
         id: raw.id,

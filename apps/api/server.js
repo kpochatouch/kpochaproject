@@ -16,6 +16,7 @@ import cron from "node-cron";
 
 // Models & core routers
 import { Application, Pro, proToBarber } from "./models.js";
+import MediaAsset from "./models/MediaAsset.js";
 import bookingsRouter from "./routes/bookings.js";
 import { Booking } from "./models/Booking.js";
 import { expandMediaForClient } from "./services/mediaResolver.js";
@@ -43,7 +44,6 @@ import geoRouter from "./routes/geo.js";
 import riskRoutes from "./routes/risk.js";
 import awsLivenessRoutes from "./routes/awsLiveness.js";
 import faceRoutes from "./routes/face.js";
-import { requireFaceGate } from "./services/faceGate.js";
 import redis from "./redis.js";
 import postStatsRouter from "./routes/postStats.js";
 import followRoutes from "./routes/follow.js";
@@ -58,7 +58,6 @@ import webrtcRoutes from "./routes/webrtc.js";
 import { getIO } from "./sockets/index.js";
 import pushRoutes from "./routes/push.js";
 import mediaRoutes from "./routes/media.js";
-import faceGateTestRoutes from "./routes/faceGateTest.js";
 
 dotenv.config();
 
@@ -776,6 +775,64 @@ function scrubPublicPro(p = {}) {
   return rest;
 }
 
+// ✅ KYC document enforcement (Facebook-style private assets)
+async function assertPrivateOwnedReadyImageAssetIds(ownerUid, assetIds = []) {
+  const ids = Array.isArray(assetIds)
+    ? assetIds.map((x) => String(x || "").trim()).filter(Boolean)
+    : [];
+
+  if (!ids.length) return { ok: true, ids: [] };
+
+  // Must exist, must belong to the user, must be PRIVATE, must be ready, must be image.
+  const docs = await MediaAsset.find({ _id: { $in: ids } })
+    .select("_id ownerUid visibility type status")
+    .lean()
+    .catch(() => []);
+
+  const byId = new Map(docs.map((d) => [String(d._id), d]));
+
+  for (const id of ids) {
+    const a = byId.get(String(id));
+    if (!a) {
+      return { ok: false, status: 404, error: "asset_not_found", assetId: id };
+    }
+    if (String(a.ownerUid) !== String(ownerUid)) {
+      return {
+        ok: false,
+        status: 403,
+        error: "asset_forbidden",
+        assetId: id,
+      };
+    }
+    if (a.visibility !== "private") {
+      return {
+        ok: false,
+        status: 400,
+        error: "asset_must_be_private",
+        assetId: id,
+      };
+    }
+    if (a.type !== "image") {
+      return {
+        ok: false,
+        status: 400,
+        error: "asset_must_be_image",
+        assetId: id,
+      };
+    }
+    if (a.status !== "ready") {
+      return {
+        ok: false,
+        status: 409,
+        error: "asset_not_ready",
+        assetId: id,
+      };
+    }
+  }
+
+  return { ok: true, ids };
+}
+
 /* ------------------- Unified current user profile summary ------------------- */
 app.get("/api/me", requireAuth, async (req, res) => {
   try {
@@ -1114,7 +1171,15 @@ app.put("/api/pros/me", requireAuth, async (req, res) => {
     }
 
     if (body.availability) proSet.availability = body.availability;
-    if (body.bank) proSet.bank = body.bank;
+    // ❌ Do NOT accept payout/bank edits here.
+    // Payout destination must be updated via PUT /api/payout/me (where FaceGate runs).
+    if (body.bank) {
+      return res.status(400).json({
+        error: "bank_update_not_allowed_here",
+        message:
+          "Update payout account via Settings → Payout Bank (PUT /api/payout/me).",
+      });
+    }
     if (typeof body.bio === "string") proSet.bio = body.bio;
 
     proSet.status = hasVal(body.status)
@@ -1283,7 +1348,6 @@ app.use("/api", callRoutes({ requireAuth }));
 app.use("/api", webrtcRoutes);
 app.use("/api", pushRoutes);
 app.use("/api", mediaRoutes({ requireAuth }));
-app.use("/api", faceGateTestRoutes({ requireAuth, requireAdmin }));
 
 // admin pros
 try {
@@ -2038,6 +2102,39 @@ app.post("/api/applications", requireAuth, async (req, res) => {
 
     const status = "submitted";
 
+    // ✅ Enforce KYC docs are private + owned + ready + image
+    // Accept docs from either payload.application.documentAssetIds OR payload.documentAssetIds
+    const docIdsA = payload?.application?.documentAssetIds;
+    const docIdsB = payload?.documentAssetIds;
+
+    const checkA = await assertPrivateOwnedReadyImageAssetIds(
+      req.user.uid,
+      docIdsA,
+    );
+    if (!checkA.ok) {
+      return res.status(checkA.status).json({
+        error: checkA.error,
+        message:
+          "KYC documents must be PRIVATE image assets you uploaded (ready).",
+        assetId: checkA.assetId,
+        field: "payload.application.documentAssetIds",
+      });
+    }
+
+    const checkB = await assertPrivateOwnedReadyImageAssetIds(
+      req.user.uid,
+      docIdsB,
+    );
+    if (!checkB.ok) {
+      return res.status(checkB.status).json({
+        error: checkB.error,
+        message:
+          "KYC documents must be PRIVATE image assets you uploaded (ready).",
+        assetId: checkB.assetId,
+        field: "payload.documentAssetIds",
+      });
+    }
+
     const setDoc = {
       uid: req.user.uid,
       email: req.user.email || "",
@@ -2053,6 +2150,19 @@ app.post("/api/applications", requireAuth, async (req, res) => {
         terms: !!payload?.agreements?.terms,
         privacy: !!payload?.agreements?.privacy,
       },
+
+      // ✅ normalize persisted doc lists (only clean ids survive)
+      ...(Array.isArray(payload?.application?.documentAssetIds)
+        ? {
+            application: {
+              ...(payload.application || {}),
+              documentAssetIds: checkA.ids,
+            },
+          }
+        : {}),
+      ...(Array.isArray(payload?.documentAssetIds)
+        ? { documentAssetIds: checkB.ids }
+        : {}),
     };
 
     const doc = await Application.findOneAndUpdate(

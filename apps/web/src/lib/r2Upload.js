@@ -23,7 +23,12 @@ function detectMediaType(file, explicitType) {
   return isVideo ? "video" : "image";
 }
 
-export async function uploadMediaAsset({ api, file, type }) {
+export async function uploadMediaAsset({
+  api,
+  file,
+  type,
+  visibility = "private", // ✅ default safe
+}) {
   if (!api) throw new Error("uploadMediaAsset: api is required");
   if (!file) throw new Error("uploadMediaAsset: file is required");
 
@@ -32,6 +37,7 @@ export async function uploadMediaAsset({ api, file, type }) {
   // 1) init
   const initRes = await api.post("/api/media/init", {
     type: finalType,
+    visibility, // ✅ "public" | "private"
     contentType:
       file.type || (finalType === "video" ? "video/mp4" : "image/jpeg"),
     filename: file.name || "",

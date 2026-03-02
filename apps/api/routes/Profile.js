@@ -14,6 +14,7 @@ import { proToBarber } from "../models.js";
 import { getIO } from "../sockets/index.js";
 import { computeProfileStats } from "../services/profileStatsService.js";
 import { expandMediaForClient } from "../services/mediaResolver.js";
+import MediaAsset from "../models/MediaAsset.js";
 
 const router = express.Router();
 
@@ -97,6 +98,11 @@ function filterProPublic(p) {
 function buildProfilesSetFromPayload(payload = {}) {
   const set = {};
 
+  // 🚫 Never persist raw photo URLs again (Facebook-style)
+  if ("photoUrl" in payload) {
+    // ignore client-supplied photoUrl entirely
+  }
+
   if (payload.fullName) set.fullName = payload.fullName;
   if (payload.phone) set.phone = payload.phone;
   if (payload.state) set.state = String(payload.state).toUpperCase();
@@ -128,18 +134,6 @@ function buildProfilesSetFromPayload(payload = {}) {
     }
   }
 
-  if (payload.application && typeof payload.application === "object") {
-    if (Array.isArray(payload.application.documentAssetIds)) {
-      set.application = set.application || payload.application;
-      set.application.documentAssetIds = payload.application.documentAssetIds;
-    }
-  }
-
-  if (Array.isArray(payload.documentAssetIds)) {
-    set.application = set.application || {};
-    set.application.documentAssetIds = payload.documentAssetIds;
-  }
-
   return set;
 }
 
@@ -147,6 +141,53 @@ function buildProfilesSetFromPayload(payload = {}) {
 // Liveness is ONLY for bank/payout editing (wallet routes).
 function bodyTouchesSensitiveClient(_body = {}) {
   return false;
+}
+
+// ✅ KYC document enforcement (Facebook-style private assets)
+async function assertPrivateOwnedReadyImageAssetIds(ownerUid, assetIds = []) {
+  const ids = Array.isArray(assetIds)
+    ? assetIds.map((x) => String(x || "").trim()).filter(Boolean)
+    : [];
+
+  if (!ids.length) return { ok: true, ids: [] };
+
+  const docs = await MediaAsset.find({ _id: { $in: ids } })
+    .select("_id ownerUid visibility type status")
+    .lean()
+    .catch(() => []);
+
+  const byId = new Map(docs.map((d) => [String(d._id), d]));
+
+  for (const id of ids) {
+    const a = byId.get(String(id));
+    if (!a) {
+      return { ok: false, status: 404, error: "asset_not_found", assetId: id };
+    }
+    if (String(a.ownerUid) !== String(ownerUid)) {
+      return { ok: false, status: 403, error: "asset_forbidden", assetId: id };
+    }
+    if (a.visibility !== "private") {
+      return {
+        ok: false,
+        status: 400,
+        error: "asset_must_be_private",
+        assetId: id,
+      };
+    }
+    if (a.type !== "image") {
+      return {
+        ok: false,
+        status: 400,
+        error: "asset_must_be_image",
+        assetId: id,
+      };
+    }
+    if (a.status !== "ready") {
+      return { ok: false, status: 409, error: "asset_not_ready", assetId: id };
+    }
+  }
+
+  return { ok: true, ids };
 }
 
 /* ------------------------------------------------------------------
@@ -198,7 +239,8 @@ router.post("/profile/ensure", requireAuth, async (req, res) => {
             state: existing.state || "",
             lga: existing.lga || "",
             address: existing.address || "",
-            photoUrl: existing.photoUrl || "",
+            // 🚫 stop syncing raw photoUrl (legacy). Use photoAssetId + resolver instead.
+            // photoUrl: existing.photoUrl || "",
             ...(existing.identity ? { identity: existing.identity } : {}),
             ...(existing.livenessVerifiedAt
               ? { livenessVerifiedAt: existing.livenessVerifiedAt }
@@ -275,6 +317,43 @@ async function handlePutClientMe(req, res) {
       return res.status(404).json({ error: "profile_not_found" });
     }
 
+    async function assertPrivateOwnedReadyImage(
+      assetId,
+      fieldName = "assetId",
+    ) {
+      const a = await MediaAsset.findById(assetId)
+        .select("_id ownerUid visibility type status")
+        .lean()
+        .catch(() => null);
+
+      if (!a) {
+        return { ok: false, status: 404, error: "asset_not_found", fieldName };
+      }
+      if (String(a.ownerUid) !== String(uid)) {
+        return { ok: false, status: 403, error: "asset_forbidden", fieldName };
+      }
+      if (a.visibility !== "private") {
+        return {
+          ok: false,
+          status: 400,
+          error: "asset_must_be_private",
+          fieldName,
+        };
+      }
+      if (a.type !== "image") {
+        return {
+          ok: false,
+          status: 400,
+          error: "asset_must_be_image",
+          fieldName,
+        };
+      }
+      if (a.status !== "ready") {
+        return { ok: false, status: 409, error: "asset_not_ready", fieldName };
+      }
+      return { ok: true };
+    }
+
     // normalize casing only if present
     if (payload.lga) payload.lga = String(payload.lga).toUpperCase();
     if (payload.state) payload.state = String(payload.state).toUpperCase();
@@ -307,6 +386,30 @@ async function handlePutClientMe(req, res) {
       clientSet.identity = identityClean;
     }
 
+    // ✅ Facebook-style rule:
+    // Any assetId stored in PRIVATE profile fields must be PRIVATE, owned by user, ready, and image.
+    if (payload.photoAssetId && String(payload.photoAssetId).trim()) {
+      const id = String(payload.photoAssetId).trim();
+      const check = await assertPrivateOwnedReadyImage(id, "photoAssetId");
+      if (!check.ok)
+        return res.status(check.status).json({ error: check.error });
+    }
+
+    if (payload.identity && typeof payload.identity === "object") {
+      if (
+        payload.identity.photoAssetId &&
+        String(payload.identity.photoAssetId).trim()
+      ) {
+        const id = String(payload.identity.photoAssetId).trim();
+        const check = await assertPrivateOwnedReadyImage(
+          id,
+          "identity.photoAssetId",
+        );
+        if (!check.ok)
+          return res.status(check.status).json({ error: check.error });
+      }
+    }
+
     // ✅ Asset IDs (R2 pipeline)
     if (payload.photoAssetId && String(payload.photoAssetId).trim()) {
       clientSet.photoAssetId = String(payload.photoAssetId).trim();
@@ -324,19 +427,46 @@ async function handlePutClientMe(req, res) {
       }
     }
 
-    // (Optional but supported) application docs
-    if (payload.application && typeof payload.application === "object") {
-      if (Array.isArray(payload.application.documentAssetIds)) {
-        clientSet.application =
-          clientSet.application || payload.application || {};
-        clientSet.application.documentAssetIds =
-          payload.application.documentAssetIds;
-      }
+    // ✅ KYC docs: enforce PRIVATE + owned + ready + image
+    // Accept docs from either payload.application.documentAssetIds OR payload.documentAssetIds
+    const docIdsA = payload?.application?.documentAssetIds;
+    const docIdsB = payload?.documentAssetIds;
+
+    const checkA = await assertPrivateOwnedReadyImageAssetIds(uid, docIdsA);
+    if (!checkA.ok) {
+      return res.status(checkA.status).json({
+        error: checkA.error,
+        message:
+          "KYC documents must be PRIVATE image assets you uploaded (ready).",
+        assetId: checkA.assetId,
+        field: "payload.application.documentAssetIds",
+      });
     }
-    if (Array.isArray(payload.documentAssetIds)) {
+
+    const checkB = await assertPrivateOwnedReadyImageAssetIds(uid, docIdsB);
+    if (!checkB.ok) {
+      return res.status(checkB.status).json({
+        error: checkB.error,
+        message:
+          "KYC documents must be PRIVATE image assets you uploaded (ready).",
+        assetId: checkB.assetId,
+        field: "payload.documentAssetIds",
+      });
+    }
+
+    // Persist only the cleaned ids (no raw application object copy)
+    // Canonical: prefer payload.application.documentAssetIds, else payload.documentAssetIds
+    const canonicalDocIds = Array.isArray(docIdsA)
+      ? checkA.ids
+      : Array.isArray(docIdsB)
+      ? checkB.ids
+      : null;
+
+    if (canonicalDocIds) {
       clientSet.application = clientSet.application || {};
-      clientSet.application.documentAssetIds = payload.documentAssetIds;
+      clientSet.application.documentAssetIds = canonicalDocIds;
     }
+
     if (payload.kyc) clientSet.kyc = payload.kyc;
     if (typeof payload.acceptedTerms === "boolean")
       clientSet.acceptedTerms = payload.acceptedTerms;
@@ -360,7 +490,25 @@ async function handlePutClientMe(req, res) {
       const fromPayload = buildProfilesSetFromPayload(payload);
       Object.assign($set, fromPayload);
 
-      await col.updateOne({ uid }, { $set }, { upsert: true });
+      // ✅ Persist cleaned KYC doc ids into raw profiles collection too
+      // Use the SAME canonical list used for ClientProfile (prevents overwrite footguns)
+      if (canonicalDocIds) {
+        $set.application = $set.application || {};
+        $set.application.documentAssetIds = canonicalDocIds;
+      }
+
+      await col.updateOne(
+        { uid },
+        {
+          $set,
+          $unset: {
+            photoUrl: "",
+            "identity.photoUrl": "",
+            "application.documentUrls": "", // optional: if you want to purge legacy docs too
+          },
+        },
+        { upsert: true },
+      );
     } catch (e) {
       console.warn("[profile->profiles col sync] skipped:", e?.message || e);
     }

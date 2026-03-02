@@ -1,6 +1,6 @@
 // apps/web/src/pages/BecomePro.jsx
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   api,
   ensureClientProfile,
@@ -10,6 +10,8 @@ import {
 import NgGeoPicker from "../components/NgGeoPicker.jsx";
 import MediaUploader from "../components/MediaUploader.jsx";
 import ServicePicker from "../components/ServicePicker.jsx";
+import { useToast } from "../components/Toast.jsx";
+import FaceEnrollModal from "../components/FaceEnrollModal.jsx";
 
 /* ---------- Utils ---------- */
 function digitsOnly(s = "") {
@@ -35,12 +37,155 @@ function normName(s = "") {
     .trim();
 }
 
+/* ---------- BecomePro liveness pipeline keys ---------- */
+const BECOME_PRO_PENDING_KEY = "kpocha:becomeProPending";
+const AFTER_LIVENESS_KEY = "kpocha:afterLiveness";
+const BECOME_PRO_ENROLLED_ASSET_KEY = "kpocha:becomeProEnrolledAssetId";
+
+function lsSet(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {}
+}
+function lsGet(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+function lsDel(key) {
+  try {
+    localStorage.removeItem(key);
+  } catch {}
+}
+
 /* ======================= BecomePro Page ======================= */
 export default function BecomePro() {
   const nav = useNavigate();
-
+  const [params] = useSearchParams();
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
+  const toast = useToast();
+
+  // ✅ prevent double-trigger (double click / double tap)
+  const [pipelineStarted, setPipelineStarted] = useState(false);
+
+  async function startBecomeProPipeline() {
+    // block double-run
+    if (busy || pipelineStarted) return;
+
+    // must still satisfy your existing checks
+    if (!canSubmit) {
+      setMsg(`Please complete: ${missingAll.join(", ")}`);
+      return;
+    }
+
+    // must have selfie
+    if (!enrollSelfie.assetId) {
+      setMsg("");
+      setNeedEnrollSelfie(true);
+      return;
+    }
+
+    setPipelineStarted(true);
+    setBusy(true);
+    setMsg("");
+
+    try {
+      const topLat = business.lat || identity.lat || "";
+      const topLon = business.lon || identity.lon || "";
+
+      const normalizedRows = servicesDetailed
+        .map((r) => {
+          const name = (r.name || "").trim();
+          if (!name) return null;
+          const price = parseMoney(r.price);
+          const promoPrice = r.promoPrice ? parseMoney(r.promoPrice) : "";
+          return {
+            id: r.id || "other",
+            name,
+            price: price === "" ? "0" : price,
+            ...(promoPrice !== "" ? { promoPrice } : {}),
+          };
+        })
+        .filter(Boolean);
+
+      const payload = {
+        ...(topLat && topLon ? { lat: topLat, lon: topLon } : {}),
+        identity: {
+          ...identity,
+          photoPreviewUrl: undefined, // UI-only: DO NOT STORE
+          ...(topLat && topLon ? { lat: topLat, lon: topLon } : {}),
+          email: identity.email || me?.email || "",
+          phone:
+            identity.phone || clientProfile?.phone || me?.identity?.phone || "",
+          state: identity.state,
+          city: identity.lga,
+        },
+        professional: {
+          ...professional,
+          services: Array.from(new Set(normalizedRows.map((r) => r.name))),
+        },
+        business: {
+          ...business,
+          shopPhotoOutsidePreviewUrl: undefined,
+          shopPhotoInsidePreviewUrl: undefined,
+          ...(topLat && topLon ? { lat: topLat, lon: topLon } : {}),
+        },
+        availability: {
+          ...availability,
+          statesCovered: professional.nationwide
+            ? stateList
+            : availability.statesCovered,
+        },
+        servicesDetailed: normalizedRows,
+        bank: {
+          ...bank,
+          accountNumber: digitsOnly(bank.accountNumber).slice(0, 10),
+        },
+        portfolio,
+        status: "submitted",
+        acceptedTerms: !!agreements.terms,
+        acceptedPrivacy: !!agreements.privacy,
+        agreements: {
+          terms: !!agreements.terms,
+          privacy: !!agreements.privacy,
+        },
+      };
+
+      // save draft so we can finish after liveness returns
+      lsSet(BECOME_PRO_PENDING_KEY, payload);
+
+      // store enrolled selfie asset for auto-resume
+      lsSet(BECOME_PRO_ENROLLED_ASSET_KEY, enrollSelfie.assetId);
+
+      // tell liveness page where to go next (routing token; one-shot)
+      lsSet(AFTER_LIVENESS_KEY, { next: "/become?auto=1" });
+
+      // start liveness
+      nav(`/aws-liveness?back=${encodeURIComponent("/become")}`);
+    } catch (err) {
+      const apiMsg =
+        err?.response?.data?.error || "Failed to start verification.";
+
+      // keep inline msg optional; toast is primary for events
+      setMsg(apiMsg);
+      toast.error(apiMsg, { playSound: true });
+
+      setPipelineStarted(false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // ✅ enrolled selfie (private/admin-only; used for face enrollment)
+  const [enrollSelfie, setEnrollSelfie] = useState({
+    assetId: "",
+    previewUrl: "",
+  });
+  const [needEnrollSelfie, setNeedEnrollSelfie] = useState(false);
 
   // step-by-step UI (like Settings)
   const [step, setStep] = useState("identity");
@@ -49,7 +194,6 @@ export default function BecomePro() {
     "services",
     "business",
     "availability",
-    "verification",
     "payout",
     "portfolio",
     "agreements",
@@ -99,9 +243,9 @@ export default function BecomePro() {
     email: "",
     state: "",
     lga: "",
-    photoAssetId: "",
 
-    // UI-only preview (NOT persisted)
+    // optional public profile photo (NOT used for payout verification)
+    photoAssetId: "",
     photoPreviewUrl: "",
 
     lat: "",
@@ -157,12 +301,6 @@ export default function BecomePro() {
     statesCovered: [],
   });
 
-  // ===== Verification
-  const [verification, setVerification] = useState({
-    faceVerificationVideoUrl: "",
-    livenessMetrics: {},
-  });
-
   // ===== Bank
   const [bank, setBank] = useState({
     bankCode: "",
@@ -197,6 +335,12 @@ export default function BecomePro() {
       } catch {}
 
       try {
+        if (enrollSelfie.previewUrl?.startsWith("blob:")) {
+          URL.revokeObjectURL(enrollSelfie.previewUrl);
+        }
+      } catch {}
+
+      try {
         if (business.shopPhotoOutsidePreviewUrl?.startsWith("blob:")) {
           URL.revokeObjectURL(business.shopPhotoOutsidePreviewUrl);
         }
@@ -210,6 +354,7 @@ export default function BecomePro() {
     };
   }, [
     identity.photoPreviewUrl,
+    enrollSelfie.previewUrl,
     business.shopPhotoOutsidePreviewUrl,
     business.shopPhotoInsidePreviewUrl,
   ]);
@@ -351,6 +496,64 @@ export default function BecomePro() {
     [allStates],
   );
 
+  useEffect(() => {
+    const auto = params.get("auto");
+    if (auto !== "1") return;
+
+    let alive = true;
+
+    (async () => {
+      try {
+        setBusy(true);
+        setMsg("");
+
+        const pending = lsGet(BECOME_PRO_PENDING_KEY);
+        const enrolledAssetId = String(
+          lsGet(BECOME_PRO_ENROLLED_ASSET_KEY) || "",
+        ).trim();
+
+        if (!pending) {
+          setMsg("Could not resume verification. Please submit again.");
+          return;
+        }
+
+        if (!enrolledAssetId) {
+          setMsg("Missing enrolled selfie. Please submit again.");
+          return;
+        }
+
+        await api.post("/api/face/enroll", { enrolledAssetId });
+        await submitProApplication(pending);
+
+        lsDel(BECOME_PRO_PENDING_KEY);
+        lsDel(BECOME_PRO_ENROLLED_ASSET_KEY);
+
+        if (!alive) return;
+
+        toast.success("Application submitted.", { playSound: true });
+        nav("/apply/thanks");
+        setPipelineStarted(false);
+      } catch (err) {
+        const apiMsg =
+          err?.response?.data?.error ||
+          err?.response?.data?.message ||
+          "Verification failed. Please retry.";
+
+        setMsg(apiMsg);
+        toast.error(apiMsg, { playSound: true });
+
+        // ✅ allow retry if auto-resume fails
+        if (alive) setPipelineStarted(false);
+      } finally {
+        if (alive) setBusy(false);
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [params, nav]);
+
   /* -------- GPS: Use my location -------- */
   async function useMyLocation() {
     try {
@@ -403,45 +606,6 @@ export default function BecomePro() {
       setMsg(err?.message || "Failed to get your location.");
     }
   }
-
-  /* ---------- Face verification storage (AWS liveness) ---------- */
-  function checkVerificationStorage() {
-    try {
-      const metricsRaw = localStorage.getItem("kpocha:livenessMetrics");
-      const videoUrl = localStorage.getItem("kpocha:livenessVideoUrl") || "";
-
-      const hasMetrics = !!metricsRaw;
-      const hasVideo = !!videoUrl;
-
-      if (hasMetrics || hasVideo) {
-        setVerification((v) => ({
-          ...v,
-          livenessMetrics: metricsRaw
-            ? JSON.parse(metricsRaw)
-            : v.livenessMetrics || {},
-          faceVerificationVideoUrl:
-            videoUrl || v.faceVerificationVideoUrl || "",
-        }));
-
-        // one-time consume
-        localStorage.removeItem("kpocha:livenessMetrics");
-        localStorage.removeItem("kpocha:livenessVideoUrl");
-      }
-    } catch {}
-  }
-
-  useEffect(() => {
-    const onFocus = () => checkVerificationStorage();
-    const onVisibility = () => {
-      if (document.visibilityState === "visible") checkVerificationStorage();
-    };
-    window.addEventListener("focus", onFocus);
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => {
-      window.removeEventListener("focus", onFocus);
-      document.removeEventListener("visibilitychange", onVisibility);
-    };
-  }, []);
 
   /* ---------- Services rows helpers ---------- */
   function updateRow(i, patch) {
@@ -561,97 +725,9 @@ export default function BecomePro() {
 
   const canSubmit = missingAll.length === 0;
 
-  /* ---------- Submit ---------- */
   async function submit(e) {
     e.preventDefault();
-    if (!canSubmit) {
-      setMsg(`Please complete: ${missingAll.join(", ")}`);
-      return;
-    }
-
-    setBusy(true);
-    setMsg("");
-    try {
-      const topLat = business.lat || identity.lat || "";
-      const topLon = business.lon || identity.lon || "";
-
-      const normalizedRows = servicesDetailed
-        .map((r) => {
-          const name = (r.name || "").trim();
-          if (!name) return null;
-          const price = parseMoney(r.price);
-          const promoPrice = r.promoPrice ? parseMoney(r.promoPrice) : "";
-          return {
-            id: r.id || "other",
-            name,
-            price: price === "" ? "0" : price,
-            ...(promoPrice !== "" ? { promoPrice } : {}),
-          };
-        })
-        .filter(Boolean);
-
-      const payload = {
-        ...(topLat && topLon ? { lat: topLat, lon: topLon } : {}),
-        identity: {
-          ...identity,
-          photoPreviewUrl: undefined, // UI-only: DO NOT STORE
-          ...(topLat && topLon ? { lat: topLat, lon: topLon } : {}),
-          // 👇 make sure backend can map this to client later
-          email: identity.email || me?.email || "",
-          phone:
-            identity.phone || clientProfile?.phone || me?.identity?.phone || "",
-          state: identity.state,
-          city: identity.lga,
-        },
-        professional: {
-          ...professional,
-          services: Array.from(new Set(normalizedRows.map((r) => r.name))),
-        },
-        business: {
-          ...business,
-          shopPhotoOutsidePreviewUrl: undefined, // UI-only
-          shopPhotoInsidePreviewUrl: undefined, // UI-only
-          ...(topLat && topLon ? { lat: topLat, lon: topLon } : {}),
-        },
-        availability: {
-          ...availability,
-          statesCovered: professional.nationwide
-            ? stateList
-            : availability.statesCovered,
-        },
-        servicesDetailed: normalizedRows,
-        ...(verification?.faceVerificationVideoUrl ||
-        (verification?.livenessMetrics &&
-          Object.keys(verification.livenessMetrics || {}).length > 0)
-          ? { verification }
-          : {}),
-
-        bank: {
-          ...bank,
-          accountNumber: digitsOnly(bank.accountNumber).slice(0, 10),
-        },
-        portfolio,
-        status: "submitted",
-        acceptedTerms: !!agreements.terms,
-        acceptedPrivacy: !!agreements.privacy,
-        agreements: {
-          terms: !!agreements.terms,
-          privacy: !!agreements.privacy,
-        },
-      };
-
-      await submitProApplication(payload);
-      nav("/apply/thanks");
-    } catch (err) {
-      const apiMsg =
-        err?.response?.data?.error ||
-        (err?.response?.status === 409
-          ? "You already have an active or pending application."
-          : "Failed to submit application.");
-      setMsg(apiMsg);
-    } finally {
-      setBusy(false);
-    }
+    await startBecomeProPipeline();
   }
 
   /* ---------- UI ---------- */
@@ -683,11 +759,6 @@ export default function BecomePro() {
           label="Availability"
           active={step === "availability"}
           onClick={() => goStep("availability")}
-        />
-        <StepTab
-          label="Face Verification"
-          active={step === "verification"}
-          onClick={() => goStep("verification")}
         />
 
         <StepTab
@@ -722,6 +793,28 @@ export default function BecomePro() {
           </ul>
         </div>
       )}
+
+      <FaceEnrollModal
+        open={needEnrollSelfie}
+        api={api}
+        busy={busy}
+        selfie={enrollSelfie}
+        onChangeSelfie={({ previewUrl, assetId }) =>
+          setEnrollSelfie((prev) => {
+            try {
+              if (prev.previewUrl?.startsWith("blob:")) {
+                URL.revokeObjectURL(prev.previewUrl);
+              }
+            } catch {}
+            return { assetId: assetId || "", previewUrl: previewUrl || "" };
+          })
+        }
+        onContinue={async () => {
+          setNeedEnrollSelfie(false);
+          await startBecomeProPipeline();
+        }}
+        onCancel={() => setNeedEnrollSelfie(false)}
+      />
 
       <form onSubmit={submit} className="space-y-8">
         {/* SECTION: Identity */}
@@ -1150,34 +1243,6 @@ export default function BecomePro() {
                   }
                   placeholder="e.g. 10,000"
                 />
-              )}
-            </div>
-          </Section>
-        )}
-
-        {/* SECTION: Face Verification (AWS Liveness) */}
-        {step === "verification" && (
-          <Section title="Face Verification (Optional)">
-            <p className="text-xs text-zinc-400 mb-2">
-              This is optional for now. No government ID is required.
-            </p>
-
-            <div className="flex items-center gap-2 flex-wrap">
-              <button
-                type="button"
-                className="px-3 py-2 rounded-lg border border-emerald-500 text-emerald-200 text-sm hover:bg-emerald-500/10"
-                onClick={() => nav("/aws-liveness?back=/become")}
-                title="Start face verification and return to this form"
-              >
-                Start Face verification
-              </button>
-
-              {verification.faceVerificationVideoUrl ? (
-                <span className="text-xs text-emerald-400">Verified ✓</span>
-              ) : (
-                <span className="text-xs text-zinc-500">
-                  Not completed yet.
-                </span>
               )}
             </div>
           </Section>

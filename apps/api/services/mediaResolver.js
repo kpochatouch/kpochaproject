@@ -9,14 +9,20 @@ export function resolveAssetDocToClient(a) {
   if (!a) return null;
 
   const isVideo = a.type === "video";
-  const originalUrl = keyToPublicUrl(a?.original?.key);
+  const isPublic = a.visibility === "public";
 
-  const hlsUrl = isVideo ? keyToPublicUrl(a?.hls?.masterPlaylistKey) : "";
-
-  const thumbnailUrl = keyToPublicUrl(a?.thumbnail?.key || "");
+  // ✅ Never leak CDN URLs for private assets
+  const originalUrl = isPublic ? keyToPublicUrl(a?.original?.key) : "";
+  const hlsUrl = isPublic
+    ? isVideo
+      ? keyToPublicUrl(a?.hls?.masterPlaylistKey)
+      : ""
+    : "";
+  const thumbnailUrl = isPublic ? keyToPublicUrl(a?.thumbnail?.key || "") : "";
 
   return {
     assetId: String(a._id),
+    visibility: a.visibility || "private",
     url: isVideo ? hlsUrl || originalUrl : originalUrl,
     hlsUrl,
     type: isVideo ? "video" : "image",
@@ -88,8 +94,11 @@ export async function expandMediaForClient(mediaArr) {
         // Prefer explicit thumbnail asset if provided
         const thumb = (thumbIdStr && map.get(thumbIdStr)) || null;
 
+        // ✅ Never leak thumbnail via CDN if thumb asset is private
         const thumbnailUrl = thumb
-          ? keyToPublicUrl(thumb?.original?.key || thumb?.thumbnail?.key)
+          ? thumb.visibility === "public"
+            ? keyToPublicUrl(thumb?.original?.key || thumb?.thumbnail?.key)
+            : ""
           : base.thumbnailUrl;
 
         return { ...base, thumbnailUrl };

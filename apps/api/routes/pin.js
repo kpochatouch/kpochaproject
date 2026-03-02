@@ -84,6 +84,22 @@ export default function pinRoutes({ requireAuth, Application }) {
       const newPin = String(req.body?.newPin || "").trim();
 
       if (!uid) return res.status(401).json({ error: "unauthorized" });
+
+      // ✅ FaceGate for PIN changes (same pattern as /pin/me/forgot)
+      let passed = false;
+      await new Promise((resolve) => {
+        requireFaceGate(
+          req,
+          res,
+          () => {
+            passed = true;
+            resolve();
+          },
+          { reason: "pin_reset" },
+        );
+      });
+      if (!passed) return;
+
       if (!isValidPin(newPin))
         return res.status(400).json({ error: "invalid_pin_format" });
       if (hitLimit(uid))

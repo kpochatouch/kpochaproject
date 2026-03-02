@@ -1,7 +1,8 @@
 // apps/api/services/faceGate.js
 import mongoose from "mongoose";
 import fetch from "node-fetch";
-import { expandMediaForClient } from "./mediaResolver.js";
+import MediaAsset from "../models/MediaAsset.js";
+import { getDownloadUrl } from "../r2.js";
 import {
   RekognitionClient,
   GetFaceLivenessSessionResultsCommand,
@@ -40,11 +41,23 @@ async function fetchBytesFromUrl(url) {
   return Buffer.from(ab);
 }
 
-async function resolveAssetToUrl({ assetId, legacyUrl }) {
-  const [resolved] = await expandMediaForClient([
-    { assetId: assetId || null, url: legacyUrl || "", type: "image" },
-  ]);
-  return resolved?.url || legacyUrl || "";
+async function resolveAssetToSignedUrl(assetId) {
+  const a = await MediaAsset.findById(assetId)
+    .select("_id ownerUid visibility type status original")
+    .lean()
+    .catch(() => null);
+
+  if (!a) return "";
+  if (a.type !== "image") return "";
+  if (a.status !== "ready") return "";
+
+  const key = a?.original?.key || "";
+  if (!key) return "";
+
+  // ✅ Always safe for private: signed URL
+  // (also works fine for public)
+  const url = await getDownloadUrl(key, { expiresIn: 300 });
+  return url || "";
 }
 
 /**
@@ -52,12 +65,7 @@ async function resolveAssetToUrl({ assetId, legacyUrl }) {
  * - Liveness ReferenceImage (from GetFaceLivenessSessionResults)
  * - Enrolled image from profile.face.enrolledAssetId (asset pipeline)
  */
-async function runCompare({
-  uid,
-  sessionId,
-  enrolledAssetId,
-  enrolledLegacyUrl,
-}) {
+async function runCompare({ sessionId, enrolledAssetId }) {
   const livenessOut = await rek.send(
     new GetFaceLivenessSessionResultsCommand({ SessionId: sessionId }),
   );
@@ -80,10 +88,7 @@ async function runCompare({
     : Buffer.from(refBytesRaw);
 
   // Enrolled image bytes (your stored profile image)
-  const enrolledUrl = await resolveAssetToUrl({
-    assetId: enrolledAssetId,
-    legacyUrl: enrolledLegacyUrl,
-  });
+  const enrolledUrl = await resolveAssetToSignedUrl(enrolledAssetId);
   if (!enrolledUrl) return { ok: false, code: "missing_enrolled_image_url" };
 
   const enrolledBytes = await fetchBytesFromUrl(enrolledUrl);
@@ -114,6 +119,14 @@ async function runCompare({
   };
 }
 
+// ADD this export near the runCompare definition
+export async function runFaceCompareForEnrollment({
+  sessionId,
+  enrolledAssetId,
+}) {
+  return runCompare({ sessionId, enrolledAssetId });
+}
+
 /**
  * Central FaceGate:
  * - If lastVerifiedAt is fresh => allow.
@@ -142,17 +155,12 @@ export async function requireFaceGate(req, res, next, opts = {}) {
     }
 
     // 2) Need enrolled image
-    const enrolledAssetId =
-      face.enrolledAssetId ||
-      p?.photoAssetId ||
-      p?.identity?.photoAssetId ||
-      null;
-    const enrolledLegacyUrl = p?.photoUrl || p?.identity?.photoUrl || "";
+    const enrolledAssetId = face.enrolledAssetId || null;
 
-    if (!enrolledAssetId && !enrolledLegacyUrl) {
+    if (!enrolledAssetId) {
       return res.status(403).json({
         error: "face_enroll_required",
-        message: "Enroll a clear selfie photo before using this feature.",
+        message: "Enroll your payout selfie before using this feature.",
       });
     }
 
@@ -170,10 +178,8 @@ export async function requireFaceGate(req, res, next, opts = {}) {
 
     // 4) Compare
     const out = await runCompare({
-      uid,
       sessionId,
       enrolledAssetId,
-      enrolledLegacyUrl,
     });
 
     // 5) Persist audit

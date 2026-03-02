@@ -505,9 +505,9 @@ export default function Compose() {
           api,
           file: mediaFile,
           type: mediaType,
+          visibility: "public", // ✅ post media is public
         });
         mediaAssetId = main.assetId;
-
         // optional thumbnail upload (image asset)
         if (mediaType === "video" && videoThumbUrl) {
           try {
@@ -519,6 +519,7 @@ export default function Compose() {
               api,
               file: thumbFile,
               type: "image",
+              visibility: "public", // ✅ thumbnail is public with post
             });
             thumbAssetId = t.assetId;
           } catch {}

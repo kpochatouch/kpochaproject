@@ -82,7 +82,11 @@ export default function Profile() {
 
   // unified avatar
   const avatarUrl =
-    clientProfile?.photoUrl || me?.photoUrl || me?.identity?.photoUrl || "";
+    clientProfile?.photoUrlResolved ||
+    clientProfile?.photoUrl || // legacy fallback (old accounts only)
+    me?.photoUrl ||
+    me?.identity?.photoUrl ||
+    "";
 
   // unified phone (private to owner)
   const phone =
@@ -115,8 +119,8 @@ export default function Profile() {
   const idVerifiedLabel = !clientProfile
     ? "—"
     : hasKyc
-      ? "Verified"
-      : "Not verified";
+    ? "Verified"
+    : "Not verified";
 
   const isPro = !!(me?.isPro || me?.pro);
 

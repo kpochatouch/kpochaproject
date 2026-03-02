@@ -5,6 +5,15 @@ const MediaAssetSchema = new mongoose.Schema(
   {
     ownerUid: { type: String, required: true, index: true },
     postId: { type: mongoose.Schema.Types.ObjectId, ref: "Post", index: true },
+    // ✅ Facebook-style safety: explicitly mark asset visibility
+    // - public: can be delivered via CDN URL (keyToPublicUrl)
+    // - private: must NEVER be delivered via CDN URL (signed/API only)
+    visibility: {
+      type: String,
+      enum: ["public", "private"],
+      default: "private",
+      index: true,
+    },
 
     type: {
       type: String,

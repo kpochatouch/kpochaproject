@@ -19,6 +19,7 @@ export default function MediaUploader({
   valueUrl = "",
   valueAssetId = "",
   type = "image",
+  visibility = "private", // ✅ default safe
   onChange,
   label = "Upload",
 }) {
@@ -45,6 +46,7 @@ export default function MediaUploader({
         api,
         file,
         type,
+        visibility,
       });
 
       onChange?.({
