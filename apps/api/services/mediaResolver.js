@@ -9,7 +9,9 @@ export function resolveAssetDocToClient(a) {
   if (!a) return null;
 
   const isVideo = a.type === "video";
-  const isPublic = a.visibility === "public";
+  // If visibility is missing (older docs), treat it as public so URLs resolve.
+  const vis = a.visibility || "public";
+  const isPublic = vis === "public";
 
   // ✅ Never leak CDN URLs for private assets
   const originalUrl = isPublic ? keyToPublicUrl(a?.original?.key) : "";
@@ -22,7 +24,7 @@ export function resolveAssetDocToClient(a) {
 
   return {
     assetId: String(a._id),
-    visibility: a.visibility || "private",
+    visibility: vis,
     url: isVideo ? hlsUrl || originalUrl : originalUrl,
     hlsUrl,
     type: isVideo ? "video" : "image",
@@ -57,25 +59,6 @@ export async function expandMediaForClient(mediaArr) {
     .flatMap((m) => [toIdString(m?.assetId), toIdString(m?.thumbnailAssetId)])
     .filter((x) => typeof x === "string" && /^[0-9a-fA-F]{24}$/.test(x));
 
-  if (!ids.length) {
-    // legacy passthrough
-    return media
-      .map((m) => {
-        const url = String(m?.url || "").trim();
-        if (!url) return null;
-        return {
-          url,
-          type: m?.type === "video" ? "video" : "image",
-          thumbnailUrl: String(m?.thumbnailUrl || "").trim(),
-          width: Number(m?.width || 0),
-          height: Number(m?.height || 0),
-          durationSec: Number(m?.durationSec || 0),
-          status: "ready",
-        };
-      })
-      .filter(Boolean);
-  }
-
   const assets = await MediaAsset.find({ _id: { $in: ids } }).lean();
   const map = new Map(assets.map((a) => [String(a._id), a]));
 
@@ -103,20 +86,7 @@ export async function expandMediaForClient(mediaArr) {
 
         return { ...base, thumbnailUrl };
       }
-
-      // Legacy fallback (url)
-      const url = String(m?.url || "").trim();
-      if (!url) return null;
-
-      return {
-        url,
-        type: m?.type === "video" ? "video" : "image",
-        thumbnailUrl: String(m?.thumbnailUrl || "").trim(),
-        width: Number(m?.width || 0),
-        height: Number(m?.height || 0),
-        durationSec: Number(m?.durationSec || 0),
-        status: "ready",
-      };
+      return null;
     })
     .filter(Boolean);
 }

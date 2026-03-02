@@ -1,13 +1,17 @@
-//apps/api/models/MediaAsset.js
+// apps/api/models/MediaAsset.js
 import mongoose from "mongoose";
 
 const MediaAssetSchema = new mongoose.Schema(
   {
     ownerUid: { type: String, required: true, index: true },
     postId: { type: mongoose.Schema.Types.ObjectId, ref: "Post", index: true },
-    // ✅ Facebook-style safety: explicitly mark asset visibility
-    // - public: can be delivered via CDN URL (keyToPublicUrl)
-    // - private: must NEVER be delivered via CDN URL (signed/API only)
+
+    // ✅ Dedupe anchor for migrations/backfills:
+    // Store the original Cloudinary secure_url (or any legacy url) used to create this asset.
+    // This lets reruns re-use the same MediaAsset instead of creating duplicates.
+    sourceUrl: { type: String, default: "", index: true },
+
+    // ✅ Safety: explicit visibility
     visibility: {
       type: String,
       enum: ["public", "private"],
@@ -47,7 +51,7 @@ const MediaAssetSchema = new mongoose.Schema(
 
     renditions: [
       {
-        name: String, // 1080p / 720p / 480p
+        name: String,
         playlistKey: String,
         bandwidth: Number,
         width: Number,
@@ -75,6 +79,11 @@ const MediaAssetSchema = new mongoose.Schema(
   },
   { timestamps: true },
 );
+
+// ✅ Helpful indexes (non-unique = safe even if duplicates already exist)
+MediaAssetSchema.index({ ownerUid: 1, createdAt: -1 });
+MediaAssetSchema.index({ ownerUid: 1, sourceUrl: 1, createdAt: -1 });
+MediaAssetSchema.index({ ownerUid: 1, "original.key": 1, createdAt: -1 });
 
 export default mongoose.models.MediaAsset ||
   mongoose.model("MediaAsset", MediaAssetSchema);

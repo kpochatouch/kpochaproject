@@ -40,9 +40,24 @@ const worker = new Worker(
       await asset.save();
       console.log("[worker] ✅ job done", assetId);
     } catch (e) {
-      console.error("[worker] ❌ job failed", assetId, e?.message || e);
+      const msg = String(e?.message || e || "unknown_error");
+      const stderr =
+        typeof e?.stderr === "string" ? e.stderr.slice(0, 4000) : "";
+      const stdout =
+        typeof e?.stdout === "string" ? e.stdout.slice(0, 2000) : "";
+
+      console.error("[worker] ❌ job failed", assetId);
+      console.error("[worker] message:", msg);
+      if (stderr) console.error("[worker] stderr:", stderr);
+      if (stdout) console.error("[worker] stdout:", stdout);
+
       asset.status = "failed";
-      asset.error = { message: e.message, step: "processing" };
+      asset.error = {
+        message: msg,
+        step: "processing",
+        ...(stderr ? { stderr } : {}),
+        ...(stdout ? { stdout } : {}),
+      };
       await asset.save();
       throw e;
     }

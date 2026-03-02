@@ -48,23 +48,8 @@ const todayStr = () => new Date().toISOString().slice(0, 10); // YYYY-MM-DD
 function videoElemMatch() {
   return {
     $elemMatch: {
-      $or: [
-        // ✅ new asset-based
-        { assetId: { $exists: true, $ne: "" } },
-
-        // ✅ explicit typing (works for both legacy + new)
-        { type: "video" },
-
-        // legacy url heuristics
-        {
-          url: {
-            $regex: "(\\.mp4|\\.mov|\\.webm|\\.mkv|\\.m3u8)(\\?|$)",
-            $options: "i",
-          },
-        },
-        { url: { $regex: "/video/", $options: "i" } },
-        { url: { $regex: "/video/upload/", $options: "i" } },
-      ],
+      assetId: { $exists: true, $ne: "" },
+      type: "video",
     },
   };
 }
@@ -158,6 +143,18 @@ router.post("/posts", requireAuth, async (req, res) => {
     text = trim(text || "");
     if (!Array.isArray(media)) media = [];
 
+    // 🚫 NO LEGACY URL MEDIA ALLOWED
+    if (
+      Array.isArray(media) &&
+      media.some((m) => m && typeof m.url === "string" && m.url.trim())
+    ) {
+      return res.status(400).json({
+        error: "legacy_urls_not_allowed",
+        message:
+          "Use assetId/thumbnailAssetId only. Raw media URLs are no longer supported.",
+      });
+    }
+
     media = media
       .map((m) => {
         // NEW: asset-based
@@ -168,18 +165,6 @@ router.post("/posts", requireAuth, async (req, res) => {
               ? { thumbnailAssetId: String(m.thumbnailAssetId) }
               : {}),
             type: m.type === "video" ? "video" : "image",
-          };
-        }
-
-        // LEGACY: url-based
-        if (m && typeof m.url === "string" && m.url.trim()) {
-          return {
-            url: trim(m.url),
-            type: m.type === "video" ? "video" : "image",
-            thumbnailUrl: trim(m.thumbnailUrl || ""),
-            width: Number(m.width || 0),
-            height: Number(m.height || 0),
-            durationSec: Number(m.durationSec || 0),
           };
         }
         return null;
@@ -552,6 +537,18 @@ router.post("/stories", requireAuth, async (req, res) => {
 
     text = trim(text || "");
 
+    // 🚫 NO LEGACY URL MEDIA ALLOWED
+    if (
+      Array.isArray(media) &&
+      media.some((m) => m && typeof m.url === "string" && m.url.trim())
+    ) {
+      return res.status(400).json({
+        error: "legacy_urls_not_allowed",
+        message:
+          "Use assetId/thumbnailAssetId only. Raw media URLs are no longer supported.",
+      });
+    }
+
     media = Array.isArray(media) ? media : [];
     media = media
       .map((m) => {
@@ -563,18 +560,6 @@ router.post("/stories", requireAuth, async (req, res) => {
               ? { thumbnailAssetId: String(m.thumbnailAssetId) }
               : {}),
             type: m.type === "video" ? "video" : "image",
-          };
-        }
-
-        // LEGACY: url-based
-        if (m && typeof m.url === "string" && m.url.trim()) {
-          return {
-            url: trim(m.url),
-            type: m.type === "video" ? "video" : "image",
-            thumbnailUrl: trim(m.thumbnailUrl || ""),
-            width: Number(m.width || 0),
-            height: Number(m.height || 0),
-            durationSec: Number(m.durationSec || 0),
           };
         }
 

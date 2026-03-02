@@ -165,5 +165,36 @@ export default function mediaRoutes({ requireAuth }) {
     return res.json({ ok: true, id: asset._id, variant, key, url });
   });
 
+  // RETRY processing (video only)
+  r.post("/media/:id/retry", requireAuth, async (req, res) => {
+    const asset = await MediaAsset.findById(req.params.id);
+    if (!asset) return res.status(404).json({ error: "not_found" });
+
+    if (String(asset.ownerUid) !== String(req.user.uid)) {
+      return res.status(403).json({ error: "forbidden" });
+    }
+
+    if (asset.type !== "video") {
+      return res.status(400).json({ error: "not_video" });
+    }
+
+    asset.status = "uploaded";
+    asset.error = null;
+    await asset.save();
+
+    await mediaQueue.add(
+      "process",
+      { assetId: asset._id.toString() },
+      {
+        attempts: 5,
+        backoff: { type: "exponential", delay: 5000 },
+        removeOnComplete: 100,
+        removeOnFail: 100,
+      },
+    );
+
+    return res.json({ ok: true, assetId: asset._id, status: asset.status });
+  });
+
   return r;
 }

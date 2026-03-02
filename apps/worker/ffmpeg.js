@@ -52,24 +52,35 @@ export async function processVideo(asset) {
     ].join(" "),
   );
 
-  // 4) HLS transcode (audio-safe)
-  // Note: keep it Windows-safe by quoting only file paths.
-  const common = [
-    `ffmpeg -y`,
-    `-i "${input}"`,
-    `-filter_complex "[0:v]split=3[v1][v2][v3]"`,
-    `-map "[v1]" -s 1920x1080 -c:v:0 libx264 -b:v:0 5000k`,
-    `-map "[v2]" -s 1280x720  -c:v:1 libx264 -b:v:1 2800k`,
-    `-map "[v3]" -s 854x480   -c:v:2 libx264 -b:v:2 1400k`,
+  // 4) HLS transcode (audio-safe) — FIXED
+  // Root cause (confirmed from your DB error): your previous command produced duplicate/identical variants,
+  // so the HLS muxer rejected it ("Same elementary stream found more than once").
+  // Fix: create distinct scaled video streams via filter_complex and map them explicitly.
+
+  const filter = [
+    `[0:v]scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2[v1080]`,
+    `[0:v]scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2[v720]`,
+    `[0:v]scale=854:480:force_original_aspect_ratio=decrease,pad=854:480:(ow-iw)/2:(oh-ih)/2[v480]`,
+  ].join(";");
+
+  const maps = [
+    `-map "[v1080]" -c:v:0 libx264 -b:v:0 5000k -maxrate:v:0 5350k -bufsize:v:0 7500k`,
+    `-map "[v720]"  -c:v:1 libx264 -b:v:1 2800k -maxrate:v:1 2996k -bufsize:v:1 4200k`,
+    `-map "[v480]"  -c:v:2 libx264 -b:v:2 1400k -maxrate:v:2 1498k -bufsize:v:2 2100k`,
   ];
 
-  const audioPart = hasAudio ? [`-map 0:a:0 -c:a aac -b:a 128k`] : []; // no audio mapping at all
+  const audioPart = hasAudio ? [`-map 0:a:0 -c:a aac -b:a 128k -ac 2`] : [];
 
   const varMap = hasAudio
     ? `-var_stream_map "v:0,a:0 v:1,a:0 v:2,a:0"`
     : `-var_stream_map "v:0 v:1 v:2"`;
 
-  const hlsPart = [
+  const cmd = [
+    `ffmpeg -y`,
+    `-i "${input}"`,
+    `-filter_complex "${filter}"`,
+    ...maps,
+    ...audioPart,
     `-f hls`,
     `-hls_time 4`,
     `-hls_playlist_type vod`,
@@ -77,9 +88,8 @@ export async function processVideo(asset) {
     `-master_pl_name master.m3u8`,
     varMap,
     `"${outputDir}/v%v/index.m3u8"`,
-  ];
+  ].join(" ");
 
-  const cmd = [...common, ...audioPart, ...hlsPart].join(" ");
   await run(cmd);
 
   // 5) Upload thumbnail
