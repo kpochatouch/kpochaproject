@@ -142,7 +142,9 @@ export default function BecomePro() {
         },
         servicesDetailed: normalizedRows,
         bank: {
-          ...bank,
+          bankName: bank.bankName || "",
+          code: bank.code || bank.bankCode || "",
+          bankCode: bank.bankCode || bank.code || "",
           accountNumber: digitsOnly(bank.accountNumber).slice(0, 10),
         },
         portfolio,
@@ -304,8 +306,8 @@ export default function BecomePro() {
   // ===== Bank
   const [bank, setBank] = useState({
     bankCode: "",
+    code: "",
     bankName: "",
-    accountName: "",
     accountNumber: "",
   });
 
@@ -424,12 +426,6 @@ export default function BecomePro() {
           proData?.identity?.city ||
           meData?.identity?.city ||
           "";
-        const basePhoto =
-          clientData?.photoUrl ||
-          clientData?.identity?.photoUrl ||
-          proData?.identity?.photoUrl ||
-          meData?.identity?.photoUrl ||
-          "";
 
         const basePhotoAssetId =
           clientData?.photoAssetId ||
@@ -471,7 +467,7 @@ export default function BecomePro() {
           state: prev.state || baseState,
           lga: prev.lga || baseLga,
           photoAssetId: prev.photoAssetId || basePhotoAssetId,
-          photoPreviewUrl: prev.photoPreviewUrl || basePhoto,
+          photoPreviewUrl: prev.photoPreviewUrl || "",
         }));
 
         // If user is already pro and has availability states, keep it
@@ -690,8 +686,7 @@ export default function BecomePro() {
     // optional (AWS liveness) → leave empty
 
     // ---------- payout ----------
-    if (!bank.bankCode) out.payout.push("Bank (select)");
-    if (!bank.accountName) out.payout.push("Account name");
+    if (!bank.bankCode && !bank.code) out.payout.push("Bank (select)");
     if (!bank.accountNumber) out.payout.push("Account number");
 
     // ---------- agreements ----------
@@ -709,7 +704,7 @@ export default function BecomePro() {
     professional.nationwide,
     servicesDetailed,
     bank.bankCode,
-    bank.accountName,
+    bank.code,
     bank.accountNumber,
     agreements.terms,
     agreements.privacy,
@@ -1264,6 +1259,7 @@ export default function BecomePro() {
                     setBank((prev) => ({
                       ...prev,
                       bankCode: code,
+                      code,
                       bankName: bn,
                     }));
                   }}
@@ -1280,14 +1276,6 @@ export default function BecomePro() {
                   ))}
                 </select>
               </label>
-
-              <Input
-                label="Account Name *"
-                value={bank.accountName}
-                onChange={(e) =>
-                  setBank((p) => ({ ...p, accountName: e.target.value }))
-                }
-              />
 
               <Input
                 label="Account Number *"
