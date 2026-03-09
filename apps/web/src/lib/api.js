@@ -1176,6 +1176,13 @@ export async function listBanksNG() {
   return data?.items || [];
 }
 
+export async function resolveBankAccount(accountNumber, bankCode) {
+  const { data } = await api.get("/api/payout/resolve", {
+    params: { accountNumber, bankCode },
+  });
+  return data;
+}
+
 /* Payout bank (canonical: Application.payoutBank) */
 export async function getPayoutBankMe() {
   const { data } = await api.get("/api/payout/me");

@@ -47,6 +47,60 @@ export default function payoutRoutes({ requireAuth, Application }) {
   });
 
   // ----------------------------
+  // Resolve account name only (for live UI preview)
+  // ----------------------------
+  router.get("/payout/resolve", requireAuth, async (req, res) => {
+    try {
+      const accountNumber = t(req.query?.accountNumber);
+      const bankCode = t(req.query?.bankCode);
+
+      if (!/^\d{10}$/.test(accountNumber)) {
+        return res.status(400).json({ error: "invalid_account_number" });
+      }
+
+      if (!bankCode) {
+        return res.status(400).json({ error: "bankCode_required" });
+      }
+
+      const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY || "";
+      if (!PAYSTACK_SECRET_KEY) {
+        return res.status(500).json({ error: "paystack_not_configured" });
+      }
+
+      const vr = await fetch(
+        `https://api.paystack.co/bank/resolve?account_number=${encodeURIComponent(
+          accountNumber,
+        )}&bank_code=${encodeURIComponent(bankCode)}`,
+        { headers: { Authorization: `Bearer ${PAYSTACK_SECRET_KEY}` } },
+      );
+
+      const vj = await vr.json();
+
+      if (!vr.ok || !vj?.status) {
+        return res.status(400).json({
+          error: "account_resolve_failed",
+          details: vj?.message || "resolve_failed",
+        });
+      }
+
+      const accountName = t(vj?.data?.account_name);
+      if (!accountName) {
+        return res.status(400).json({ error: "account_name_missing" });
+      }
+
+      return res.json({
+        ok: true,
+        accountName,
+        accountNumber,
+        bankCode,
+      });
+    } catch (err) {
+      console.error("[payout/resolve] error:", err);
+      return res.status(500).json({ error: "server_error" });
+    }
+  });
+
+  // ----------------------------
   // 1) Save/update payout bank details (CANONICAL: Application.payoutBank)
   // - client sends: accountNumber + bankCode
   // - server verifies: resolves accountName

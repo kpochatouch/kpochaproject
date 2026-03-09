@@ -5,6 +5,7 @@ import {
   api,
   ensureClientProfile,
   listBanksNG,
+  resolveBankAccount,
   submitProApplication,
 } from "../lib/api";
 import NgGeoPicker from "../components/NgGeoPicker.jsx";
@@ -143,6 +144,7 @@ export default function BecomePro() {
         servicesDetailed: normalizedRows,
         bank: {
           bankName: bank.bankName || "",
+          accountName: bank.accountName || "",
           code: bank.code || bank.bankCode || "",
           bankCode: bank.bankCode || bank.code || "",
           accountNumber: digitsOnly(bank.accountNumber).slice(0, 10),
@@ -308,7 +310,10 @@ export default function BecomePro() {
     bankCode: "",
     code: "",
     bankName: "",
+    accountName: "",
     accountNumber: "",
+    resolving: false,
+    resolveError: "",
   });
 
   // ===== Portfolio
@@ -491,6 +496,65 @@ export default function BecomePro() {
     () => (allStates || []).slice().sort(),
     [allStates],
   );
+
+  useEffect(() => {
+    const accountNumber = digitsOnly(bank.accountNumber).slice(0, 10);
+    const bankCode = bank.bankCode || bank.code || "";
+
+    if (!bankCode || accountNumber.length !== 10) {
+      setBank((prev) => ({
+        ...prev,
+        accountName: "",
+        resolving: false,
+        resolveError: "",
+      }));
+      return;
+    }
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        setBank((prev) => ({
+          ...prev,
+          resolving: true,
+          accountName: "",
+          resolveError: "",
+        }));
+
+        const res = await resolveBankAccount(accountNumber, bankCode);
+
+        if (cancelled) return;
+
+        setBank((prev) => ({
+          ...prev,
+          accountName: res?.accountName || "",
+          resolving: false,
+          resolveError: res?.accountName
+            ? ""
+            : "Could not resolve account name.",
+        }));
+      } catch (err) {
+        if (cancelled) return;
+
+        const msg =
+          err?.response?.data?.details ||
+          err?.response?.data?.error ||
+          "Could not resolve account name.";
+
+        setBank((prev) => ({
+          ...prev,
+          accountName: "",
+          resolving: false,
+          resolveError: msg,
+        }));
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [bank.bankCode, bank.code, bank.accountNumber]);
 
   useEffect(() => {
     const auto = params.get("auto");
@@ -688,7 +752,7 @@ export default function BecomePro() {
     // ---------- payout ----------
     if (!bank.bankCode && !bank.code) out.payout.push("Bank (select)");
     if (!bank.accountNumber) out.payout.push("Account number");
-
+    if (!bank.accountName) out.payout.push("Resolved account name");
     // ---------- agreements ----------
     if (!agreements.terms) out.agreements.push("Accept Terms");
     if (!agreements.privacy) out.agreements.push("Accept Privacy Policy");
@@ -706,6 +770,7 @@ export default function BecomePro() {
     bank.bankCode,
     bank.code,
     bank.accountNumber,
+    bank.accountName,
     agreements.terms,
     agreements.privacy,
   ]);
@@ -1261,6 +1326,8 @@ export default function BecomePro() {
                       bankCode: code,
                       code,
                       bankName: bn,
+                      accountName: "",
+                      resolveError: "",
                     }));
                   }}
                   disabled={loadingBanks}
@@ -1284,11 +1351,30 @@ export default function BecomePro() {
                   setBank((p) => ({
                     ...p,
                     accountNumber: digitsOnly(e.target.value).slice(0, 10),
+                    accountName: "",
+                    resolveError: "",
                   }))
                 }
                 placeholder="10 digits"
               />
             </div>
+
+            <Input
+              label="Account Name *"
+              value={
+                bank.resolving
+                  ? "Resolving account name..."
+                  : bank.accountName || ""
+              }
+              readOnly
+              placeholder="Acount name, Read Only"
+            />
+
+            {bank.resolveError ? (
+              <p className="text-[11px] text-red-400 mt-2">
+                {bank.resolveError}
+              </p>
+            ) : null}
 
             <p className="text-[11px] text-zinc-500 mt-2">
               Account number must be 10 digits.
