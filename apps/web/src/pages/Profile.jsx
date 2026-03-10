@@ -173,7 +173,7 @@ export default function Profile() {
       {!loading && me && (
         <div className="space-y-6">
           {/* Account details (always) */}
-          <Section title="Account Details">
+          <Section title="Your Pro Profile">
             <div className="grid sm:grid-cols-2 gap-4">
               <ReadOnly label="Email" value={me.email || "—"} />
               <ReadOnly label="Phone" value={phone || "—"} />

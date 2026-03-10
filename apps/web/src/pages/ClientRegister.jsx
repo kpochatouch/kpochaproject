@@ -1,6 +1,6 @@
 // apps/web/src/pages/ClientRegister.jsx
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   api,
   getClientProfile,
@@ -8,7 +8,8 @@ import {
   ensureClientProfile,
 } from "../lib/api";
 import NgGeoPicker from "../components/NgGeoPicker.jsx";
-import { uploadMediaAsset } from "../lib/r2Upload";
+import MediaUploader from "../components/MediaUploader.jsx";
+import { getSignedMediaUrl } from "../lib/r2Upload";
 
 /* ======================= Client Register Page ======================= */
 export default function ClientRegister() {
@@ -26,8 +27,8 @@ export default function ClientRegister() {
   const [stateVal, setStateVal] = useState("");
   const [lga, setLga] = useState("");
   const [address, setAddress] = useState("");
-  const [photoUrl, setPhotoUrl] = useState("");
   const [photoAssetId, setPhotoAssetId] = useState("");
+  const [photoPreviewUrl, setPhotoPreviewUrl] = useState("");
 
   // face verification (AWS liveness)
   const [verification, setVerification] = useState({
@@ -101,7 +102,6 @@ export default function ClientRegister() {
           setStateVal(data.state || "");
           setLga((data.lga || "").toString().toUpperCase());
           setAddress(data.address || "");
-          setPhotoUrl(data.photoUrl || "");
           setPhotoAssetId(
             data.photoAssetId || data?.identity?.photoAssetId || "",
           );
@@ -133,6 +133,19 @@ export default function ClientRegister() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      const url = await resolvePreviewUrl(photoAssetId);
+      if (!cancelled) setPhotoPreviewUrl(url || "");
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [photoAssetId]);
+
+  useEffect(() => {
     const onFocus = () => checkVerificationStorage();
     const onVisibility = () => {
       if (document.visibilityState === "visible") checkVerificationStorage();
@@ -148,6 +161,16 @@ export default function ClientRegister() {
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, []);
+
+  async function resolvePreviewUrl(assetId, variant = "original") {
+    const id = String(assetId || "").trim();
+    if (!id) return "";
+    try {
+      return await getSignedMediaUrl({ api, assetId: id, variant });
+    } catch {
+      return "";
+    }
+  }
 
   // ===== Can save? =====
   const canSave = useMemo(() => {
@@ -175,7 +198,6 @@ export default function ClientRegister() {
         state: stateUP,
         lga: lgaUP,
         address: address?.trim(),
-        photoUrl: photoUrl?.trim(),
         photoAssetId,
         acceptedTerms: !!agreements.terms,
         acceptedPrivacy: !!agreements.privacy,
@@ -189,12 +211,10 @@ export default function ClientRegister() {
           ? { verification }
           : {}),
 
-        // keep identity in sync like other settings pages
         identity: {
           phone: phone?.trim(),
           state: stateUP,
           city: lgaUP,
-          photoUrl: photoUrl?.trim(),
           photoAssetId,
         },
       };
@@ -214,34 +234,6 @@ export default function ClientRegister() {
       nav("/browse", { replace: true });
     } catch (e) {
       setErr(e?.response?.data?.error || "Failed to save profile.");
-    }
-  }
-
-  async function uploadImageToR2(file) {
-    if (!file) return { previewUrl: "", assetId: "" };
-
-    setError("");
-    setOk("Uploading image...");
-
-    try {
-      const res = await uploadMediaAsset({ api, file, type: "image" });
-      const previewUrl = res?.publicUrl || "";
-      const assetId = res?.assetId || "";
-
-      if (!assetId) {
-        setOk("");
-        setError("Upload succeeded but assetId is missing.");
-        return { previewUrl, assetId: "" };
-      }
-
-      setOk("Uploaded ✓ (click Save changes)");
-      setTimeout(() => setOk(""), 1500);
-
-      return { previewUrl, assetId };
-    } catch (e) {
-      setOk("");
-      setError(e?.message || "Upload failed.");
-      return { previewUrl: "", assetId: "" };
     }
   }
 
@@ -317,7 +309,7 @@ export default function ClientRegister() {
   return (
     <div className="max-w-3xl mx-auto px-4 py-8">
       <h1 className="text-2xl font-semibold mb-6 text-yellow-400">
-        Client Profile
+        Client Register
       </h1>
 
       {err && (
@@ -338,56 +330,19 @@ export default function ClientRegister() {
           {/* Photo */}
           <Section title="Photo">
             <div className="flex flex-wrap items-center gap-4">
-              <div className="relative w-16 h-16 rounded-full border border-yellow-500/60 overflow-hidden bg-zinc-900">
-                {photoUrl ? (
-                  <img
-                    src={photoUrl}
-                    alt="Avatar"
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center text-[10px] text-zinc-500">
-                    No Photo
-                  </div>
-                )}
-              </div>
-              <div className="flex gap-2 flex-wrap">
-                <input
-                  className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm text-zinc-200"
-                  placeholder="Photo URL"
-                  value={photoUrl}
-                  onChange={(e) => setPhotoUrl(e.target.value)}
-                />
-                <label className="px-3 py-1.5 rounded-lg border border-yellow-500 text-yellow-300 text-sm hover:bg-yellow-500/10 cursor-pointer">
-                  Upload
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={async (e) => {
-                      const file = e.target.files?.[0];
-                      e.target.value = "";
-                      const out = await uploadImageToR2(file);
-                      if (out.assetId) {
-                        onChangeField("photoAssetId", out.assetId);
-                        // optimistic preview: keep showing the current preview until save reloads resolved URL
-                        setOk("Uploaded ✓ (click Save changes)");
-                        setTimeout(() => setOk(""), 1500);
-                      }
-                    }}
-                  />
-                </label>
-
-                {photoUrl && (
-                  <button
-                    type="button"
-                    onClick={() => setPhotoUrl("")}
-                    className="px-3 py-1.5 rounded-lg border border-red-500/60 text-red-200 text-sm hover:bg-red-500/10"
-                  >
-                    Remove
-                  </button>
-                )}
-              </div>
+              <MediaUploader
+                api={api}
+                type="image"
+                visibility="public"
+                valueUrl={photoPreviewUrl}
+                valueAssetId={photoAssetId}
+                onChange={({ previewUrl, assetId }) => {
+                  setPhotoPreviewUrl(previewUrl || "");
+                  setPhotoAssetId(assetId || "");
+                  flashOK("Uploaded ✓ (click Save changes)");
+                }}
+                label="Upload Photo"
+              />
 
               <div className="flex items-center gap-2">
                 <button
