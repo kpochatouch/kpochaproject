@@ -8,10 +8,12 @@ import {
   getPayoutBankMe,
   savePayoutBank,
 } from "../lib/api";
+import { getSignedMediaUrl } from "../lib/r2Upload";
 import { useToast } from "../components/Toast.jsx";
 import NgGeoPicker from "../components/NgGeoPicker.jsx";
 import ServicePicker from "../components/ServicePicker.jsx";
-import { uploadMediaAsset } from "../lib/r2Upload";
+import MediaUploader from "../components/MediaUploader.jsx";
+import FaceEnrollModal from "../components/FaceEnrollModal.jsx";
 
 /* ---------- username cooldown (3 months) ---------- */
 // Change USERNAME_COOLDOWN_DAYS to 180 if you want 6 months instead
@@ -72,6 +74,25 @@ function isFreshDraft(d, maxAgeMs = 5 * 60 * 1000) {
   return Number.isFinite(ts) && Date.now() - ts <= maxAgeMs;
 }
 
+function markFaceEnrollAfterLiveness() {
+  try {
+    localStorage.setItem("kpocha:openFaceEnrollAfterLiveness", "1");
+  } catch {
+    /* ignore */
+  }
+}
+
+function takeFaceEnrollAfterLiveness() {
+  try {
+    const yes =
+      localStorage.getItem("kpocha:openFaceEnrollAfterLiveness") === "1";
+    localStorage.removeItem("kpocha:openFaceEnrollAfterLiveness");
+    return yes;
+  } catch {
+    return false;
+  }
+}
+
 export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const { success, error, info } = useToast();
@@ -92,7 +113,7 @@ export default function SettingsPage() {
   // general/user
   const [displayName, setDisplayName] = useState("");
   const [phone, setPhone] = useState("");
-  const [avatarUrl, setAvatarUrl] = useState("");
+  const [avatarPreviewUrl, setAvatarPreviewUrl] = useState("");
   const [avatarAssetId, setAvatarAssetId] = useState("");
   const [clientBio, setClientBio] = useState("");
   const [username, setUsername] = useState("");
@@ -107,20 +128,20 @@ export default function SettingsPage() {
   const [nationwide, setNationwide] = useState(false);
   const [statesCovered, setStatesCovered] = useState([]);
 
-  // legacy pro fields
+  // professional fields
   const [services, setServices] = useState([]);
   const [years, setYears] = useState("");
   const [hasCert, setHasCert] = useState("no");
-  const [certUrl, setCertUrl] = useState("");
+  const [certPreviewUrl, setCertPreviewUrl] = useState("");
   const [certAssetId, setCertAssetId] = useState("");
 
   // pro public
   const [proBio, setProBio] = useState("");
-  const [proPhotoUrl, setProPhotoUrl] = useState("");
+  const [proPhotoPreviewUrl, setProPhotoPreviewUrl] = useState("");
   const [proPhotoAssetId, setProPhotoAssetId] = useState("");
 
   // gallery
-  const [workPhotos, setWorkPhotos] = useState([""]);
+  const [workPhotoPreviewUrls, setWorkPhotoPreviewUrls] = useState([""]);
   const [workPhotoAssetIds, setWorkPhotoAssetIds] = useState([""]);
 
   // bank
@@ -142,8 +163,15 @@ export default function SettingsPage() {
     mode: "shop",
     shopName: "",
     shopAddress: "",
-    shopPhotoOutside: "",
-    shopPhotoInside: "",
+
+    // preview-only
+    shopPhotoOutsidePreviewUrl: "",
+    shopPhotoInsidePreviewUrl: "",
+
+    // canonical asset ids
+    shopPhotoOutsideAssetId: "",
+    shopPhotoInsideAssetId: "",
+
     lat: "",
     lon: "",
   });
@@ -169,6 +197,14 @@ export default function SettingsPage() {
   const [savingProfile, setSavingProfile] = useState(false);
   const [savingPro, setSavingPro] = useState(false);
   const [savingBank, setSavingBank] = useState(false);
+  const [faceInfo, setFaceInfo] = useState(null);
+  const [loadingFace, setLoadingFace] = useState(false);
+  const [faceEnrollOpen, setFaceEnrollOpen] = useState(false);
+  const [faceEnrollBusy, setFaceEnrollBusy] = useState(false);
+  const [faceSelfie, setFaceSelfie] = useState({
+    previewUrl: "",
+    assetId: "",
+  });
 
   // ui helpers
   const [lightboxUrl, setLightboxUrl] = useState("");
@@ -283,15 +319,7 @@ export default function SettingsPage() {
         setStateVal(String(st || "").toUpperCase());
         setLga(String(lg || "").toUpperCase());
 
-        setAvatarUrl(
-          clientData?.photoUrl ||
-            clientData?.identity?.photoUrl ||
-            proData?.photoUrl ||
-            proData?.identity?.photoUrl ||
-            meData?.photoUrl ||
-            meData?.identity?.photoUrl ||
-            "",
-        );
+        setAvatarPreviewUrl("");
 
         setAvatarAssetId(
           clientData?.photoAssetId ||
@@ -350,13 +378,13 @@ export default function SettingsPage() {
             "",
           stateVal: String(st || "").toUpperCase(),
           lga: String(lg || "").toUpperCase(),
-          avatarUrl:
-            clientData?.photoUrl ||
-            clientData?.identity?.photoUrl ||
-            proData?.photoUrl ||
-            proData?.identity?.photoUrl ||
-            meData?.photoUrl ||
-            meData?.identity?.photoUrl ||
+          avatarAssetId:
+            clientData?.photoAssetId ||
+            clientData?.identity?.photoAssetId ||
+            proData?.photoAssetId ||
+            proData?.identity?.photoAssetId ||
+            meData?.photoAssetId ||
+            meData?.identity?.photoAssetId ||
             "",
           clientBio: clientData?.bio || "",
           username: serverUsername || "",
@@ -393,24 +421,13 @@ export default function SettingsPage() {
           setYears(proData?.professional?.years || "");
           const hc = String(proData?.professional?.hasCert || "no");
           setHasCert(hc === "yes" ? "yes" : "no");
-          setCertUrl(proData?.professional?.certUrl || "");
+          setCertPreviewUrl("");
           setCertAssetId(proData?.professional?.certAssetId || "");
-          setWorkPhotos(
-            Array.isArray(proData?.professional?.workPhotos) &&
-              proData.professional.workPhotos.length
-              ? proData.professional.workPhotos
-              : Array.isArray(proData?.gallery) && proData.gallery.length
-              ? proData.gallery
-              : [""],
-          );
+          setWorkPhotoPreviewUrls([""]);
 
           setProBio(proData?.bio || proData?.description || "");
-          setProPhotoUrl(
-            proData?.photoUrl ||
-              proData?.identity?.photoUrl ||
-              proData?.contactPublic?.shopPhoto ||
-              "",
-          );
+
+          setProPhotoPreviewUrl("");
 
           setProPhotoAssetId(proData?.photoAssetId || "");
 
@@ -461,8 +478,16 @@ export default function SettingsPage() {
             mode: proData?.business?.mode || "shop",
             shopName: proData?.business?.shopName || "",
             shopAddress: proData?.business?.shopAddress || "",
-            shopPhotoOutside: proData?.business?.shopPhotoOutside || "",
-            shopPhotoInside: proData?.business?.shopPhotoInside || "",
+
+            // preview-only
+            shopPhotoOutsidePreviewUrl: "",
+            shopPhotoInsidePreviewUrl: "",
+            // canonical asset ids
+            shopPhotoOutsideAssetId:
+              proData?.business?.shopPhotoOutsideAssetId || "",
+            shopPhotoInsideAssetId:
+              proData?.business?.shopPhotoInsideAssetId || "",
+
             lat: proData?.business?.lat || proData?.lat || "",
             lon: proData?.business?.lon || proData?.lon || "",
           });
@@ -506,17 +531,92 @@ export default function SettingsPage() {
           setServices([]);
           setYears("");
           setHasCert("no");
-          setCertUrl("");
-          setWorkPhotos([""]);
+          setCertPreviewUrl("");
+          setWorkPhotoPreviewUrls([""]);
           setProBio("");
-          setProPhotoUrl("");
+          setProPhotoPreviewUrl("");
           setCertAssetId("");
           setWorkPhotoAssetIds([""]);
           setProPhotoAssetId("");
+          setBusiness({
+            mode: "shop",
+            shopName: "",
+            shopAddress: "",
+            shopPhotoOutsidePreviewUrl: "",
+            shopPhotoInsidePreviewUrl: "",
+            shopPhotoOutsideAssetId: "",
+            shopPhotoInsideAssetId: "",
+            lat: "",
+            lon: "",
+          });
           setServicesDetailed([
             { id: "", name: "", price: "", promoPrice: "", otherText: "" },
           ]);
         }
+
+        const nextAvatarAssetId =
+          clientData?.photoAssetId ||
+          clientData?.identity?.photoAssetId ||
+          proData?.photoAssetId ||
+          proData?.identity?.photoAssetId ||
+          meData?.photoAssetId ||
+          meData?.identity?.photoAssetId ||
+          "";
+
+        const nextProPhotoAssetId = proData?.photoAssetId || "";
+        const nextCertAssetId = proData?.professional?.certAssetId || "";
+
+        const nextShopOutsideAssetId =
+          proData?.business?.shopPhotoOutsideAssetId || "";
+        const nextShopInsideAssetId =
+          proData?.business?.shopPhotoInsideAssetId || "";
+
+        const nextWorkPhotoAssetIds =
+          Array.isArray(proData?.professional?.workPhotoAssetIds) &&
+          proData.professional.workPhotoAssetIds.length
+            ? proData.professional.workPhotoAssetIds
+            : Array.isArray(proData?.workPhotoAssetIds) &&
+              proData.workPhotoAssetIds.length
+            ? proData.workPhotoAssetIds
+            : [""];
+
+        // hydrate previews from saved assetIds
+        (async () => {
+          const [
+            avatarUrl,
+            proPhotoUrl,
+            certUrl,
+            shopOutsideUrl,
+            shopInsideUrl,
+          ] = await Promise.all([
+            resolvePreviewUrl(nextAvatarAssetId),
+            resolvePreviewUrl(nextProPhotoAssetId),
+            resolvePreviewUrl(nextCertAssetId),
+            resolvePreviewUrl(nextShopOutsideAssetId),
+            resolvePreviewUrl(nextShopInsideAssetId),
+          ]);
+
+          if (!alive) return;
+
+          setAvatarPreviewUrl(avatarUrl || "");
+          setProPhotoPreviewUrl(proPhotoUrl || "");
+          setCertPreviewUrl(certUrl || "");
+
+          setBusiness((prev) => ({
+            ...prev,
+            shopPhotoOutsidePreviewUrl: shopOutsideUrl || "",
+            shopPhotoInsidePreviewUrl: shopInsideUrl || "",
+          }));
+
+          const workUrls = await Promise.all(
+            nextWorkPhotoAssetIds.map((id) => resolvePreviewUrl(id)),
+          );
+
+          if (!alive) return;
+          setWorkPhotoPreviewUrls(
+            workUrls.length ? workUrls.map((u) => u || "") : [""],
+          );
+        })();
 
         // ✅ Load banks list + saved payout bank (best-effort)
         (async () => {
@@ -562,12 +662,12 @@ export default function SettingsPage() {
             setPhone(draft.payload.phone || "");
             setStateVal((draft.payload.state || "").toUpperCase());
             setLga((draft.payload.lga || "").toUpperCase());
-            setAvatarUrl(draft.payload.avatarUrl || "");
+            setAvatarPreviewUrl(draft.payload.avatarPreviewUrl || "");
             setAvatarAssetId(draft.payload.avatarAssetId || "");
             setClientBio(draft.payload.bio || "");
           } else if (draft.section === "pro") {
             setProBio(draft.payload.proBio || "");
-            setProPhotoUrl(draft.payload.proPhotoUrl || "");
+            setProPhotoPreviewUrl(draft.payload.proPhotoPreviewUrl || "");
             setProfileVisible(
               typeof draft.payload.profileVisible === "boolean"
                 ? draft.payload.profileVisible
@@ -617,7 +717,7 @@ export default function SettingsPage() {
               phone: draft.payload.phone || "",
               stateVal: String(draft.payload.state || "").toUpperCase(),
               lga: String(draft.payload.lga || "").toUpperCase(),
-              avatarUrl: draft.payload.avatarUrl || "",
+              avatarAssetId: draft.payload.avatarAssetId || "",
               clientBio: draft.payload.bio || "",
               username: username || "",
             };
@@ -651,13 +751,54 @@ export default function SettingsPage() {
       (phone || "") !== (b.phone || "") ||
       (stateVal || "") !== (b.stateVal || "") ||
       (lga || "") !== (b.lga || "") ||
-      (avatarUrl || "") !== (b.avatarUrl || "") ||
+      (avatarAssetId || "") !== (b.avatarAssetId || "") ||
       (clientBio || "") !== (b.clientBio || "") ||
       (username || "") !== (b.username || "")
     );
-  }, [displayName, phone, stateVal, lga, avatarUrl, clientBio, username]);
+  }, [displayName, phone, stateVal, lga, avatarAssetId, clientBio, username]);
 
   const hasPro = !!appDoc?._id;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      if (!hasPro) {
+        setFaceInfo(null);
+        setLoadingFace(false);
+        return;
+      }
+
+      setLoadingFace(true);
+      try {
+        const { data } = await api.get("/api/face/me");
+        if (cancelled) return;
+
+        setFaceInfo({
+          face: data?.face || null,
+          liveness: data?.liveness || null,
+          livenessVerifiedAt: data?.livenessVerifiedAt || null,
+        });
+      } catch {
+        if (cancelled) return;
+        setFaceInfo(null);
+      } finally {
+        if (!cancelled) setLoadingFace(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [hasPro, livenessVerifiedAt]);
+
+  useEffect(() => {
+    if (!hasPro) return;
+    if (!takeFaceEnrollAfterLiveness()) return;
+
+    setStep("payments");
+    setFaceEnrollOpen(true);
+  }, [hasPro, livenessVerifiedAt]);
   const canSaveProfile = useMemo(
     () => !!displayName && !!phone && !!stateVal && !!lga,
     [displayName, phone, stateVal, lga],
@@ -673,9 +814,9 @@ export default function SettingsPage() {
         hasAnyDetailed ||
         years ||
         hasCert === "yes" ||
-        workPhotos.filter(Boolean).length > 0 ||
+        workPhotoAssetIds.filter(Boolean).length > 0 ||
         proBio ||
-        proPhotoUrl)
+        proPhotoAssetId)
     );
   }, [
     hasPro,
@@ -683,16 +824,48 @@ export default function SettingsPage() {
     servicesDetailed,
     years,
     hasCert,
-    workPhotos,
     workPhotoAssetIds,
     proBio,
-    proPhotoUrl,
     proPhotoAssetId,
   ]);
   const canSaveBank = useMemo(
     () => hasPro && !!bankCode && digitsOnly(accountNumber).length === 10,
     [hasPro, bankCode, accountNumber],
   );
+
+  useEffect(() => {
+    const acct = digitsOnly(accountNumber).slice(0, 10);
+    const code = String(bankCode || "").trim();
+
+    if (!hasPro) return;
+
+    if (!code || acct.length !== 10) {
+      setAccountName("");
+      return;
+    }
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const { data } = await api.get(
+          `/api/payout/resolve?accountNumber=${encodeURIComponent(
+            acct,
+          )}&bankCode=${encodeURIComponent(code)}`,
+        );
+
+        if (cancelled) return;
+        setAccountName(String(data?.accountName || ""));
+      } catch {
+        if (cancelled) return;
+        setAccountName("");
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [hasPro, bankCode, accountNumber]);
 
   const profileUrl = useMemo(() => {
     if (!username) return "";
@@ -739,6 +912,60 @@ export default function SettingsPage() {
     }
   }
 
+  async function refreshFaceInfoNow() {
+    if (!hasPro) {
+      setFaceInfo(null);
+      return;
+    }
+
+    setLoadingFace(true);
+    try {
+      const { data } = await api.get("/api/face/me");
+      setFaceInfo({
+        face: data?.face || null,
+        liveness: data?.liveness || null,
+        livenessVerifiedAt: data?.livenessVerifiedAt || null,
+      });
+    } catch {
+      setFaceInfo(null);
+    } finally {
+      setLoadingFace(false);
+    }
+  }
+
+  async function startFaceEnrollFlow() {
+    markFaceEnrollAfterLiveness();
+    await startAwsLivenessFlow();
+  }
+
+  async function completeFaceEnrollment() {
+    if (!faceSelfie?.assetId || faceEnrollBusy) return;
+
+    setFaceEnrollBusy(true);
+    try {
+      await api.post("/api/face/enroll", {
+        enrolledAssetId: faceSelfie.assetId,
+      });
+
+      setFaceEnrollOpen(false);
+      setFaceSelfie({ previewUrl: "", assetId: "" });
+      await refreshFaceInfoNow();
+      flashOK("Face verification selfie enrolled.");
+    } catch (e) {
+      const code = e?.response?.data?.error || "";
+      const msg = e?.response?.data?.message || "";
+
+      if (code === "liveness_required") {
+        markFaceEnrollAfterLiveness();
+        await startAwsLivenessFlow();
+      } else {
+        flashErr(msg || code || "Face enrollment failed.");
+      }
+    } finally {
+      setFaceEnrollBusy(false);
+    }
+  }
+
   /* ---------- saves ---------- */
 
   // general
@@ -770,11 +997,7 @@ export default function SettingsPage() {
         state: stateVal.toUpperCase(),
         lga: lga.toUpperCase(),
 
-        // legacy (temporary)
-        avatarUrl,
-        photoUrl: avatarUrl,
-
-        // ✅ new asset-based (Phase 1)
+        // canonical asset-based only
         ...(avatarAssetId ? { photoAssetId: avatarAssetId } : {}),
 
         bio: clientBio,
@@ -814,7 +1037,6 @@ export default function SettingsPage() {
           phone,
           state: stateVal.toUpperCase(),
           city: lga.toUpperCase(),
-          photoUrl: avatarUrl,
           ...(avatarAssetId ? { photoAssetId: avatarAssetId } : {}),
         },
       }));
@@ -836,7 +1058,7 @@ export default function SettingsPage() {
         phone,
         stateVal: stateVal.toUpperCase(),
         lga: lga.toUpperCase(),
-        avatarUrl,
+        avatarAssetId: avatarAssetId || "",
         clientBio,
         username: trimmedUsername || "",
       };
@@ -853,10 +1075,11 @@ export default function SettingsPage() {
           phone,
           state: stateVal,
           lga,
-          avatarUrl,
+          avatarPreviewUrl,
           avatarAssetId,
           bio: clientBio,
         });
+
         await startAwsLivenessFlow();
       } else {
         flashErr(e?.response?.data?.error || "Failed to save profile.");
@@ -871,7 +1094,7 @@ export default function SettingsPage() {
     phone,
     stateVal,
     lga,
-    avatarUrl,
+    avatarPreviewUrl,
     avatarAssetId,
     clientBio,
     client,
@@ -916,19 +1139,13 @@ export default function SettingsPage() {
           years,
           hasCert,
 
-          // legacy (temporary)
-          certUrl,
-
-          // ✅ new asset-based (Phase 1)
+          // canonical asset-based only
           ...(certAssetId ? { certAssetId } : {}),
 
           profileVisible,
           nationwide,
 
-          // legacy (temporary)
-          workPhotos,
-
-          // ✅ new asset-based (Phase 1)
+          // canonical asset-based only
           ...(Array.isArray(workPhotoAssetIds) &&
           workPhotoAssetIds.filter(Boolean).length
             ? { workPhotoAssetIds: workPhotoAssetIds.filter(Boolean) }
@@ -953,18 +1170,20 @@ export default function SettingsPage() {
 
         bio: proBio,
 
-        // legacy (temporary)
-        photoUrl: proPhotoUrl,
-
-        // ✅ new asset-based (Phase 1)
+        // canonical asset-based only
         ...(proPhotoAssetId ? { photoAssetId: proPhotoAssetId } : {}),
 
         servicesDetailed: normalizedDetailed,
 
         business: {
           ...(appDoc?.business || {}),
-          ...business,
-          // (we’ll migrate shopPhotoOutside/shopPhotoInside in a later pass; they’re URLs for now)
+          mode: business.mode,
+          shopName: business.shopName,
+          shopAddress: business.shopAddress,
+          shopPhotoOutsideAssetId: business.shopPhotoOutsideAssetId || "",
+          shopPhotoInsideAssetId: business.shopPhotoInsideAssetId || "",
+          lat: business.lat,
+          lon: business.lon,
         },
 
         status: appDoc?.status || "submitted",
@@ -987,7 +1206,7 @@ export default function SettingsPage() {
         // stash current pro section
         stashSettingsDraft("pro", {
           proBio,
-          proPhotoUrl,
+          proPhotoPreviewUrl,
           proPhotoAssetId,
           profileVisible,
           nationwide,
@@ -1013,16 +1232,16 @@ export default function SettingsPage() {
     services,
     years,
     hasCert,
-    certUrl,
+    certPreviewUrl,
     certAssetId,
     profileVisible,
     nationwide,
-    workPhotos,
+    workPhotoPreviewUrls,
     stateList,
     statesCovered,
     hasPro,
     proBio,
-    proPhotoUrl,
+    proPhotoPreviewUrl,
     proPhotoAssetId,
     availability,
     business,
@@ -1060,7 +1279,33 @@ export default function SettingsPage() {
 
       flashOK("Payment details saved.");
     } catch (e) {
-      flashErr(e?.response?.data?.error || "Failed to save payment details.");
+      const code = e?.response?.data?.error || "";
+      const msg = e?.response?.data?.message || "";
+
+      if (code === "liveness_required") {
+        stashSettingsDraft("bank", {
+          bankCode,
+          bankName,
+          accountName,
+          accountNumber,
+        });
+        await startAwsLivenessFlow();
+      } else if (code === "face_enroll_required") {
+        stashSettingsDraft("bank", {
+          bankCode,
+          bankName,
+          accountName,
+          accountNumber,
+        });
+        flashErr(
+          msg || "Face enrollment is required before changing payout details.",
+        );
+        await startFaceEnrollFlow();
+      } else if (code === "face_mismatch") {
+        flashErr(msg || "Face verification failed. Please retry.");
+      } else {
+        flashErr(msg || code || "Failed to save payment details.");
+      }
     } finally {
       setSavingBank(false);
     }
@@ -1069,10 +1314,23 @@ export default function SettingsPage() {
     savingBank,
     hasPro,
     bankCode,
+    bankName,
     accountNumber,
-    banks,
     accountName,
+    banks,
+    startAwsLivenessFlow,
+    startFaceEnrollFlow,
   ]);
+
+  async function resolvePreviewUrl(assetId, variant = "original") {
+    const id = String(assetId || "").trim();
+    if (!id) return "";
+    try {
+      return await getSignedMediaUrl({ api, assetId: id, variant });
+    } catch {
+      return "";
+    }
+  }
 
   /* ---------- UI ---------- */
   return (
@@ -1145,30 +1403,29 @@ export default function SettingsPage() {
             <section className="rounded-xl border border-zinc-800 p-4 bg-black/30">
               <h2 className="text-lg font-semibold mb-3">General</h2>
 
-              <div className="flex items-center gap-4 mb-3">
-                <Avatar
-                  url={avatarUrl}
-                  onClick={() => avatarUrl && setLightboxUrl(avatarUrl)}
-                />
-                <div className="flex items-center gap-2">
-                  <UploadButton
-                    title="Upload Photo"
-                    onUploaded={(url, assetId) => {
-                      setAvatarUrl(url);
-                      setAvatarAssetId(assetId || "");
-                    }}
+              <div className="mb-3">
+                <Label>Profile Photo</Label>
+                <div className="flex items-center gap-4">
+                  <Avatar
+                    url={avatarPreviewUrl}
+                    onClick={() =>
+                      avatarPreviewUrl && setLightboxUrl(avatarPreviewUrl)
+                    }
                   />
-                  {avatarUrl && (
-                    <button
-                      className="text-xs text-red-300 border border-red-800 rounded px-2 py-1"
-                      onClick={() => {
-                        setAvatarUrl("");
-                        setAvatarAssetId("");
+                  <div className="flex-1">
+                    <MediaUploader
+                      api={api}
+                      type="image"
+                      visibility="public"
+                      valueUrl={avatarPreviewUrl}
+                      valueAssetId={avatarAssetId}
+                      onChange={({ previewUrl, assetId }) => {
+                        setAvatarPreviewUrl(previewUrl || "");
+                        setAvatarAssetId(assetId || "");
                       }}
-                    >
-                      Remove
-                    </button>
-                  )}
+                      label="Upload Photo"
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -1263,29 +1520,25 @@ export default function SettingsPage() {
                 <Label>Pro profile picture (public)</Label>
                 <div className="flex items-center gap-3">
                   <Avatar
-                    url={proPhotoUrl}
-                    onClick={() => proPhotoUrl && setLightboxUrl(proPhotoUrl)}
+                    url={proPhotoPreviewUrl}
+                    onClick={() =>
+                      proPhotoPreviewUrl && setLightboxUrl(proPhotoPreviewUrl)
+                    }
                   />
-                  <UploadButton
-                    title="Upload Pro Photo"
-                    disabled={!hasPro}
-                    onUploaded={(url, assetId) => {
-                      setProPhotoUrl(url);
-                      setProPhotoAssetId(assetId || "");
-                    }}
-                  />
-                  {proPhotoUrl && (
-                    <button
-                      className="text-xs text-red-300 border border-red-800 rounded px-2 py-1"
-                      onClick={() => {
-                        setProPhotoUrl("");
-                        setProPhotoAssetId("");
+                  <div className="flex-1">
+                    <MediaUploader
+                      api={api}
+                      type="image"
+                      visibility="public"
+                      valueUrl={proPhotoPreviewUrl}
+                      valueAssetId={proPhotoAssetId}
+                      onChange={({ previewUrl, assetId }) => {
+                        setProPhotoPreviewUrl(previewUrl || "");
+                        setProPhotoAssetId(assetId || "");
                       }}
-                      disabled={!hasPro}
-                    >
-                      Remove
-                    </button>
-                  )}
+                      label="Upload Pro Photo"
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -1334,20 +1587,18 @@ export default function SettingsPage() {
                 {hasCert === "yes" && hasPro && (
                   <div>
                     <Label>Certificate</Label>
-                    <div className="flex gap-2">
-                      <input
-                        className="flex-1 bg-black border border-zinc-800 rounded-lg px-3 py-2"
-                        value={certUrl}
-                        onChange={(e) => setCertUrl(e.target.value)}
-                      />
-                      <UploadButton
-                        title="Upload"
-                        onUploaded={(url, assetId) => {
-                          setCertUrl(url);
-                          setCertAssetId(assetId || "");
-                        }}
-                      />
-                    </div>
+                    <MediaUploader
+                      api={api}
+                      type="image"
+                      visibility="private"
+                      valueUrl={certPreviewUrl}
+                      valueAssetId={certAssetId}
+                      onChange={({ previewUrl, assetId }) => {
+                        setCertPreviewUrl(previewUrl || "");
+                        setCertAssetId(assetId || "");
+                      }}
+                      label="Upload Certificate"
+                    />
                   </div>
                 )}
               </div>
@@ -1521,22 +1772,43 @@ export default function SettingsPage() {
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
-                      <UploadRow
-                        label="Photo (outside)"
-                        value={business.shopPhotoOutside}
-                        onChange={(v) =>
-                          setBusiness({ ...business, shopPhotoOutside: v })
-                        }
-                        disabled={!hasPro}
-                      />
-                      <UploadRow
-                        label="Photo (inside)"
-                        value={business.shopPhotoInside}
-                        onChange={(v) =>
-                          setBusiness({ ...business, shopPhotoInside: v })
-                        }
-                        disabled={!hasPro}
-                      />
+                      <div>
+                        <Label>Photo (outside)</Label>
+                        <MediaUploader
+                          api={api}
+                          type="image"
+                          visibility="public"
+                          valueUrl={business.shopPhotoOutsidePreviewUrl}
+                          valueAssetId={business.shopPhotoOutsideAssetId}
+                          onChange={({ previewUrl, assetId }) =>
+                            setBusiness((prev) => ({
+                              ...prev,
+                              shopPhotoOutsidePreviewUrl: previewUrl || "",
+                              shopPhotoOutsideAssetId: assetId || "",
+                            }))
+                          }
+                          label="Upload Outside Photo"
+                        />
+                      </div>
+
+                      <div>
+                        <Label>Photo (inside)</Label>
+                        <MediaUploader
+                          api={api}
+                          type="image"
+                          visibility="public"
+                          valueUrl={business.shopPhotoInsidePreviewUrl}
+                          valueAssetId={business.shopPhotoInsideAssetId}
+                          onChange={({ previewUrl, assetId }) =>
+                            setBusiness((prev) => ({
+                              ...prev,
+                              shopPhotoInsidePreviewUrl: previewUrl || "",
+                              shopPhotoInsideAssetId: assetId || "",
+                            }))
+                          }
+                          label="Upload Inside Photo"
+                        />
+                      </div>
                     </div>
                   </>
                 )}
@@ -1682,39 +1954,36 @@ export default function SettingsPage() {
               {/* Work Photos */}
               <div className="mt-6">
                 <Label>Work Photos</Label>
-                {workPhotos.map((u, idx) => (
-                  <div key={idx} className="flex items-center gap-2 mb-2">
-                    <input
-                      className="flex-1 bg-black border border-zinc-800 rounded-lg px-3 py-2"
-                      placeholder={`Photo URL ${idx + 1}`}
-                      value={u}
-                      onChange={(e) => {
-                        const arr = [...workPhotos];
-                        arr[idx] = e.target.value;
-                        setWorkPhotos(arr);
-                      }}
-                      disabled={!hasPro}
-                    />
-                    <UploadButton
-                      title="Upload"
-                      disabled={!hasPro}
-                      onUploaded={(url, assetId) => {
-                        const arr = [...workPhotos];
-                        arr[idx] = url;
-                        setWorkPhotos(arr);
+                {workPhotoPreviewUrls.map((u, idx) => (
+                  <div
+                    key={idx}
+                    className="mb-3 border border-zinc-800 rounded-lg p-3"
+                  >
+                    <MediaUploader
+                      api={api}
+                      type="image"
+                      visibility="public"
+                      valueUrl={u}
+                      valueAssetId={workPhotoAssetIds[idx] || ""}
+                      onChange={({ previewUrl, assetId }) => {
+                        const previews = [...workPhotoPreviewUrls];
+                        previews[idx] = previewUrl || "";
+                        setWorkPhotoPreviewUrls(previews);
 
                         const ids = [...(workPhotoAssetIds || [])];
-                        while (ids.length < arr.length) ids.push("");
+                        while (ids.length < previews.length) ids.push("");
                         ids[idx] = assetId || "";
                         setWorkPhotoAssetIds(ids);
                       }}
+                      label={`Upload Work Photo ${idx + 1}`}
                     />
+
                     {idx > 0 && (
                       <button
                         type="button"
-                        className="text-sm text-red-400"
+                        className="mt-2 text-sm text-red-400"
                         onClick={() => {
-                          setWorkPhotos((prev) =>
+                          setWorkPhotoPreviewUrls((prev) =>
                             prev.filter((_, i) => i !== idx),
                           );
                           setWorkPhotoAssetIds((prev) =>
@@ -1728,11 +1997,12 @@ export default function SettingsPage() {
                     )}
                   </div>
                 ))}
+
                 <button
                   type="button"
                   className="text-sm text-gold underline"
                   onClick={() => {
-                    setWorkPhotos((prev) => [...prev, ""]);
+                    setWorkPhotoPreviewUrls((prev) => [...prev, ""]);
                     setWorkPhotoAssetIds((prev) => [...(prev || []), ""]);
                   }}
                   disabled={!hasPro}
@@ -1757,6 +2027,58 @@ export default function SettingsPage() {
           {step === "payments" && (
             <section className="rounded-xl border border-zinc-800 p-4 bg-black/30">
               <h2 className="text-lg font-semibold mb-3">Payout</h2>
+              <div className="mb-4 rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <div className="text-sm font-medium text-zinc-200">
+                      Face verification
+                    </div>
+                    <div className="text-xs text-zinc-400 mt-1">
+                      {loadingFace
+                        ? "Checking face status..."
+                        : faceInfo?.face?.enrolledAssetId
+                        ? `Enrolled${
+                            faceInfo?.face?.enrolledAt
+                              ? ` • ${new Date(
+                                  faceInfo.face.enrolledAt,
+                                ).toLocaleString()}`
+                              : ""
+                          }`
+                        : "Not enrolled yet."}
+                    </div>
+                    <div className="text-xs text-zinc-500 mt-1">
+                      Required before payout bank changes and protected
+                      withdrawals.
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={startFaceEnrollFlow}
+                    disabled={!hasPro}
+                    className="px-4 py-2 rounded-lg border border-yellow-500/50 text-yellow-300 text-sm hover:bg-yellow-500/10 disabled:opacity-50"
+                  >
+                    {faceInfo?.face?.enrolledAssetId
+                      ? "Re-enroll Face Selfie"
+                      : "Enroll Face Selfie"}
+                  </button>
+                </div>
+
+                <div className="mt-3">
+                  <FaceEnrollModal
+                    open={faceEnrollOpen}
+                    api={api}
+                    busy={faceEnrollBusy}
+                    selfie={faceSelfie}
+                    onChangeSelfie={setFaceSelfie}
+                    onContinue={completeFaceEnrollment}
+                    onCancel={() => {
+                      setFaceEnrollOpen(false);
+                      setFaceSelfie({ previewUrl: "", assetId: "" });
+                    }}
+                  />
+                </div>
+              </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {/* Bank dropdown (Paystack codes) */}
                 <label className="block sm:col-span-2">
@@ -1919,73 +2241,7 @@ function Select({ label, options = [], required, disabled, ...props }) {
     </label>
   );
 }
-function UploadButton({ title = "Upload", onUploaded, disabled, accept }) {
-  const inputRef = useRef(null);
-  const [busy, setBusy] = useState(false);
 
-  async function onPick(e) {
-    const file = e.target.files?.[0] || null;
-    // reset so picking same file again still triggers change
-    e.target.value = "";
-    if (!file) return;
-
-    try {
-      setBusy(true);
-      const out = await uploadMediaAsset({ api, file, type: "image" });
-      // out: { assetId, type, publicUrl, key }
-      const url = out?.publicUrl || "";
-      const assetId = out?.assetId || "";
-      if (typeof onUploaded === "function") onUploaded(url, assetId);
-    } catch (err) {
-      alert(err?.message || "Upload failed");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <>
-      <input
-        ref={inputRef}
-        type="file"
-        accept={accept || "image/*"}
-        className="hidden"
-        onChange={onPick}
-        disabled={disabled || busy}
-      />
-      <button
-        type="button"
-        onClick={() => inputRef.current?.click()}
-        disabled={disabled || busy}
-        className="px-3 py-2 rounded-lg border border-zinc-700 text-sm hover:bg-zinc-900 disabled:opacity-50"
-        title="Upload to R2"
-      >
-        {busy ? "Uploading…" : title}
-      </button>
-    </>
-  );
-}
-function UploadRow({ label, value, onChange, disabled }) {
-  return (
-    <div>
-      <Label>{label}</Label>
-      <div className="flex gap-2">
-        <input
-          className="flex-1 bg-black border border-zinc-800 rounded-lg px-3 py-2"
-          placeholder="Paste image URL"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          disabled={disabled}
-        />
-        <UploadButton
-          title="Upload"
-          onUploaded={(url) => onChange(url)}
-          disabled={disabled}
-        />
-      </div>
-    </div>
-  );
-}
 function Avatar({ url, onClick }) {
   return (
     <button
