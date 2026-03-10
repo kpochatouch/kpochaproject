@@ -206,8 +206,8 @@ export default function SettingsPage() {
     assetId: "",
   });
 
-  // ui helpers
   const [lightboxUrl, setLightboxUrl] = useState("");
+
   // ✅ baseline for "already saved" detection (disable save when no changes)
   const profileBaselineRef = useRef(null);
 
@@ -1405,28 +1405,19 @@ export default function SettingsPage() {
 
               <div className="mb-3">
                 <Label>Profile Photo</Label>
-                <div className="flex items-center gap-4">
-                  <Avatar
-                    url={avatarPreviewUrl}
-                    onClick={() =>
-                      avatarPreviewUrl && setLightboxUrl(avatarPreviewUrl)
-                    }
-                  />
-                  <div className="flex-1">
-                    <MediaUploader
-                      api={api}
-                      type="image"
-                      visibility="public"
-                      valueUrl={avatarPreviewUrl}
-                      valueAssetId={avatarAssetId}
-                      onChange={({ previewUrl, assetId }) => {
-                        setAvatarPreviewUrl(previewUrl || "");
-                        setAvatarAssetId(assetId || "");
-                      }}
-                      label="Upload Photo"
-                    />
-                  </div>
-                </div>
+                <MediaUploader
+                  api={api}
+                  type="image"
+                  visibility="public"
+                  valueUrl={avatarPreviewUrl}
+                  valueAssetId={avatarAssetId}
+                  onPreviewClick={() => setLightboxUrl(avatarPreviewUrl)}
+                  onChange={({ previewUrl, assetId }) => {
+                    setAvatarPreviewUrl(previewUrl || "");
+                    setAvatarAssetId(assetId || "");
+                  }}
+                  label="Upload Photo"
+                />
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1518,28 +1509,19 @@ export default function SettingsPage() {
 
               <div className="mb-4">
                 <Label>Pro profile picture (public)</Label>
-                <div className="flex items-center gap-3">
-                  <Avatar
-                    url={proPhotoPreviewUrl}
-                    onClick={() =>
-                      proPhotoPreviewUrl && setLightboxUrl(proPhotoPreviewUrl)
-                    }
-                  />
-                  <div className="flex-1">
-                    <MediaUploader
-                      api={api}
-                      type="image"
-                      visibility="public"
-                      valueUrl={proPhotoPreviewUrl}
-                      valueAssetId={proPhotoAssetId}
-                      onChange={({ previewUrl, assetId }) => {
-                        setProPhotoPreviewUrl(previewUrl || "");
-                        setProPhotoAssetId(assetId || "");
-                      }}
-                      label="Upload Pro Photo"
-                    />
-                  </div>
-                </div>
+                <MediaUploader
+                  api={api}
+                  type="image"
+                  visibility="public"
+                  valueUrl={proPhotoPreviewUrl}
+                  valueAssetId={proPhotoAssetId}
+                  onPreviewClick={() => setLightboxUrl(proPhotoPreviewUrl)}
+                  onChange={({ previewUrl, assetId }) => {
+                    setProPhotoPreviewUrl(previewUrl || "");
+                    setProPhotoAssetId(assetId || "");
+                  }}
+                  label="Upload Pro Photo"
+                />
               </div>
 
               <div className="mb-4">
@@ -1593,6 +1575,7 @@ export default function SettingsPage() {
                       visibility="private"
                       valueUrl={certPreviewUrl}
                       valueAssetId={certAssetId}
+                      onPreviewClick={() => setLightboxUrl(certPreviewUrl)}
                       onChange={({ previewUrl, assetId }) => {
                         setCertPreviewUrl(previewUrl || "");
                         setCertAssetId(assetId || "");
@@ -1780,6 +1763,9 @@ export default function SettingsPage() {
                           visibility="public"
                           valueUrl={business.shopPhotoOutsidePreviewUrl}
                           valueAssetId={business.shopPhotoOutsideAssetId}
+                          onPreviewClick={() =>
+                            setLightboxUrl(business.shopPhotoOutsidePreviewUrl)
+                          }
                           onChange={({ previewUrl, assetId }) =>
                             setBusiness((prev) => ({
                               ...prev,
@@ -1799,6 +1785,9 @@ export default function SettingsPage() {
                           visibility="public"
                           valueUrl={business.shopPhotoInsidePreviewUrl}
                           valueAssetId={business.shopPhotoInsideAssetId}
+                          onPreviewClick={() =>
+                            setLightboxUrl(business.shopPhotoInsidePreviewUrl)
+                          }
                           onChange={({ previewUrl, assetId }) =>
                             setBusiness((prev) => ({
                               ...prev,
@@ -1965,6 +1954,7 @@ export default function SettingsPage() {
                       visibility="public"
                       valueUrl={u}
                       valueAssetId={workPhotoAssetIds[idx] || ""}
+                      onPreviewClick={() => setLightboxUrl(u)}
                       onChange={({ previewUrl, assetId }) => {
                         const previews = [...workPhotoPreviewUrls];
                         previews[idx] = previewUrl || "";
@@ -2176,9 +2166,19 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {lightboxUrl && (
-        <ImageLightbox src={lightboxUrl} onClose={() => setLightboxUrl("")} />
-      )}
+      {lightboxUrl ? (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+          onClick={() => setLightboxUrl("")}
+        >
+          <img
+            src={lightboxUrl}
+            alt="Preview"
+            className="max-w-full max-h-[90vh] rounded-lg border border-zinc-800"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -2258,20 +2258,6 @@ function Avatar({ url, onClick }) {
         </div>
       )}
     </button>
-  );
-}
-function ImageLightbox({ src, onClose }) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/70" onClick={onClose} />
-      <div className="relative z-10 max-w-3xl max-h-[85vh] border border-zinc-800 rounded-xl overflow-hidden">
-        <img
-          src={src}
-          alt="Preview"
-          className="block max-h-[85vh] object-contain"
-        />
-      </div>
-    </div>
   );
 }
 
