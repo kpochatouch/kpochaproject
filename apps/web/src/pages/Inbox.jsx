@@ -112,8 +112,8 @@ function normalizeThread(raw = {}, currentUid) {
     typeof raw.unread === "number"
       ? raw.unread
       : typeof raw.unreadCount === "number"
-        ? raw.unreadCount
-        : 0;
+      ? raw.unreadCount
+      : 0;
 
   const peerProfile = raw.peerProfile || raw.user || {};
   const displayName =
@@ -126,6 +126,10 @@ function normalizeThread(raw = {}, currentUid) {
   const avatarUrl =
     peerProfile.avatarUrl || peerProfile.photoUrl || raw.avatarUrl || "";
 
+  const verified = Boolean(
+    peerProfile.verified || raw.peerVerified || raw.verified,
+  );
+
   return {
     peerUid,
     room,
@@ -134,6 +138,7 @@ function normalizeThread(raw = {}, currentUid) {
     lastAt,
     displayName,
     avatarUrl,
+    verified,
   };
 }
 
@@ -180,8 +185,8 @@ export default function Inbox() {
       const raw = Array.isArray(data?.items)
         ? data.items
         : Array.isArray(data)
-          ? data
-          : data?.threads || [];
+        ? data
+        : data?.threads || [];
 
       const normalized = raw
         .map((t) => normalizeThread(t, myUid))
@@ -318,6 +323,7 @@ export default function Inbox() {
             // we do NOT know their profile name yet → show clear "Unknown user"
             displayName: "Unknown user",
             avatarUrl: "",
+            verified: false,
           };
 
           return [updatedThread, ...prev].slice(0, MAX_THREADS);
@@ -381,6 +387,7 @@ export default function Inbox() {
               lastAt: ts,
               displayName: "Unknown user",
               avatarUrl: "",
+              verified: false,
             },
             ...prev,
           ].slice(0, MAX_THREADS);
@@ -401,8 +408,9 @@ export default function Inbox() {
     const term = (debouncedSearch || "").trim().toLowerCase();
     if (!term) return threads;
     return threads.filter((t) => {
-      const haystack =
-        `${t.displayName || ""} ${t.peerUid || ""}`.toLowerCase();
+      const haystack = `${t.displayName || ""} ${
+        t.peerUid || ""
+      }`.toLowerCase();
       return haystack.includes(term);
     });
   }, [threads, debouncedSearch]);
@@ -433,6 +441,7 @@ export default function Inbox() {
             displayName:
               p.displayName || p.fullName || p.username || "Unknown user",
             avatarUrl: p.avatarUrl || p.photoUrl || "",
+            verified: !!p.verified,
           };
         } catch (e) {
           // ignore failures for individual users

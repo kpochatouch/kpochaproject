@@ -10,6 +10,7 @@ import ActionButton from "./ActionButton.jsx";
 import { Capacitor } from "@capacitor/core";
 import { openNativeFeed } from "../lib/nativeFeed";
 import { attachHlsToVideo, isHlsUrl } from "../lib/hlsAttach";
+import DisplayName from "./DisplayName.jsx";
 
 // ------------------- Feed: Only one video plays at a time -------------------
 const FEED_ACTIVE_VIDEO_KEY = "__kpocha_feed_active_video_id__";
@@ -843,6 +844,9 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
   const pro = post.pro || {};
   const avatar = pro.photoUrl || post.authorAvatar || "";
   const proName = pro.name || post.authorName || "Professional";
+  const proVerified = Boolean(
+    pro.verified || post.verified || post.authorVerified || post.ownerVerified,
+  );
   const lga = pro.lga || post.lga || "";
 
   // who to follow (prefer owner UID) — robust fallbacks for mixed payloads
@@ -1061,7 +1065,11 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
 
                   <div className="min-w-0">
                     <div className="text-xs font-semibold text-white truncate max-w-[220px]">
-                      {proName}
+                      <DisplayName
+                        name={proName}
+                        verified={proVerified}
+                        badgeClassName="w-4 h-4"
+                      />
                     </div>
                     <div className="text-[10px] text-gray-300">
                       {lga || "Nigeria"} • {timeAgo(post.createdAt)}

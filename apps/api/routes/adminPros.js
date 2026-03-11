@@ -115,6 +115,16 @@ export default function adminProsRoutes({
           identity.photoAssetId = String(photoAssetId).trim();
         }
 
+        const face = fresh?.face || {};
+        const liveness = fresh?.liveness || {};
+
+        const verified = Boolean(
+          face?.enrolledAssetId &&
+            (fresh?.livenessVerifiedAt || liveness?.lastVerifiedAt) &&
+            face?.lastStatus === "match" &&
+            face?.lastVerifiedAt,
+        );
+
         const proSet = {};
         if (name) proSet.name = name;
         if (phone) proSet.phone = phone;
@@ -122,6 +132,7 @@ export default function adminProsRoutes({
         if (state) proSet.state = state;
         if (photoAssetId) proSet.photoAssetId = String(photoAssetId).trim();
         if (Object.keys(identity).length > 0) proSet.identity = identity;
+        proSet.verified = verified;
 
         // 4) update Pro
         await Pro.updateOne({ ownerUid }, { $set: proSet });

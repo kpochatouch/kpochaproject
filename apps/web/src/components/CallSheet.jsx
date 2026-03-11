@@ -7,6 +7,7 @@ import {
   registerSocketHandler,
 } from "../lib/api";
 import { Capacitor } from "@capacitor/core";
+import DisplayName from "./DisplayName.jsx";
 
 /**
  * Props:
@@ -30,6 +31,7 @@ export default function CallSheet({
   callType = "audio",
   peerName = "",
   peerAvatar = "",
+  peerVerified = false,
   chatRoom = null,
   autoAccept = false,
 }) {
@@ -916,7 +918,11 @@ export default function CallSheet({
               {/* name + timer / status for audio */}
               <div className="mt-4 flex flex-col items-center gap-1">
                 <span className="text-lg md:text-2xl font-semibold text-zinc-50">
-                  {displayPeerName}
+                  <DisplayName
+                    name={displayPeerName}
+                    verified={!!peerVerified}
+                    badgeClassName="w-5 h-5"
+                  />
                 </span>
                 <span className="text-sm text-zinc-300 mt-1">
                   {hasConnected ? formatDuration(elapsedSeconds) : statusText}

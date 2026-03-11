@@ -1,7 +1,9 @@
 // apps/web/src/pages/ClientSettings.jsx
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { api, ensureClientProfile } from "../lib/api";
-import { uploadMediaAsset } from "../lib/r2Upload";
+import MediaUploader from "../components/MediaUploader.jsx";
+import { getSignedMediaUrl } from "../lib/r2Upload";
 
 /* ---------- localStorage keys ---------- */
 const DRAFT_KEY = "kpocha:clientSettingsDraft";
@@ -26,11 +28,15 @@ export default function ClientSettings() {
     state: "",
     lga: "",
     address: "",
+    lat: "",
+    lon: "",
     photoAssetId: "",
     photoPreviewUrl: "", // UI only, not saved
     agreeTerms: false,
     agreePrivacy: false,
   });
+
+  const [locLoading, setLocLoading] = useState(false);
 
   // helper: save draft
   function saveDraft(nextForm) {
@@ -129,11 +135,15 @@ export default function ClientSettings() {
           state: normalizedState || "",
           lga: normalizedLga || "",
           address: clientData?.address || "",
-          photoPreviewUrl:
-            clientData?.photoUrlResolved ||
-            clientData?.photoUrl ||
-            proData?.photoUrl ||
-            "",
+          lat:
+            clientData?.lat != null && clientData?.lat !== ""
+              ? clientData.lat
+              : "",
+          lon:
+            clientData?.lon != null && clientData?.lon !== ""
+              ? clientData.lon
+              : "",
+          photoPreviewUrl: "",
           photoAssetId:
             clientData?.photoAssetId ||
             clientData?.identity?.photoAssetId ||
@@ -143,8 +153,15 @@ export default function ClientSettings() {
         };
 
         // if we have draft, overlay it (so user doesn't lose typing)
+
         if (draft) {
           nextForm = { ...nextForm, ...draft };
+        }
+
+        if (nextForm.photoAssetId) {
+          nextForm.photoPreviewUrl = await resolvePreviewUrl(
+            nextForm.photoAssetId,
+          );
         }
 
         setForm(nextForm);
@@ -167,35 +184,77 @@ export default function ClientSettings() {
   function onChangeField(key, val) {
     setForm((f) => {
       const next = { ...f, [key]: val };
+      saveDraft(next);
       return next;
     });
   }
 
-  async function uploadImageToR2(file) {
-    if (!file) return { previewUrl: "", assetId: "" };
-
-    setError("");
-    setOk("Uploading image...");
-
+  async function resolvePreviewUrl(assetId, variant = "original") {
+    const id = String(assetId || "").trim();
+    if (!id) return "";
     try {
-      const res = await uploadMediaAsset({ api, file, type: "image" });
-      const previewUrl = res?.publicUrl || "";
-      const assetId = res?.assetId || "";
+      return await getSignedMediaUrl({ api, assetId: id, variant });
+    } catch {
+      return "";
+    }
+  }
 
-      if (!assetId) {
-        setOk("");
-        setError("Upload succeeded but assetId is missing.");
-        return { previewUrl, assetId: "" };
-      }
+  async function useMyLocation() {
+    try {
+      setLocLoading(true);
+      setError("");
 
-      setOk("Uploaded ✓ (click Save changes)");
-      setTimeout(() => setOk(""), 1500);
+      const pos = await new Promise((resolve, reject) =>
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 10000,
+        }),
+      );
 
-      return { previewUrl, assetId };
+      const { latitude, longitude } = pos.coords;
+
+      const { data } = await api.get("/api/geo/rev", {
+        params: { lat: latitude, lon: longitude },
+      });
+
+      const feat = data?.features?.[0];
+      const p = feat?.properties || {};
+
+      const detectedState = (p.state || p.region || "").toString();
+      const detectedLga = (
+        p.county ||
+        p.city ||
+        p.district ||
+        p.suburb ||
+        ""
+      ).toString();
+      const detectedAddress = [p.address_line1, p.address_line2]
+        .filter(Boolean)
+        .join(", ");
+
+      setForm((prev) => {
+        const next = {
+          ...prev,
+          state: detectedState || prev.state,
+          lga: detectedLga || prev.lga,
+          address: detectedAddress || prev.address,
+          lat: latitude,
+          lon: longitude,
+        };
+        saveDraft(next);
+        return next;
+      });
+
+      setOk("Location detected.");
+      setTimeout(() => setOk(""), 2000);
     } catch (e) {
-      setOk("");
-      setError(e?.message || "Upload failed.");
-      return { previewUrl: "", assetId: "" };
+      alert(
+        e?.message?.includes("Only secure origins")
+          ? "Location requires HTTPS. Use your ngrok URL on phone, or localhost on laptop."
+          : "Could not get your location. Please allow location.",
+      );
+    } finally {
+      setLocLoading(false);
     }
   }
 
@@ -208,6 +267,11 @@ export default function ClientSettings() {
 
       const stateUP = (form.state || "").toUpperCase();
       const lgaUP = (form.lga || "").toUpperCase();
+
+      const latClean =
+        form.lat === "" || form.lat === null ? null : Number(form.lat);
+      const lonClean =
+        form.lon === "" || form.lon === null ? null : Number(form.lon);
 
       const payload = {
         fullName: form.displayName?.trim(),
@@ -230,6 +294,16 @@ export default function ClientSettings() {
           photoAssetId: form.photoAssetId || "",
         },
       };
+
+      if (
+        latClean != null &&
+        !Number.isNaN(latClean) &&
+        lonClean != null &&
+        !Number.isNaN(lonClean)
+      ) {
+        payload.lat = latClean;
+        payload.lon = lonClean;
+      }
 
       const res = await api.put("/api/profile/me", payload);
       const updated = res?.data || payload;
@@ -290,37 +364,21 @@ export default function ClientSettings() {
           <section>
             <h2 className="text-lg font-semibold mb-3">Photo</h2>
             <div className="flex items-center gap-3 flex-wrap">
-              <div className="w-14 h-14 rounded-full overflow-hidden border border-zinc-700 bg-zinc-900">
-                {form.photoPreviewUrl ? (
-                  <img
-                    src={form.photoPreviewUrl}
-                    alt="avatar"
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center text-xs text-zinc-500">
-                    No photo
-                  </div>
-                )}
-              </div>
-              <label className="px-3 py-2 rounded-lg border border-zinc-700 text-sm hover:bg-zinc-900 cursor-pointer">
-                Upload
-                <input
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={async (e) => {
-                    const file = e.target.files?.[0];
-                    e.target.value = "";
-                    const out = await uploadImageToR2(file);
-                    if (out.assetId) {
-                      onChangeField("photoAssetId", out.assetId);
-                      if (out.previewUrl)
-                        onChangeField("photoPreviewUrl", out.previewUrl);
-                    }
-                  }}
-                />
-              </label>
+              <MediaUploader
+                api={api}
+                type="image"
+                visibility="private"
+                valueUrl={form.photoPreviewUrl}
+                valueAssetId={form.photoAssetId}
+                label="Upload Photo"
+                onChange={({ previewUrl, assetId }) => {
+                  onChangeField("photoAssetId", assetId || "");
+                  onChangeField("photoPreviewUrl", previewUrl || "");
+                  setOk("Uploaded ✓ (click Save changes)");
+                  setTimeout(() => setOk(""), 1500);
+                }}
+              />
+
               {(form.photoPreviewUrl || form.photoAssetId) && (
                 <button
                   type="button"
@@ -404,6 +462,35 @@ export default function ClientSettings() {
                   onChange={(e) => onChangeField("address", e.target.value)}
                 />
               </Field>
+
+              <Field label="Latitude">
+                <input
+                  className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2"
+                  value={form.lat ?? ""}
+                  onChange={(e) => onChangeField("lat", e.target.value)}
+                  placeholder="6.5244"
+                />
+              </Field>
+
+              <Field label="Longitude">
+                <input
+                  className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2"
+                  value={form.lon ?? ""}
+                  onChange={(e) => onChangeField("lon", e.target.value)}
+                  placeholder="3.3792"
+                />
+              </Field>
+
+              <Field label="Location helper">
+                <button
+                  type="button"
+                  onClick={useMyLocation}
+                  disabled={locLoading}
+                  className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm hover:bg-zinc-900 disabled:opacity-60"
+                >
+                  {locLoading ? "Detecting…" : "Use my location"}
+                </button>
+              </Field>
             </div>
           </section>
 
@@ -416,8 +503,19 @@ export default function ClientSettings() {
                 checked={form.agreeTerms}
                 onChange={(e) => onChangeField("agreeTerms", e.target.checked)}
               />
-              I agree to the Terms &amp; Conditions
+              <span>
+                I agree to the{" "}
+                <Link
+                  to="/legal#terms"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="underline"
+                >
+                  Terms &amp; Conditions
+                </Link>
+              </span>
             </label>
+
             <label className="flex items-center gap-2 text-sm text-zinc-200 mt-2">
               <input
                 type="checkbox"
@@ -426,7 +524,17 @@ export default function ClientSettings() {
                   onChangeField("agreePrivacy", e.target.checked)
                 }
               />
-              I agree to the Privacy Policy
+              <span>
+                I agree to the{" "}
+                <Link
+                  to="/legal#privacy"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="underline"
+                >
+                  Privacy Policy
+                </Link>
+              </span>
             </label>
             <p className="text-xs text-zinc-500 mt-1">
               Old accounts can use this page to accept current terms.

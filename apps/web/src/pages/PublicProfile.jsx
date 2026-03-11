@@ -8,6 +8,7 @@ import NotificationsMenu from "../components/NotificationsMenu.jsx";
 import SideMenu from "../components/SideMenu.jsx";
 import FeedComposer from "../components/FeedComposer.jsx";
 import { useMe } from "../context/MeContext.jsx";
+import DisplayName from "../components/DisplayName.jsx";
 
 function normalizeProfile(data) {
   if (!data) return null;
@@ -28,6 +29,7 @@ function normalizeProfile(data) {
       coverUrl: data.coverUrl || "",
       bio: data.bio || data.description || "",
       isPro: Boolean(data.proId || data.proOwnerUid || data.services),
+      verified: Boolean(data.verified),
       services: data.services || [],
       gallery: data.gallery || [],
       badges: data.badges || [],
@@ -619,8 +621,8 @@ export default function PublicProfile() {
           list = Array.isArray(res.data)
             ? res.data
             : Array.isArray(res.data?.items)
-              ? res.data.items
-              : [];
+            ? res.data.items
+            : [];
         } catch (err) {
           console.warn(
             "[PublicProfile] /api/posts failed, will try /posts/author/:uid",
@@ -637,8 +639,8 @@ export default function PublicProfile() {
             const list2 = Array.isArray(res2.data)
               ? res2.data
               : Array.isArray(res2.data?.items)
-                ? res2.data.items
-                : [];
+              ? res2.data.items
+              : [];
             if (list2.length) list = list2;
           } catch (err2) {
             console.warn(
@@ -746,11 +748,12 @@ export default function PublicProfile() {
     typeof profile.ratingAverage === "number"
       ? Number(profile.ratingAverage)
       : typeof profile.metrics?.avgRating === "number"
-        ? Number(profile.metrics.avgRating)
-        : 0;
+      ? Number(profile.metrics.avgRating)
+      : 0;
 
-  const badges = Array.isArray(profile.badges) ? profile.badges : [];
-  const gallery = Array.isArray(profile.gallery) ? profile.gallery : [];
+  const badges = Array.isArray(profile.badges)
+    ? profile.badges.filter((b) => String(b || "").toLowerCase() !== "verified")
+    : [];
 
   const isAdmin = !!meIsAdmin || Boolean(currentUser?.isAdmin);
 
@@ -791,7 +794,13 @@ export default function PublicProfile() {
           {/* name + meta */}
           <div className="flex-1 pb-3">
             <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-2xl font-bold">{name}</h1>
+              <h1 className="text-2xl font-bold">
+                <DisplayName
+                  name={name}
+                  verified={!!profile.verified}
+                  badgeClassName="w-5 h-5"
+                />
+              </h1>
               {badges.map((b, i) => (
                 <span
                   key={i}

@@ -1,5 +1,6 @@
 // apps/web/src/components/Inbox.jsx
 import React from "react";
+import DisplayName from "./DisplayName.jsx";
 
 /**
  * Props:
@@ -38,7 +39,11 @@ export function ThreadItem({ t, onOpen, formatTime }) {
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <span className="text-sm font-semibold truncate max-w-[160px]">
-              {t.displayName}
+              <DisplayName
+                name={t.displayName}
+                verified={!!t.verified}
+                badgeClassName="w-4 h-4"
+              />
             </span>
             {t.unread > 0 && (
               <span className="inline-flex items-center justify-center text-[10px] font-semibold rounded-full min-w-[18px] h-[18px] px-1 bg-gold text-black">

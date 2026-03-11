@@ -1,5 +1,6 @@
 // apps/web/src/components/BarberCard.jsx
 import { Link } from "react-router-dom";
+import DisplayName from "./DisplayName.jsx";
 
 /**
  * Branding is sourced from .env for flexibility.
@@ -102,12 +103,12 @@ export default function BarberCard({ barber = {}, onOpen, onBook }) {
     typeof barber.startingPrice === "number" && barber.startingPrice >= 0
       ? barber.startingPrice
       : services.length
-        ? Math.min(
-            ...services
-              .map((s) => Number(s.price) || 0)
-              .filter((n) => Number.isFinite(n)),
-          )
-        : 0;
+      ? Math.min(
+          ...services
+            .map((s) => Number(s.price) || 0)
+            .filter((n) => Number.isFinite(n)),
+        )
+      : 0;
 
   const bio = String(barber.bio || barber.description || "").trim();
   const photoUrl = barber.photoUrl || barber.avatarUrl || "";
@@ -134,8 +135,8 @@ export default function BarberCard({ barber = {}, onOpen, onBook }) {
     hasRealReviews && Number.isFinite(Number(barber?.ratingStars?.full))
       ? Math.max(0, Math.min(5, Number(barber.ratingStars.full)))
       : hasRealReviews
-        ? Math.max(0, Math.min(5, Math.round(rating)))
-        : 0;
+      ? Math.max(0, Math.min(5, Math.round(rating)))
+      : 0;
 
   const emptyStars = 5 - fullStars;
 
@@ -197,7 +198,11 @@ export default function BarberCard({ barber = {}, onOpen, onBook }) {
         <div className="min-w-0 flex-1">
           <div className="leading-tight flex items-center gap-2">
             <div className="text-[20px] font-extrabold tracking-wide truncate">
-              {name}
+              <DisplayName
+                name={name}
+                verified={verified}
+                badgeClassName="w-5 h-5"
+              />
             </div>
             {/* small "From ₦..." if we have it */}
             {startingPrice > 0 && (
@@ -248,15 +253,6 @@ export default function BarberCard({ barber = {}, onOpen, onBook }) {
                 <span className="h-3 w-px bg-zinc-700" />
                 <span className="rounded-full px-2 py-0.5 bg-zinc-800 text-zinc-200">
                   {availability}
-                </span>
-              </>
-            )}
-
-            {verified && (
-              <>
-                <span className="h-3 w-px bg-zinc-700" />
-                <span className="rounded-full bg-emerald-900/40 px-2 py-0.5 text-emerald-300">
-                  ✓ Verified
                 </span>
               </>
             )}

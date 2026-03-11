@@ -91,11 +91,14 @@ export default function AwsLiveness() {
       // ✅ NEW: tell the backend to persist livenessVerifiedAt = now
       await api.post("/api/aws-liveness/verify", { sessionId });
       // ✅ NEW: log this as a risk/audit event (useful until FaceMatch is added)
+
+      const cont = readAfterLivenessOnce();
+
       try {
         await api.post("/api/risk/liveness", {
           provider: "aws",
           sessionId,
-          reason: "payout", // or "onboarding" depending on caller page
+          reason: cont?.reason || "onboarding",
           context: { page: "aws-liveness", back },
           metrics: {
             source: "aws",
@@ -110,9 +113,7 @@ export default function AwsLiveness() {
       console.error("[AwsLiveness] verify POST failed:", e);
       // even if this fails, the backup (remember flag) on next save will work
     } finally {
-      const cont = readAfterLivenessOnce();
       if (cont?.next) {
-        // keep payload for the destination page to consume once
         nav(cont.next);
       } else {
         nav(back);

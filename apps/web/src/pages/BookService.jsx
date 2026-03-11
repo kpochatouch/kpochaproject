@@ -6,6 +6,7 @@ import { useParams, useLocation, useNavigate, Link } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { getAuth, onAuthStateChanged } from "firebase/auth";
+import DisplayName from "../components/DisplayName.jsx";
 
 // helper: get firebase id token, waiting briefly if auth not yet ready
 async function getIdTokenOrNull(timeoutMs = 5000) {
@@ -117,7 +118,7 @@ export default function BookService() {
           // client profile may be absent for some users — that's okay
           console.info(
             "[book] no client profile (ok)",
-            innerErr?.response?.data || innerErr?.message || innerErr
+            innerErr?.response?.data || innerErr?.message || innerErr,
           );
         }
 
@@ -142,13 +143,13 @@ export default function BookService() {
               }
             },
             () => {},
-            { enableHighAccuracy: true, timeout: 10000 }
+            { enableHighAccuracy: true, timeout: 10000 },
           );
         }
       } catch (err) {
         console.error(
           "[book] protected fetch error:",
-          err?.response?.data || err?.message || err
+          err?.response?.data || err?.message || err,
         );
         if (alive) setErr("Could not load booking.");
       }
@@ -211,9 +212,17 @@ export default function BookService() {
       ? Number(
           typeof barber.services[0] === "string"
             ? 0
-            : barber.services[0]?.price || 0
+            : barber.services[0]?.price || 0,
         )
       : 0;
+
+  const barberVerified = Boolean(
+    barber?.verified ||
+      (Array.isArray(barber?.badges) &&
+        barber.badges.some(
+          (b) => String(b || "").toLowerCase() === "verified",
+        )),
+  );
 
   async function handleBook() {
     setErr("");
@@ -234,7 +243,7 @@ export default function BookService() {
 
     if (!client?.fullName || !client?.phone) {
       setErr(
-        "Update your client profile (name + phone + address) before booking."
+        "Update your client profile (name + phone + address) before booking.",
       );
       return;
     }
@@ -311,11 +320,11 @@ export default function BookService() {
           if (!avail?.ok) {
             if (avail?.reason === "NO_PRO_AVAILABLE") {
               setErr(
-                "No professional is currently available around this location."
+                "No professional is currently available around this location.",
               );
             } else {
               setErr(
-                "Could not confirm availability. Please try again in a moment."
+                "Could not confirm availability. Please try again in a moment.",
               );
             }
             return; // stop here, do not create booking
@@ -326,7 +335,7 @@ export default function BookService() {
         } catch (e) {
           console.error(
             "[availability] check failed:",
-            e?.response?.data || e?.message || e
+            e?.response?.data || e?.message || e,
           );
           // Fail-soft: you can either block or allow booking when availability fails.
           // I'll allow booking but you can choose to block if you prefer.
@@ -367,9 +376,12 @@ export default function BookService() {
       <h1 className="text-2xl font-semibold mb-2">Confirm &amp; Pay</h1>
       <p className="text-zinc-400 mb-6">
         You&apos;re booking{" "}
-        <span className="text-gold font-medium">
-          {barber?.name || "Professional"}
-        </span>
+        <DisplayName
+          name={barber?.name || "Professional"}
+          verified={barberVerified}
+          className="text-gold font-medium"
+          badgeClassName="w-4 h-4"
+        />
       </p>
 
       {err && (

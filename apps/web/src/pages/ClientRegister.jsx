@@ -1,6 +1,6 @@
 // apps/web/src/pages/ClientRegister.jsx
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   api,
   getClientProfile,
@@ -9,13 +9,42 @@ import {
 } from "../lib/api";
 import NgGeoPicker from "../components/NgGeoPicker.jsx";
 import MediaUploader from "../components/MediaUploader.jsx";
+import FaceEnrollModal from "../components/FaceEnrollModal.jsx";
 import { getSignedMediaUrl } from "../lib/r2Upload";
+
+/* ---------- Client face-gate pipeline keys ---------- */
+const CLIENT_REGISTER_PENDING_KEY = "kpocha:clientRegisterPending";
+const AFTER_LIVENESS_KEY = "kpocha:afterLiveness";
+const CLIENT_REGISTER_ENROLLED_ASSET_KEY =
+  "kpocha:clientRegisterEnrolledAssetId";
+
+function lsSet(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {}
+}
+function lsGet(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+function lsDel(key) {
+  try {
+    localStorage.removeItem(key);
+  } catch {}
+}
 
 /* ======================= Client Register Page ======================= */
 export default function ClientRegister() {
   const nav = useNavigate();
+  const [params] = useSearchParams();
 
   const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [pipelineStarted, setPipelineStarted] = useState(false);
   const [err, setErr] = useState("");
   const [ok, setOk] = useState("");
 
@@ -30,11 +59,25 @@ export default function ClientRegister() {
   const [photoAssetId, setPhotoAssetId] = useState("");
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState("");
 
-  // face verification (AWS liveness)
-  const [verification, setVerification] = useState({
-    faceVerificationVideoUrl: "",
-    livenessMetrics: {},
+  // client face gate (backend truth)
+  const [faceGate, setFaceGate] = useState({
+    enrolledAssetId: "",
+    enrolledAt: null,
+    lastVerifiedAt: null,
+    lastCheckedAt: null,
+    lastSimilarity: 0,
+    lastSessionId: "",
+    lastReason: "",
+    lastStatus: "",
+    livenessVerifiedAt: null,
   });
+
+  // private selfie for face enroll
+  const [enrollSelfie, setEnrollSelfie] = useState({
+    assetId: "",
+    previewUrl: "",
+  });
+  const [needEnrollSelfie, setNeedEnrollSelfie] = useState(false);
 
   // agreements
   const [agreements, setAgreements] = useState({
@@ -52,73 +95,138 @@ export default function ClientRegister() {
   const [nearby, setNearby] = useState([]);
 
   const okTimerRef = useRef(null);
+
   function flashOK(msg) {
     setOk(msg);
     clearTimeout(okTimerRef.current);
     okTimerRef.current = setTimeout(() => setOk(""), 2200);
   }
 
-  /* ---------- Face verification storage (AWS liveness) ---------- */
-  function checkVerificationStorage() {
-    try {
-      const metricsRaw = localStorage.getItem("kpocha:livenessMetrics");
-      const videoUrl = localStorage.getItem("kpocha:livenessVideoUrl") || "";
+  function applyProfileData(data) {
+    if (!data) return;
 
-      const hasMetrics = !!metricsRaw;
-      const hasVideo = !!videoUrl;
+    setFullName(data.fullName || "");
+    setPhone(data.phone || "");
+    setStateVal(data.state || "");
+    setLga((data.lga || "").toString().toUpperCase());
+    setAddress(data.address || "");
+    setPhotoAssetId(data.photoAssetId || data?.identity?.photoAssetId || "");
 
-      if (hasMetrics || hasVideo) {
-        setVerification((v) => ({
-          ...v,
-          livenessMetrics: metricsRaw
-            ? JSON.parse(metricsRaw)
-            : v.livenessMetrics || {},
-          faceVerificationVideoUrl:
-            videoUrl || v.faceVerificationVideoUrl || "",
-        }));
+    if (data.lat != null) setLat(data.lat);
+    if (data.lon != null) setLon(data.lon);
 
-        // one-time consume
-        localStorage.removeItem("kpocha:livenessMetrics");
-        localStorage.removeItem("kpocha:livenessVideoUrl");
-      }
-    } catch {}
+    const acceptedTerms = !!data.acceptedTerms || !!data?.agreements?.terms;
+    const acceptedPrivacy =
+      !!data.acceptedPrivacy || !!data?.agreements?.privacy;
+
+    if (acceptedTerms || acceptedPrivacy) {
+      setAgreements({
+        terms: acceptedTerms,
+        privacy: acceptedPrivacy,
+      });
+    }
+
+    setFaceGate({
+      enrolledAssetId: data?.face?.enrolledAssetId || "",
+      enrolledAt: data?.face?.enrolledAt || null,
+      lastVerifiedAt: data?.face?.lastVerifiedAt || null,
+      lastCheckedAt: data?.face?.lastCheckedAt || null,
+      lastSimilarity: Number(data?.face?.lastSimilarity || 0),
+      lastSessionId:
+        data?.face?.lastSessionId || data?.liveness?.lastSessionId || "",
+      lastReason: data?.face?.lastReason || "",
+      lastStatus: data?.face?.lastStatus || "",
+      livenessVerifiedAt:
+        data?.livenessVerifiedAt || data?.liveness?.lastVerifiedAt || null,
+    });
   }
 
-  // ===== Prefill =====
+  async function resolvePreviewUrl(assetId, variant = "original") {
+    const id = String(assetId || "").trim();
+    if (!id) return "";
+    try {
+      return await getSignedMediaUrl({ api, assetId: id, variant });
+    } catch {
+      return "";
+    }
+  }
+
+  function buildPayload() {
+    const latClean = lat === "" || lat === null ? null : Number(lat);
+    const lonClean = lon === "" || lon === null ? null : Number(lon);
+
+    const stateUP = (stateVal || "").toString().toUpperCase().trim();
+    const lgaUP = (lga || stateVal || "").toString().toUpperCase().trim();
+
+    const payload = {
+      fullName: fullName?.trim(),
+      phone: phone?.trim(),
+      state: stateUP,
+      lga: lgaUP,
+      address: address?.trim(),
+      photoAssetId,
+      acceptedTerms: !!agreements.terms,
+      acceptedPrivacy: !!agreements.privacy,
+      agreements: {
+        terms: !!agreements.terms,
+        privacy: !!agreements.privacy,
+      },
+      identity: {
+        phone: phone?.trim(),
+        state: stateUP,
+        city: lgaUP,
+        photoAssetId,
+      },
+    };
+
+    if (
+      latClean != null &&
+      !Number.isNaN(latClean) &&
+      lonClean != null &&
+      !Number.isNaN(lonClean)
+    ) {
+      payload.lat = latClean;
+      payload.lon = lonClean;
+    }
+
+    return payload;
+  }
+
+  const canProceedBase = useMemo(() => {
+    return (
+      !!fullName &&
+      !!phone &&
+      (!!stateVal || !!lga) &&
+      !!address &&
+      !!photoAssetId &&
+      agreements.terms &&
+      agreements.privacy
+    );
+  }, [fullName, phone, stateVal, lga, address, photoAssetId, agreements]);
+
+  const isVerified = useMemo(() => {
+    return (
+      !!faceGate.enrolledAssetId &&
+      !!faceGate.livenessVerifiedAt &&
+      faceGate.lastStatus === "match" &&
+      !!faceGate.lastVerifiedAt
+    );
+  }, [faceGate]);
+
   useEffect(() => {
     let alive = true;
+
     (async () => {
       setLoading(true);
       setErr("");
+
       try {
-        await ensureClientProfile(); // ✅ make sure profile exists
+        await ensureClientProfile();
         const data = await getClientProfile().catch(() => null);
         if (!alive) return;
 
         if (data) {
-          setFullName(data.fullName || "");
-          setPhone(data.phone || "");
-          // keep original casing for UI
-          setStateVal(data.state || "");
-          setLga((data.lga || "").toString().toUpperCase());
-          setAddress(data.address || "");
-          setPhotoAssetId(
-            data.photoAssetId || data?.identity?.photoAssetId || "",
-          );
-
-          if (data.lat != null) setLat(data.lat);
-          if (data.lon != null) setLon(data.lon);
-
-          const acceptedTerms =
-            !!data.acceptedTerms || !!data?.agreements?.terms;
-          const acceptedPrivacy =
-            !!data.acceptedPrivacy || !!data?.agreements?.privacy;
-          if (acceptedTerms || acceptedPrivacy) {
-            setAgreements({
-              terms: acceptedTerms,
-              privacy: acceptedPrivacy,
-            });
-          }
+          applyProfileData(data);
         }
       } catch {
         if (alive) setErr("Unable to load your profile.");
@@ -126,6 +234,7 @@ export default function ClientRegister() {
         if (alive) setLoading(false);
       }
     })();
+
     return () => {
       alive = false;
       clearTimeout(okTimerRef.current);
@@ -146,98 +255,142 @@ export default function ClientRegister() {
   }, [photoAssetId]);
 
   useEffect(() => {
-    const onFocus = () => checkVerificationStorage();
-    const onVisibility = () => {
-      if (document.visibilityState === "visible") checkVerificationStorage();
-    };
-    window.addEventListener("focus", onFocus);
-    document.addEventListener("visibilitychange", onVisibility);
+    const auto = params.get("auto");
+    if (auto !== "1") return;
 
-    // also run once on mount
-    checkVerificationStorage();
+    let alive = true;
+
+    (async () => {
+      try {
+        setBusy(true);
+        setErr("");
+        setOk("");
+
+        const pending = lsGet(CLIENT_REGISTER_PENDING_KEY);
+        const enrolledAssetId = String(
+          lsGet(CLIENT_REGISTER_ENROLLED_ASSET_KEY) || "",
+        ).trim();
+
+        if (!pending) {
+          setErr("Could not resume face verification. Please try again.");
+          return;
+        }
+
+        if (!enrolledAssetId) {
+          setErr("Missing enrolled selfie. Please try again.");
+          return;
+        }
+
+        await api.post("/api/face/enroll", { enrolledAssetId });
+        await updateClientProfile(pending);
+
+        const fresh = await getClientProfile().catch(() => null);
+        if (!alive) return;
+
+        if (fresh) {
+          applyProfileData(fresh);
+        }
+
+        lsDel(CLIENT_REGISTER_PENDING_KEY);
+        lsDel(CLIENT_REGISTER_ENROLLED_ASSET_KEY);
+
+        flashOK("Saved!");
+        nav("/browse", { replace: true });
+        setPipelineStarted(false);
+      } catch (e) {
+        if (!alive) return;
+        setErr(
+          e?.response?.data?.message ||
+            e?.response?.data?.error ||
+            "Face verification failed. Please retry.",
+        );
+        setPipelineStarted(false);
+      } finally {
+        if (alive) setBusy(false);
+      }
+    })();
 
     return () => {
-      window.removeEventListener("focus", onFocus);
-      document.removeEventListener("visibilitychange", onVisibility);
+      alive = false;
     };
-  }, []);
+  }, [params, nav]);
 
-  async function resolvePreviewUrl(assetId, variant = "original") {
-    const id = String(assetId || "").trim();
-    if (!id) return "";
+  async function startClientFaceGate() {
+    if (busy || pipelineStarted) return;
+
+    if (!canProceedBase) {
+      setErr("Please complete all required fields.");
+      return;
+    }
+
+    const enrolledAssetId = String(
+      faceGate.enrolledAssetId || enrollSelfie.assetId || "",
+    ).trim();
+
+    if (!enrolledAssetId) {
+      setErr("");
+      setNeedEnrollSelfie(true);
+      return;
+    }
+
+    setPipelineStarted(true);
+    setBusy(true);
+    setErr("");
+
     try {
-      return await getSignedMediaUrl({ api, assetId: id, variant });
-    } catch {
-      return "";
+      const payload = buildPayload();
+
+      lsSet(CLIENT_REGISTER_PENDING_KEY, payload);
+      lsSet(CLIENT_REGISTER_ENROLLED_ASSET_KEY, enrolledAssetId);
+      lsSet(AFTER_LIVENESS_KEY, {
+        next: "/client/register?auto=1",
+        reason: "client_onboarding",
+      });
+
+      nav(`/aws-liveness?back=${encodeURIComponent("/client/register")}`);
+    } catch (e) {
+      setErr("Could not continue. Please try again.");
+      setPipelineStarted(false);
+    } finally {
+      setBusy(false);
     }
   }
 
-  // ===== Can save? =====
-  const canSave = useMemo(() => {
-    const base = !!fullName && !!phone && (!!stateVal || !!lga) && !!address;
-    const agreed = agreements.terms && agreements.privacy;
-    return base && agreed;
-  }, [fullName, phone, stateVal, lga, address, agreements]);
-
-  // ===== Save =====
   async function save() {
+    if (busy) return;
+
     try {
       setErr("");
 
-      // sanitize lat/lon — don't send empty strings
-      const latClean = lat === "" || lat === null ? null : Number(lat);
-      const lonClean = lon === "" || lon === null ? null : Number(lon);
-
-      // we send uppercase to the backend to match Pro/Profile/Browse
-      const stateUP = (stateVal || "").toString().toUpperCase().trim();
-      const lgaUP = (lga || stateVal || "").toString().toUpperCase().trim();
-
-      const payload = {
-        fullName: fullName?.trim(),
-        phone: phone?.trim(),
-        state: stateUP,
-        lga: lgaUP,
-        address: address?.trim(),
-        photoAssetId,
-        acceptedTerms: !!agreements.terms,
-        acceptedPrivacy: !!agreements.privacy,
-        agreements: {
-          terms: !!agreements.terms,
-          privacy: !!agreements.privacy,
-        },
-
-        ...(verification?.faceVerificationVideoUrl ||
-        Object.keys(verification?.livenessMetrics || {}).length > 0
-          ? { verification }
-          : {}),
-
-        identity: {
-          phone: phone?.trim(),
-          state: stateUP,
-          city: lgaUP,
-          photoAssetId,
-        },
-      };
-
-      if (
-        latClean != null &&
-        !Number.isNaN(latClean) &&
-        lonClean != null &&
-        !Number.isNaN(lonClean)
-      ) {
-        payload.lat = latClean;
-        payload.lon = lonClean;
+      if (!canProceedBase) {
+        setErr("Please complete all required fields.");
+        return;
       }
 
+      if (!isVerified) {
+        await startClientFaceGate();
+        return;
+      }
+
+      setBusy(true);
+
+      const payload = buildPayload();
       await updateClientProfile(payload);
+
+      const fresh = await getClientProfile().catch(() => null);
+      if (fresh) {
+        applyProfileData(fresh);
+      }
+
       flashOK("Saved!");
       nav("/browse", { replace: true });
     } catch (e) {
       setErr(e?.response?.data?.error || "Failed to save profile.");
+    } finally {
+      setBusy(false);
     }
   }
 
-  // ===== Use my location =====
   async function useMyLocation() {
     try {
       setLocLoading(true);
@@ -265,7 +418,6 @@ export default function ClientRegister() {
         .filter(Boolean)
         .join(", ");
 
-      // we keep UI value as whatever we detect (usually uppercase from rev)
       setStateVal((s) => detectedState || s);
       setLga((l) => detectedLga || l);
       setAddress((a) => detectedAddress || a);
@@ -284,7 +436,6 @@ export default function ClientRegister() {
     }
   }
 
-  // ===== Nearby =====
   async function loadNearby() {
     if (lat == null || lon == null) {
       alert(
@@ -323,6 +474,30 @@ export default function ClientRegister() {
         </div>
       )}
 
+      <FaceEnrollModal
+        open={needEnrollSelfie}
+        api={api}
+        busy={busy}
+        title="Take a quick selfie"
+        subtitle="Center your face clearly and continue."
+        selfie={enrollSelfie}
+        onChangeSelfie={({ previewUrl, assetId }) =>
+          setEnrollSelfie((prev) => {
+            try {
+              if (prev.previewUrl?.startsWith("blob:")) {
+                URL.revokeObjectURL(prev.previewUrl);
+              }
+            } catch {}
+            return { assetId: assetId || "", previewUrl: previewUrl || "" };
+          })
+        }
+        onContinue={async () => {
+          setNeedEnrollSelfie(false);
+          await startClientFaceGate();
+        }}
+        onCancel={() => setNeedEnrollSelfie(false)}
+      />
+
       {loading ? (
         <div className="text-zinc-200">Loading…</div>
       ) : (
@@ -333,34 +508,22 @@ export default function ClientRegister() {
               <MediaUploader
                 api={api}
                 type="image"
-                visibility="public"
+                visibility="private"
                 valueUrl={photoPreviewUrl}
                 valueAssetId={photoAssetId}
                 onChange={({ previewUrl, assetId }) => {
                   setPhotoPreviewUrl(previewUrl || "");
                   setPhotoAssetId(assetId || "");
-                  flashOK("Uploaded ✓ (click Save changes)");
+                  flashOK("Uploaded ✓");
                 }}
                 label="Upload Photo"
               />
 
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => nav("/aws-liveness?back=/client/register")}
-                  className="px-3 py-1.5 rounded-lg border border-yellow-500/80 text-yellow-200 text-sm hover:bg-yellow-500/10"
-                >
-                  Start Face Verification
-                </button>
-
-                {verification.faceVerificationVideoUrl ? (
-                  <span className="text-xs text-emerald-400">Verified ✓</span>
-                ) : (
-                  <span className="text-xs text-zinc-500">
-                    Not verified yet
-                  </span>
-                )}
-              </div>
+              {isVerified ? (
+                <span className="text-xs text-emerald-400 font-medium">
+                  Verified ✓
+                </span>
+              ) : null}
             </div>
           </Section>
 
@@ -512,13 +675,12 @@ export default function ClientRegister() {
             )}
           </Section>
 
-          {/* Save */}
           <button
-            disabled={!canSave}
+            disabled={busy || !canProceedBase}
             onClick={save}
             className="w-full bg-yellow-400 text-black font-semibold rounded-lg py-2 disabled:opacity-60"
           >
-            Save &amp; Continue
+            {busy ? "Working..." : "Save & Continue"}
           </button>
         </div>
       )}
@@ -526,7 +688,7 @@ export default function ClientRegister() {
   );
 }
 
-/* ---------- Small UI (copied style from BecomePro) ---------- */
+/* ---------- Small UI ---------- */
 function Section({ title, children }) {
   return (
     <section className="rounded-lg border border-yellow-500/40 p-4 bg-black">

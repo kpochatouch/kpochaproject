@@ -95,6 +95,20 @@ function filterProPublic(p) {
   };
 }
 
+function computeIdentityVerified(profileDoc = null, rawProfile = null) {
+  const face = rawProfile?.face || profileDoc?.face || {};
+  const liveness = rawProfile?.liveness || profileDoc?.liveness || {};
+
+  return Boolean(
+    face?.enrolledAssetId &&
+      (rawProfile?.livenessVerifiedAt ||
+        profileDoc?.livenessVerifiedAt ||
+        liveness?.lastVerifiedAt) &&
+      face?.lastStatus === "match" &&
+      face?.lastVerifiedAt,
+  );
+}
+
 function buildProfilesSetFromPayload(payload = {}) {
   const set = {};
 
@@ -275,6 +289,23 @@ async function handleGetClientMe(req, res) {
       .lean()
       .catch(() => null);
 
+    let rawProfile = null;
+    try {
+      const col = mongoose.connection.db.collection("profiles");
+      rawProfile = await col.findOne(
+        { uid: req.user.uid },
+        {
+          projection: {
+            face: 1,
+            liveness: 1,
+            livenessVerifiedAt: 1,
+          },
+        },
+      );
+    } catch (e) {
+      console.warn("[profile:get/me raw] skipped:", e?.message || e);
+    }
+
     const masked = maskClientProfileForClientView(p) || {};
 
     const [avatarResolved] = await expandMediaForClient([
@@ -284,8 +315,10 @@ async function handleGetClientMe(req, res) {
     return res.json({
       ...masked,
       email: req.user.email || "",
-      // expose liveness to frontend so it can decide to reopen AWS
-      livenessVerifiedAt: p?.livenessVerifiedAt || null,
+      livenessVerifiedAt:
+        rawProfile?.livenessVerifiedAt || p?.livenessVerifiedAt || null,
+      liveness: rawProfile?.liveness || null,
+      face: rawProfile?.face || null,
       photoUrlResolved: avatarResolved?.url || "",
       pro: pro
         ? {
@@ -583,12 +616,42 @@ async function handlePutClientMe(req, res) {
       );
     }
 
+    let rawProfile = null;
+    try {
+      const col = mongoose.connection.db.collection("profiles");
+      rawProfile = await col.findOne(
+        { uid },
+        {
+          projection: {
+            face: 1,
+            liveness: 1,
+            livenessVerifiedAt: 1,
+          },
+        },
+      );
+    } catch (e) {
+      console.warn("[profile:put/me raw] skipped:", e?.message || e);
+    }
+
+    const verified = computeIdentityVerified(updated, rawProfile);
+
+    try {
+      await Pro.updateOne({ ownerUid: uid }, { $set: { verified } }).catch(
+        () => null,
+      );
+    } catch (e) {
+      console.warn("[profile->pro verified sync] skipped:", e?.message || e);
+    }
+
     const masked = maskClientProfileForClientView(updated) || {};
     return res.json({
       ...masked,
       email: req.user.email || "",
-      // return the latest known stamp
-      livenessVerifiedAt: existing.livenessVerifiedAt || null,
+      livenessVerifiedAt:
+        rawProfile?.livenessVerifiedAt || existing?.livenessVerifiedAt || null,
+      liveness: rawProfile?.liveness || null,
+      face: rawProfile?.face || null,
+      verified,
     });
   } catch (e) {
     console.warn("[profile:put/me] error", e?.message || e);
@@ -704,6 +767,25 @@ async function handleGetPublicProfile(req, res) {
         .catch(() => null));
     const publicFromPro = proDoc ? proToBarber(proDoc) : null;
 
+    let rawProfile = null;
+    try {
+      const col = mongoose.connection.db.collection("profiles");
+      rawProfile = await col.findOne(
+        { uid: ownerUid },
+        {
+          projection: {
+            face: 1,
+            liveness: 1,
+            livenessVerifiedAt: 1,
+          },
+        },
+      );
+    } catch (e) {
+      console.warn("[public/profile raw] skipped:", e?.message || e);
+    }
+
+    const verified = computeIdentityVerified(client, rawProfile);
+
     const [clientAvatarResolved] = await expandMediaForClient([
       { assetId: client?.photoAssetId, url: client?.photoUrl, type: "image" },
     ]);
@@ -728,6 +810,7 @@ async function handleGetPublicProfile(req, res) {
         (client && client.coverUrl) || (proDoc && proDoc.coverUrl) || "",
       bio: (client && client.bio) || (proDoc && proDoc.bio) || "",
       isPro: Boolean(proDoc),
+      verified,
       services: (publicFromPro && publicFromPro.services) || [],
       gallery:
         (publicFromPro && publicFromPro.gallery) ||
@@ -879,6 +962,25 @@ router.get("/profile/public-by-uid/:uid", async (req, res) => {
 
     const ownerUid = client.uid;
 
+    let rawProfile = null;
+    try {
+      const col = mongoose.connection.db.collection("profiles");
+      rawProfile = await col.findOne(
+        { uid: ownerUid },
+        {
+          projection: {
+            face: 1,
+            liveness: 1,
+            livenessVerifiedAt: 1,
+          },
+        },
+      );
+    } catch (e) {
+      console.warn("[public/profile-by-uid raw] skipped:", e?.message || e);
+    }
+
+    const verified = computeIdentityVerified(client, rawProfile);
+
     // 2) pro doc if exists
     const pro = await Pro.findOne({ ownerUid })
       .lean()
@@ -902,6 +1004,7 @@ router.get("/profile/public-by-uid/:uid", async (req, res) => {
       coverUrl: client.coverUrl || pro?.coverUrl || "",
       bio: client.bio || pro?.bio || "" || "",
       isPro: Boolean(pro),
+      verified,
       services: (publicFromPro && publicFromPro.services) || [],
       gallery: (publicFromPro && publicFromPro.gallery) || client.gallery || [],
       contactPublic: (pro && pro.contactPublic) || {},

@@ -1,11 +1,18 @@
 // apps/web/src/pages/BookingChat.jsx
 import { useParams, useLocation, useNavigate, Link } from "react-router-dom";
 import { useEffect, useMemo, useState } from "react";
-import { api, connectSocket, initiateCall, completeBooking } from "../lib/api";
+import {
+  api,
+  connectSocket,
+  initiateCall,
+  completeBooking,
+  getPublicProfileByUid,
+} from "../lib/api";
 import { useMe } from "../context/MeContext.jsx";
 import ChatPane from "../components/ChatPane";
 import CallSheet from "../components/CallSheet";
 import MobileBackButton from "../components/MobileBackButton";
+import DisplayName from "../components/DisplayName.jsx";
 
 function formatMoney(kobo = 0) {
   const naira = (Number(kobo) || 0) / 100;
@@ -55,6 +62,7 @@ export default function BookingChat() {
   const [loadingBooking, setLoadingBooking] = useState(true);
 
   const [busy, setBusy] = useState(false);
+  const [peerProfile, setPeerProfile] = useState(null);
 
   const isClient = useMemo(() => {
     if (!booking || !myUid) return false;
@@ -140,6 +148,15 @@ export default function BookingChat() {
     [booking],
   );
 
+  const peerName =
+    peerProfile?.displayName ||
+    (isClient
+      ? booking?.pro?.name || booking?.proName || "Professional"
+      : booking?.clientName || booking?.client?.displayName || "Client");
+
+  const peerAvatar = peerProfile?.avatarUrl || "";
+  const peerVerified = Boolean(peerProfile?.verified);
+
   // Determine the other participant (client ↔ professional)
   const peerUid = useMemo(() => {
     if (!booking || !myUid) return null;
@@ -171,6 +188,38 @@ export default function BookingChat() {
 
     return null;
   }, [booking, myUid]);
+
+  // ---- Load peer public profile (name + avatar + verified) ----
+  useEffect(() => {
+    if (!peerUid) return;
+
+    let alive = true;
+
+    (async () => {
+      try {
+        const data = await getPublicProfileByUid(peerUid);
+        if (!alive) return;
+
+        const p = data?.profile || data;
+
+        if (p) {
+          setPeerProfile({
+            displayName: p.displayName || p.fullName || p.username || "",
+            avatarUrl: p.avatarUrl || p.photoUrl || "",
+            verified: !!p.verified,
+          });
+        } else {
+          setPeerProfile(null);
+        }
+      } catch {
+        if (alive) setPeerProfile(null);
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [peerUid]);
 
   // ---- Socket connection (shared with chat + call status) ----
   const socket = useMemo(() => {
@@ -415,7 +464,13 @@ export default function BookingChat() {
           </Link>
 
           <div>
-            <h1 className="text-lg font-semibold">Booking Chat</h1>
+            <h1 className="text-lg font-semibold">
+              <DisplayName
+                name={peerName}
+                verified={peerVerified}
+                badgeClassName="w-4 h-4"
+              />
+            </h1>
             <p className="text-xs text-zinc-500">
               Chat and voice call for this booking.
             </p>
@@ -509,9 +564,8 @@ export default function BookingChat() {
         room={room}
         meUid={myUid}
         myLabel={myLabel}
-        // booking chat is usually between exactly two people,
-        // but we don’t have the other profile wired here yet.
         peerUid={peerUid || null}
+        peerProfile={peerProfile}
         initialMessages={[]}
       />
 
@@ -522,10 +576,8 @@ export default function BookingChat() {
         callId={callState.callId}
         callType={callState.callType}
         me={myLabel}
-        // we don’t know a nice peerName/avatar from booking here yet,
-        // so we leave them empty and let CallSheet fall back.
-        peerName=""
-        peerAvatar=""
+        peerName={peerName}
+        peerAvatar={peerAvatar}
         chatRoom={room}
         open={callState.open}
         onClose={() =>

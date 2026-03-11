@@ -36,6 +36,7 @@ import {
 } from "../lib/api";
 import PaymentMethodPicker from "../components/PaymentMethodPicker.jsx";
 import ClientWalletLinkButton from "../components/ClientWalletLinkButton.jsx";
+import DisplayName from "../components/DisplayName.jsx";
 
 /* -------- shared helpers -------- */
 function formatMoney(kobo = 0) {
@@ -230,6 +231,21 @@ export default function BookingDetails() {
       booking?.client?.name ||
       booking?.clientProfile?.fullName ||
       "",
+    [booking],
+  );
+
+  const clientVerified = useMemo(
+    () =>
+      Boolean(
+        booking?.clientVerified ||
+          booking?.client?.verified ||
+          booking?.clientProfile?.verified,
+      ),
+    [booking],
+  );
+
+  const proVerified = useMemo(
+    () => Boolean(booking?.proVerified || booking?.pro?.verified),
     [booking],
   );
 
@@ -869,12 +885,22 @@ export default function BookingDetails() {
             </div>
             {clientDisplayName && (
               <div className="text-xs text-zinc-400 mt-1">
-                Client: {clientDisplayName}
+                Client:{" "}
+                <DisplayName
+                  name={clientDisplayName}
+                  verified={clientVerified}
+                  badgeClassName="w-3.5 h-3.5"
+                />
               </div>
             )}
             {booking?.proName && (
               <div className="text-xs text-zinc-400 mt-1">
-                Professional: {booking.proName}
+                Professional:{" "}
+                <DisplayName
+                  name={booking.proName}
+                  verified={proVerified}
+                  badgeClassName="w-3.5 h-3.5"
+                />
               </div>
             )}
             {booking?.addressText ? (
@@ -1027,8 +1053,8 @@ export default function BookingDetails() {
                   {busy
                     ? "Processing…"
                     : payMethod === "wallet"
-                      ? "Pay from Wallet"
-                      : "Pay with Card"}
+                    ? "Pay from Wallet"
+                    : "Pay with Card"}
                 </button>
                 {payMethod === "card" && !paystackReady && (
                   <p className="text-xs text-zinc-500 mt-1">

@@ -15,6 +15,7 @@ export default function Profile() {
   const [proPrivate, setProPrivate] = useState(null);
   // public pro (from /api/barbers/:id) → what cards/public browse see
   const [proPublic, setProPublic] = useState(null);
+  const [lightboxUrl, setLightboxUrl] = useState("");
 
   useEffect(() => {
     let mounted = true;
@@ -39,16 +40,23 @@ export default function Profile() {
 
         // 3) pro data (if user is pro)
         if (meData?.pro?.id || meData?.isPro) {
-          // private pro document
+          let privateProData = null;
+
           try {
             const { data: proData } = await api.get("/api/pros/me");
-            if (mounted) setProPrivate(proData || null);
+            privateProData = proData || null;
+            if (mounted) setProPrivate(privateProData);
           } catch {
             if (mounted) setProPrivate(null);
           }
 
-          // public barber card shape
-          const proId = meData?.pro?.id;
+          const proId =
+            meData?.pro?.id ||
+            privateProData?._id ||
+            privateProData?.id ||
+            privateProData?.proId ||
+            "";
+
           if (proId) {
             try {
               const { data: pubData } = await api.get(`/api/barbers/${proId}`);
@@ -56,6 +64,13 @@ export default function Profile() {
             } catch {
               if (mounted) setProPublic(null);
             }
+          } else {
+            if (mounted) setProPublic(null);
+          }
+        } else {
+          if (mounted) {
+            setProPrivate(null);
+            setProPublic(null);
           }
         }
       } catch {
@@ -70,23 +85,12 @@ export default function Profile() {
     };
   }, []);
 
-  function maskId(id = "") {
-    const s = String(id).trim();
-    if (s.length <= 4) return "****";
-    return `${"*".repeat(Math.max(0, s.length - 4))}${s.slice(-4)}`;
-  }
-
   // unified display name
   const displayName =
     me?.displayName || clientProfile?.fullName || me?.email || "Your Account";
 
-  // unified avatar
-  const avatarUrl =
-    clientProfile?.photoUrlResolved ||
-    clientProfile?.photoUrl || // legacy fallback (old accounts only)
-    me?.photoUrl ||
-    me?.identity?.photoUrl ||
-    "";
+  // unified avatar (resolved by backend only)
+  const avatarUrl = clientProfile?.photoUrlResolved || me?.photoUrl || "";
 
   // unified phone (private to owner)
   const phone =
@@ -113,12 +117,18 @@ export default function Profile() {
   // optional username (for future link sharing) – this is SAFE to show
   const username = clientProfile?.username || me?.username || "";
 
-  const kyc = clientProfile?.kyc || {};
-  const hasKyc = !!kyc.idType || !!kyc.idUrl || !!kyc.selfieWithIdUrl;
+  const face = clientProfile?.face || {};
+  const liveness = clientProfile?.liveness || {};
+
+  const isVerified =
+    !!face?.enrolledAssetId &&
+    !!(clientProfile?.livenessVerifiedAt || liveness?.lastVerifiedAt) &&
+    face?.lastStatus === "match" &&
+    !!face?.lastVerifiedAt;
 
   const idVerifiedLabel = !clientProfile
     ? "—"
-    : hasKyc
+    : isVerified
     ? "Verified"
     : "Not verified";
 
@@ -129,7 +139,11 @@ export default function Profile() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-4">
-          <Avatar url={avatarUrl} seed={me?.email || me?.uid} />
+          <Avatar
+            url={avatarUrl}
+            seed={me?.email || me?.uid}
+            onClick={avatarUrl ? () => setLightboxUrl(avatarUrl) : undefined}
+          />
           <div>
             <h1 className="text-2xl font-semibold">{displayName}</h1>
             <p className="text-zinc-400 text-sm">
@@ -173,7 +187,7 @@ export default function Profile() {
       {!loading && me && (
         <div className="space-y-6">
           {/* Account details (always) */}
-          <Section title="Your Pro Profile">
+          <Section title="Your Account Profile">
             <div className="grid sm:grid-cols-2 gap-4">
               <ReadOnly label="Email" value={me.email || "—"} />
               <ReadOnly label="Phone" value={phone || "—"} />
@@ -219,9 +233,20 @@ export default function Profile() {
                 value={clientProfile?.address || "—"}
               />
 
-              <ReadOnly label="Means of ID" value={kyc?.idType || "—"} />
+              <ReadOnly
+                label="Face Enrolled"
+                value={face?.enrolledAssetId ? "Yes" : "No"}
+              />
 
-              <ReadOnly label="ID Verified" value={idVerifiedLabel} />
+              <ReadOnly
+                label="Last Face Check Status"
+                value={face?.lastStatus || "—"}
+              />
+
+              <ReadOnly
+                label="Face / Liveness Verified"
+                value={idVerifiedLabel}
+              />
             </div>
           </Section>
 
@@ -262,8 +287,8 @@ export default function Profile() {
           {/* What the public sees about your pro profile */}
           {isPro && (
             <Section
-              title="Your Pro Profile (Public View)"
-              hint="This is the safe data shown on cards/browse. Contact details are NOT exposed here."
+              title="Your Professional Public Card"
+              hint="This is the safe data shown on cards/browse. Contact details are not exposed here."
             >
               {proPublic ? (
                 <div className="space-y-3">
@@ -395,6 +420,20 @@ export default function Profile() {
           </Section>
         </div>
       )}
+
+      {lightboxUrl ? (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+          onClick={() => setLightboxUrl("")}
+        >
+          <img
+            src={lightboxUrl}
+            alt="Profile Preview"
+            className="max-w-full max-h-[90vh] rounded-lg border border-zinc-800"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -426,16 +465,20 @@ function ReadOnly({ label, value, mono }) {
   );
 }
 
-function Avatar({ url, seed }) {
+function Avatar({ url, seed, onClick }) {
   if (url) {
     return (
-      <img
-        src={url}
-        alt="Profile"
-        className="w-14 h-14 rounded-full border border-zinc-800 object-cover"
-      />
+      <button
+        type="button"
+        onClick={onClick}
+        className="w-14 h-14 rounded-full border border-zinc-800 overflow-hidden shrink-0"
+        title="Click to expand"
+      >
+        <img src={url} alt="Profile" className="w-full h-full object-cover" />
+      </button>
     );
   }
+
   const initials =
     (seed || "?")
       .split("@")[0]
@@ -443,8 +486,9 @@ function Avatar({ url, seed }) {
       .slice(0, 2)
       .map((s) => s?.[0]?.toUpperCase())
       .join("") || "?";
+
   return (
-    <div className="w-14 h-14 rounded-full border border-zinc-800 bg-zinc-900 flex items-center justify-center text-lg font-semibold">
+    <div className="w-14 h-14 rounded-full border border-zinc-800 bg-zinc-900 flex items-center justify-center text-lg font-semibold shrink-0">
       {initials}
     </div>
   );

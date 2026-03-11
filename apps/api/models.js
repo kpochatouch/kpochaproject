@@ -325,6 +325,7 @@ export function proToBarber(doc) {
     shopName: d?.contactPublic?.shopName || "",
     shopAddress: d?.contactPublic?.shopAddress || "",
     phone: d?.contactPublic?.phone || "",
+    verified: !!d?.verified,
     badges: Array.isArray(d?.badges)
       ? d.badges.map((b) => b.label || b.kind).filter(Boolean)
       : [],

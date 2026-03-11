@@ -14,6 +14,7 @@ import ChatPane from "../components/ChatPane.jsx";
 import CallSheet from "../components/CallSheet.jsx";
 import RouteLoader from "../components/RouteLoader.jsx";
 import MobileBackButton from "../components/MobileBackButton.jsx";
+import DisplayName from "../components/DisplayName.jsx";
 
 function useQuery() {
   const { search } = useLocation();
@@ -187,6 +188,7 @@ export default function Chat() {
           setPeerProfile({
             displayName: p.displayName || p.fullName || p.username || "",
             avatarUrl: p.avatarUrl || p.photoUrl || "",
+            verified: !!p.verified,
           });
         } else {
           setPeerProfile(null);
@@ -413,6 +415,7 @@ export default function Chat() {
 
   const peerName = peerProfile?.displayName || peerUid.slice(0, 6) + "…";
   const peerAvatar = peerProfile?.avatarUrl || "";
+  const peerVerified = Boolean(peerProfile?.verified);
 
   // ------------------ RENDER ------------------ //
 
@@ -437,7 +440,13 @@ export default function Chat() {
               </div>
             )}
             <div>
-              <h1 className="text-lg font-semibold">{peerName}</h1>
+              <h1 className="text-lg font-semibold">
+                <DisplayName
+                  name={peerName}
+                  verified={peerVerified}
+                  badgeClassName="w-4 h-4"
+                />
+              </h1>
               <p className="text-xs text-zinc-500">
                 Social and everyday conversation (not tied to bookings).
               </p>

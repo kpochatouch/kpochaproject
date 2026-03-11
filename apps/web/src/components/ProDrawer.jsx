@@ -1,6 +1,6 @@
 // apps/web/src/components/ProDrawer.jsx
 import { Link } from "react-router-dom";
-
+import DisplayName from "./DisplayName.jsx";
 // Env-based logo
 const APP_LOGO_URL = import.meta.env.VITE_APP_LOGO_URL || "";
 
@@ -68,8 +68,8 @@ export default function ProDrawer({ open, pro, onClose, onBook }) {
     hasRealReviews && Number.isFinite(Number(pro?.ratingStars?.full))
       ? Math.max(0, Math.min(5, Number(pro.ratingStars.full)))
       : hasRealReviews
-        ? Math.max(0, Math.min(5, Math.round(rating)))
-        : 0;
+      ? Math.max(0, Math.min(5, Math.round(rating)))
+      : 0;
 
   const emptyStars = 5 - fullStars;
 
@@ -90,13 +90,12 @@ export default function ProDrawer({ open, pro, onClose, onBook }) {
           <div>
             <div className="flex items-center gap-2">
               <h3 className="text-xl font-semibold">
-                {pro.name || "Professional"}
+                <DisplayName
+                  name={pro.name || "Professional"}
+                  verified={verified}
+                  badgeClassName="w-5 h-5"
+                />
               </h3>
-              {verified && (
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-900/40 text-emerald-300 border border-emerald-800">
-                  Verified
-                </span>
-              )}
             </div>
             <div className="text-sm text-zinc-400 flex items-center gap-1">
               {pro.lga || "—"}
@@ -218,21 +217,26 @@ export default function ProDrawer({ open, pro, onClose, onBook }) {
             )}
           </section>
 
-          {Array.isArray(pro.badges) && pro.badges.length > 0 && (
-            <section>
-              <h4 className="font-semibold mb-2">Badges</h4>
-              <div className="flex flex-wrap gap-2">
-                {pro.badges.map((b, i) => (
-                  <span
-                    key={i}
-                    className="text-xs px-2 py-1 rounded-full border border-zinc-700 text-zinc-300"
-                  >
-                    {b}
-                  </span>
-                ))}
-              </div>
-            </section>
-          )}
+          {Array.isArray(pro.badges) &&
+            pro.badges.filter(
+              (b) => String(b || "").toLowerCase() !== "verified",
+            ).length > 0 && (
+              <section>
+                <h4 className="font-semibold mb-2">Badges</h4>
+                <div className="flex flex-wrap gap-2">
+                  {pro.badges
+                    .filter((b) => String(b || "").toLowerCase() !== "verified")
+                    .map((b, i) => (
+                      <span
+                        key={i}
+                        className="text-xs px-2 py-1 rounded-full border border-zinc-700 text-zinc-300"
+                      >
+                        {b}
+                      </span>
+                    ))}
+                </div>
+              </section>
+            )}
 
           {gallery.length > 0 && (
             <section>

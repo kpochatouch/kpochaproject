@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, sendChatMessage } from "../lib/api";
 import VoiceInputButton from "./VoiceInputButton.jsx";
 import VoiceMessageButton from "./VoiceMessageButton.jsx";
+import DisplayName from "./DisplayName.jsx";
 
 const isMobileDevice =
   typeof navigator !== "undefined" &&
@@ -175,7 +176,7 @@ export default function ChatPane({
         // reconcile optimistic message by clientId
         if (n.clientId) {
           const idx = prev.findIndex(
-            (x) => x.clientId && x.clientId === n.clientId
+            (x) => x.clientId && x.clientId === n.clientId,
           );
           if (idx !== -1) {
             const copy = [...prev];
@@ -205,7 +206,7 @@ export default function ChatPane({
         // avoid dupes
         if (
           prev.some(
-            (x) => x.id === n.id || (n.clientId && x.clientId === n.clientId)
+            (x) => x.id === n.id || (n.clientId && x.clientId === n.clientId),
           )
         ) {
           return prev;
@@ -306,7 +307,7 @@ export default function ChatPane({
       {
         method: "POST",
         body: form,
-      }
+      },
     );
 
     if (!res.ok) throw new Error("cloudinary_upload_failed");
@@ -388,7 +389,7 @@ export default function ChatPane({
           const currentRank = order.indexOf(m.status || "pending");
           if (currentRank >= sentRank) return m;
           return { ...m, status: "sent" };
-        })
+        }),
       );
     } catch (err) {
       console.error("upload failed", err);
@@ -462,15 +463,15 @@ export default function ChatPane({
           const currentRank = order.indexOf(m.status || "pending");
           if (currentRank >= sentRank) return m;
           return { ...m, status: "sent" };
-        })
+        }),
       );
     } catch (e) {
       console.error("voice message upload failed", e);
       alert("Voice upload failed");
       setMsgs((prev) =>
         prev.map((m) =>
-          m.clientId === clientId ? { ...m, status: "failed" } : m
-        )
+          m.clientId === clientId ? { ...m, status: "failed" } : m,
+        ),
       );
     } finally {
       setUploading(false);
@@ -542,7 +543,7 @@ export default function ChatPane({
         const currentRank = order.indexOf(m.status || "pending");
         if (currentRank >= sentRank) return m;
         return { ...m, status: "sent" };
-      })
+      }),
     );
 
     setText("");
@@ -636,7 +637,7 @@ export default function ChatPane({
       const updated = data?.message || data;
       if (updated) {
         setMsgs((prev) =>
-          prev.map((m) => (m.id === id ? { ...m, ...updated } : m))
+          prev.map((m) => (m.id === id ? { ...m, ...updated } : m)),
         );
       }
     } catch (e) {
@@ -653,7 +654,7 @@ export default function ChatPane({
       const updated = data?.message || data;
       if (updated) {
         setMsgs((prev) =>
-          prev.map((m) => (m.id === id ? { ...m, ...updated } : m))
+          prev.map((m) => (m.id === id ? { ...m, ...updated } : m)),
         );
       }
     } catch (e) {
@@ -678,7 +679,7 @@ export default function ChatPane({
     const id = menu.msg.id;
     setSelectMode(true);
     setSelectedIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
     );
     closeMenu();
   }
@@ -709,7 +710,7 @@ export default function ChatPane({
       const updated = data?.message || data;
       if (updated) {
         setMsgs((prev) =>
-          prev.map((m) => (m.id === id ? { ...m, ...updated } : m))
+          prev.map((m) => (m.id === id ? { ...m, ...updated } : m)),
         );
       }
     } catch (e) {
@@ -720,7 +721,7 @@ export default function ChatPane({
   function toggleSelectedForClick(id) {
     if (!selectMode) return;
     setSelectedIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
     );
   }
 
@@ -739,12 +740,15 @@ export default function ChatPane({
 
           let displayName;
           let avatarUrl = "";
+          let displayVerified = false;
 
           if (isMe) {
             displayName = "You";
+            displayVerified = false;
           } else if (m.sender && (m.sender.displayName || m.sender.name)) {
             displayName = m.sender.displayName || m.sender.name;
             avatarUrl = m.sender.avatarUrl || m.sender.photoUrl || "";
+            displayVerified = !!m.sender.verified;
           } else if (
             peerProfile &&
             (!peerUid || !m.fromUid || m.fromUid === peerUid)
@@ -755,8 +759,10 @@ export default function ChatPane({
               peerProfile.username ||
               "Unknown";
             avatarUrl = peerProfile.avatarUrl || peerProfile.photoUrl || "";
+            displayVerified = !!peerProfile.verified;
           } else {
             displayName = "Unknown";
+            displayVerified = false;
           }
 
           const initial =
@@ -876,7 +882,13 @@ export default function ChatPane({
                   onClick={() => toggleSelectedForClick(m.id)}
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <div className="text-xs text-zinc-400">{displayName}</div>
+                    <div className="text-xs text-zinc-400">
+                      <DisplayName
+                        name={displayName}
+                        verified={displayVerified}
+                        badgeClassName="w-3.5 h-3.5"
+                      />
+                    </div>
                     <div className="flex items-center gap-1 text-[10px]">
                       {isPinned && <span>📌</span>}
                       {isStarred && <span>⭐</span>}
