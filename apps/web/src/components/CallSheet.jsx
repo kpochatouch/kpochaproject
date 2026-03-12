@@ -71,6 +71,8 @@ export default function CallSheet({
 
   const localRef = useRef(null);
   const remoteRef = useRef(null);
+  const localStreamRef = useRef(null);
+  const remoteStreamRef = useRef(null);
 
   // ring tones
   const callerToneRef = useRef(null);
@@ -93,6 +95,33 @@ export default function CallSheet({
         }
       } catch {}
     });
+  }
+
+  async function attachStream(videoEl, stream, { muted = false } = {}) {
+    try {
+      if (!videoEl || !stream) return;
+
+      videoEl.srcObject = stream;
+      videoEl.autoplay = true;
+      videoEl.playsInline = true;
+      videoEl.muted = muted;
+
+      const tryPlay = async () => {
+        try {
+          await videoEl.play();
+        } catch {}
+      };
+
+      if (videoEl.readyState >= 1) {
+        await tryPlay();
+      } else {
+        videoEl.onloadedmetadata = () => {
+          tryPlay();
+        };
+      }
+    } catch (e) {
+      console.warn("[CallSheet] attachStream failed:", e?.message || e);
+    }
   }
 
   // helper: format seconds as mm:ss
@@ -368,17 +397,57 @@ export default function CallSheet({
     const mySession = callSessionRef.current;
 
     // local media
-    const stream = await navigator.mediaDevices.getUserMedia({
+    const mediaConstraints = {
       audio: true,
-      video: wantVideo,
-    });
-    stream.getTracks().forEach((t) => pcNew.addTrack(t, stream));
-    if (localRef.current) localRef.current.srcObject = stream;
+      video: wantVideo
+        ? {
+            facingMode: "user",
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          }
+        : false,
+    };
 
+    const stream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
+    localStreamRef.current = stream;
+
+    stream.getTracks().forEach((t) => pcNew.addTrack(t, stream));
+
+    if (localRef.current) {
+      await attachStream(localRef.current, stream, { muted: true });
+    }
     // remote media
-    pcNew.ontrack = (ev) => {
+    remoteStreamRef.current = new MediaStream();
+
+    pcNew.ontrack = async (ev) => {
       if (callSessionRef.current !== mySession) return;
-      if (remoteRef.current) remoteRef.current.srcObject = ev.streams[0];
+
+      try {
+        const inbound = ev.track;
+        if (!inbound) return;
+
+        const existingTracks = remoteStreamRef.current.getTracks();
+        const alreadyAdded = existingTracks.some((t) => t.id === inbound.id);
+
+        if (!alreadyAdded) {
+          remoteStreamRef.current.addTrack(inbound);
+        }
+
+        if (remoteRef.current) {
+          await attachStream(remoteRef.current, remoteStreamRef.current, {
+            muted: false,
+          });
+        }
+
+        console.log("[CallSheet] remote track added", {
+          kind: inbound.kind,
+          id: inbound.id,
+          readyState: inbound.readyState,
+          remoteTrackCount: remoteStreamRef.current.getTracks().length,
+        });
+      } catch (e) {
+        console.warn("[CallSheet] ontrack failed:", e?.message || e);
+      }
     };
 
     // ICE
@@ -631,15 +700,30 @@ export default function CallSheet({
     setCallFailed(false); // 👈 reset failure flag
 
     // stop local & remote streams
-    if (localRef.current?.srcObject) {
+    if (localStreamRef.current) {
       try {
-        localRef.current.srcObject.getTracks().forEach((t) => t.stop());
+        localStreamRef.current.getTracks().forEach((t) => t.stop());
+      } catch {}
+      localStreamRef.current = null;
+    }
+
+    if (remoteStreamRef.current) {
+      try {
+        remoteStreamRef.current.getTracks().forEach((t) => t.stop());
+      } catch {}
+      remoteStreamRef.current = null;
+    }
+
+    if (localRef.current) {
+      try {
+        localRef.current.pause?.();
       } catch {}
       localRef.current.srcObject = null;
     }
-    if (remoteRef.current?.srcObject) {
+
+    if (remoteRef.current) {
       try {
-        remoteRef.current.srcObject.getTracks().forEach((t) => t.stop());
+        remoteRef.current.pause?.();
       } catch {}
       remoteRef.current.srcObject = null;
     }
