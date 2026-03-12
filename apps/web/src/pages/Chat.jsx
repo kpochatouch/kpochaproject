@@ -59,8 +59,17 @@ export default function Chat() {
     currentUser?.fullName ||
     currentUser?.username ||
     currentUser?.email ||
-    myUid ||
-    "me";
+    "";
+
+  const meReady = Boolean(
+    !meLoading &&
+      currentUser &&
+      (currentUser?.uid ||
+        currentUser?.ownerUid ||
+        currentUser?._id ||
+        currentUser?.id ||
+        currentUser?.userId),
+  );
 
   // ------------------ CALL HELPERS ------------------ //
 
@@ -83,6 +92,13 @@ export default function Chat() {
 
   async function handleStartCall(callType = "audio") {
     if (!peerUid) return;
+
+    if (!meReady || !myUid) {
+      alert(
+        "Your account is still loading. Please wait a moment and try again.",
+      );
+      return;
+    }
 
     // ✅ STEP 1: request mic/cam FIRST (so we don't create a call record if blocked)
     try {
@@ -108,7 +124,7 @@ export default function Chat() {
 
     const meta = {
       fromUid: myUid,
-      fromName: myLabel,
+      fromName: myLabel || "User",
       fromAvatar,
       peerUid,
       chatRoom: room || null,
@@ -413,7 +429,7 @@ export default function Chat() {
     );
   }
 
-  const peerName = peerProfile?.displayName || peerUid.slice(0, 6) + "…";
+  const peerName = peerProfile?.displayName || "User";
   const peerAvatar = peerProfile?.avatarUrl || "";
   const peerVerified = Boolean(peerProfile?.verified);
 

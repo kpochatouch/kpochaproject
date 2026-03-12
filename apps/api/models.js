@@ -293,6 +293,7 @@ export function proToBarber(doc) {
 
   return {
     id: d._id?.toString?.() || String(d._id || ""),
+    ownerUid: d.ownerUid || "",
 
     // name: prefer pro.name, but fall back to identity if pro.name is empty
     name:
@@ -302,8 +303,16 @@ export function proToBarber(doc) {
         .join(" ") ||
       "",
 
-    // avatar for barber card
-    photoUrl: d.photoUrl || d?.identity?.photoUrl || "",
+    // avatar for barber card / public identity
+    photoUrl:
+      d.photoUrl ||
+      d?.photoUrlResolved ||
+      d?.identity?.photoUrl ||
+      d?.identity?.photoUrlResolved ||
+      "",
+
+    // expose asset pipeline id (new profile refactor)
+    photoAssetId: d.photoAssetId || d?.identity?.photoAssetId || "",
 
     lga,
     state,

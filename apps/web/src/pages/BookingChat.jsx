@@ -37,17 +37,19 @@ export default function BookingChat() {
     [location.search],
   );
 
-  const { me } = useMe();
+  const { me, loading: meLoading } = useMe();
 
   // 🔐 who am I?
   const myUid =
     me?.uid || me?.ownerUid || me?._id || me?.id || me?.userId || null;
 
-  const myLabel =
-    me?.displayName ||
-    me?.fullName ||
-    me?.email ||
-    (myUid ? `User ${String(myUid).slice(0, 6)}…` : "Unknown");
+  const myLabel = me?.displayName || me?.fullName || me?.email || "";
+
+  const meReady = Boolean(
+    !meLoading &&
+      me &&
+      (me?.uid || me?.ownerUid || me?._id || me?.id || me?.userId),
+  );
 
   // 🔔 call state for this page (caller only)
   const [callState, setCallState] = useState({
@@ -342,8 +344,10 @@ export default function BookingChat() {
 
   // ---- Start a call through backend (like DM) ----
   async function handleStartCall(nextType = "audio") {
-    if (!booking || !myUid) {
-      alert("Booking not ready yet. Please wait a moment and try again.");
+    if (!booking || !myUid || !meReady) {
+      alert(
+        "Your account or booking is still loading. Please wait a moment and try again.",
+      );
       return;
     }
 
@@ -372,7 +376,7 @@ export default function BookingChat() {
 
     const meta = {
       fromUid: myUid,
-      fromName: myLabel,
+      fromName: myLabel || "User",
       fromAvatar,
       peerUid,
       bookingId,

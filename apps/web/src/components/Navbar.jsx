@@ -8,11 +8,12 @@ import NotificationBell from "./NotificationBell.jsx";
 import InstallAppButton from "./InstallAppButton.jsx";
 
 export default function Navbar() {
-  const { user } = useAuth();
-  const { me } = useMe();
-
+  const { user, loading: authLoading } = useAuth();
+  const { me, loading: meLoading } = useMe();
   // "logged in" should be Firebase truth, not /api/me truth
   const token = user ? "1" : null;
+  const authKnown = !authLoading;
+  const meKnown = !meLoading;
 
   const location = useLocation();
   const pathname = location.pathname;
@@ -43,8 +44,8 @@ export default function Navbar() {
     window.location.assign("/login?signedout=1");
   }
 
-  const isAdmin = !!me?.isAdmin;
-  const isPro = !!me?.isPro;
+  const isAdmin = meKnown ? !!me?.isAdmin : false;
+  const isPro = meKnown ? !!me?.isPro : false;
 
   const navLinkClass = ({ isActive }) =>
     isActive ? "text-gold font-medium" : "hover:text-gold";
@@ -136,14 +137,16 @@ export default function Navbar() {
           {/* notification bell + signout */}
           {token && <NotificationBell />}
 
-          {token ? (
+          {authKnown && token && (
             <button
               onClick={handleSignOut}
               className="rounded-lg border border-gold px-3 py-1 hover:bg-gold hover:text-black"
             >
               Sign Out
             </button>
-          ) : (
+          )}
+
+          {authKnown && !token && (
             <NavLink
               to="/login"
               className="rounded-lg border border-gold px-3 py-1 hover:bg-gold hover:text-black"
@@ -172,22 +175,22 @@ export default function Navbar() {
               {token && <NotificationBell />}
 
               {/* Auth buttons on mobile */}
-              {token ? (
+              {authKnown && token && (
                 <button
                   onClick={handleSignOut}
                   className="rounded-lg border border-gold px-3 py-1 text-sm hover:bg-gold hover:text-black"
                 >
                   Sign Out
                 </button>
-              ) : (
-                <>
-                  <NavLink
-                    to="/login"
-                    className="rounded-lg border border-gold px-3 py-1 text-sm hover:bg-gold hover:text-black"
-                  >
-                    Sign In
-                  </NavLink>
-                </>
+              )}
+
+              {authKnown && !token && (
+                <NavLink
+                  to="/login"
+                  className="rounded-lg border border-gold px-3 py-1 text-sm hover:bg-gold hover:text-black"
+                >
+                  Sign In
+                </NavLink>
               )}
             </div>
           </div>
