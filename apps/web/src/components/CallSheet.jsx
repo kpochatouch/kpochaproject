@@ -13,8 +13,9 @@ import DisplayName from "./DisplayName.jsx";
  * Props:
  * - room: signaling room string (e.g. "call:abc123")
  * - me: label for current user
- * - open: boolean (expanded UI visible or not)
+ * - uiMode: "expanded" | "minimized"
  * - onClose: () => void          // minimize only
+ * - onRestore: () => void        // restore from mini
  * - onEnd: () => void            // true end / destroy call
  * - role: "caller" | "receiver"  (default "caller")
  * - callId: string | null
@@ -22,11 +23,13 @@ import DisplayName from "./DisplayName.jsx";
  * - peerName: string
  * - peerAvatar: string
  */
+
 export default function CallSheet({
   room,
   me,
-  open,
+  uiMode = "expanded",
   onClose,
+  onRestore,
   onMessage,
   role = "caller",
   callId = null,
@@ -55,6 +58,7 @@ export default function CallSheet({
   const gotAnswerRef = useRef(false);
   const peerAcceptedRef = useRef(false);
   const hasAcceptedRef = useRef(false);
+  const everConnectedRef = useRef(false);
 
   // ✅ caller offer resend loop
   const offerResendTimerRef = useRef(null);
@@ -76,6 +80,16 @@ export default function CallSheet({
   const [localVideoReady, setLocalVideoReady] = useState(false);
   const [remoteVideoReady, setRemoteVideoReady] = useState(false);
 
+  const miniDragRef = useRef(null);
+  const miniResizeRef = useRef(null);
+
+  const [desktopMiniRect, setDesktopMiniRect] = useState({
+    x: 24,
+    y: 120,
+    w: 220,
+    h: 300,
+  });
+
   const localRef = useRef(null);
   const remoteRef = useRef(null);
   const localStreamRef = useRef(null);
@@ -91,6 +105,14 @@ export default function CallSheet({
   // NEW: queue ICE candidates until remoteDescription is set
   const pendingIceRef = useRef([]);
   const shouldHardCleanupRef = useRef(false);
+
+  const isExpanded = uiMode !== "minimized";
+
+  function getVideoConstraints(facing = cameraFacing) {
+    return {
+      facingMode: { ideal: facing },
+    };
+  }
 
   function stopAllTones() {
     [callerToneRef, incomingToneRef].forEach((ref) => {
@@ -126,17 +148,15 @@ export default function CallSheet({
       };
 
       videoEl.onloadedmetadata = () => {
-        markReady();
         videoEl.play?.().catch(() => {});
       };
 
-      videoEl.oncanplay = () => {
+      videoEl.onloadeddata = null;
+      videoEl.oncanplay = null;
+
+      videoEl.onplaying = () => {
         markReady();
       };
-
-      if (stream.getTracks?.().length) {
-        markReady();
-      }
 
       await videoEl.play().catch(() => {});
     } catch (e) {
@@ -183,6 +203,47 @@ export default function CallSheet({
     setMode(callType || "audio");
     setCamOff(callType === "audio");
   }, [callType]);
+
+  useEffect(() => {
+    function onMouseMove(e) {
+      if (miniDragRef.current) {
+        const { startX, startY, originX, originY } = miniDragRef.current;
+        const dx = e.clientX - startX;
+        const dy = e.clientY - startY;
+
+        setDesktopMiniRect((prev) => ({
+          ...prev,
+          x: Math.max(8, originX + dx),
+          y: Math.max(8, originY + dy),
+        }));
+      }
+
+      if (miniResizeRef.current) {
+        const { startX, startY, originW, originH } = miniResizeRef.current;
+        const dx = e.clientX - startX;
+        const dy = e.clientY - startY;
+
+        setDesktopMiniRect((prev) => ({
+          ...prev,
+          w: Math.max(180, originW + dx),
+          h: Math.max(220, originH + dy),
+        }));
+      }
+    }
+
+    function onMouseUp() {
+      miniDragRef.current = null;
+      miniResizeRef.current = null;
+    }
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+  }, []);
 
   // setup signaling for the active call session
   // IMPORTANT: this must depend on room, not on open/minimized UI state
@@ -354,18 +415,20 @@ export default function CallSheet({
     return () => clearTimeout(id);
   }, [room, role, hasConnected, peerAccepted, hasAccepted]);
 
-  // ⏲️ fail-safe: if call is accepted but never connects, fail after ~20s
+  // ⏲️ fail-safe: only for calls that have NEVER connected
   useEffect(() => {
     if (!room) return;
 
     const accepted = peerAccepted || hasAccepted;
     if (!accepted) return;
     if (hasConnected) return;
+    if (everConnectedRef.current) return;
 
     const mySession = callSessionRef.current;
 
     const timeoutId = setTimeout(() => {
       if (callSessionRef.current !== mySession) return;
+      if (everConnectedRef.current) return;
 
       console.warn(
         "[CallSheet] Call failed: no WebRTC connection within 20 seconds",
@@ -377,6 +440,7 @@ export default function CallSheet({
 
       setTimeout(() => {
         if (callSessionRef.current !== mySession) return;
+        if (everConnectedRef.current) return;
         hangup("failed");
       }, 1500);
     }, 20000);
@@ -451,13 +515,7 @@ export default function CallSheet({
     // local media
     const mediaConstraints = {
       audio: true,
-      video: wantVideo
-        ? {
-            facingMode: { ideal: cameraFacing },
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-          }
-        : false,
+      video: wantVideo ? getVideoConstraints(cameraFacing) : false,
     };
 
     const stream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
@@ -539,6 +597,8 @@ export default function CallSheet({
       });
 
       if (st === "connected") {
+        everConnectedRef.current = true;
+
         setHasConnected((prev) => {
           if (!prev) {
             stopAllTones();
@@ -550,9 +610,10 @@ export default function CallSheet({
         });
       }
 
-      // ✅ only mark disconnected if THIS call had connected before (prevents false negatives)
+      // Do NOT downgrade a once-connected call back to "connecting"
+      // because transient WebRTC state changes can happen during a healthy call.
       if (["disconnected", "failed", "closed"].includes(st)) {
-        setHasConnected((prev) => (prev ? false : prev));
+        console.warn("[CallSheet] connectionState transient/end:", st);
       }
     };
 
@@ -721,6 +782,7 @@ export default function CallSheet({
     } catch {}
     gotAnswerRef.current = false;
     peerReadyRef.current = false;
+    everConnectedRef.current = false;
 
     // 🔽 clear any stashed signaling so it never leaks into next call
     pendingOfferRef.current = null;
@@ -805,7 +867,7 @@ export default function CallSheet({
 
     try {
       console.log("[CallSheet] startCaller()", {
-        open,
+        uiMode,
         room,
         role,
         callId,
@@ -855,16 +917,15 @@ export default function CallSheet({
     }
   }
 
-  // auto-start caller once signaling client is ready
   useEffect(() => {
-    if (!open || !room) return;
+    if (!room) return;
     if (role !== "caller") return;
     if (autoStarted) return;
     if (!sig) return; // wait until signaling is ready
     startCaller();
     setAutoStarted(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, room, role, sig, autoStarted]);
+  }, [room, role, sig, autoStarted]);
 
   // ---- receiver actions ----
 
@@ -873,7 +934,7 @@ export default function CallSheet({
     setStarting(true);
     try {
       console.log("[CallSheet] acceptIncoming()", {
-        open,
+        uiMode,
         room,
         role,
         callId,
@@ -960,27 +1021,52 @@ export default function CallSheet({
       if (!pc) return;
 
       const nextFacing = cameraFacing === "user" ? "environment" : "user";
-
       let newStream = null;
 
+      const currentVideoTrack = localStreamRef.current
+        ?.getVideoTracks?.()
+        ?.at?.(0);
+      const currentDeviceId =
+        currentVideoTrack?.getSettings?.()?.deviceId || "";
+
+      // First: try real facing-mode switch
       try {
         newStream = await navigator.mediaDevices.getUserMedia({
           audio: false,
           video: {
+            ...getVideoConstraints(nextFacing),
             facingMode: { exact: nextFacing },
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
           },
         });
       } catch {
-        newStream = await navigator.mediaDevices.getUserMedia({
-          audio: false,
-          video: {
-            facingMode: { ideal: nextFacing },
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-          },
-        });
+        try {
+          newStream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: getVideoConstraints(nextFacing),
+          });
+        } catch {
+          const devices = await navigator.mediaDevices
+            .enumerateDevices()
+            .catch(() => []);
+
+          const videoInputs = devices.filter((d) => d.kind === "videoinput");
+
+          const alternateDevice = videoInputs.find(
+            (d) => d.deviceId && d.deviceId !== currentDeviceId,
+          );
+
+          if (!alternateDevice?.deviceId) {
+            throw new Error("No alternate camera device found");
+          }
+
+          newStream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: {
+              ...getVideoConstraints(nextFacing),
+              deviceId: { exact: alternateDevice.deviceId },
+            },
+          });
+        }
       }
 
       const newVideoTrack = newStream.getVideoTracks?.()[0];
@@ -1065,20 +1151,67 @@ export default function CallSheet({
     typeof window !== "undefined" &&
     window.matchMedia("(min-width: 768px)").matches;
 
-  const shellClass = open
+  const miniStatusText = hasConnected
+    ? formatDuration(elapsedSeconds)
+    : statusText;
+
+  const miniSurface =
+    mode === "video" && remoteVideoReady && remoteStreamRef.current ? (
+      <video
+        autoPlay
+        playsInline
+        className="absolute inset-0 w-full h-full object-cover bg-black"
+        ref={(el) => {
+          if (!el || !remoteStreamRef.current) return;
+          if (el.srcObject !== remoteStreamRef.current) {
+            el.srcObject = remoteStreamRef.current;
+          }
+          el.muted = false;
+          el.play?.().catch(() => {});
+        }}
+      />
+    ) : mode === "video" && localVideoReady && localStreamRef.current ? (
+      <video
+        autoPlay
+        playsInline
+        muted
+        className="absolute inset-0 w-full h-full object-cover bg-black"
+        ref={(el) => {
+          if (!el || !localStreamRef.current) return;
+          if (el.srcObject !== localStreamRef.current) {
+            el.srcObject = localStreamRef.current;
+          }
+          el.muted = true;
+          el.play?.().catch(() => {});
+        }}
+      />
+    ) : peerAvatar ? (
+      <img
+        src={peerAvatar}
+        alt={displayPeerName}
+        className="absolute inset-0 w-full h-full object-cover"
+      />
+    ) : (
+      <div className="absolute inset-0 flex items-center justify-center text-5xl text-white bg-zinc-900">
+        {displayPeerName.slice(0, 1).toUpperCase()}
+      </div>
+    );
+
+  const shellClass = isExpanded
     ? "fixed inset-0 z-50 bg-black md:bg-black/70 md:backdrop-blur-[2px] flex md:items-center md:justify-center"
     : "hidden";
 
   const panelClass = isDesktop
-    ? "relative w-[min(960px,88vw)] h-[min(680px,86vh)] bg-black border border-zinc-800 rounded-3xl shadow-2xl overflow-hidden"
+    ? "relative w-[min(760px,84vw)] h-[min(760px,84vh)] bg-black border border-zinc-800 rounded-3xl shadow-2xl overflow-hidden"
     : "relative w-full h-full bg-black border-0 rounded-none overflow-hidden";
 
   const bodyClass = isDesktop
     ? "relative bg-black overflow-hidden h-[calc(100%-64px)]"
     : "relative bg-black overflow-hidden h-[calc(100vh-64px)]";
 
-  const mainVideoClass =
-    "absolute inset-0 w-full h-full bg-black object-contain z-10";
+  const mainVideoClass = isDesktop
+    ? "absolute inset-0 w-full h-full bg-black object-contain z-10"
+    : "absolute inset-0 w-full h-full bg-black object-cover z-10";
 
   const pipClass = isDesktop
     ? "absolute bottom-28 right-6 w-40 h-52 rounded-2xl border border-zinc-300 shadow-lg overflow-hidden bg-black z-20"
@@ -1087,6 +1220,219 @@ export default function CallSheet({
   const localPreviewClass = isDesktop
     ? "absolute bottom-28 right-6 w-40 h-52 rounded-2xl border border-zinc-700 shadow-lg overflow-hidden bg-black z-20"
     : "absolute bottom-28 right-4 w-24 h-32 rounded-2xl border border-zinc-700 shadow-lg overflow-hidden bg-black z-20";
+
+  if (!isExpanded) {
+    if (isDesktop) {
+      return (
+        <div
+          className="fixed z-[60] rounded-2xl border border-zinc-700 bg-black shadow-2xl overflow-hidden select-none"
+          style={{
+            left: desktopMiniRect.x,
+            top: desktopMiniRect.y,
+            width: desktopMiniRect.w,
+            height: desktopMiniRect.h,
+          }}
+        >
+          <div
+            className="absolute top-0 left-0 right-0 h-10 flex items-center justify-between px-3 bg-black/70 backdrop-blur-sm cursor-move z-20"
+            onMouseDown={(e) => {
+              miniDragRef.current = {
+                startX: e.clientX,
+                startY: e.clientY,
+                originX: desktopMiniRect.x,
+                originY: desktopMiniRect.y,
+              };
+            }}
+          >
+            <div className="text-[11px] text-white">
+              {mode === "video" ? "Video" : "Voice"}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onMessage?.();
+                }}
+                className="w-8 h-8 rounded-full bg-black/60 flex items-center justify-center text-white text-xs"
+                title="Back to chat"
+              >
+                💬
+              </button>
+
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRestore?.();
+                }}
+                className="w-8 h-8 rounded-full bg-black/60 flex items-center justify-center text-white text-xs"
+                title="Restore"
+              >
+                ⤢
+              </button>
+
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  hangup();
+                }}
+                className="w-8 h-8 rounded-full bg-rose-600 flex items-center justify-center text-white text-xs"
+                title="End call"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={onRestore}
+            className="relative w-full h-full bg-zinc-950 text-left"
+          >
+            {miniSurface}
+
+            <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-transparent to-black/20" />
+
+            <div className="absolute bottom-3 left-3 right-3 text-left z-10">
+              <div className="text-xl font-semibold text-white truncate">
+                <DisplayName
+                  name={displayPeerName}
+                  verified={!!peerVerified}
+                  badgeClassName="w-4 h-4"
+                />
+              </div>
+              <div className="text-sm text-emerald-400 mt-1">
+                {miniStatusText}
+              </div>
+              <div className="text-[11px] text-zinc-300 mt-1">
+                Tap to reopen
+              </div>
+            </div>
+
+            {mode === "video" && localVideoReady && remoteVideoReady && (
+              <div className="absolute bottom-4 right-4 w-14 h-20 rounded-2xl border border-white/20 bg-black/70 shadow-lg overflow-hidden z-10">
+                <video
+                  autoPlay
+                  playsInline
+                  muted
+                  disablePictureInPicture
+                  className="w-full h-full object-contain bg-black"
+                  ref={(el) => {
+                    if (!el || !localStreamRef.current) return;
+                    if (el.srcObject !== localStreamRef.current) {
+                      el.srcObject = localStreamRef.current;
+                    }
+                    el.muted = true;
+                    el.play?.().catch(() => {});
+                  }}
+                />
+              </div>
+            )}
+          </button>
+
+          <div
+            className="absolute bottom-0 right-0 w-5 h-5 cursor-se-resize z-20"
+            onMouseDown={(e) => {
+              e.stopPropagation();
+              miniResizeRef.current = {
+                startX: e.clientX,
+                startY: e.clientY,
+                originW: desktopMiniRect.w,
+                originH: desktopMiniRect.h,
+              };
+            }}
+          >
+            <div className="absolute bottom-1 right-1 w-3 h-3 border-r-2 border-b-2 border-zinc-400" />
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="fixed bottom-24 right-4 z-[60] w-36 h-48 rounded-2xl border border-zinc-700 bg-black shadow-2xl overflow-hidden">
+        <button
+          type="button"
+          onClick={onRestore}
+          className="relative w-full h-full bg-zinc-950 text-left"
+        >
+          {miniSurface}
+
+          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/20" />
+
+          <div className="absolute top-2 left-2 right-2 flex items-start justify-between z-10">
+            <div className="px-2 py-1 rounded-full bg-black/60 text-[10px] text-white">
+              {mode === "video" ? "Video" : "Voice"}
+            </div>
+
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onMessage?.();
+                }}
+                className="w-8 h-8 rounded-full bg-black/60 flex items-center justify-center text-white text-xs"
+                title="Back to chat"
+              >
+                💬
+              </button>
+
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  hangup();
+                }}
+                className="w-8 h-8 rounded-full bg-rose-600 flex items-center justify-center text-white text-xs"
+                title="End call"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+
+          <div className="absolute bottom-2 left-2 right-2 text-left z-10">
+            <div className="text-sm font-semibold text-white truncate">
+              <DisplayName
+                name={displayPeerName}
+                verified={!!peerVerified}
+                badgeClassName="w-4 h-4"
+              />
+            </div>
+            <div className="text-[11px] text-emerald-400 mt-0.5">
+              {miniStatusText}
+            </div>
+            <div className="text-[10px] text-zinc-300 mt-0.5">
+              Tap to reopen
+            </div>
+          </div>
+
+          {mode === "video" && localVideoReady && remoteVideoReady && (
+            <div className="absolute bottom-3 right-3 w-10 h-14 rounded-xl border border-white/20 bg-black/70 shadow-lg overflow-hidden z-10">
+              <video
+                autoPlay
+                playsInline
+                muted
+                disablePictureInPicture
+                className="w-full h-full object-contain bg-black"
+                ref={(el) => {
+                  if (!el || !localStreamRef.current) return;
+                  if (el.srcObject !== localStreamRef.current) {
+                    el.srcObject = localStreamRef.current;
+                  }
+                  el.muted = true;
+                  el.play?.().catch(() => {});
+                }}
+              />
+            </div>
+          )}
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className={shellClass}>
@@ -1129,6 +1475,7 @@ export default function CallSheet({
                 <video
                   autoPlay
                   playsInline
+                  disablePictureInPicture
                   className={mainVideoClass}
                   ref={(el) => {
                     if (!el || !remoteStreamRef.current) return;
@@ -1139,11 +1486,12 @@ export default function CallSheet({
                     el.play?.().catch(() => {});
                   }}
                 />
-              ) : showLocalAsMain && localStreamRef.current ? (
+              ) : showLocalAsMain && localVideoReady ? (
                 <video
                   autoPlay
                   playsInline
                   muted
+                  disablePictureInPicture
                   className={mainVideoClass}
                   ref={(el) => {
                     if (!el || !localStreamRef.current) return;
@@ -1177,13 +1525,14 @@ export default function CallSheet({
               </div>
 
               {/* before remote is ready, show only small local preview */}
-              {localStreamRef.current && !remoteVideoReady && (
+              {localVideoReady && !remoteVideoReady && (
                 <div className={localPreviewClass}>
                   <video
                     autoPlay
                     playsInline
                     muted
-                    className="w-full h-full object-cover"
+                    disablePictureInPicture
+                    className="w-full h-full object-cover bg-black"
                     ref={(el) => {
                       if (!el || !localStreamRef.current) return;
                       if (el.srcObject !== localStreamRef.current) {
@@ -1207,8 +1556,8 @@ export default function CallSheet({
                     <video
                       autoPlay
                       playsInline
-                      muted
-                      className="w-full h-full object-cover"
+                      disablePictureInPicture
+                      className="w-full h-full object-cover bg-black"
                       ref={(el) => {
                         if (!el || !localStreamRef.current) return;
                         if (el.srcObject !== localStreamRef.current) {
@@ -1222,7 +1571,8 @@ export default function CallSheet({
                     <video
                       autoPlay
                       playsInline
-                      className="w-full h-full object-cover"
+                      disablePictureInPicture
+                      className="w-full h-full object-cover bg-black"
                       ref={(el) => {
                         if (!el || !remoteStreamRef.current) return;
                         if (el.srcObject !== remoteStreamRef.current) {

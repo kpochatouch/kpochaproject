@@ -25,6 +25,7 @@ import BookingAlert from "./components/BookingAlert.jsx";
 import usePostPaymentRecovery from "./hooks/usePostPaymentRecovery";
 import { ensurePushSubscribed, getDeviceId } from "./lib/pushClient";
 import MobileTabBar from "./components/MobileTabBar.jsx";
+import PullToRefresh from "./components/PullToRefresh.jsx";
 console.log("[push] App.jsx loaded");
 
 // ---------- pages (lazy) ----------
@@ -335,16 +336,6 @@ export default function App() {
   const [activeCall, setActiveCall] = useState(null);
   const [callUiMode, setCallUiMode] = useState("expanded");
 
-  const miniDragRef = useRef(null);
-  const miniResizeRef = useRef(null);
-
-  const [desktopMiniRect, setDesktopMiniRect] = useState({
-    x: 24,
-    y: 120,
-    w: 220,
-    h: 300,
-  });
-
   useEffect(() => {
     function onStartGlobalCall(event) {
       const detail = event?.detail || {};
@@ -368,47 +359,6 @@ export default function App() {
     window.addEventListener("kpocha:start-call", onStartGlobalCall);
     return () => {
       window.removeEventListener("kpocha:start-call", onStartGlobalCall);
-    };
-  }, []);
-
-  useEffect(() => {
-    function onMouseMove(e) {
-      if (miniDragRef.current) {
-        const { startX, startY, originX, originY } = miniDragRef.current;
-        const dx = e.clientX - startX;
-        const dy = e.clientY - startY;
-
-        setDesktopMiniRect((prev) => ({
-          ...prev,
-          x: Math.max(8, originX + dx),
-          y: Math.max(8, originY + dy),
-        }));
-      }
-
-      if (miniResizeRef.current) {
-        const { startX, startY, originW, originH } = miniResizeRef.current;
-        const dx = e.clientX - startX;
-        const dy = e.clientY - startY;
-
-        setDesktopMiniRect((prev) => ({
-          ...prev,
-          w: Math.max(180, originW + dx),
-          h: Math.max(220, originH + dy),
-        }));
-      }
-    }
-
-    function onMouseUp() {
-      miniDragRef.current = null;
-      miniResizeRef.current = null;
-    }
-
-    window.addEventListener("mousemove", onMouseMove);
-    window.addEventListener("mouseup", onMouseUp);
-
-    return () => {
-      window.removeEventListener("mousemove", onMouseMove);
-      window.removeEventListener("mouseup", onMouseUp);
     };
   }, []);
 
@@ -638,6 +588,8 @@ export default function App() {
   return (
     <ToastProvider>
       <div className="min-h-screen flex flex-col bg-black text-white">
+        <PullToRefresh disabled={Boolean(activeCall?.room)} />
+
         {/* global click → custom event used by menus/overlays */}
         <ClickOutsideLayer />
 
@@ -910,8 +862,9 @@ export default function App() {
             )}
             autoAccept={Boolean(activeCall?.meta?.autoAccept)}
             chatRoom={activeCall?.meta?.chatRoom || null}
-            open={callUiMode === "expanded"}
+            uiMode={callUiMode}
             onClose={() => setCallUiMode("minimized")}
+            onRestore={() => setCallUiMode("expanded")}
             onEnd={() => {
               setActiveCall(null);
               setCallUiMode("expanded");
@@ -934,136 +887,6 @@ export default function App() {
               navigate("/chat");
             }}
           />
-        )}
-
-        {activeCall?.room && callUiMode === "minimized" && !isMobile && (
-          <div
-            className="fixed z-[60] rounded-2xl border border-zinc-700 bg-black shadow-2xl overflow-hidden select-none"
-            style={{
-              left: desktopMiniRect.x,
-              top: desktopMiniRect.y,
-              width: desktopMiniRect.w,
-              height: desktopMiniRect.h,
-            }}
-          >
-            <div
-              className="absolute top-0 left-0 right-0 h-10 flex items-center justify-between px-3 bg-black/70 backdrop-blur-sm cursor-move z-10"
-              onMouseDown={(e) => {
-                miniDragRef.current = {
-                  startX: e.clientX,
-                  startY: e.clientY,
-                  originX: desktopMiniRect.x,
-                  originY: desktopMiniRect.y,
-                };
-              }}
-            >
-              <div className="text-[11px] text-white">
-                {activeCall?.callType === "video" ? "Video" : "Voice"}
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setCallUiMode("expanded")}
-                className="w-8 h-8 rounded-full bg-black/60 flex items-center justify-center text-white text-xs"
-              >
-                ⤢
-              </button>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setCallUiMode("expanded")}
-              className="relative w-full h-full bg-zinc-950 text-left"
-            >
-              {activeCall?.meta?.peerAvatar ? (
-                <img
-                  src={activeCall.meta.peerAvatar}
-                  alt={activeCall?.meta?.peerName || "Call peer"}
-                  className="absolute inset-0 w-full h-full object-cover opacity-90"
-                />
-              ) : (
-                <div className="absolute inset-0 flex items-center justify-center text-5xl text-white bg-zinc-900">
-                  {(activeCall?.meta?.peerName || "U")
-                    .slice(0, 1)
-                    .toUpperCase()}
-                </div>
-              )}
-
-              <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-transparent to-black/20" />
-
-              <div className="absolute bottom-3 left-3 right-3 text-left">
-                <div className="text-xl font-semibold text-white truncate">
-                  {activeCall?.meta?.peerName || "Ongoing call"}
-                </div>
-                <div className="text-sm text-emerald-400 mt-1">
-                  Tap to reopen
-                </div>
-              </div>
-
-              <div className="absolute bottom-4 right-4 w-14 h-20 rounded-2xl border border-white/20 bg-black/70 shadow-lg" />
-            </button>
-
-            <div
-              className="absolute bottom-0 right-0 w-5 h-5 cursor-se-resize z-20"
-              onMouseDown={(e) => {
-                e.stopPropagation();
-                miniResizeRef.current = {
-                  startX: e.clientX,
-                  startY: e.clientY,
-                  originW: desktopMiniRect.w,
-                  originH: desktopMiniRect.h,
-                };
-              }}
-            >
-              <div className="absolute bottom-1 right-1 w-3 h-3 border-r-2 border-b-2 border-zinc-400" />
-            </div>
-          </div>
-        )}
-
-        {activeCall?.room && callUiMode === "minimized" && isMobile && (
-          <button
-            type="button"
-            onClick={() => setCallUiMode("expanded")}
-            className="fixed bottom-24 right-4 z-[60] w-36 h-48 rounded-2xl border border-zinc-700 bg-black shadow-2xl overflow-hidden"
-          >
-            <div className="relative w-full h-full bg-zinc-950">
-              {activeCall?.meta?.peerAvatar ? (
-                <img
-                  src={activeCall.meta.peerAvatar}
-                  alt={activeCall?.meta?.peerName || "Call peer"}
-                  className="absolute inset-0 w-full h-full object-cover opacity-90"
-                />
-              ) : (
-                <div className="absolute inset-0 flex items-center justify-center text-4xl text-white bg-zinc-900">
-                  {(activeCall?.meta?.peerName || "U")
-                    .slice(0, 1)
-                    .toUpperCase()}
-                </div>
-              )}
-
-              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/20" />
-
-              <div className="absolute top-2 left-2 right-2 flex items-start justify-between">
-                <div className="px-2 py-1 rounded-full bg-black/60 text-[10px] text-white">
-                  {activeCall?.callType === "video" ? "Video" : "Voice"}
-                </div>
-                <div className="w-8 h-8 rounded-full bg-black/60 flex items-center justify-center text-white text-xs">
-                  ⤢
-                </div>
-              </div>
-
-              <div className="absolute bottom-2 left-2 right-2 text-left">
-                <div className="text-sm font-semibold text-white truncate">
-                  {activeCall?.meta?.peerName || "Ongoing call"}
-                </div>
-                <div className="text-[11px] text-emerald-400 mt-0.5">
-                  Tap to reopen
-                </div>
-              </div>
-
-              <div className="absolute bottom-3 right-3 w-10 h-14 rounded-xl border border-white/20 bg-black/70 shadow-lg" />
-            </div>
-          </button>
         )}
         <InstallPWAButton />
       </div>
