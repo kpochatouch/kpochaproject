@@ -10,7 +10,6 @@ import {
 } from "../lib/api";
 import { useMe } from "../context/MeContext.jsx";
 import ChatPane from "../components/ChatPane";
-import CallSheet from "../components/CallSheet";
 import MobileBackButton from "../components/MobileBackButton";
 import DisplayName from "../components/DisplayName.jsx";
 
@@ -50,15 +49,6 @@ export default function BookingChat() {
       me &&
       (me?.uid || me?.ownerUid || me?._id || me?.id || me?.userId),
   );
-
-  // 🔔 call state for this page (caller only)
-  const [callState, setCallState] = useState({
-    open: false,
-    room: null,
-    callId: null,
-    callType: "audio",
-    role: "caller",
-  });
 
   const [booking, setBooking] = useState(null);
   const [loadingBooking, setLoadingBooking] = useState(true);
@@ -122,10 +112,6 @@ export default function BookingChat() {
     if (!bookingId) return;
     if (booking?.status !== "completed") return;
 
-    // close call sheet if open
-    setCallState((prev) => ({ ...prev, open: false }));
-
-    // leave chat immediately
     navigate(`/bookings/${bookingId}`, { replace: true });
   }, [booking?.status, bookingId, navigate]);
 
@@ -258,53 +244,6 @@ export default function BookingChat() {
     };
   }, [socket, bookingId]);
 
-  // Listen only for call status → so caller's sheet closes properly
-  useEffect(() => {
-    if (!socket) return;
-
-    function handleCallStatus(evt) {
-      if (!evt) return;
-      const { callId, room: callRoom, status } = evt;
-
-      setCallState((prev) => {
-        if (!prev.open) return prev;
-
-        // Check if this status belongs to the current call
-        if (
-          (prev.callId && callId && prev.callId !== callId) ||
-          (prev.room && callRoom && prev.room !== callRoom)
-        ) {
-          return prev;
-        }
-
-        if (
-          ["ended", "cancelled", "declined", "missed", "failed"].includes(
-            status,
-          )
-        ) {
-          return { ...prev, open: false };
-        }
-
-        return prev;
-      });
-    }
-
-    try {
-      socket.on("call:status", handleCallStatus);
-    } catch (e) {
-      console.warn(
-        "[BookingChat] attach call status listener failed:",
-        e?.message || e,
-      );
-    }
-
-    return () => {
-      try {
-        socket.off("call:status", handleCallStatus);
-      } catch {}
-    };
-  }, [socket]);
-
   // ✅ Auto-close chat immediately when socket announces booking completion
   useEffect(() => {
     if (!socket || !bookingId) return;
@@ -313,7 +252,6 @@ export default function BookingChat() {
       const bid = String(p?.bookingId || "");
       if (bid !== String(bookingId)) return;
 
-      setCallState((prev) => ({ ...prev, open: false }));
       navigate(`/bookings/${bookingId}`, { replace: true });
     };
 
@@ -400,13 +338,25 @@ export default function BookingChat() {
         return;
       }
 
-      setCallState({
-        open: true,
-        room: callRoom,
-        callId,
-        callType: ack.callType || nextType,
-        role: "caller",
-      });
+      window.dispatchEvent(
+        new CustomEvent("kpocha:start-call", {
+          detail: {
+            role: "caller",
+            room: callRoom,
+            callId,
+            callType: ack.callType || nextType,
+            meta: {
+              peerName,
+              peerAvatar,
+              peerVerified,
+              chatRoom: room || null,
+              chatPath: `/bookings/${bookingId}/chat`,
+              bookingId,
+              source: "booking_chat",
+            },
+          },
+        }),
+      );
 
       try {
         navigate(`/bookings/${bookingId}/chat`, { replace: true });
@@ -571,25 +521,6 @@ export default function BookingChat() {
         peerUid={peerUid || null}
         peerProfile={peerProfile}
         initialMessages={[]}
-      />
-
-      {/* CallSheet uses the callState (signaling room) + booking chat as chatRoom */}
-      <CallSheet
-        role={callState.role}
-        room={callState.room}
-        callId={callState.callId}
-        callType={callState.callType}
-        me={myLabel}
-        peerName={peerName}
-        peerAvatar={peerAvatar}
-        chatRoom={room}
-        open={callState.open}
-        onClose={() =>
-          setCallState((prev) => ({
-            ...prev,
-            open: false,
-          }))
-        }
       />
     </div>
   );

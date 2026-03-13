@@ -13,8 +13,9 @@ import DisplayName from "./DisplayName.jsx";
  * Props:
  * - room: signaling room string (e.g. "call:abc123")
  * - me: label for current user
- * - open: boolean (show/hide modal)
- * - onClose: () => void
+ * - open: boolean (expanded UI visible or not)
+ * - onClose: () => void          // minimize only
+ * - onEnd: () => void            // true end / destroy call
  * - role: "caller" | "receiver"  (default "caller")
  * - callId: string | null
  * - callType: "audio" | "video"  (default "audio")
@@ -26,6 +27,7 @@ export default function CallSheet({
   me,
   open,
   onClose,
+  onMessage,
   role = "caller",
   callId = null,
   callType = "audio",
@@ -34,6 +36,7 @@ export default function CallSheet({
   peerVerified = false,
   chatRoom = null,
   autoAccept = false,
+  onEnd,
 }) {
   const [sig, setSig] = useState(null);
   const [pc, setPc] = useState(null);
@@ -50,6 +53,8 @@ export default function CallSheet({
   // ✅ refs (avoid stale React state inside timers/promises)
   const peerReadyRef = useRef(false);
   const gotAnswerRef = useRef(false);
+  const peerAcceptedRef = useRef(false);
+  const hasAcceptedRef = useRef(false);
 
   // ✅ caller offer resend loop
   const offerResendTimerRef = useRef(null);
@@ -59,6 +64,7 @@ export default function CallSheet({
 
   const [micMuted, setMicMuted] = useState(false);
   const [camOff, setCamOff] = useState(mode === "audio");
+  const [cameraFacing, setCameraFacing] = useState("user");
 
   // ⏱ call duration state
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -67,7 +73,8 @@ export default function CallSheet({
   const [callFailed, setCallFailed] = useState(false);
 
   const [pipFlipped, setPipFlipped] = useState(false);
-  const [isMini, setIsMini] = useState(false);
+  const [localVideoReady, setLocalVideoReady] = useState(false);
+  const [remoteVideoReady, setRemoteVideoReady] = useState(false);
 
   const localRef = useRef(null);
   const remoteRef = useRef(null);
@@ -97,28 +104,41 @@ export default function CallSheet({
     });
   }
 
-  async function attachStream(videoEl, stream, { muted = false } = {}) {
+  async function attachStream(
+    videoEl,
+    stream,
+    { muted = false, kind = "remote" } = {},
+  ) {
     try {
       if (!videoEl || !stream) return;
 
-      videoEl.srcObject = stream;
+      if (videoEl.srcObject !== stream) {
+        videoEl.srcObject = stream;
+      }
+
       videoEl.autoplay = true;
       videoEl.playsInline = true;
       videoEl.muted = muted;
 
-      const tryPlay = async () => {
-        try {
-          await videoEl.play();
-        } catch {}
+      const markReady = () => {
+        if (kind === "local") setLocalVideoReady(true);
+        if (kind === "remote") setRemoteVideoReady(true);
       };
 
-      if (videoEl.readyState >= 1) {
-        await tryPlay();
-      } else {
-        videoEl.onloadedmetadata = () => {
-          tryPlay();
-        };
+      videoEl.onloadedmetadata = () => {
+        markReady();
+        videoEl.play?.().catch(() => {});
+      };
+
+      videoEl.oncanplay = () => {
+        markReady();
+      };
+
+      if (stream.getTracks?.().length) {
+        markReady();
       }
+
+      await videoEl.play().catch(() => {});
     } catch (e) {
       console.warn("[CallSheet] attachStream failed:", e?.message || e);
     }
@@ -164,11 +184,12 @@ export default function CallSheet({
     setCamOff(callType === "audio");
   }, [callType]);
 
-  // setup signaling when modal opens
+  // setup signaling for the active call session
+  // IMPORTANT: this must depend on room, not on open/minimized UI state
   useEffect(() => {
-    if (!open || !room) return;
+    if (!room) return;
 
-    // ✅ new call session begins as soon as this sheet opens for a room
+    // ✅ new call session begins as soon as this component is mounted for a room
     callSessionRef.current += 1;
 
     const sc = new SignalingClient(
@@ -179,7 +200,6 @@ export default function CallSheet({
     setSig(sc);
     shouldHardCleanupRef.current = false;
 
-    // ✅ barrier handshake: receiver tells caller "I'm ready"
     const onPeerReady = (msg) => {
       try {
         const p = msg?.payload || msg;
@@ -200,8 +220,6 @@ export default function CallSheet({
     let stashIce = null;
 
     if (role !== "caller") {
-      // ✅ Incoming ringtone only for web/PWA.
-      // Native already rings via Android (ForegroundService / system).
       if (!Capacitor.isNativePlatform()) {
         try {
           const audio = new Audio("/sound/incoming.mp3");
@@ -211,15 +229,28 @@ export default function CallSheet({
         } catch {}
       }
 
-      // stash offer (may arrive before Accept)
       stashOffer = (msg) => {
+        if (peerAcceptedRef.current) {
+          console.log(
+            "[CallSheet] ignoring offer; call already accepted elsewhere",
+          );
+          return;
+        }
+
         console.log("[CallSheet] stashed incoming offer before accept");
         pendingOfferRef.current = msg;
       };
+
       sc.on("webrtc:offer", stashOffer);
 
-      // stash ICE (may arrive before Accept)
       stashIce = (msg) => {
+        if (peerAcceptedRef.current) {
+          console.log(
+            "[CallSheet] ignoring ICE; call already accepted elsewhere",
+          );
+          return;
+        }
+
         const cand = msg?.payload || msg;
         if (!cand) return;
         pendingIceRef.current.push(cand);
@@ -228,6 +259,7 @@ export default function CallSheet({
           pendingIceRef.current.length,
         );
       };
+
       sc.on("webrtc:ice", stashIce);
     }
 
@@ -240,15 +272,13 @@ export default function CallSheet({
       try {
         if (shouldHardCleanupRef.current) {
           sc.disconnect();
-        } else {
-          console.log("[CallSheet] skip disconnect on remount");
         }
       } catch {}
 
       pendingOfferRef.current = null;
       pendingIceRef.current = [];
-
       setSig(null);
+
       stopAllTones();
       setAutoStarted(false);
       setElapsedSeconds(0);
@@ -260,7 +290,6 @@ export default function CallSheet({
       peerReadyRef.current = false;
       gotAnswerRef.current = false;
 
-      // stop caller offer resend loop (if any)
       try {
         if (offerResendTimerRef.current) {
           clearInterval(offerResendTimerRef.current);
@@ -270,14 +299,37 @@ export default function CallSheet({
     };
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, room, role]);
+  }, [room, role, callId]);
+
+  useEffect(() => {
+    peerAcceptedRef.current = peerAccepted;
+  }, [peerAccepted]);
+
+  useEffect(() => {
+    hasAcceptedRef.current = hasAccepted;
+  }, [hasAccepted]);
+
+  useEffect(() => {
+    if (mode !== "video") return;
+
+    if (localRef.current && localStreamRef.current) {
+      attachStream(localRef.current, localStreamRef.current, {
+        muted: true,
+        kind: "local",
+      });
+    }
+
+    if (remoteRef.current && remoteStreamRef.current) {
+      attachStream(remoteRef.current, remoteStreamRef.current, {
+        muted: false,
+        kind: "remote",
+      });
+    }
+  }, [mode, hasAccepted, peerAccepted, hasConnected]);
 
   // ⏱ duration timer: start counting only when connected
   useEffect(() => {
-    if (!open) {
-      setElapsedSeconds(0);
-      return;
-    }
+    if (!room) return;
     if (!hasConnected) return;
 
     const id = setInterval(() => {
@@ -285,36 +337,31 @@ export default function CallSheet({
     }, 1000);
 
     return () => clearInterval(id);
-  }, [open, hasConnected]);
+  }, [room, hasConnected]);
 
   // ⏳ ring timeout: if receiver never answers, end as "missed"
   useEffect(() => {
-    if (!open) return;
+    if (!room) return;
     if (role !== "caller") return;
 
-    // if already connected or receiver accepted, don't ring-timeout
     if (hasConnected || peerAccepted || hasAccepted) return;
 
-    // start countdown once caller sheet is open and dialing
     const id = setTimeout(() => {
       console.warn("[CallSheet] Ring timeout: no answer");
-
-      // End as "missed" (not failed)
       hangup("missed");
-    }, 30000); // 30s (adjust if you want)
+    }, 30000);
 
     return () => clearTimeout(id);
-  }, [open, role, hasConnected, peerAccepted, hasAccepted]);
+  }, [room, role, hasConnected, peerAccepted, hasAccepted]);
 
   // ⏲️ fail-safe: if call is accepted but never connects, fail after ~20s
   useEffect(() => {
-    if (!open) return;
+    if (!room) return;
 
     const accepted = peerAccepted || hasAccepted;
     if (!accepted) return;
     if (hasConnected) return;
 
-    // ✅ guard: only the current call session may fail itself
     const mySession = callSessionRef.current;
 
     const timeoutId = setTimeout(() => {
@@ -335,33 +382,38 @@ export default function CallSheet({
     }, 20000);
 
     return () => clearTimeout(timeoutId);
-  }, [open, peerAccepted, hasAccepted, hasConnected]);
+  }, [room, peerAccepted, hasAccepted, hasConnected]);
 
   // 🔔 React to backend call:status events for this call
   useEffect(() => {
-    if (!open || !callId) return;
+    if (!callId) return;
 
     const unsubscribe = registerSocketHandler("call:status", (evt) => {
       if (!evt) return;
       const { callId: evtId, status } = evt;
 
-      // ignore other calls
       if (!evtId || evtId !== callId) return;
 
       setPeerStatus(status || null);
 
-      // as soon as backend says "accepted", we know peer has picked
       if (status === "accepted") {
         stopAllTones();
         setPeerAccepted(true);
+
+        // Another device for this same receiver answered first.
+        // This device must leave the session completely.
+        if (role === "receiver" && !hasAcceptedRef.current) {
+          cleanupPeer();
+          onEnd?.();
+          return;
+        }
       }
 
-      // if remote ends / cancels / declines, close our sheet too
       if (
         ["ended", "cancelled", "declined", "missed", "failed"].includes(status)
       ) {
         cleanupPeer();
-        onClose?.();
+        onEnd?.();
       }
     });
 
@@ -370,11 +422,11 @@ export default function CallSheet({
         unsubscribe && unsubscribe();
       } catch {}
     };
-  }, [open, callId, onClose]);
+  }, [callId, role, onEnd]);
 
   // ✅ Auto-accept when opened from native Android accept
   useEffect(() => {
-    if (!open || !room) return;
+    if (!room) return;
     if (role !== "receiver") return;
     if (!autoAccept) return;
     if (hasAccepted) return;
@@ -383,7 +435,7 @@ export default function CallSheet({
     console.log("[CallSheet] autoAccept triggered");
     acceptIncoming();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, room, role, autoAccept, sig, hasAccepted]);
+  }, [room, role, autoAccept, sig, hasAccepted]);
 
   async function setupPeerConnection(asCaller) {
     if (!sig || !room) return null;
@@ -401,7 +453,7 @@ export default function CallSheet({
       audio: true,
       video: wantVideo
         ? {
-            facingMode: "user",
+            facingMode: { ideal: cameraFacing },
             width: { ideal: 1280 },
             height: { ideal: 720 },
           }
@@ -414,7 +466,10 @@ export default function CallSheet({
     stream.getTracks().forEach((t) => pcNew.addTrack(t, stream));
 
     if (localRef.current) {
-      await attachStream(localRef.current, stream, { muted: true });
+      await attachStream(localRef.current, stream, {
+        muted: true,
+        kind: "local",
+      });
     }
     // remote media
     remoteStreamRef.current = new MediaStream();
@@ -436,6 +491,7 @@ export default function CallSheet({
         if (remoteRef.current) {
           await attachStream(remoteRef.current, remoteStreamRef.current, {
             muted: false,
+            kind: "remote",
           });
         }
 
@@ -698,6 +754,10 @@ export default function CallSheet({
     readySentRef.current = false;
     setElapsedSeconds(0); // reset duration when call ends
     setCallFailed(false); // 👈 reset failure flag
+    setLocalVideoReady(false);
+    setRemoteVideoReady(false);
+    setPipFlipped(false);
+    setCameraFacing("user");
 
     // stop local & remote streams
     if (localStreamRef.current) {
@@ -838,7 +898,7 @@ export default function CallSheet({
       );
       await safeUpdateStatus("declined", { reason: "media_error" });
       cleanupPeer();
-      onClose?.();
+      onEnd?.();
     } finally {
       setStarting(false);
     }
@@ -849,7 +909,7 @@ export default function CallSheet({
     await safeUpdateStatus("declined");
     await sendCallSummaryMessage("declined");
     cleanupPeer();
-    onClose?.();
+    onEnd?.();
   }
 
   // ---- hangup (both roles) ----
@@ -866,7 +926,7 @@ export default function CallSheet({
     await safeUpdateStatus(endedStatus);
     await sendCallSummaryMessage(endedStatus);
     cleanupPeer();
-    onClose?.();
+    onEnd?.();
   }
 
   // ---- mic / camera toggles ----
@@ -882,19 +942,97 @@ export default function CallSheet({
   }
 
   function toggleCam() {
-    const stream = localRef.current?.srcObject;
+    const stream = localStreamRef.current || localRef.current?.srcObject;
     if (!stream) return;
+
     const videoTracks = stream.getVideoTracks();
     if (!videoTracks.length) return;
+
     videoTracks.forEach((t) => {
       t.enabled = !t.enabled;
       setCamOff(!t.enabled);
     });
   }
 
+  async function switchCamera() {
+    try {
+      if (mode !== "video") return;
+      if (!pc) return;
+
+      const nextFacing = cameraFacing === "user" ? "environment" : "user";
+
+      let newStream = null;
+
+      try {
+        newStream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: {
+            facingMode: { exact: nextFacing },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+        });
+      } catch {
+        newStream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: {
+            facingMode: { ideal: nextFacing },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+        });
+      }
+
+      const newVideoTrack = newStream.getVideoTracks?.()[0];
+      if (!newVideoTrack) return;
+
+      const sender = pc
+        .getSenders()
+        ?.find((s) => s.track && s.track.kind === "video");
+
+      if (sender) {
+        await sender.replaceTrack(newVideoTrack);
+      }
+
+      const currentStream = localStreamRef.current;
+
+      if (currentStream) {
+        const oldVideoTracks = currentStream.getVideoTracks();
+
+        oldVideoTracks.forEach((t) => {
+          try {
+            currentStream.removeTrack(t);
+          } catch {}
+          try {
+            t.stop();
+          } catch {}
+        });
+
+        currentStream.addTrack(newVideoTrack);
+        localStreamRef.current = currentStream;
+      } else {
+        localStreamRef.current = new MediaStream([newVideoTrack]);
+      }
+
+      setCameraFacing(nextFacing);
+      setCamOff(false);
+      setLocalVideoReady(false);
+
+      if (localRef.current && localStreamRef.current) {
+        localRef.current.srcObject = null;
+        await attachStream(localRef.current, localStreamRef.current, {
+          muted: true,
+          kind: "local",
+        });
+      }
+    } catch (e) {
+      console.warn("[CallSheet] switchCamera failed:", e?.message || e);
+    }
+  }
+
   // ---------- render ----------
 
-  if (!open || !room) return null;
+  if (!room) return null;
 
   const isCaller = role === "caller";
 
@@ -917,9 +1055,42 @@ export default function CallSheet({
   const displayPeerName =
     peerName && peerName.trim().length ? peerName : "Unknown user";
 
+  const canShowRemote =
+    remoteVideoReady && (hasAccepted || peerAccepted || hasConnected);
+
+  const showRemoteAsMain = canShowRemote && !pipFlipped;
+  const showLocalAsMain = !canShowRemote || pipFlipped;
+
+  const isDesktop =
+    typeof window !== "undefined" &&
+    window.matchMedia("(min-width: 768px)").matches;
+
+  const shellClass = open
+    ? "fixed inset-0 z-50 bg-black md:bg-black/70 md:backdrop-blur-[2px] flex md:items-center md:justify-center"
+    : "hidden";
+
+  const panelClass = isDesktop
+    ? "relative w-[min(960px,88vw)] h-[min(680px,86vh)] bg-black border border-zinc-800 rounded-3xl shadow-2xl overflow-hidden"
+    : "relative w-full h-full bg-black border-0 rounded-none overflow-hidden";
+
+  const bodyClass = isDesktop
+    ? "relative bg-black overflow-hidden h-[calc(100%-64px)]"
+    : "relative bg-black overflow-hidden h-[calc(100vh-64px)]";
+
+  const mainVideoClass =
+    "absolute inset-0 w-full h-full bg-black object-contain z-10";
+
+  const pipClass = isDesktop
+    ? "absolute bottom-28 right-6 w-40 h-52 rounded-2xl border border-zinc-300 shadow-lg overflow-hidden bg-black z-20"
+    : "absolute bottom-28 right-4 w-24 h-32 rounded-2xl border border-zinc-300 shadow-lg overflow-hidden bg-black z-20";
+
+  const localPreviewClass = isDesktop
+    ? "absolute bottom-28 right-6 w-40 h-52 rounded-2xl border border-zinc-700 shadow-lg overflow-hidden bg-black z-20"
+    : "absolute bottom-28 right-4 w-24 h-32 rounded-2xl border border-zinc-700 shadow-lg overflow-hidden bg-black z-20";
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80">
-      <div className="relative w-full max-w-xl md:rounded-2xl md:overflow-hidden bg-[#111] border border-zinc-800">
+    <div className={shellClass}>
+      <div className={panelClass}>
         {/* top bar */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 bg-black/60">
           <div className="flex flex-col">
@@ -932,54 +1103,145 @@ export default function CallSheet({
           </div>
           <button
             className="text-xs px-3 py-1 rounded-full border border-zinc-700 text-zinc-300 hover:bg-zinc-800"
-            onClick={() => hangup()}
+            onClick={onClose}
             type="button"
           >
-            Close
+            Minimize
           </button>
         </div>
 
         {/* body: fixed height so nothing collapses */}
-        <div
-          className="relative bg-black overflow-hidden"
-          style={{ height: "460px" }} // 👈 explicit height, ignores external flex
-        >
+        <div className={bodyClass}>
           {/* VIDEO LAYOUT */}
           {mode === "video" && (
             <>
-              {/* big view (also tap to swap) */}
-              <video
-                ref={pipFlipped ? localRef : remoteRef}
-                autoPlay
-                playsInline
-                onClick={() => setPipFlipped((v) => !v)} // 👈 tap big view to swap
-                className="absolute inset-0 w-full h-full object-cover opacity-90"
-              />
-              <div className="absolute inset-0 bg-black/35" />
-
-              {/* PiP bottom-right INSIDE video */}
-              <video
-                ref={pipFlipped ? remoteRef : localRef}
-                autoPlay
-                playsInline
-                muted
-                onClick={() => setPipFlipped((v) => !v)}
-                className="absolute bottom-24 right-4 w-28 h-40 md:w-32 md:h-44 rounded-2xl border border-zinc-300 shadow-lg object-cover bg-black cursor-pointer"
-              />
-
-              {/* timer / status at bottom centre */}
-              <div className="absolute bottom-32 left-0 right-0 flex justify-center z-20">
-                <span className="px-3 py-1 rounded-full bg-black/70 text-xs text-zinc-100">
-                  {hasConnected ? formatDuration(elapsedSeconds) : statusText}
-                </span>
+              {/* permanently mounted hidden bind targets */}
+              <div className="absolute w-0 h-0 overflow-hidden pointer-events-none opacity-0">
+                <video ref={localRef} autoPlay playsInline muted />
+                <video ref={remoteRef} autoPlay playsInline />
               </div>
+
+              {/* black base */}
+              <div className="absolute inset-0 bg-black" />
+
+              {/* main surface: local first, remote only when ready, real PiP swap */}
+              {showRemoteAsMain ? (
+                <video
+                  autoPlay
+                  playsInline
+                  className={mainVideoClass}
+                  ref={(el) => {
+                    if (!el || !remoteStreamRef.current) return;
+                    if (el.srcObject !== remoteStreamRef.current) {
+                      el.srcObject = remoteStreamRef.current;
+                    }
+                    el.muted = false;
+                    el.play?.().catch(() => {});
+                  }}
+                />
+              ) : showLocalAsMain && localStreamRef.current ? (
+                <video
+                  autoPlay
+                  playsInline
+                  muted
+                  className={mainVideoClass}
+                  ref={(el) => {
+                    if (!el || !localStreamRef.current) return;
+                    if (el.srcObject !== localStreamRef.current) {
+                      el.srcObject = localStreamRef.current;
+                    }
+                    el.muted = true;
+                    el.play?.().catch(() => {});
+                  }}
+                />
+              ) : (
+                <div className="absolute inset-0 bg-black z-10" />
+              )}
+
+              <div className="absolute inset-0 bg-black/10 pointer-events-none z-10" />
+
+              {/* top status */}
+              <div className="absolute top-4 left-0 right-0 flex justify-center z-20 px-4">
+                <div className="text-center">
+                  <div className="text-white text-xl md:text-2xl font-semibold drop-shadow">
+                    <DisplayName
+                      name={displayPeerName}
+                      verified={!!peerVerified}
+                      badgeClassName="w-5 h-5"
+                    />
+                  </div>
+                  <div className="text-white/80 text-sm mt-1">
+                    {hasConnected ? formatDuration(elapsedSeconds) : statusText}
+                  </div>
+                </div>
+              </div>
+
+              {/* before remote is ready, show only small local preview */}
+              {localStreamRef.current && !remoteVideoReady && (
+                <div className={localPreviewClass}>
+                  <video
+                    autoPlay
+                    playsInline
+                    muted
+                    className="w-full h-full object-cover"
+                    ref={(el) => {
+                      if (!el || !localStreamRef.current) return;
+                      if (el.srcObject !== localStreamRef.current) {
+                        el.srcObject = localStreamRef.current;
+                      }
+                      el.muted = true;
+                      el.play?.().catch(() => {});
+                    }}
+                  />
+                </div>
+              )}
+
+              {/* once remote is ready, allow true main ↔ PiP swap */}
+              {localVideoReady && remoteVideoReady && (
+                <button
+                  type="button"
+                  className={pipClass}
+                  onClick={() => setPipFlipped((v) => !v)}
+                >
+                  {showRemoteAsMain ? (
+                    <video
+                      autoPlay
+                      playsInline
+                      muted
+                      className="w-full h-full object-cover"
+                      ref={(el) => {
+                        if (!el || !localStreamRef.current) return;
+                        if (el.srcObject !== localStreamRef.current) {
+                          el.srcObject = localStreamRef.current;
+                        }
+                        el.muted = true;
+                        el.play?.().catch(() => {});
+                      }}
+                    />
+                  ) : (
+                    <video
+                      autoPlay
+                      playsInline
+                      className="w-full h-full object-cover"
+                      ref={(el) => {
+                        if (!el || !remoteStreamRef.current) return;
+                        if (el.srcObject !== remoteStreamRef.current) {
+                          el.srcObject = remoteStreamRef.current;
+                        }
+                        el.muted = false;
+                        el.play?.().catch(() => {});
+                      }}
+                    />
+                  )}
+                </button>
+              )}
             </>
           )}
 
           {/* AUDIO LAYOUT */}
           {mode === "audio" && (
-            <div className="flex flex-col items-center justify-center h-full">
-              <div className="w-32 h-32 rounded-full mb-4 border-4 border-emerald-500/60 shadow-[0_0_40px_rgba(16,185,129,0.4)] flex items-center justify-center overflow-hidden bg-zinc-900">
+            <div className="flex flex-col items-center justify-center h-full px-6">
+              <div className="w-28 h-28 md:w-36 md:h-36 rounded-full mb-4 border-4 border-emerald-500/60 shadow-[0_0_40px_rgba(16,185,129,0.4)] flex items-center justify-center overflow-hidden bg-zinc-900">
                 {peerAvatar ? (
                   <img
                     src={peerAvatar}
@@ -1000,7 +1262,7 @@ export default function CallSheet({
               </div>
 
               {/* name + timer / status for audio */}
-              <div className="mt-4 flex flex-col items-center gap-1">
+              <div className="mt-4 flex flex-col items-center gap-1 text-center">
                 <span className="text-lg md:text-2xl font-semibold text-zinc-50">
                   <DisplayName
                     name={displayPeerName}
@@ -1019,7 +1281,7 @@ export default function CallSheet({
           )}
 
           {/* bottom controls overlay (on top of video / audio) */}
-          <div className="absolute inset-x-0 bottom-4 flex flex-col items-center gap-3 z-30">
+          <div className="absolute inset-x-0 bottom-4 md:bottom-5 flex flex-col items-center gap-3 z-30 px-4">
             <div className="flex items-center justify-center gap-10">
               {!isCaller && !hasConnected && !hasAccepted && !callFailed ? (
                 <>
@@ -1053,7 +1315,7 @@ export default function CallSheet({
               )}
             </div>
 
-            <div className="flex items-center justify-center gap-6 text-zinc-400 text-xl">
+            <div className="flex items-center justify-center gap-6 text-zinc-400 text-xl bg-black/55 backdrop-blur-sm border border-zinc-800 rounded-full px-5 py-3">
               {/* mic */}
               <button
                 type="button"
@@ -1067,21 +1329,33 @@ export default function CallSheet({
 
               {/* camera (video only) */}
               {mode === "video" && (
-                <button
-                  type="button"
-                  onClick={toggleCam}
-                  className={`hover:text-zinc-100 ${
-                    camOff ? "text-rose-400" : ""
-                  }`}
-                >
-                  {camOff ? "📷✕" : "📷"}
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={toggleCam}
+                    className={`hover:text-zinc-100 ${
+                      camOff ? "text-rose-400" : ""
+                    }`}
+                    title="Turn camera on or off"
+                  >
+                    {camOff ? "📷✕" : "📷"}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={switchCamera}
+                    className="hover:text-zinc-100"
+                    title="Switch front/back camera"
+                  >
+                    🔄
+                  </button>
+                </>
               )}
 
               {/* chat shortcut */}
               <button
                 type="button"
-                onClick={onClose}
+                onClick={onMessage || onClose}
                 className="hover:text-zinc-100"
                 title="Back to chat"
               >

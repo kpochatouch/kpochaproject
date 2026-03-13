@@ -11,7 +11,6 @@ import {
 } from "../lib/api";
 import { useMe } from "../context/MeContext.jsx";
 import ChatPane from "../components/ChatPane.jsx";
-import CallSheet from "../components/CallSheet.jsx";
 import RouteLoader from "../components/RouteLoader.jsx";
 import MobileBackButton from "../components/MobileBackButton.jsx";
 import DisplayName from "../components/DisplayName.jsx";
@@ -31,15 +30,6 @@ export default function Chat() {
   const [room, setRoom] = useState(null);
   const [initialMessages, setInitialMessages] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
-
-  // 🔔 call state now also carries role: "caller" | "receiver"
-  const [callState, setCallState] = useState({
-    open: false,
-    room: null,
-    callId: null,
-    callType: "audio",
-    role: "caller",
-  });
 
   const [peerProfile, setPeerProfile] = useState(null);
 
@@ -147,13 +137,24 @@ export default function Chat() {
         return;
       }
 
-      setCallState({
-        open: true,
-        room: callRoom,
-        callId,
-        callType: ack.callType || callType,
-        role: "caller",
-      });
+      window.dispatchEvent(
+        new CustomEvent("kpocha:start-call", {
+          detail: {
+            role: "caller",
+            room: callRoom,
+            callId,
+            callType: ack.callType || callType,
+            meta: {
+              peerName,
+              peerAvatar,
+              peerVerified,
+              chatRoom: room || null,
+              chatPath: `/chat?with=${encodeURIComponent(peerUid)}`,
+              source: "dm_chat",
+            },
+          },
+        }),
+      );
 
       // only write call bubble if call actually started
       if (room) {
@@ -179,11 +180,6 @@ export default function Chat() {
       console.error("start call failed:", e);
       alert("Could not start call. Please try again.");
     }
-  }
-
-  function handleCallClose() {
-    setCallState((prev) => ({ ...prev, open: false }));
-    // CallSheet itself already sends the correct status (ended/cancelled/declined)
   }
 
   // ------------------ PEER PROFILE ------------------ //
@@ -323,50 +319,6 @@ export default function Chat() {
     };
   }, [room, myLabel]);
 
-  // 4) Listen only for call status (close caller UI when call ends/fails)
-  useEffect(() => {
-    if (!socket) return;
-
-    function handleCallStatus(evt) {
-      if (!evt) return;
-      const { callId, room: callRoom, status } = evt;
-
-      setCallState((prev) => {
-        if (!prev.open) return prev;
-
-        // Check if this status belongs to the current call we’re showing
-        if (
-          (prev.callId && callId && prev.callId !== callId) ||
-          (prev.room && callRoom && prev.room !== callRoom)
-        ) {
-          return prev;
-        }
-
-        if (
-          ["ended", "cancelled", "declined", "missed", "failed"].includes(
-            status,
-          )
-        ) {
-          return { ...prev, open: false };
-        }
-
-        return prev;
-      });
-    }
-
-    try {
-      socket.on("call:status", handleCallStatus);
-    } catch (e) {
-      console.warn("attach call status listener failed:", e?.message || e);
-    }
-
-    return () => {
-      try {
-        socket.off("call:status", handleCallStatus);
-      } catch {}
-    };
-  }, [socket]);
-
   // 🔥 Auto-start call when URL has ?call=audio or ?call=video
   useEffect(() => {
     if (!startCallType) return; // no call param → do nothing
@@ -503,20 +455,6 @@ export default function Chat() {
           initialMessages={initialMessages}
         />
       </div>
-
-      {/* 🔔 Shared CallSheet – role now dynamic */}
-      <CallSheet
-        role={callState.role}
-        room={callState.room}
-        callId={callState.callId}
-        callType={callState.callType}
-        me={myLabel}
-        peerName={peerName}
-        peerAvatar={peerAvatar}
-        open={callState.open}
-        onClose={handleCallClose}
-        chatRoom={room}
-      />
     </div>
   );
 }

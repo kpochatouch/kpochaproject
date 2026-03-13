@@ -331,8 +331,86 @@ export default function App() {
     });
   }, [me?.uid]);
 
-  const [incomingCall, setIncomingCall] = useState(null);
   const handledCallParamRef = useRef(false);
+  const [activeCall, setActiveCall] = useState(null);
+  const [callUiMode, setCallUiMode] = useState("expanded");
+
+  const miniDragRef = useRef(null);
+  const miniResizeRef = useRef(null);
+
+  const [desktopMiniRect, setDesktopMiniRect] = useState({
+    x: 24,
+    y: 120,
+    w: 220,
+    h: 300,
+  });
+
+  useEffect(() => {
+    function onStartGlobalCall(event) {
+      const detail = event?.detail || {};
+      if (!detail?.room) return;
+
+      setActiveCall({
+        open: true,
+        callId: detail.callId || null,
+        room: detail.room,
+        callType: detail.callType || "audio",
+        role: detail.role || "caller",
+        fromUid: detail.fromUid || null,
+        meta: {
+          ...(detail.meta || {}),
+        },
+      });
+
+      setCallUiMode("expanded");
+    }
+
+    window.addEventListener("kpocha:start-call", onStartGlobalCall);
+    return () => {
+      window.removeEventListener("kpocha:start-call", onStartGlobalCall);
+    };
+  }, []);
+
+  useEffect(() => {
+    function onMouseMove(e) {
+      if (miniDragRef.current) {
+        const { startX, startY, originX, originY } = miniDragRef.current;
+        const dx = e.clientX - startX;
+        const dy = e.clientY - startY;
+
+        setDesktopMiniRect((prev) => ({
+          ...prev,
+          x: Math.max(8, originX + dx),
+          y: Math.max(8, originY + dy),
+        }));
+      }
+
+      if (miniResizeRef.current) {
+        const { startX, startY, originW, originH } = miniResizeRef.current;
+        const dx = e.clientX - startX;
+        const dy = e.clientY - startY;
+
+        setDesktopMiniRect((prev) => ({
+          ...prev,
+          w: Math.max(180, originW + dx),
+          h: Math.max(220, originH + dy),
+        }));
+      }
+    }
+
+    function onMouseUp() {
+      miniDragRef.current = null;
+      miniResizeRef.current = null;
+    }
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+  }, []);
 
   // ✅ Native deep-link support (works with notification taps on some devices)
   useEffect(() => {
@@ -364,9 +442,9 @@ export default function App() {
     const isCall = qs.get("call") === "1";
 
     // reset when not on a call link
-    // ✅ but do NOT reset while a call modal is open (prevents native re-open loops)
+    // but do NOT reset while a call UI is already active
     if (!isCall) {
-      if (incomingCall?.open) return;
+      if (activeCall?.room) return;
       handledCallParamRef.current = false;
       return;
     }
@@ -377,21 +455,14 @@ export default function App() {
     const callId = qs.get("callId") || null;
     const room = qs.get("room") || null;
     const callType = qs.get("callType") || "audio";
-
     const shouldAccept = qs.get("accept") === "1";
 
-    // ✅ If we're already showing THIS call, don't reopen / restart anything.
-    // Just ignore duplicate deep links from Android.
-    if (
-      incomingCall?.open &&
-      incomingCall?.callId &&
-      incomingCall.callId === callId
-    ) {
+    // if this exact call is already active, ignore duplicate deep link
+    if (activeCall?.callId && activeCall.callId === callId) {
       return;
     }
 
     if (shouldAccept && callId) {
-      // best-effort: tell backend receiver accepted
       api
         .post(`/api/calls/${encodeURIComponent(callId)}/accept`)
         .catch(() => {});
@@ -401,21 +472,23 @@ export default function App() {
       const fromName = qs.get("fromName") || "";
       const fromAvatar = qs.get("fromAvatar") || "";
 
-      setIncomingCall({
+      setActiveCall({
         open: true,
         callId,
         room,
         callType,
+        role: "receiver",
         fromUid: null,
         meta: {
           fromName,
           fromAvatar,
           callerName: fromName,
           callerAvatar: fromAvatar,
-          // ✅ native Accept passes accept=1, so make CallSheet auto-accept once
           autoAccept: shouldAccept,
         },
       });
+
+      setCallUiMode("expanded");
     }
 
     // clean URL so refresh won't re-trigger forever
@@ -435,7 +508,7 @@ export default function App() {
       },
       { replace: true },
     );
-  }, [location.pathname, location.search, navigate]);
+  }, [location.pathname, location.search, navigate, activeCall]);
 
   // MobileTabBar: tap Help -> load Chatbase on demand (mobile only)
   useEffect(() => {
@@ -481,27 +554,43 @@ export default function App() {
     const offIncoming = registerSocketHandler("call:incoming", (payload) => {
       if (!payload) return;
 
-      setIncomingCall({
+      setActiveCall({
         open: true,
         callId: payload.callId,
         room: payload.room,
         callType: payload.callType || "audio",
+        role: "receiver",
         fromUid: payload.callerUid,
         meta: payload.meta || {},
       });
+
+      setCallUiMode("expanded");
     });
 
-    // close modal when call ends / cancelled / declined
+    // remove active call only when call truly ends
     const offStatus = registerSocketHandler("call:status", (payload) => {
       if (!payload) return;
+
       if (
         ["ended", "missed", "cancelled", "declined", "failed"].includes(
           payload.status,
         )
       ) {
-        setIncomingCall((prev) =>
-          prev && prev.callId === payload.callId ? null : prev,
-        );
+        setActiveCall((prev) => {
+          if (!prev) return prev;
+
+          const sameCallId =
+            prev.callId && payload.callId && prev.callId === payload.callId;
+
+          const sameRoom =
+            prev.room &&
+            payload.room &&
+            String(prev.room) === String(payload.room);
+
+          return sameCallId || sameRoom ? null : prev;
+        });
+
+        setCallUiMode("expanded");
       }
     });
 
@@ -797,27 +886,185 @@ export default function App() {
             <MobileTabBar me={me} />
           </>
         )}
-        <CallSheet
-          role="receiver"
-          room={incomingCall?.room || null}
-          callId={incomingCall?.callId || null}
-          callType={incomingCall?.callType || "audio"}
-          me={myLabel}
-          // 🔥 show real caller identity from meta put there by Chat.jsx
-          peerName={
-            incomingCall?.meta?.fromName || incomingCall?.meta?.callerName || ""
-          }
-          peerAvatar={
-            incomingCall?.meta?.fromAvatar ||
-            incomingCall?.meta?.callerAvatar ||
-            ""
-          }
-          // 🔔 allow call summary bubble for DM chat if chatRoom passed
-          autoAccept={Boolean(incomingCall?.meta?.autoAccept)}
-          chatRoom={incomingCall?.meta?.chatRoom || null}
-          open={Boolean(incomingCall?.open && incomingCall?.room)}
-          onClose={() => setIncomingCall(null)}
-        />
+        {activeCall?.room && (
+          <CallSheet
+            role={activeCall?.role || "receiver"}
+            room={activeCall.room}
+            callId={activeCall.callId || null}
+            callType={activeCall.callType || "audio"}
+            me={myLabel}
+            peerName={
+              activeCall?.meta?.peerName ||
+              activeCall?.meta?.fromName ||
+              activeCall?.meta?.callerName ||
+              ""
+            }
+            peerAvatar={
+              activeCall?.meta?.peerAvatar ||
+              activeCall?.meta?.fromAvatar ||
+              activeCall?.meta?.callerAvatar ||
+              ""
+            }
+            peerVerified={Boolean(
+              activeCall?.meta?.peerVerified || activeCall?.meta?.fromVerified,
+            )}
+            autoAccept={Boolean(activeCall?.meta?.autoAccept)}
+            chatRoom={activeCall?.meta?.chatRoom || null}
+            open={callUiMode === "expanded"}
+            onClose={() => setCallUiMode("minimized")}
+            onEnd={() => {
+              setActiveCall(null);
+              setCallUiMode("expanded");
+            }}
+            onMessage={() => {
+              setCallUiMode("minimized");
+
+              if (activeCall?.meta?.chatPath) {
+                navigate(activeCall.meta.chatPath);
+                return;
+              }
+
+              if (activeCall?.meta?.chatRoom) {
+                navigate(
+                  `/chat?room=${encodeURIComponent(activeCall.meta.chatRoom)}`,
+                );
+                return;
+              }
+
+              navigate("/chat");
+            }}
+          />
+        )}
+
+        {activeCall?.room && callUiMode === "minimized" && !isMobile && (
+          <div
+            className="fixed z-[60] rounded-2xl border border-zinc-700 bg-black shadow-2xl overflow-hidden select-none"
+            style={{
+              left: desktopMiniRect.x,
+              top: desktopMiniRect.y,
+              width: desktopMiniRect.w,
+              height: desktopMiniRect.h,
+            }}
+          >
+            <div
+              className="absolute top-0 left-0 right-0 h-10 flex items-center justify-between px-3 bg-black/70 backdrop-blur-sm cursor-move z-10"
+              onMouseDown={(e) => {
+                miniDragRef.current = {
+                  startX: e.clientX,
+                  startY: e.clientY,
+                  originX: desktopMiniRect.x,
+                  originY: desktopMiniRect.y,
+                };
+              }}
+            >
+              <div className="text-[11px] text-white">
+                {activeCall?.callType === "video" ? "Video" : "Voice"}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setCallUiMode("expanded")}
+                className="w-8 h-8 rounded-full bg-black/60 flex items-center justify-center text-white text-xs"
+              >
+                ⤢
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setCallUiMode("expanded")}
+              className="relative w-full h-full bg-zinc-950 text-left"
+            >
+              {activeCall?.meta?.peerAvatar ? (
+                <img
+                  src={activeCall.meta.peerAvatar}
+                  alt={activeCall?.meta?.peerName || "Call peer"}
+                  className="absolute inset-0 w-full h-full object-cover opacity-90"
+                />
+              ) : (
+                <div className="absolute inset-0 flex items-center justify-center text-5xl text-white bg-zinc-900">
+                  {(activeCall?.meta?.peerName || "U")
+                    .slice(0, 1)
+                    .toUpperCase()}
+                </div>
+              )}
+
+              <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-transparent to-black/20" />
+
+              <div className="absolute bottom-3 left-3 right-3 text-left">
+                <div className="text-xl font-semibold text-white truncate">
+                  {activeCall?.meta?.peerName || "Ongoing call"}
+                </div>
+                <div className="text-sm text-emerald-400 mt-1">
+                  Tap to reopen
+                </div>
+              </div>
+
+              <div className="absolute bottom-4 right-4 w-14 h-20 rounded-2xl border border-white/20 bg-black/70 shadow-lg" />
+            </button>
+
+            <div
+              className="absolute bottom-0 right-0 w-5 h-5 cursor-se-resize z-20"
+              onMouseDown={(e) => {
+                e.stopPropagation();
+                miniResizeRef.current = {
+                  startX: e.clientX,
+                  startY: e.clientY,
+                  originW: desktopMiniRect.w,
+                  originH: desktopMiniRect.h,
+                };
+              }}
+            >
+              <div className="absolute bottom-1 right-1 w-3 h-3 border-r-2 border-b-2 border-zinc-400" />
+            </div>
+          </div>
+        )}
+
+        {activeCall?.room && callUiMode === "minimized" && isMobile && (
+          <button
+            type="button"
+            onClick={() => setCallUiMode("expanded")}
+            className="fixed bottom-24 right-4 z-[60] w-36 h-48 rounded-2xl border border-zinc-700 bg-black shadow-2xl overflow-hidden"
+          >
+            <div className="relative w-full h-full bg-zinc-950">
+              {activeCall?.meta?.peerAvatar ? (
+                <img
+                  src={activeCall.meta.peerAvatar}
+                  alt={activeCall?.meta?.peerName || "Call peer"}
+                  className="absolute inset-0 w-full h-full object-cover opacity-90"
+                />
+              ) : (
+                <div className="absolute inset-0 flex items-center justify-center text-4xl text-white bg-zinc-900">
+                  {(activeCall?.meta?.peerName || "U")
+                    .slice(0, 1)
+                    .toUpperCase()}
+                </div>
+              )}
+
+              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/20" />
+
+              <div className="absolute top-2 left-2 right-2 flex items-start justify-between">
+                <div className="px-2 py-1 rounded-full bg-black/60 text-[10px] text-white">
+                  {activeCall?.callType === "video" ? "Video" : "Voice"}
+                </div>
+                <div className="w-8 h-8 rounded-full bg-black/60 flex items-center justify-center text-white text-xs">
+                  ⤢
+                </div>
+              </div>
+
+              <div className="absolute bottom-2 left-2 right-2 text-left">
+                <div className="text-sm font-semibold text-white truncate">
+                  {activeCall?.meta?.peerName || "Ongoing call"}
+                </div>
+                <div className="text-[11px] text-emerald-400 mt-0.5">
+                  Tap to reopen
+                </div>
+              </div>
+
+              <div className="absolute bottom-3 right-3 w-10 h-14 rounded-xl border border-white/20 bg-black/70 shadow-lg" />
+            </div>
+          </button>
+        )}
         <InstallPWAButton />
       </div>
     </ToastProvider>
