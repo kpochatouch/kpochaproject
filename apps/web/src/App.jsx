@@ -62,6 +62,7 @@ const Inbox = lazy(() => import("./pages/Inbox.jsx"));
 const LeaveReview = lazy(() => import("./pages/LeaveReview.jsx"));
 const LeaveClientReview = lazy(() => import("./pages/LeaveClientReview.jsx"));
 const Contact = lazy(() => import("./pages/Contact.jsx"));
+const StoryCompose = lazy(() => import("./pages/StoryCompose.jsx"));
 
 /* ---------- Chatbase hook ---------- */
 function useChatbase(enabled) {
@@ -659,6 +660,15 @@ export default function App() {
                 element={
                   <RequireAuth>
                     <Compose />
+                  </RequireAuth>
+                }
+              />
+
+              <Route
+                path="/stories/create"
+                element={
+                  <RequireAuth>
+                    <StoryCompose />
                   </RequireAuth>
                 }
               />

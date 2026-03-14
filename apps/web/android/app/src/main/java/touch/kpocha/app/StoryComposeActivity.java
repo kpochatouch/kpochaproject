@@ -3,6 +3,8 @@ package touch.kpocha.app;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.content.res.AssetFileDescriptor;
+import android.database.Cursor;
 import android.net.Uri;
 import android.os.Bundle;
 import android.provider.OpenableColumns;
@@ -16,12 +18,10 @@ import org.json.JSONObject;
 
 import java.io.IOException;
 import java.io.InputStream;
-import android.content.res.AssetFileDescriptor;
-
-import okio.BufferedSink;
 
 import okhttp3.MediaType;
-import okhttp3.MultipartBody;
+import okio.BufferedSink;
+
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
@@ -47,7 +47,7 @@ public class StoryComposeActivity extends Activity {
 
     private Uri pickedUri = null;
     private String pickedMime = "";
-    private String uploadedUrl = "";
+    private String uploadedAssetId = "";
     private String uploadedType = "";
 
     private final OkHttpClient client = new OkHttpClient();
@@ -103,6 +103,7 @@ public class StoryComposeActivity extends Activity {
 
         if (btnPick != null)
             btnPick.setOnClickListener(v -> pickMedia());
+
         if (btnPost != null)
             btnPost.setOnClickListener(v -> {
                 if (pickedUri == null) {
@@ -113,13 +114,15 @@ public class StoryComposeActivity extends Activity {
                     setStatus("Missing apiBase/token.");
                     return;
                 }
-                // upload then post
+
                 new Thread(() -> {
                     try {
                         setStatusUi("Uploading...");
                         uploadToBackend();
+
                         setStatusUi("Posting story...");
                         postStory();
+
                         setStatusUi("Posted ✅");
                         runOnUiThread(this::finish);
                     } catch (Exception e) {
@@ -156,7 +159,7 @@ public class StoryComposeActivity extends Activity {
             }
 
             pickedMime = getContentResolver().getType(pickedUri);
-            uploadedUrl = "";
+            uploadedAssetId = "";
             uploadedType = "";
 
             if (pickedMime != null && pickedMime.startsWith("video/")) {
@@ -178,7 +181,7 @@ public class StoryComposeActivity extends Activity {
                 pickedMime = getContentResolver().getType(pickedUri);
                 if (TextUtils.isEmpty(pickedMime))
                     pickedMime = "video/mp4";
-                uploadedUrl = "";
+                uploadedAssetId = "";
                 uploadedType = "";
                 setStatus("Trimmed ✓ Ready to upload");
             } else {
@@ -193,100 +196,119 @@ public class StoryComposeActivity extends Activity {
     }
 
     private void uploadToBackend() throws Exception {
-        // This now means: sign on backend, upload DIRECT to Cloudinary.
         String root = apiBase.endsWith("/") ? apiBase.substring(0, apiBase.length() - 1) : apiBase;
 
-        // 1) Ask backend for Cloudinary signature
-        String signUrl = root + "/api/uploads/sign";
+        String mime = !TextUtils.isEmpty(pickedMime) ? pickedMime : "application/octet-stream";
+        boolean isVideo = mime.startsWith("video/");
+        String type = isVideo ? "video" : "image";
 
-        JSONObject signPayload = new JSONObject();
-        signPayload.put("folder", "kpocha-stories");
-        signPayload.put("overwrite", true);
+        String filename = guessDisplayName(pickedUri);
+        if (TextUtils.isEmpty(filename)) {
+            filename = isVideo ? "story.mp4" : "story.jpg";
+        }
 
-        RequestBody signBody = RequestBody.create(
-                signPayload.toString().getBytes(),
+        // 1) INIT
+        String initUrl = root + "/api/media/init";
+
+        JSONObject initPayload = new JSONObject();
+        initPayload.put("type", type);
+        initPayload.put("contentType", mime);
+        initPayload.put("filename", filename);
+        initPayload.put("visibility", "public");
+
+        RequestBody initBody = RequestBody.create(
+                initPayload.toString().getBytes(),
                 MediaType.parse("application/json"));
 
-        Request signReq = new Request.Builder()
-                .url(signUrl)
-                .post(signBody)
+        Request initReq = new Request.Builder()
+                .url(initUrl)
+                .post(initBody)
                 .header("Authorization", "Bearer " + token)
                 .header("Content-Type", "application/json")
                 .build();
 
-        Response signResp = client.newCall(signReq).execute();
-        String signRespBody = signResp.body() != null ? signResp.body().string() : "{}";
-        if (signResp.body() != null)
-            signResp.body().close();
+        Response initResp = client.newCall(initReq).execute();
+        String initRespBody = initResp.body() != null ? initResp.body().string() : "{}";
+        if (initResp.body() != null)
+            initResp.body().close();
 
-        if (!signResp.isSuccessful()) {
-            throw new Exception("sign_http_" + signResp.code());
+        if (!initResp.isSuccessful()) {
+            throw new Exception("media_init_http_" + initResp.code());
         }
 
-        JSONObject sign = new JSONObject(signRespBody);
-        if (!sign.optBoolean("ok", false))
-            throw new Exception("sign_failed");
+        JSONObject initJson = new JSONObject(initRespBody);
+        String assetId = initJson.optString("assetId", "");
+        String uploadUrl = initJson.optString("uploadUrl", "");
 
-        String cloudName = sign.optString("cloudName", "");
-        String apiKey = sign.optString("apiKey", "");
-        String signature = sign.optString("signature", "");
-        long timestamp = sign.optLong("timestamp", 0);
-        String folder = sign.optString("folder", "kpocha-stories");
-
-        if (TextUtils.isEmpty(cloudName) || TextUtils.isEmpty(apiKey) || TextUtils.isEmpty(signature)
-                || timestamp <= 0) {
-            throw new Exception("sign_bad_response");
+        if (TextUtils.isEmpty(assetId) || TextUtils.isEmpty(uploadUrl)) {
+            throw new Exception("media_init_bad_response");
         }
 
-        String mime = (pickedMime != null ? pickedMime : "application/octet-stream");
-        boolean isVideo = mime.startsWith("video/");
-        String type = isVideo ? "video" : "image";
-
-        // hard safety: stories max 60s / 25MB is handled client-side later, but keep
-        // this simple now.
-        String filename = guessDisplayName(pickedUri);
-        if (TextUtils.isEmpty(filename))
-            filename = isVideo ? "story.mp4" : "story.jpg";
-
-        String cloudinaryUrl = "https://api.cloudinary.com/v1_1/" + cloudName + "/auto/upload";
-
+        // 2) DIRECT PUT TO R2
         RequestBody fileBody = requestBodyFromUri(pickedUri, mime);
 
-        MultipartBody form = new MultipartBody.Builder()
-                .setType(MultipartBody.FORM)
-                .addFormDataPart("file", filename, fileBody)
-                .addFormDataPart("api_key", apiKey)
-                .addFormDataPart("timestamp", String.valueOf(timestamp))
-                .addFormDataPart("signature", signature)
-                .addFormDataPart("folder", folder)
-                .build();
-
         Request uploadReq = new Request.Builder()
-                .url(cloudinaryUrl)
-                .post(form)
+                .url(uploadUrl)
+                .put(fileBody)
+                .header("Content-Type", mime)
                 .build();
 
         Response uploadResp = client.newCall(uploadReq).execute();
-        String uploadRespBody = uploadResp.body() != null ? uploadResp.body().string() : "{}";
-        if (uploadResp.body() != null)
-            uploadResp.body().close();
+        try {
+            if (!uploadResp.isSuccessful()) {
+                throw new Exception("upload_http_" + uploadResp.code());
+            }
+        } finally {
+            if (uploadResp.body() != null) {
+                try {
+                    uploadResp.body().close();
+                } catch (Exception ignored) {
+                }
+            }
+        }
 
-        if (!uploadResp.isSuccessful())
-            throw new Exception("cloudinary_http_" + uploadResp.code());
+        // 3) COMPLETE
+        String completeUrl = root + "/api/media/complete";
 
-        JSONObject up = new JSONObject(uploadRespBody);
-        String url = up.optString("secure_url", up.optString("url", ""));
+        JSONObject completePayload = new JSONObject();
+        completePayload.put("assetId", assetId);
 
-        if (TextUtils.isEmpty(url))
-            throw new Exception("cloudinary_missing_url");
+        RequestBody completeBody = RequestBody.create(
+                completePayload.toString().getBytes(),
+                MediaType.parse("application/json"));
 
-        uploadedUrl = url;
+        Request completeReq = new Request.Builder()
+                .url(completeUrl)
+                .post(completeBody)
+                .header("Authorization", "Bearer " + token)
+                .header("Content-Type", "application/json")
+                .build();
+
+        Response completeResp = client.newCall(completeReq).execute();
+        String completeRespBody = completeResp.body() != null ? completeResp.body().string() : "{}";
+        if (completeResp.body() != null)
+            completeResp.body().close();
+
+        if (!completeResp.isSuccessful()) {
+            throw new Exception("media_complete_http_" + completeResp.code());
+        }
+
+        JSONObject completeJson = new JSONObject(completeRespBody);
+        if (!completeJson.optBoolean("ok", false)) {
+            throw new Exception("media_complete_failed");
+        }
+
+        uploadedAssetId = assetId;
         uploadedType = type;
     }
 
     private void postStory() throws Exception {
         String root = apiBase.endsWith("/") ? apiBase.substring(0, apiBase.length() - 1) : apiBase;
         String url = root + "/api/stories";
+
+        if (TextUtils.isEmpty(uploadedAssetId) || TextUtils.isEmpty(uploadedType)) {
+            throw new Exception("missing_uploaded_asset");
+        }
 
         JSONObject payload = new JSONObject();
         payload.put("text", "");
@@ -295,7 +317,7 @@ public class StoryComposeActivity extends Activity {
 
         JSONArray media = new JSONArray();
         JSONObject m0 = new JSONObject();
-        m0.put("url", uploadedUrl);
+        m0.put("assetId", uploadedAssetId);
         m0.put("type", uploadedType);
         media.put(m0);
         payload.put("media", media);
@@ -312,14 +334,22 @@ public class StoryComposeActivity extends Activity {
                 .build();
 
         Response resp = client.newCall(req).execute();
+        String respBody = resp.body() != null ? resp.body().string() : "{}";
         if (resp.body() != null)
             resp.body().close();
-        if (!resp.isSuccessful())
+
+        if (!resp.isSuccessful()) {
             throw new Exception("story_http_" + resp.code());
+        }
+
+        JSONObject json = new JSONObject(respBody);
+        if (!json.optBoolean("ok", false)) {
+            throw new Exception("story_create_failed");
+        }
     }
 
     private String guessDisplayName(Uri uri) {
-        try (android.database.Cursor c = getContentResolver().query(uri, null, null, null, null)) {
+        try (Cursor c = getContentResolver().query(uri, null, null, null, null)) {
             if (c != null && c.moveToFirst()) {
                 int idx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME);
                 if (idx >= 0)

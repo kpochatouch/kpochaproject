@@ -12,6 +12,7 @@ import SideMenu from "../components/SideMenu.jsx";
 import FeedComposer from "../components/FeedComposer.jsx";
 import { connectSocket, registerSocketHandler } from "../lib/api";
 import NotificationsBell from "../components/NotificationBell.jsx";
+import StoriesRail from "../components/StoriesRail.jsx";
 
 /* ---------------- Main Browse page ---------------- */
 export default function Browse() {
@@ -136,8 +137,8 @@ export default function Browse() {
         const list = Array.isArray(data)
           ? data
           : Array.isArray(data?.items)
-            ? data.items
-            : [];
+          ? data.items
+          : [];
         setPros(list);
       } catch {
         if (!on) return;
@@ -256,8 +257,8 @@ export default function Browse() {
         const list = Array.isArray(r.data)
           ? r.data
           : Array.isArray(r.data?.items)
-            ? r.data.items
-            : [];
+          ? r.data.items
+          : [];
 
         if (append) {
           setFeed((prev) => {
@@ -601,13 +602,14 @@ export default function Browse() {
 
             {/* FEED */}
             <div className="flex-1 w-full max-w-2xl lg:mx-0 mx-auto">
+              <StoriesRail />
+
               {canPostOnFeed && (
                 <FeedComposer
                   lga={lga}
                   onPosted={() => fetchFeed({ append: false, before: null })}
                 />
               )}
-
               {errFeed && (
                 <div className="mb-4 rounded border border-red-800 bg-red-900/30 text-red-100 px-3 py-2">
                   {errFeed}
@@ -718,35 +720,15 @@ export default function Browse() {
                         Preview
                       </button>
                       <button
-                        onClick={async () => {
-                          if (!adminAdUrl.trim())
-                            return setAdMsg("Paste a media URL first.");
-                          try {
-                            setAdMsg("Publishing…");
-                            await api.post("/api/posts", {
-                              text: "Sponsored",
-                              media: [
-                                {
-                                  url: adminAdUrl.trim(),
-                                  type: /\.(mp4|mov|webm)$/i.test(adminAdUrl)
-                                    ? "video"
-                                    : "image",
-                                },
-                              ],
-                              isPublic: true,
-                              tags: ["AD"],
-                            });
-                            setAdMsg("Published to feed ✔");
-                            await fetchFeed({
-                              append: false,
-                              before: null,
-                            });
-                          } catch (e) {
-                            setAdMsg(
-                              e?.response?.data?.error ||
-                                "Failed to publish ad",
-                            );
+                        onClick={() => {
+                          if (!adminAdUrl.trim()) {
+                            setAdMsg("Paste a media URL first.");
+                            return;
                           }
+
+                          setAdMsg(
+                            "Direct URL publish is disabled. Admin advert posting must use uploaded assetId media now.",
+                          );
                         }}
                         className="flex-1 rounded-md bg-gold text-black px-2 py-1 text-xs font-semibold"
                         type="button"
