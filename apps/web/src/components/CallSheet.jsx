@@ -141,6 +141,8 @@ export default function CallSheet({
       videoEl.autoplay = true;
       videoEl.playsInline = true;
       videoEl.muted = muted;
+      videoEl.setAttribute("playsinline", "true");
+      videoEl.setAttribute("webkit-playsinline", "true");
 
       const markReady = () => {
         if (kind === "local") setLocalVideoReady(true);
@@ -148,11 +150,17 @@ export default function CallSheet({
       };
 
       videoEl.onloadedmetadata = () => {
+        markReady();
         videoEl.play?.().catch(() => {});
       };
 
-      videoEl.onloadeddata = null;
-      videoEl.oncanplay = null;
+      videoEl.onloadeddata = () => {
+        markReady();
+      };
+
+      videoEl.oncanplay = () => {
+        markReady();
+      };
 
       videoEl.onplaying = () => {
         markReady();
@@ -1141,8 +1149,7 @@ export default function CallSheet({
   const displayPeerName =
     peerName && peerName.trim().length ? peerName : "Unknown user";
 
-  const canShowRemote =
-    remoteVideoReady && (hasAccepted || peerAccepted || hasConnected);
+  const canShowRemote = remoteVideoReady;
 
   const showRemoteAsMain = canShowRemote && !pipFlipped;
   const showLocalAsMain = !canShowRemote || pipFlipped;
