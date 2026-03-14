@@ -151,7 +151,7 @@ export default function Profile() {
             </p>
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap justify-end">
           <Link
             to="/settings"
             className="text-sm px-3 py-1.5 rounded-lg border border-zinc-700 hover:bg-zinc-900"
@@ -165,6 +165,20 @@ export default function Profile() {
             title="Open Wallet"
           >
             Wallet →
+          </Link>
+          <Link
+            to="/adverts/new"
+            className="text-sm px-3 py-1.5 rounded-lg border border-zinc-700 hover:bg-zinc-900"
+            title="Create Advert"
+          >
+            Create Advert →
+          </Link>
+          <Link
+            to="/my-adverts"
+            className="text-sm px-3 py-1.5 rounded-lg border border-zinc-700 hover:bg-zinc-900"
+            title="Open My Adverts"
+          >
+            My Adverts →
           </Link>
         </div>
       </div>

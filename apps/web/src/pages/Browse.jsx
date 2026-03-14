@@ -13,12 +13,15 @@ import FeedComposer from "../components/FeedComposer.jsx";
 import { connectSocket, registerSocketHandler } from "../lib/api";
 import NotificationsBell from "../components/NotificationBell.jsx";
 import StoriesRail from "../components/StoriesRail.jsx";
+import AdvertCardFeed from "../components/AdvertCardFeed.jsx";
+import AdvertCardRail from "../components/AdvertCardRail.jsx";
+import { handleAdvertClick as runAdvertClick } from "../lib/advertActions";
 
 /* ---------------- Main Browse page ---------------- */
 export default function Browse() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { me, isAdmin } = useMe();
+  const { me } = useMe();
 
   // derive initial tab from URL (?tab=pros) but default to "feed"
   const [tab, setTab] = useState(() => {
@@ -49,9 +52,8 @@ export default function Browse() {
   const [hasMore, setHasMore] = useState(true);
   const pageSize = 8;
 
-  // right-rail advert
-  const [adminAdUrl, setAdminAdUrl] = useState("");
-  const [adMsg, setAdMsg] = useState("");
+  const [feedAdverts, setFeedAdverts] = useState([]);
+  const [railAdverts, setRailAdverts] = useState([]);
 
   // sentinel + latest state refs
   const sentinelRef = useRef(null);
@@ -459,6 +461,64 @@ export default function Browse() {
 
   const canPostOnFeed = !!me;
 
+  const fetchAdverts = useCallback(async () => {
+    try {
+      const [feedRes, railRes] = await Promise.all([
+        api.get("/api/adverts/active/list", { params: { placement: "feed" } }),
+        api.get("/api/adverts/active/list", {
+          params: { placement: "right_rail" },
+        }),
+      ]);
+
+      setFeedAdverts(Array.isArray(feedRes.data) ? feedRes.data : []);
+      setRailAdverts(Array.isArray(railRes.data) ? railRes.data : []);
+    } catch (err) {
+      console.warn("fetch adverts failed", err?.message || err);
+      setFeedAdverts([]);
+      setRailAdverts([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isFeedTab) return;
+    fetchAdverts();
+  }, [isFeedTab, fetchAdverts]);
+
+  function injectFeedAdverts(posts = [], adverts = []) {
+    if (!Array.isArray(posts) || !posts.length) return [];
+
+    const out = [];
+    let adIndex = 0;
+
+    posts.forEach((post, index) => {
+      out.push({
+        kind: "post",
+        data: post,
+        key: `post-${post?._id || post?.id || index}`,
+      });
+
+      const shouldInsert = (index + 1) % 4 === 0;
+      if (shouldInsert && Array.isArray(adverts) && adverts[adIndex]) {
+        out.push({
+          kind: "advert",
+          data: adverts[adIndex],
+          key: `advert-${adverts[adIndex]?._id || adIndex}-${index}`,
+        });
+        adIndex += 1;
+      }
+    });
+
+    return out;
+  }
+
+  async function handleAdvertClick(advert) {
+    await runAdvertClick({ advert, navigate });
+  }
+
+  const feedWithAdverts = useMemo(() => {
+    return injectFeedAdverts(feed, feedAdverts);
+  }, [feed, feedAdverts]);
+
   return (
     <ErrorBoundary>
       <div className="max-w-6xl mx-auto px-4 py-10">
@@ -621,18 +681,36 @@ export default function Browse() {
               ) : feed.length ? (
                 <>
                   <div className="space-y-4">
-                    {feed.map((post) => (
-                      <FeedCard
-                        key={post._id || post.id}
-                        post={post}
-                        currentUser={
-                          me ? { uid: me.uid || me.id, ...me } : null
-                        }
-                        onDeleted={() =>
-                          fetchFeed({ append: false, before: null })
-                        }
-                      />
-                    ))}
+                    {feedWithAdverts.map((item, idx) => {
+                      if (item?.kind === "advert") {
+                        return (
+                          <AdvertCardFeed
+                            key={item.key || item.data?._id || `ad-${idx}`}
+                            advert={item.data}
+                            onClickAction={handleAdvertClick}
+                          />
+                        );
+                      }
+
+                      if (item?.kind === "post" && item?.data) {
+                        const post = item.data;
+                        return (
+                          <FeedCard
+                            key={
+                              item.key || post._id || post.id || `post-${idx}`
+                            }
+                            post={post}
+                            currentUser={
+                              me ? { uid: me.uid || me.id, ...me } : null
+                            }
+                            onDeleted={() =>
+                              fetchFeed({ append: false, before: null })
+                            }
+                          />
+                        );
+                      }
+                      return null;
+                    })}
                   </div>
 
                   {/* invisible sentinel */}
@@ -680,93 +758,10 @@ export default function Browse() {
             {/* RIGHT ADS */}
             <div className="hidden lg:block w-56 self-start lg:top-20 lg:sticky">
               <div className="space-y-4">
-                {isAdmin ? (
-                  <div className="rounded-lg border border-zinc-800 bg-black/40 p-3 space-y-2">
-                    <div className="text-xs text-zinc-300 mb-1">
-                      Advert (admin only)
-                    </div>
-                    <input
-                      value={adminAdUrl}
-                      onChange={(e) => {
-                        setAdminAdUrl(e.target.value);
-                        setAdMsg("");
-                      }}
-                      placeholder="Image / video URL"
-                      className="w-full bg-black border border-zinc-700 rounded px-2 py-1 text-xs"
-                    />
-                    <input
-                      type="file"
-                      accept="image/*,video/*"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (!file) return;
-                        const localUrl = URL.createObjectURL(file);
-                        setAdminAdUrl(localUrl);
-                        setAdMsg("Local preview (not uploaded to backend)");
-                      }}
-                      className="w-full text-[10px] text-zinc-400"
-                    />
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => {
-                          if (!adminAdUrl.trim())
-                            return setAdMsg("Paste a media URL first.");
-                          setAdMsg("Previewing…");
-                          setTimeout(() => setAdMsg("Preview ready"), 300);
-                        }}
-                        className="flex-1 rounded-md border border-zinc-700 px-2 py-1 text-xs hover:bg-zinc-900"
-                        type="button"
-                      >
-                        Preview
-                      </button>
-                      <button
-                        onClick={() => {
-                          if (!adminAdUrl.trim()) {
-                            setAdMsg("Paste a media URL first.");
-                            return;
-                          }
-
-                          setAdMsg(
-                            "Direct URL publish is disabled. Admin advert posting must use uploaded assetId media now.",
-                          );
-                        }}
-                        className="flex-1 rounded-md bg-gold text-black px-2 py-1 text-xs font-semibold"
-                        type="button"
-                      >
-                        Publish
-                      </button>
-                    </div>
-                    {adMsg && (
-                      <p className="text-[10px] text-zinc-500 mt-1">{adMsg}</p>
-                    )}
-                  </div>
-                ) : null}
-
-                {adminAdUrl ? (
-                  <div className="rounded-lg border border-zinc-800 overflow-hidden bg-black/40 h-40 flex items-center justify-center">
-                    {adminAdUrl.match(/\.(mp4|mov|webm)$/i) ? (
-                      <video
-                        src={adminAdUrl}
-                        muted
-                        loop
-                        playsInline
-                        autoPlay
-                        className="w-full h-full object-cover max-w-full"
-                      />
-                    ) : (
-                      <img
-                        src={adminAdUrl}
-                        alt="ad"
-                        loading="lazy"
-                        className="w-full h-full object-cover max-w-full"
-                      />
-                    )}
-                  </div>
-                ) : (
-                  <div className="h-40 rounded-lg border border-zinc-800 bg-black/20 flex items-center justify-center text-xs text-zinc-500">
-                    Advert space
-                  </div>
-                )}
+                <AdvertCardRail
+                  advert={railAdverts?.[0] || null}
+                  onClickAction={handleAdvertClick}
+                />
               </div>
             </div>
           </div>

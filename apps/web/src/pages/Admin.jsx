@@ -16,8 +16,8 @@ export default function Admin() {
     tabParam === "settings"
       ? "settings"
       : tabParam === "wallet"
-        ? "wallet"
-        : "pending";
+      ? "wallet"
+      : "pending";
 
   const [tab, setTab] = useState(initialTab);
 
@@ -478,6 +478,15 @@ export default function Admin() {
       <p className="text-zinc-400 mt-1">
         Review pro applications and configure how the platform runs itself.
       </p>
+
+      <div className="mt-4">
+        <Link
+          to="/admin/adverts"
+          className="inline-flex rounded-lg border border-zinc-700 px-4 py-2 text-sm hover:bg-zinc-900"
+        >
+          Open Advert Review
+        </Link>
+      </div>
 
       {/* Tabs */}
       <div className="mt-6 border-b border-zinc-800 flex gap-6">
@@ -1129,8 +1138,8 @@ export default function Admin() {
                           {t.direction === "credit"
                             ? "+"
                             : t.direction === "debit"
-                              ? "−"
-                              : ""}{" "}
+                            ? "−"
+                            : ""}{" "}
                           {money(t.amountKobo)}
                         </div>
                       </div>
@@ -1183,8 +1192,8 @@ export default function Admin() {
                           {t.direction === "credit"
                             ? "+"
                             : t.direction === "debit"
-                              ? "−"
-                              : ""}{" "}
+                            ? "−"
+                            : ""}{" "}
                           {money(t.amountKobo)}
                         </div>
                       </div>

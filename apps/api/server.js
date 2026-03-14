@@ -58,6 +58,7 @@ import webrtcRoutes from "./routes/webrtc.js";
 import { getIO } from "./sockets/index.js";
 import pushRoutes from "./routes/push.js";
 import mediaRoutes from "./routes/media.js";
+import advertsRoutes from "./routes/adverts.js";
 
 dotenv.config();
 
@@ -1348,6 +1349,7 @@ app.use("/api", callRoutes({ requireAuth }));
 app.use("/api", webrtcRoutes);
 app.use("/api", pushRoutes);
 app.use("/api", mediaRoutes({ requireAuth }));
+app.use("/api", advertsRoutes);
 
 // admin pros
 try {

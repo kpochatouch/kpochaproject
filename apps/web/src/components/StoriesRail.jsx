@@ -4,6 +4,8 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import { useMe } from "../context/MeContext.jsx";
 import { attachHlsToVideo, isHlsUrl } from "../lib/hlsAttach";
+import AdvertStoryCard from "./AdvertStoryCard.jsx";
+import { handleAdvertClick as runAdvertClick } from "../lib/advertActions";
 
 function timeLeftLabel(expiresAt) {
   if (!expiresAt) return "";
@@ -35,6 +37,7 @@ export default function StoriesRail({
   const { me } = useMe();
 
   const [stories, setStories] = useState([]);
+  const [storyAdverts, setStoryAdverts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(0);
@@ -64,13 +67,70 @@ export default function StoriesRail({
     }
   }
 
+  async function loadStoryAdverts() {
+    try {
+      const res = await api.get("/api/adverts/active/list", {
+        params: { placement: "stories" },
+      });
+
+      const list = Array.isArray(res?.data)
+        ? res.data
+        : Array.isArray(res?.data?.items)
+        ? res.data.items
+        : [];
+
+      setStoryAdverts(list);
+    } catch {
+      setStoryAdverts([]);
+    }
+  }
+
   useEffect(() => {
     loadStories();
+    loadStoryAdverts();
   }, [limit]);
 
-  const items = useMemo(() => stories || [], [stories]);
-  const activeStory = viewerOpen ? items[viewerIndex] || null : null;
-  const activeMedia = activeStory ? storyMedia(activeStory) : null;
+  const items = useMemo(() => {
+    const realStories = Array.isArray(stories) ? stories : [];
+    const adverts = Array.isArray(storyAdverts) ? storyAdverts : [];
+
+    if (!realStories.length) {
+      return adverts.map((ad, index) => ({
+        kind: "advert",
+        data: ad,
+        key: ad?._id || `story-ad-${index}`,
+      }));
+    }
+
+    const out = [];
+    let advertIndex = 0;
+
+    realStories.forEach((story, index) => {
+      out.push({
+        kind: "story",
+        data: story,
+        key: story?._id || story?.id || `story-${index}`,
+      });
+
+      const shouldInsertAdvert = (index + 1) % 3 === 0;
+      if (shouldInsertAdvert && adverts[advertIndex]) {
+        out.push({
+          kind: "advert",
+          data: adverts[advertIndex],
+          key: adverts[advertIndex]?._id || `story-ad-${advertIndex}`,
+        });
+        advertIndex += 1;
+      }
+    });
+
+    return out;
+  }, [stories, storyAdverts]);
+  const activeItem = viewerOpen ? items[viewerIndex] || null : null;
+  const activeStory = activeItem?.kind === "story" ? activeItem.data : null;
+  const activeAdvert = activeItem?.kind === "advert" ? activeItem.data : null;
+  const activeMedia = activeStory
+    ? storyMedia(activeStory)
+    : activeAdvert?.media?.[0] || null;
   const activeIsVideo = activeMedia?.type === "video";
 
   function openCreate() {
@@ -92,6 +152,10 @@ export default function StoriesRail({
 
   function nextStory() {
     setViewerIndex((i) => Math.min(items.length - 1, i + 1));
+  }
+
+  async function handleAdvertClick(advert) {
+    await runAdvertClick({ advert, navigate });
   }
 
   useEffect(() => {
@@ -200,12 +264,11 @@ export default function StoriesRail({
               <div className="text-sm text-zinc-500 px-1 py-3">
                 Loading stories…
               </div>
-            ) : items.length ? (
-              items.map((story, index) => {
+            ) : stories.length ? (
+              stories.map((story, index) => {
                 const thumb = storyThumb(story);
                 const authorName = story?.authorName || "Professional";
                 const expires = timeLeftLabel(story?.expiresAt);
-
                 return (
                   <button
                     key={story._id || story.id || index}
@@ -268,7 +331,7 @@ export default function StoriesRail({
         </div>
       </div>
 
-      {viewerOpen && activeStory && (
+      {viewerOpen && activeItem && (
         <div className="fixed inset-0 z-[200] bg-black/95 flex items-center justify-center px-3 py-4">
           <div className="relative w-full max-w-md h-[86vh] rounded-3xl overflow-hidden border border-zinc-800 bg-black">
             <button
@@ -302,37 +365,50 @@ export default function StoriesRail({
               </button>
             )}
 
-            <div className="absolute inset-x-0 top-0 z-10 p-4 bg-gradient-to-b from-black/70 to-transparent">
-              <div className="flex items-center gap-3 pr-12">
-                <div className="w-11 h-11 rounded-full overflow-hidden bg-zinc-800">
-                  {activeStory?.authorAvatar ? (
-                    <img
-                      src={activeStory.authorAvatar}
-                      alt={activeStory.authorName || "Professional"}
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-sm text-white">
-                      {(activeStory?.authorName || "P")
-                        .slice(0, 1)
-                        .toUpperCase()}
-                    </div>
-                  )}
-                </div>
-
-                <div className="min-w-0">
-                  <div className="text-sm font-semibold text-white truncate">
-                    {activeStory?.authorName || "Professional"}
+            {activeStory ? (
+              <div className="absolute inset-x-0 top-0 z-10 p-4 bg-gradient-to-b from-black/70 to-transparent">
+                <div className="flex items-center gap-3 pr-12">
+                  <div className="w-11 h-11 rounded-full overflow-hidden bg-zinc-800">
+                    {activeStory?.authorAvatar ? (
+                      <img
+                        src={activeStory.authorAvatar}
+                        alt={activeStory.authorName || "Professional"}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-sm text-white">
+                        {(activeStory?.authorName || "P")
+                          .slice(0, 1)
+                          .toUpperCase()}
+                      </div>
+                    )}
                   </div>
-                  <div className="text-[11px] text-zinc-300">
-                    {timeLeftLabel(activeStory?.expiresAt) || "Story"}
+
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-white truncate">
+                      {activeStory?.authorName || "Professional"}
+                    </div>
+                    <div className="text-[11px] text-zinc-300">
+                      {timeLeftLabel(activeStory?.expiresAt) || "Story"}
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
+            ) : activeAdvert ? (
+              <div className="absolute inset-x-0 top-0 z-10 p-4 bg-gradient-to-b from-black/70 to-transparent">
+                <div className="text-xs uppercase tracking-wide text-white/80">
+                  Sponsored
+                </div>
+              </div>
+            ) : null}
 
             <div className="absolute inset-0">
-              {activeIsVideo ? (
+              {activeAdvert ? (
+                <AdvertStoryCard
+                  advert={activeAdvert}
+                  onClickAction={handleAdvertClick}
+                />
+              ) : activeIsVideo ? (
                 <video
                   ref={videoRef}
                   controls
@@ -350,7 +426,7 @@ export default function StoriesRail({
               )}
             </div>
 
-            {(activeStory?.text || "").trim() ? (
+            {activeStory && (activeStory?.text || "").trim() ? (
               <div className="absolute inset-x-0 bottom-0 z-10 p-4 bg-gradient-to-t from-black/80 to-transparent">
                 <div className="text-sm text-white whitespace-pre-wrap">
                   {activeStory.text}

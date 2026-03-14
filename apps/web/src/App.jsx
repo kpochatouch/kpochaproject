@@ -63,6 +63,10 @@ const LeaveReview = lazy(() => import("./pages/LeaveReview.jsx"));
 const LeaveClientReview = lazy(() => import("./pages/LeaveClientReview.jsx"));
 const Contact = lazy(() => import("./pages/Contact.jsx"));
 const StoryCompose = lazy(() => import("./pages/StoryCompose.jsx"));
+const AdvertCompose = lazy(() => import("./pages/AdvertCompose.jsx"));
+const MyAdverts = lazy(() => import("./pages/MyAdverts.jsx"));
+const AdvertEdit = lazy(() => import("./pages/AdvertEdit.jsx"));
+const AdminAdvertsReview = lazy(() => import("./pages/AdminAdvertsReview.jsx"));
 
 /* ---------- Chatbase hook ---------- */
 function useChatbase(enabled) {
@@ -642,7 +646,6 @@ export default function App() {
                   </RequireAuth>
                 }
               />
-              <Route path="/contact" element={<Contact />} />
               {/* Entry to “Find a Pro” flow */}
               <Route path="/find" element={<FindProSmart />} />
               {/* Booking page must be authenticated */}
@@ -831,6 +834,38 @@ export default function App() {
                 element={
                   <RequireRole role="admin">
                     <RiskLogs />
+                  </RequireRole>
+                }
+              />
+              <Route
+                path="/adverts/new"
+                element={
+                  <RequireAuth>
+                    <AdvertCompose />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/my-adverts"
+                element={
+                  <RequireAuth>
+                    <MyAdverts />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/adverts/:id/edit"
+                element={
+                  <RequireAuth>
+                    <AdvertEdit />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/admin/adverts"
+                element={
+                  <RequireRole role="admin">
+                    <AdminAdvertsReview />
                   </RequireRole>
                 }
               />
