@@ -235,28 +235,26 @@ function buildSurfacePlan(nativeDocs = [], webDocs = []) {
 function choosePushTargets({ type, nativeDocs = [], webDocs = [] }) {
   const plan = buildSurfacePlan(nativeDocs, webDocs);
 
-  // For incoming calls / missed calls:
-  // native > pwa > browser
-  if (type === "call_incoming" || type === "call_missed") {
-    const native = plan.filter((p) => p.channel === "native").map((p) => p.doc);
-    if (native.length) {
-      return { nativeTargets: native, webTargets: [] };
-    }
-
-    const pwa = plan.filter((p) => p.channel === "pwa").map((p) => p.doc);
-    if (pwa.length) {
-      return { nativeTargets: [], webTargets: pwa };
-    }
-
-    const browser = plan
-      .filter((p) => p.channel === "browser")
+  // High-stakes alerts: favor reliability over strict exclusivity.
+  // We still dedupe visually via notification "tag" in the service worker.
+  if (
+    type === "call_incoming" ||
+    type === "call_missed" ||
+    type === "booking_paid" ||
+    type === "booking_update"
+  ) {
+    const nativeTargets = plan
+      .filter((p) => p.channel === "native")
       .map((p) => p.doc);
 
-    return { nativeTargets: [], webTargets: browser };
+    const webTargets = plan
+      .filter((p) => p.channel === "pwa" || p.channel === "browser")
+      .map((p) => p.doc);
+
+    return { nativeTargets, webTargets };
   }
 
-  // For normal notifications:
-  // latest surface per surfaceKey wins, regardless of channel
+  // Other notifications:
   const nativeTargets = plan
     .filter((p) => p.channel === "native")
     .map((p) => p.doc);
