@@ -24,7 +24,9 @@ export default function callRoutes({ requireAuth }) {
         return res.status(400).json({ error: "receiverUid_required" });
       }
 
-      const callId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+      const callId = `${Date.now().toString(36)}-${Math.random()
+        .toString(36)
+        .slice(2, 10)}`;
       const room = `call:${callId}`;
 
       // use the central callService
@@ -47,29 +49,6 @@ export default function callRoutes({ requireAuth }) {
     } catch (err) {
       console.error("[POST /api/call] error:", err?.message || err);
       return res.status(500).json({ error: "call_create_failed" });
-    }
-  });
-
-  /** ----------------------------------------------------
-   *  GET /api/call/:id
-   * ----------------------------------------------------*/
-  router.get("/call/:id", requireAuth, async (req, res) => {
-    try {
-      const id = String(req.params.id || "").trim();
-      if (!id) return res.status(400).json({ error: "id_required" });
-
-      const rec = await getCallById(id);
-      if (!rec) return res.status(404).json({ error: "call_not_found" });
-
-      const uid = req.user.uid;
-      if (!rec.participants?.some((p) => p.uid === uid)) {
-        return res.status(403).json({ error: "not_allowed" });
-      }
-
-      return res.json({ ok: true, item: rec });
-    } catch (err) {
-      console.error("[GET /api/call/:id] error:", err?.message || err);
-      return res.status(500).json({ error: "call_fetch_failed" });
     }
   });
 
@@ -103,6 +82,29 @@ export default function callRoutes({ requireAuth }) {
     } catch (err) {
       console.error("[GET /api/call/active] error:", err?.message || err);
       return res.status(500).json({ error: "active_call_failed" });
+    }
+  });
+
+  /** ----------------------------------------------------
+   *  GET /api/call/:id
+   * ----------------------------------------------------*/
+  router.get("/call/:id", requireAuth, async (req, res) => {
+    try {
+      const id = String(req.params.id || "").trim();
+      if (!id) return res.status(400).json({ error: "id_required" });
+
+      const rec = await getCallById(id);
+      if (!rec) return res.status(404).json({ error: "call_not_found" });
+
+      const uid = req.user.uid;
+      if (!rec.participants?.some((p) => p.uid === uid)) {
+        return res.status(403).json({ error: "not_allowed" });
+      }
+
+      return res.json({ ok: true, item: rec });
+    } catch (err) {
+      console.error("[GET /api/call/:id] error:", err?.message || err);
+      return res.status(500).json({ error: "call_fetch_failed" });
     }
   });
 
@@ -151,6 +153,34 @@ export default function callRoutes({ requireAuth }) {
     } catch (err) {
       console.error("[DELETE /api/call/:id] error:", err?.message || err);
       return res.status(500).json({ error: "call_delete_failed" });
+    }
+  });
+
+  /** ----------------------------------------------------
+   *  POST /api/calls/:id/accept
+   *  Accept an incoming call
+   * ----------------------------------------------------*/
+  router.post("/calls/:id/accept", requireAuth, async (req, res) => {
+    try {
+      const callId = String(req.params.id || "").trim();
+      if (!callId) return res.status(400).json({ error: "callId_required" });
+
+      const call = await callService.acceptCall(callId, req.user.uid);
+
+      return res.json({
+        ok: true,
+        callId: call.callId,
+        status: call.status,
+        connectedAt: call.connectedAt,
+      });
+    } catch (err) {
+      console.error("[POST /api/calls/:id/accept] error:", err?.message || err);
+
+      if (String(err?.message || "") === "call_not_found") {
+        return res.status(404).json({ error: "call_not_found" });
+      }
+
+      return res.status(500).json({ error: "call_accept_failed" });
     }
   });
 

@@ -696,11 +696,47 @@ export async function resetUnreadCounter(uid) {
   }
 }
 
+export async function sendTransientPush(ownerUid, payload = {}) {
+  if (!ownerUid) throw new Error("ownerUid required");
+
+  const title = payload?.title || "Kpocha Touch";
+  const body = payload?.body || "";
+
+  const pushPayload = {
+    title,
+    body,
+    data: {
+      ...(payload?.data || {}),
+    },
+  };
+
+  try {
+    await sendWebPushToUser(ownerUid, pushPayload);
+  } catch (e) {
+    console.warn(
+      "[notificationService] sendTransientPush web failed:",
+      e?.message || e,
+    );
+  }
+
+  try {
+    await sendFcmToUser(ownerUid, pushPayload);
+  } catch (e) {
+    console.warn(
+      "[notificationService] sendTransientPush fcm failed:",
+      e?.message || e,
+    );
+  }
+
+  return { ok: true };
+}
+
 /**
  * Export default
  */
 export default {
   createNotification,
+  sendTransientPush,
   markRead,
   markAllRead,
   unreadCount,

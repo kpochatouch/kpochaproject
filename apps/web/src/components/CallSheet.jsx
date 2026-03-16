@@ -418,7 +418,7 @@ export default function CallSheet({
     const id = setTimeout(() => {
       console.warn("[CallSheet] Ring timeout: no answer");
       hangup("missed");
-    }, 30000);
+    }, 60000);
 
     return () => clearTimeout(id);
   }, [room, role, hasConnected, peerAccepted, hasAccepted]);

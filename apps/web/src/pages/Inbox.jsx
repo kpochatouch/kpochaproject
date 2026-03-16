@@ -190,7 +190,7 @@ export default function Inbox() {
 
       const normalized = raw
         .map((t) => normalizeThread(t, myUid))
-        .filter((t) => !!t.peerUid);
+        .filter((t) => !!t.peerUid || !!t.room);
 
       normalized.sort((a, b) => {
         const ta = a.lastAt ? new Date(a.lastAt).getTime() : 0;
@@ -471,23 +471,29 @@ export default function Inbox() {
   }, [threads]);
 
   async function openThread(t) {
-    if (!t || !t.peerUid) return;
+    if (!t || (!t.peerUid && !t.room)) return;
 
-    // 1) Navigate to DM chat
-    navigate(`/chat?with=${encodeURIComponent(t.peerUid)}`);
+    // 1) Navigate to chat
+    if (t.room) {
+      navigate(`/chat?room=${encodeURIComponent(t.room)}`);
+    } else {
+      navigate(`/chat?with=${encodeURIComponent(t.peerUid)}`);
+    }
 
-    // 2) Optimistic local update: clear unread for this peer
+    // 2) Optimistic local update
     setThreads((prev) =>
-      prev.map((x) => (x.peerUid === t.peerUid ? { ...x, unread: 0 } : x)),
+      prev.map((x) =>
+        x.peerUid === t.peerUid || (t.room && x.room === t.room)
+          ? { ...x, unread: 0 }
+          : x,
+      ),
     );
 
-    // 3) Tell backend to zero the unread counter
+    // 3) Tell backend to zero unread
     try {
       if (t.room) {
-        // Prefer room if we have it (booking or DM)
         await markRoomRead(t.room);
-      } else {
-        // Fallback: DM pair-based read
+      } else if (t.peerUid) {
         await markThreadRead(t.peerUid);
       }
       await refreshCounts();

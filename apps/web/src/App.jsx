@@ -240,11 +240,13 @@ async function initNativePush(apiClient, listenersBoundRef) {
       ) {
         const qs = new URLSearchParams();
         qs.set("call", "1");
+        qs.set("accept", "1");
         if (data.callId) qs.set("callId", String(data.callId));
         qs.set("room", String(data.room));
         if (data.callType) qs.set("callType", String(data.callType));
+        if (data.fromName) qs.set("fromName", String(data.fromName));
+        if (data.fromAvatar) qs.set("fromAvatar", String(data.fromAvatar));
 
-        // Use window.location so your existing useEffect triggers
         console.log(
           "[push] routing -> call deep link:",
           `/browse?${qs.toString()}`,
@@ -406,8 +408,6 @@ export default function App() {
     const qs = new URLSearchParams(location.search || "");
     const isCall = qs.get("call") === "1";
 
-    // reset when not on a call link
-    // but do NOT reset while a call UI is already active
     if (!isCall) {
       if (activeCall?.room) return;
       handledCallParamRef.current = false;
@@ -421,58 +421,80 @@ export default function App() {
     const room = qs.get("room") || null;
     const callType = qs.get("callType") || "audio";
     const shouldAccept = qs.get("accept") === "1";
+    const fromName = qs.get("fromName") || "";
+    const fromAvatar = qs.get("fromAvatar") || "";
 
-    // if this exact call is already active, ignore duplicate deep link
     if (activeCall?.callId && activeCall.callId === callId) {
       return;
     }
 
-    if (shouldAccept && callId) {
-      api
-        .post(`/api/calls/${encodeURIComponent(callId)}/accept`)
-        .catch(() => {});
-    }
+    let cancelled = false;
 
-    if (room) {
-      const fromName = qs.get("fromName") || "";
-      const fromAvatar = qs.get("fromAvatar") || "";
+    (async () => {
+      try {
+        // ✅ If notification/deep-link means "answer this call",
+        // backend must confirm it BEFORE we open CallSheet.
+        if (shouldAccept && callId) {
+          await api.post(`/api/calls/${encodeURIComponent(callId)}/accept`);
+        }
 
-      setActiveCall({
-        open: true,
-        callId,
-        room,
-        callType,
-        role: "receiver",
-        fromUid: null,
-        meta: {
-          fromName,
-          fromAvatar,
-          callerName: fromName,
-          callerAvatar: fromAvatar,
-          autoAccept: shouldAccept,
-        },
-      });
+        if (cancelled) return;
 
-      setCallUiMode("expanded");
-    }
+        // ✅ stale/invalid call must not open CallSheet
+        if (!room) {
+          navigate("/inbox", { replace: true });
+          return;
+        }
 
-    // clean URL so refresh won't re-trigger forever
-    qs.delete("call");
-    qs.delete("callId");
-    qs.delete("room");
-    qs.delete("callType");
-    qs.delete("accept");
-    qs.delete("fromName");
-    qs.delete("fromAvatar");
+        setActiveCall({
+          open: true,
+          callId,
+          room,
+          callType,
+          role: "receiver",
+          fromUid: null,
+          meta: {
+            fromName,
+            fromAvatar,
+            callerName: fromName,
+            callerAvatar: fromAvatar,
+            autoAccept: shouldAccept,
+          },
+        });
 
-    const nextSearch = qs.toString();
-    navigate(
-      {
-        pathname: location.pathname,
-        search: nextSearch ? `?${nextSearch}` : "",
-      },
-      { replace: true },
-    );
+        setCallUiMode("expanded");
+      } catch (e) {
+        console.warn(
+          "[App] incoming call deep-link rejected:",
+          e?.message || e,
+        );
+
+        setActiveCall(null);
+        setCallUiMode("expanded");
+        navigate("/inbox", { replace: true });
+      } finally {
+        qs.delete("call");
+        qs.delete("callId");
+        qs.delete("room");
+        qs.delete("callType");
+        qs.delete("accept");
+        qs.delete("fromName");
+        qs.delete("fromAvatar");
+
+        const nextSearch = qs.toString();
+        navigate(
+          {
+            pathname: location.pathname,
+            search: nextSearch ? `?${nextSearch}` : "",
+          },
+          { replace: true },
+        );
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [location.pathname, location.search, navigate, activeCall]);
 
   // MobileTabBar: tap Help -> load Chatbase on demand (mobile only)

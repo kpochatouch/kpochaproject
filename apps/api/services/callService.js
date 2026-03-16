@@ -1,7 +1,10 @@
 // apps/api/services/callService.js
 import CallRecord from "../models/CallRecord.js";
 import mongoose from "mongoose";
-import { createNotification } from "./notificationService.js";
+import {
+  createNotification,
+  sendTransientPush,
+} from "./notificationService.js";
 import { ClientProfile } from "../models/Profile.js";
 import { Pro } from "../models.js";
 
@@ -95,6 +98,66 @@ async function resolveCallerSnapshot(uid) {
   return { name: null, avatar: null };
 }
 
+function buildIncomingCallPush({
+  callId,
+  room,
+  callType = "audio",
+  callerUid,
+  callerName,
+  callerAvatar,
+} = {}) {
+  return {
+    title: "Incoming call",
+    body: `${callerName || "Someone"} is calling you`,
+    data: {
+      type: "call_incoming",
+      priority: "high",
+      callId,
+      room,
+      callType,
+      callerUid,
+      fromUid: callerUid,
+      fromName: callerName || String(callerUid || ""),
+      callerName: callerName || String(callerUid || ""),
+      fromAvatar: callerAvatar || "",
+      callerAvatar: callerAvatar || "",
+    },
+  };
+}
+
+function buildMissedCallNotification({
+  callId,
+  room,
+  callType = "audio",
+  callerUid,
+  callerName,
+  callerAvatar,
+  duration = 0,
+} = {}) {
+  const typeLabel = callType === "video" ? "Video" : "Voice";
+
+  return {
+    title: "Missed call",
+    body: `Missed ${typeLabel.toLowerCase()} call from ${
+      callerName || "Someone"
+    }`,
+    data: {
+      type: "call_missed",
+      priority: "default",
+      callId,
+      room,
+      callType,
+      duration,
+      callerUid,
+      fromUid: callerUid,
+      fromName: callerName || String(callerUid || ""),
+      callerName: callerName || String(callerUid || ""),
+      fromAvatar: callerAvatar || "",
+      callerAvatar: callerAvatar || "",
+    },
+  };
+}
+
 export async function createCall({
   callId,
   room,
@@ -167,6 +230,42 @@ export async function createCall({
 
   const snap = await resolveCallerSnapshot(callerUid);
 
+  function callStillRinging(call) {
+    if (!call) return false;
+    if (call.endedAt) return false;
+    if (call.connectedAt) return false;
+    return ["initiated", "ringing"].includes(call.status);
+  }
+
+  function scheduleIncomingCallPushLoop({
+    callId,
+    receiverUid,
+    payload,
+    maxRepeats = 4,
+    intervalMs = 8000,
+  } = {}) {
+    if (!callId || !receiverUid || !payload) return;
+
+    for (let i = 1; i <= maxRepeats; i += 1) {
+      setTimeout(async () => {
+        try {
+          const current = await CallRecord.findOne({ callId })
+            .select("status connectedAt endedAt")
+            .lean();
+
+          if (!callStillRinging(current)) return;
+
+          await sendTransientPush(receiverUid, payload);
+        } catch (e) {
+          console.warn(
+            "[callService] scheduleIncomingCallPushLoop resend failed:",
+            e?.message || e,
+          );
+        }
+      }, intervalMs * i);
+    }
+  }
+
   const callerName = metaCallerName || snap.name || String(callerUid);
   const callerAvatar = metaCallerAvatar || snap.avatar || "";
 
@@ -216,26 +315,34 @@ export async function createCall({
 
       // create app notification (best-effort)
       try {
+        const incomingPush = buildIncomingCallPush({
+          callId,
+          room,
+          callType,
+          callerUid,
+          callerName,
+          callerAvatar,
+        });
+
         await createNotification({
           toUid: uid,
           fromUid: callerUid,
           type: "call_incoming",
-          title: "Incoming call",
-          body: `${callerName || "Someone"} is calling you`,
+          title: incomingPush.title,
+          body: incomingPush.body,
           priority: "high",
-          data: {
-            callId,
-            room,
-            callType,
-            callerUid,
-
-            // ✅ these feed your native IncomingCallActivity label
-            fromName: callerName || String(callerUid),
-            callerName: callerName || String(callerUid),
-            fromAvatar: callerAvatar || "",
-            callerAvatar: callerAvatar || "",
-          },
+          data: incomingPush.data,
           meta: { source: "callService" },
+        });
+
+        // ✅ Keep PWA/native alerting while call is still unanswered,
+        // without creating duplicate DB notifications.
+        scheduleIncomingCallPushLoop({
+          callId,
+          receiverUid: uid,
+          payload: incomingPush,
+          maxRepeats: 4,
+          intervalMs: 8000,
         });
       } catch (e) {
         console.warn(
@@ -497,21 +604,43 @@ export async function endCall(
     endedStatus === "missed" ||
     (endedStatus === "ended" && (!call.connectedAt || call.duration === 0))
   ) {
+    const callerSnap = await resolveCallerSnapshot(call.callerUid);
+    const missedCallerName =
+      call?.meta?.fromName ||
+      call?.meta?.callerName ||
+      callerSnap.name ||
+      String(call.callerUid);
+
+    const missedCallerAvatar =
+      call?.meta?.fromAvatar ||
+      call?.meta?.callerAvatar ||
+      callerSnap.avatar ||
+      "";
+
     const receivers = (call.participants || [])
       .map((p) => p.uid)
       .filter((u) => u && u !== call.callerUid);
+
     for (const r of receivers) {
       try {
+        const missedPayload = buildMissedCallNotification({
+          callId: call.callId,
+          room: call.room,
+          callType: call.callType,
+          callerUid: call.callerUid,
+          callerName: missedCallerName,
+          callerAvatar: missedCallerAvatar,
+          duration: call.duration,
+        });
+
         await createNotification({
           toUid: r,
           fromUid: call.callerUid,
           type: "call_missed",
-          data: {
-            callId: call.callId,
-            room: call.room,
-            callType: call.callType,
-            duration: call.duration,
-          },
+          title: missedPayload.title,
+          body: missedPayload.body,
+          priority: "default",
+          data: missedPayload.data,
           meta: { source: "callService" },
         });
       } catch (e) {
