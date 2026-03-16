@@ -104,7 +104,7 @@ self.addEventListener("notificationclick", (event) => {
     const fromAvatar = data.fromAvatar || data.callerAvatar || "";
 
     url =
-      `/browse?call=1&accept=1` +
+      `/browse?call=1` +
       `&callId=${encodeURIComponent(callId)}` +
       `&room=${encodeURIComponent(room)}` +
       `&callType=${encodeURIComponent(callType)}` +

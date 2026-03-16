@@ -1,12 +1,10 @@
 // apps/api/services/callService.js
 import CallRecord from "../models/CallRecord.js";
 import mongoose from "mongoose";
-import {
-  createNotification,
-  sendTransientPush,
-} from "./notificationService.js";
+import { createNotification } from "./notificationService.js";
 import { ClientProfile } from "../models/Profile.js";
 import { Pro } from "../models.js";
+import { enqueueCallRingJob } from "./callRingJobs.js";
 
 let _getIO = () => null;
 export function setGetIO(fn) {
@@ -230,42 +228,6 @@ export async function createCall({
 
   const snap = await resolveCallerSnapshot(callerUid);
 
-  function callStillRinging(call) {
-    if (!call) return false;
-    if (call.endedAt) return false;
-    if (call.connectedAt) return false;
-    return ["initiated", "ringing"].includes(call.status);
-  }
-
-  function scheduleIncomingCallPushLoop({
-    callId,
-    receiverUid,
-    payload,
-    maxRepeats = 4,
-    intervalMs = 8000,
-  } = {}) {
-    if (!callId || !receiverUid || !payload) return;
-
-    for (let i = 1; i <= maxRepeats; i += 1) {
-      setTimeout(async () => {
-        try {
-          const current = await CallRecord.findOne({ callId })
-            .select("status connectedAt endedAt")
-            .lean();
-
-          if (!callStillRinging(current)) return;
-
-          await sendTransientPush(receiverUid, payload);
-        } catch (e) {
-          console.warn(
-            "[callService] scheduleIncomingCallPushLoop resend failed:",
-            e?.message || e,
-          );
-        }
-      }, intervalMs * i);
-    }
-  }
-
   const callerName = metaCallerName || snap.name || String(callerUid);
   const callerAvatar = metaCallerAvatar || snap.avatar || "";
 
@@ -337,10 +299,12 @@ export async function createCall({
 
         // ✅ Keep PWA/native alerting while call is still unanswered,
         // without creating duplicate DB notifications.
-        scheduleIncomingCallPushLoop({
+        await enqueueCallRingJob({
           callId,
           receiverUid: uid,
           payload: incomingPush,
+          delayMs: 8000,
+          attemptNumber: 1,
           maxRepeats: 4,
           intervalMs: 8000,
         });

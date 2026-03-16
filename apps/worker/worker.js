@@ -4,6 +4,9 @@ import bullRedis from "./bullmqRedis.js";
 import mongoose from "mongoose";
 import MediaAsset from "../api/models/MediaAsset.js";
 import { processVideo } from "./ffmpeg.js";
+import CallRecord from "../api/models/CallRecord.js";
+import { sendTransientPush } from "../api/services/notificationService.js";
+import { CALL_RING_QUEUE } from "./callRingQueue.js";
 
 function mustEnv(name) {
   const v = process.env[name];
@@ -18,6 +21,13 @@ console.log("[worker] has MONGODB_URI?", !!process.env.MONGODB_URI);
 
 await mongoose.connect(mustEnv("MONGODB_URI"));
 console.log("[worker] ✅ mongo connected");
+
+function callStillRinging(call) {
+  if (!call) return false;
+  if (call.endedAt) return false;
+  if (call.connectedAt) return false;
+  return ["initiated", "ringing"].includes(call.status);
+}
 
 const worker = new Worker(
   "media-processing",
@@ -63,6 +73,75 @@ const worker = new Worker(
     }
   },
   { connection: bullRedis },
+);
+
+const callRingWorker = new Worker(
+  CALL_RING_QUEUE,
+  async (job) => {
+    const {
+      callId,
+      receiverUid,
+      payload,
+      attemptNumber = 1,
+      maxRepeats = 4,
+      intervalMs = 8000,
+    } = job.data || {};
+
+    if (!callId || !receiverUid || !payload) {
+      console.log("[worker] call-ring job missing required data");
+      return;
+    }
+
+    const call = await CallRecord.findOne({ callId })
+      .select("status connectedAt endedAt")
+      .lean();
+
+    if (!callStillRinging(call)) {
+      console.log("[worker] call-ring skipped; call no longer ringing", callId);
+      return;
+    }
+
+    console.log(
+      "[worker] call-ring send",
+      callId,
+      receiverUid,
+      "attempt",
+      attemptNumber,
+    );
+
+    await sendTransientPush(receiverUid, payload);
+
+    const nextAttempt = Number(attemptNumber) + 1;
+
+    if (nextAttempt <= Number(maxRepeats)) {
+      await job.queue.add(
+        "repeat-ring",
+        {
+          callId,
+          receiverUid,
+          payload,
+          attemptNumber: nextAttempt,
+          maxRepeats,
+          intervalMs,
+        },
+        {
+          delay: Number(intervalMs),
+          jobId: `call-ring:${callId}:${receiverUid}:${nextAttempt}`,
+          removeOnComplete: 200,
+          removeOnFail: 200,
+        },
+      );
+    }
+  },
+  { connection: bullRedis },
+);
+
+callRingWorker.on("ready", () =>
+  console.log("[worker] ✅ call-ring queue ready"),
+);
+
+callRingWorker.on("error", (e) =>
+  console.error("[worker] call-ring queue error", e?.message || e),
 );
 
 worker.on("ready", () => console.log("[worker] ✅ queue ready"));
