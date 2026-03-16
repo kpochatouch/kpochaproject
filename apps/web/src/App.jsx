@@ -160,12 +160,15 @@ function SettingsSmart() {
   return isPro ? <Settings /> : <ClientSettings />;
 }
 
-async function initNativePush(apiClient) {
+async function initNativePush(apiClient, listenersBoundRef) {
   console.log(
     "[push] initNativePush reached. isNative=",
     Capacitor.isNativePlatform(),
   );
   if (!Capacitor.isNativePlatform()) return;
+
+  const shouldBindListeners = !listenersBoundRef?.current;
+  if (listenersBoundRef) listenersBoundRef.current = true;
 
   // Android 13+ needs runtime permission
   const perm = await PushNotifications.requestPermissions();
@@ -175,15 +178,20 @@ async function initNativePush(apiClient) {
   }
 
   await PushNotifications.register();
+  if (!shouldBindListeners) return;
 
   PushNotifications.addListener("registration", async (t) => {
     console.log("[push] FCM token:", t?.value);
 
     try {
+      const nativeSurfaceKey = getDeviceId();
+
       await apiClient.post("/api/push/device-token", {
         token: t?.value,
         platform: "android",
-        deviceId: getDeviceId(),
+        deviceId: nativeSurfaceKey,
+        surfaceType: "native",
+        surfaceKey: nativeSurfaceKey,
       });
 
       console.log("[push] token saved to backend");
@@ -326,13 +334,15 @@ export default function App() {
   // ✅ Native FCM registration (Android APK)
   const didInitNativePushRef = useRef("");
 
+  const nativePushListenersBoundRef = useRef(false);
+
   useEffect(() => {
     if (didInitNativePushRef.current === me?.uid) return;
     if (!me?.uid) return;
 
     didInitNativePushRef.current = me?.uid || "";
 
-    initNativePush(api).catch((e) => {
+    initNativePush(api, nativePushListenersBoundRef).catch((e) => {
       console.log("[push] init failed:", e?.message || e);
     });
   }, [me?.uid]);

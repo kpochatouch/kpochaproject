@@ -12,13 +12,45 @@ import {
   getAwsLivenessConfig,
 } from "../lib/awsLivenessClient";
 
+function normalizeLivenessError(err) {
+  if (!err) return "Liveness failed. Please try again.";
+
+  if (typeof err === "string") return err;
+
+  if (err?.message && typeof err.message === "string") {
+    return err.message;
+  }
+
+  if (err?.name && err?.state) {
+    return `${err.name}: ${err.state}`;
+  }
+
+  if (err?.name && err?.code) {
+    return `${err.name}: ${err.code}`;
+  }
+
+  if (err?.code && typeof err.code === "string") {
+    return err.code;
+  }
+
+  try {
+    const raw = JSON.stringify(err, null, 2);
+    if (raw && raw !== "{}") return raw;
+  } catch {}
+
+  return "Liveness failed. Please try again.";
+}
+
 export default function AwsLiveness() {
   const nav = useNavigate();
   const [params] = useSearchParams();
   const back = params.get("back") || "/become";
 
   const [sessionId, setSessionId] = useState("");
-  const [{ region }, setCfg] = useState({ region: "" });
+  const [{ region }, setCfg] = useState({
+    region: "",
+    identityPoolId: "",
+  });
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
 
@@ -39,7 +71,16 @@ export default function AwsLiveness() {
         // make sure Amplify is ready
         ensureAwsConfigured();
         const cfg = getAwsLivenessConfig();
-        setCfg({ region: cfg.region });
+        setCfg({
+          region: cfg.region || "",
+          identityPoolId: cfg.identityPoolId || "",
+        });
+
+        if (!cfg.identityPoolId) {
+          throw new Error(
+            "AWS liveness is not configured. Missing VITE_AWS_COGNITO_IDENTITY_POOL_ID.",
+          );
+        }
 
         // 1) try the one pushed from App.jsx
         let existingSession = "";
@@ -73,8 +114,9 @@ export default function AwsLiveness() {
   }, []);
 
   const handleComplete = async (result) => {
+    const cont = readAfterLivenessOnce();
+
     try {
-      // keep the one-shot local proof (backup for /profile save flows)
       localStorage.setItem(
         "kpocha:livenessMetrics",
         JSON.stringify({
@@ -85,14 +127,10 @@ export default function AwsLiveness() {
           score: result?.confidence ?? null,
         }),
       );
-      // clear any pending session (we're done)
+
       localStorage.removeItem("kpocha:awsLivenessSession");
 
-      // ✅ NEW: tell the backend to persist livenessVerifiedAt = now
       await api.post("/api/aws-liveness/verify", { sessionId });
-      // ✅ NEW: log this as a risk/audit event (useful until FaceMatch is added)
-
-      const cont = readAfterLivenessOnce();
 
       try {
         await api.post("/api/risk/liveness", {
@@ -111,7 +149,6 @@ export default function AwsLiveness() {
       }
     } catch (e) {
       console.error("[AwsLiveness] verify POST failed:", e);
-      // even if this fails, the backup (remember flag) on next save will work
     } finally {
       if (cont?.next) {
         nav(cont.next);
@@ -122,8 +159,18 @@ export default function AwsLiveness() {
   };
 
   const handleError = (e) => {
-    console.error("[AwsLiveness] detector error:", e);
-    setErr(e?.message || "Liveness failed. Please try again.");
+    console.error("[AwsLiveness] detector error raw:", e);
+    console.error(
+      "[AwsLiveness] detector error json:",
+      (() => {
+        try {
+          return JSON.stringify(e, null, 2);
+        } catch {
+          return "[unserializable]";
+        }
+      })(),
+    );
+    setErr(normalizeLivenessError(e));
   };
 
   if (loading) {
@@ -147,7 +194,9 @@ export default function AwsLiveness() {
     return (
       <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center">
         <h1 className="text-xl font-semibold mb-2">AWS Liveness</h1>
-        <p className="text-sm text-red-400 mb-4">{err}</p>
+        <pre className="text-xs text-red-400 mb-4 whitespace-pre-wrap break-words text-center max-w-xl">
+          {err}
+        </pre>
         <button
           onClick={() => nav(back)}
           className="mt-6 px-4 py-2 rounded bg-yellow-400 text-black text-sm"

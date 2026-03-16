@@ -1,6 +1,6 @@
 // apps/web/src/pages/Settings.jsx
 import { useEffect, useRef, useState, useMemo, useCallback } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   api,
   ensureClientProfile,
@@ -94,11 +94,36 @@ function takeFaceEnrollAfterLiveness() {
 }
 
 export default function SettingsPage() {
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
+  const [searchParams] = useSearchParams();
   const { success, error, info } = useToast();
 
   // step-by-step view (like BookingDetails “wrapped”)
   const [step, setStep] = useState("general"); // "general" | "pro" | "payments" | "advanced"
+
+  useEffect(() => {
+    const tab = String(searchParams.get("tab") || "").toLowerCase();
+
+    if (tab === "payments" || tab === "payout") {
+      setStep("payments");
+      return;
+    }
+
+    if (tab === "pro" || tab === "professional") {
+      setStep("pro");
+      return;
+    }
+
+    if (tab === "advanced") {
+      setStep("advanced");
+      return;
+    }
+
+    if (tab === "general") {
+      setStep("general");
+    }
+  }, [searchParams]);
 
   // main docs
   const [me, setMe] = useState(null);
@@ -154,6 +179,9 @@ export default function SettingsPage() {
   const [banks, setBanks] = useState([]); // [{ name, code }]
   const [loadingBanks, setLoadingBanks] = useState(false);
   const banksRef = useRef([]);
+
+  const intent = String(searchParams.get("intent") || "").toLowerCase();
+  const returnTo = String(searchParams.get("returnTo") || "");
 
   // become-pro stuff we want to keep editable
   const [servicesDetailed, setServicesDetailed] = useState([
@@ -254,6 +282,16 @@ export default function SettingsPage() {
       p.includes(key) ? p.filter((x) => x !== key) : [...p, key],
     );
   }
+
+  useEffect(() => {
+    if (
+      intent === "liveness" ||
+      intent === "face-enroll" ||
+      intent === "face-retry"
+    ) {
+      setStep("payments");
+    }
+  }, [intent]);
 
   /* ---------- load data ---------- */
   useEffect(() => {
@@ -951,6 +989,11 @@ export default function SettingsPage() {
       setFaceSelfie({ previewUrl: "", assetId: "" });
       await refreshFaceInfoNow();
       flashOK("Face verification selfie enrolled.");
+
+      if (returnTo === "/wallet") {
+        navigate("/wallet?resumePin=1", { replace: true });
+        return;
+      }
     } catch (e) {
       const code = e?.response?.data?.error || "";
       const msg = e?.response?.data?.message || "";
@@ -2037,8 +2080,9 @@ export default function SettingsPage() {
                         : "Not enrolled yet."}
                     </div>
                     <div className="text-xs text-zinc-500 mt-1">
-                      Required before payout bank changes and protected
-                      withdrawals.
+                      This is the single place for face verification, liveness,
+                      and payout security. It is required before payout bank
+                      changes and some protected wallet actions.
                     </div>
                   </div>
 

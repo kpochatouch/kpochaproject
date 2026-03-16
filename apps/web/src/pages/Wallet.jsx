@@ -1,6 +1,6 @@
 // apps/web/src/pages/Wallet.jsx
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import ClientWalletLinkButton from "../components/ClientWalletLinkButton.jsx";
 import {
   api,
@@ -17,10 +17,34 @@ import {
   reauthenticateWithPopup,
 } from "firebase/auth";
 
+const WALLET_PIN_PENDING_KEY = "kpocha:walletPinPending";
+
+function setWalletPinPending(value) {
+  try {
+    localStorage.setItem(WALLET_PIN_PENDING_KEY, JSON.stringify(value));
+  } catch {}
+}
+
+function getWalletPinPending() {
+  try {
+    const raw = localStorage.getItem(WALLET_PIN_PENDING_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function clearWalletPinPending() {
+  try {
+    localStorage.removeItem(WALLET_PIN_PENDING_KEY);
+  } catch {}
+}
+
 export default function WalletPage() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   const [me, setMe] = useState(null);
   const [meHasPin, setMeHasPin] = useState(false);
@@ -105,6 +129,120 @@ export default function WalletPage() {
     }));
   }
 
+  async function runPendingWalletPinAction(action) {
+    if (!action?.type) return { ok: false };
+
+    try {
+      if (action.type === "forgot") {
+        await api.put("/api/pin/me/forgot", { newPin: action.newPin });
+      } else if (action.type === "reset") {
+        await api.put("/api/pin/me/reset", {
+          currentPin: action.currentPin,
+          newPin: action.newPin,
+        });
+      } else {
+        return { ok: false };
+      }
+
+      clearWalletPinPending();
+      setMeHasPin(true);
+      await load();
+
+      return { ok: true };
+    } catch (e) {
+      const code = e?.response?.data?.error;
+      const message =
+        e?.response?.data?.message ||
+        e?.response?.data?.details ||
+        e?.message ||
+        "PIN action failed.";
+
+      if (code === "liveness_required") {
+        setWalletPinPending(action);
+        setForgotOpen(false);
+        setPinModal((m) => ({ ...m, open: false }));
+        redirectWalletVerificationToSettings("liveness");
+        return { pending: true, redirected: true };
+      }
+
+      if (code === "face_enroll_required") {
+        setWalletPinPending(action);
+        setForgotOpen(false);
+        setPinModal((m) => ({ ...m, open: false }));
+        redirectWalletVerificationToSettings("face-enroll");
+        return { pending: true, redirected: true };
+      }
+
+      if (code === "face_mismatch") {
+        setWalletPinPending(action);
+        setForgotOpen(false);
+        setPinModal((m) => ({ ...m, open: false }));
+        redirectWalletVerificationToSettings("face-retry");
+        return { pending: true, redirected: true };
+      }
+
+      throw Object.assign(e || new Error(message), {
+        walletMessage: message,
+        walletCode: code,
+      });
+    }
+  }
+
+  useEffect(() => {
+    if (searchParams.get("resumePin") !== "1") return;
+
+    let alive = true;
+
+    (async () => {
+      const pending = getWalletPinPending();
+      if (!pending || !alive) {
+        navigate("/wallet", { replace: true });
+        return;
+      }
+
+      try {
+        const result = await runPendingWalletPinAction(pending);
+        if (!alive) return;
+
+        if (result?.ok) {
+          setForgotOpen(false);
+          setPinModal((m) => ({ ...m, open: false }));
+        }
+      } catch (e) {
+        if (!alive) return;
+        setErr(
+          e?.walletMessage ||
+            e?.response?.data?.message ||
+            e?.response?.data?.error ||
+            "Unable to resume wallet security action.",
+        );
+      } finally {
+        if (alive) {
+          navigate("/wallet", { replace: true });
+        }
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [searchParams, navigate]);
+
+  async function handleForgotPinSetNewPin(newPin) {
+    return runPendingWalletPinAction({
+      type: "forgot",
+      newPin,
+    });
+  }
+
+  function redirectWalletVerificationToSettings(intent = "face-enroll") {
+    navigate(
+      `/settings?tab=payments&intent=${encodeURIComponent(
+        intent,
+      )}&returnTo=${encodeURIComponent("/wallet")}`,
+    );
+  }
+
   // ----------------- Withdraw from Available -----------------
   async function withdrawFromAvailable() {
     const naira = Number(amtFromAvailable);
@@ -146,7 +284,7 @@ export default function WalletPage() {
           const go = confirm(
             "You need to add your payout (bank) details before you can withdraw.\n\nGo to Settings → Payments now?",
           );
-          if (go) navigate("/settings");
+          if (go) navigate("/settings?tab=payments");
           return;
         }
 
@@ -365,8 +503,8 @@ export default function WalletPage() {
                             {busy
                               ? "Processing…"
                               : eligible
-                                ? "Cashout now"
-                                : `Available in ${daysLeft}d`}
+                              ? "Cashout now"
+                              : `Available in ${daysLeft}d`}
                           </button>
                         )}
                       </div>
@@ -430,15 +568,15 @@ export default function WalletPage() {
                     t.direction === "credit"
                       ? "text-green-400"
                       : t.direction === "debit"
-                        ? "text-red-400"
-                        : "text-zinc-300"
+                      ? "text-red-400"
+                      : "text-zinc-300"
                   } font-semibold`}
                 >
                   {t.direction === "credit"
                     ? "+"
                     : t.direction === "debit"
-                      ? "−"
-                      : ""}{" "}
+                    ? "−"
+                    : ""}{" "}
                   {fmt(t.amountKobo)}
                 </div>
               </div>
@@ -455,6 +593,7 @@ export default function WalletPage() {
         open={pinModal.open}
         mode={pinModal.mode}
         onClose={() => setPinModal((m) => ({ ...m, open: false }))}
+        onProtectedReset={runPendingWalletPinAction}
         onDone={async () => {
           setPinModal((m) => ({ ...m, open: false }));
           await load();
@@ -478,12 +617,7 @@ export default function WalletPage() {
         open={forgotOpen}
         email={me?.email || ""}
         onClose={() => setForgotOpen(false)}
-        onSetNewPin={async (newPin) => {
-          await api.put("/api/pin/me/forgot", { newPin });
-          setForgotOpen(false);
-          setMeHasPin(true);
-          await load();
-        }}
+        onSetNewPin={handleForgotPinSetNewPin}
       />
     </div>
   );
@@ -501,7 +635,7 @@ function Card({ title, value }) {
 }
 
 /** Set / Reset PIN in Wallet (old behavior retained) */
-function PinModal({ open, mode, onClose, onDone }) {
+function PinModal({ open, mode, onClose, onDone, onProtectedReset }) {
   const [currentPin, setCurrentPin] = useState("");
   const [pin, setPin] = useState("");
   const [pin2, setPin2] = useState("");
@@ -514,16 +648,30 @@ function PinModal({ open, mode, onClose, onDone }) {
 
   async function submit() {
     if (!canSubmit || busy) return;
+
     try {
       setBusy(true);
+
       if (isReset) {
-        await api.put("/api/pin/me/reset", { currentPin, newPin: pin });
+        const result = await onProtectedReset?.({
+          type: "reset",
+          currentPin,
+          newPin: pin,
+        });
+
+        if (result?.pending) return;
       } else {
         await api.post("/api/pin/me/set", { pin });
       }
+
       onDone?.();
     } catch (e) {
-      alert(e?.response?.data?.error || "PIN error");
+      alert(
+        e?.walletMessage ||
+          e?.response?.data?.message ||
+          e?.response?.data?.error ||
+          "PIN error",
+      );
     } finally {
       setBusy(false);
     }
@@ -719,13 +867,25 @@ function ForgotPinModal({ open, email, onClose, onSetNewPin }) {
   async function setFreshPin() {
     if (!/^\d{4,6}$/.test(newPin)) return setErr("PIN must be 4–6 digits.");
     if (newPin !== newPin2) return setErr("PINs do not match.");
+
     try {
       setBusy(true);
       setErr("");
-      await onSetNewPin(newPin); // calls /api/pin/me/forgot on the parent
+
+      const result = await onSetNewPin(newPin);
+
+      if (result?.pending) {
+        return;
+      }
+
       setMode("ok");
     } catch (e) {
-      setErr(e?.response?.data?.error || "Unable to set new PIN.");
+      setErr(
+        e?.walletMessage ||
+          e?.response?.data?.message ||
+          e?.response?.data?.error ||
+          "Unable to set new PIN.",
+      );
     } finally {
       setBusy(false);
     }

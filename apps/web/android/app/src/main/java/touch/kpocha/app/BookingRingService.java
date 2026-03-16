@@ -54,7 +54,7 @@ public class BookingRingService extends Service {
             player.setLooping(true);
             player.setAudioAttributes(
                     new android.media.AudioAttributes.Builder()
-                            .setUsage(android.media.AudioAttributes.USAGE_ALARM)
+                            .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION_EVENT)
                             .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
                             .build());
             player.prepare();
@@ -64,16 +64,17 @@ public class BookingRingService extends Service {
         }
     }
 
-  private void stopRinging() {
-    try {
-      if (player != null) {
-        if (player.isPlaying()) player.stop();
-        player.release();
-      }
-    } catch (Exception ignored) {
+    private void stopRinging() {
+        try {
+            if (player != null) {
+                if (player.isPlaying())
+                    player.stop();
+                player.release();
+            }
+        } catch (Exception ignored) {
+        }
+        player = null;
     }
-    player = null;
-  }
 
     private void stopSelfSafe() {
         try {

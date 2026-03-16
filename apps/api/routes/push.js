@@ -27,6 +27,8 @@ router.post("/push/subscribe", requireAuth, async (req, res) => {
   try {
     const subscription = req.body?.subscription;
     const deviceId = String(req.body?.deviceId || "");
+    const surfaceType = req.body?.surfaceType === "pwa" ? "pwa" : "browser";
+    const surfaceKey = String(req.body?.surfaceKey || "");
 
     if (!subscription)
       return res.status(400).json({ error: "subscription_required" });
@@ -44,6 +46,8 @@ router.post("/push/subscribe", requireAuth, async (req, res) => {
         $set: {
           ownerUid: req.user.uid,
           deviceId,
+          surfaceType,
+          surfaceKey,
           endpoint,
           p256dh,
           auth,
@@ -84,7 +88,8 @@ router.post("/push/unsubscribe", requireAuth, async (req, res) => {
  */
 router.post("/push/device-token", requireAuth, async (req, res) => {
   try {
-    const { token, platform, deviceId } = req.body || {};
+    const { token, platform, deviceId, surfaceType, surfaceKey } =
+      req.body || {};
     const did = String(deviceId || "");
     if (!token) return res.status(400).json({ error: "token_required" });
     if (!["android", "ios"].includes(platform))
@@ -111,6 +116,8 @@ router.post("/push/device-token", requireAuth, async (req, res) => {
           platform,
           token,
           deviceId: did,
+          surfaceType: surfaceType || "native",
+          surfaceKey: String(surfaceKey || did || ""),
           userAgent: req.headers["user-agent"] || "",
           disabled: false,
         },

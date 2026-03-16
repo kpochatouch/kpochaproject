@@ -8,6 +8,7 @@ export default function FaceEnrollModal({
   busy = false,
   title = "Face Verification — Take Selfie",
   subtitle = "This selfie is used only for face verification (not a public profile photo).",
+  error = "",
   selfie,
   onChangeSelfie,
   onContinue,
@@ -30,6 +31,8 @@ export default function FaceEnrollModal({
           onChangeSelfie({ previewUrl, assetId })
         }
       />
+
+      {error ? <div className="text-xs text-red-400 mt-2">{error}</div> : null}
 
       <div className="flex gap-2 mt-3">
         <button

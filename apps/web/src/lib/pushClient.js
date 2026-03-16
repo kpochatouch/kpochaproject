@@ -17,6 +17,32 @@ export function getDeviceId() {
   }
 }
 
+export function detectWebSurface() {
+  const isStandalone =
+    window.matchMedia?.("(display-mode: standalone)")?.matches ||
+    window.navigator?.standalone === true;
+
+  const surfaceType = isStandalone ? "pwa" : "browser";
+
+  let surfaceKey = "";
+  try {
+    const keyName = `kpocha:${surfaceType}:surfaceKey`;
+    surfaceKey = localStorage.getItem(keyName) || "";
+    if (!surfaceKey) {
+      surfaceKey =
+        (crypto?.randomUUID ? crypto.randomUUID() : null) ||
+        `${surfaceType}_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+      localStorage.setItem(keyName, surfaceKey);
+    }
+  } catch {
+    surfaceKey = `${surfaceType}_${Date.now()}_${Math.random()
+      .toString(16)
+      .slice(2)}`;
+  }
+
+  return { surfaceType, surfaceKey };
+}
+
 function urlBase64ToUint8Array(base64String) {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
   const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
@@ -50,9 +76,13 @@ export async function ensurePushSubscribed() {
     });
   }
 
+  const { surfaceType, surfaceKey } = detectWebSurface();
+
   await api.post("/api/push/subscribe", {
     subscription: sub,
     deviceId: getDeviceId(),
+    surfaceType,
+    surfaceKey,
   });
   return { ok: true };
 }

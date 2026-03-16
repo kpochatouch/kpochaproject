@@ -95,7 +95,7 @@ public class CallForegroundService extends Service {
             player.setLooping(true);
             player.setAudioAttributes(
                     new android.media.AudioAttributes.Builder()
-                            .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                            .setUsage(android.media.AudioAttributes.USAGE_VOICE_COMMUNICATION_SIGNALLING)
                             .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
                             .build());
             player.prepare();

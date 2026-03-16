@@ -184,21 +184,88 @@ function ensureVapidConfigured() {
   }
 }
 
-async function getActiveNativeDeviceIds(uid) {
-  const tokensDocs = await DevicePushToken.find({
-    ownerUid: uid,
-    disabled: { $ne: true },
-  })
-    .select("deviceId platform")
-    .lean();
+function pickLatestByKey(rows = [], getKey) {
+  const map = new Map();
 
-  return new Set(
-    tokensDocs
-      .filter(
-        (d) => (d.platform === "android" || d.platform === "ios") && d.deviceId,
-      )
-      .map((d) => d.deviceId),
-  );
+  for (const row of rows) {
+    const key = getKey(row);
+    if (!key) continue;
+
+    const prev = map.get(key);
+    const rowTime = new Date(row.updatedAt || row.createdAt || 0).getTime();
+    const prevTime = prev
+      ? new Date(prev.updatedAt || prev.createdAt || 0).getTime()
+      : 0;
+
+    if (!prev || rowTime > prevTime) {
+      map.set(key, row);
+    }
+  }
+
+  return Array.from(map.values());
+}
+
+function buildSurfacePlan(nativeDocs = [], webDocs = []) {
+  const map = new Map();
+
+  for (const doc of nativeDocs) {
+    const key = doc.surfaceKey || doc.deviceId || `native:${doc.token}`;
+    const time = new Date(doc.updatedAt || doc.createdAt || 0).getTime();
+    const prev = map.get(key);
+
+    if (!prev || time > prev.time) {
+      map.set(key, { channel: "native", time, doc });
+    }
+  }
+
+  for (const doc of webDocs) {
+    const key =
+      doc.surfaceKey || doc.deviceId || `web:${doc.endpoint || Math.random()}`;
+    const time = new Date(doc.updatedAt || doc.createdAt || 0).getTime();
+    const prev = map.get(key);
+
+    if (!prev || time > prev.time) {
+      map.set(key, { channel: doc.surfaceType || "browser", time, doc });
+    }
+  }
+
+  return Array.from(map.values());
+}
+
+function choosePushTargets({ type, nativeDocs = [], webDocs = [] }) {
+  const plan = buildSurfacePlan(nativeDocs, webDocs);
+
+  // For incoming calls / missed calls:
+  // native > pwa > browser
+  if (type === "call_incoming" || type === "call_missed") {
+    const native = plan.filter((p) => p.channel === "native").map((p) => p.doc);
+    if (native.length) {
+      return { nativeTargets: native, webTargets: [] };
+    }
+
+    const pwa = plan.filter((p) => p.channel === "pwa").map((p) => p.doc);
+    if (pwa.length) {
+      return { nativeTargets: [], webTargets: pwa };
+    }
+
+    const browser = plan
+      .filter((p) => p.channel === "browser")
+      .map((p) => p.doc);
+
+    return { nativeTargets: [], webTargets: browser };
+  }
+
+  // For normal notifications:
+  // latest surface per surfaceKey wins, regardless of channel
+  const nativeTargets = plan
+    .filter((p) => p.channel === "native")
+    .map((p) => p.doc);
+
+  const webTargets = plan
+    .filter((p) => p.channel === "pwa" || p.channel === "browser")
+    .map((p) => p.doc);
+
+  return { nativeTargets, webTargets };
 }
 
 async function sendWebPushToUser(uid, payload) {
@@ -206,23 +273,47 @@ async function sendWebPushToUser(uid, payload) {
     const ok = ensureVapidConfigured();
     if (!ok) return { ok: false, reason: "vapid_missing" };
 
-    // deviceIds that are already covered by native push (FCM)
-    const nativeDeviceIds = await getActiveNativeDeviceIds(uid);
-
-    const subs = await PushSubscription.find({
+    const nativeDocsRaw = await DevicePushToken.find({
       ownerUid: uid,
       disabled: { $ne: true },
-    }).lean();
+      platform: { $in: ["android", "ios"] },
+    })
+      .select(
+        "token platform deviceId surfaceType surfaceKey updatedAt createdAt",
+      )
+      .lean();
 
-    if (!subs.length) return { ok: false, reason: "no_subscription" };
+    const webDocsRaw = await PushSubscription.find({
+      ownerUid: uid,
+      disabled: { $ne: true },
+    })
+      .select(
+        "subscription endpoint deviceId surfaceType surfaceKey updatedAt createdAt",
+      )
+      .lean();
+
+    const nativeDocs = pickLatestByKey(
+      nativeDocsRaw,
+      (d) => d.surfaceKey || d.deviceId || `native:${d.token}`,
+    );
+
+    const webDocs = pickLatestByKey(
+      webDocsRaw,
+      (d) => d.surfaceKey || d.deviceId || `web:${d.endpoint}`,
+    );
+
+    const { webTargets } = choosePushTargets({
+      type: payload?.data?.type || "generic",
+      nativeDocs,
+      webDocs,
+    });
+
+    if (!webTargets.length) return { ok: false, reason: "no_subscription" };
 
     let sent = 0;
 
-    for (const subDoc of subs) {
+    for (const subDoc of webTargets) {
       try {
-        // ✅ If this subscription is on a device that has native FCM enabled, skip it.
-        if (subDoc.deviceId && nativeDeviceIds.has(subDoc.deviceId)) continue;
-
         if (!subDoc?.subscription) continue;
 
         await webpush.sendNotification(
@@ -249,22 +340,45 @@ async function sendWebPushToUser(uid, payload) {
 
 async function sendFcmToUser(uid, payload) {
   try {
-    const tokensDocs = await DevicePushToken.find({
+    const nativeDocsRaw = await DevicePushToken.find({
+      ownerUid: uid,
+      disabled: { $ne: true },
+      platform: { $in: ["android", "ios"] },
+    })
+      .select(
+        "token platform deviceId surfaceType surfaceKey updatedAt createdAt",
+      )
+      .lean();
+
+    const webDocsRaw = await PushSubscription.find({
       ownerUid: uid,
       disabled: { $ne: true },
     })
-      .select("token platform deviceId")
+      .select("endpoint deviceId surfaceType surfaceKey updatedAt createdAt")
       .lean();
 
-    const tokens = tokensDocs
-      .filter((d) => d.platform === "android" || d.platform === "ios")
-      .map((d) => d.token)
-      .filter(Boolean);
+    const nativeDocs = pickLatestByKey(
+      nativeDocsRaw,
+      (d) => d.surfaceKey || d.deviceId || `native:${d.token}`,
+    );
+
+    const webDocs = pickLatestByKey(
+      webDocsRaw,
+      (d) => d.surfaceKey || d.deviceId || `web:${d.endpoint}`,
+    );
+
+    const { nativeTargets } = choosePushTargets({
+      type: payload?.data?.type || "generic",
+      nativeDocs,
+      webDocs,
+    });
+
+    const tokens = nativeTargets.map((d) => d.token).filter(Boolean);
+
     console.log("[push:fcm] uid=", uid, "tokens=", tokens.length);
 
     if (!tokens.length) return { ok: false, reason: "no_device_tokens" };
 
-    // FCM "data" values MUST be strings
     const data = {};
     const rawData = payload?.data || {};
     for (const [k, v] of Object.entries(rawData)) {
@@ -275,19 +389,15 @@ async function sendFcmToUser(uid, payload) {
     const isIncomingCall = data.type === "call_incoming";
     const isCall = data.type === "call_incoming" || data.type === "call_missed";
 
-    // ✅ Phase B: incoming call must be DATA-only and must use native trigger type
     if (isIncomingCall) {
-      // Convert your app-level type -> native trigger type (Android expects this)
-      data.appType = "call_incoming"; // keep original app-level type for debugging / analytics
+      data.appType = "call_incoming";
       data.type = "incoming_call";
 
-      // Ensure required fields exist (strings)
       if (!data.callId && rawData.callId) data.callId = String(rawData.callId);
       if (!data.room && rawData.room) data.room = String(rawData.room);
       if (!data.callType && rawData.callType)
         data.callType = String(rawData.callType);
 
-      // Caller label (best-effort)
       if (!data.fromName) {
         data.fromName =
           (rawData.fromName && String(rawData.fromName)) ||
@@ -296,11 +406,8 @@ async function sendFcmToUser(uid, payload) {
       }
     }
 
-    // ✅ Calls: DATA-only (no notification payload) so Android handles full-screen UI.
-    // ✅ Non-calls: normal notification payload to alerts channel.
     const message = {
       tokens,
-
       ...(isCall
         ? {}
         : {
@@ -309,13 +416,9 @@ async function sendFcmToUser(uid, payload) {
               body: payload?.body || "",
             },
           }),
-
       data,
-
       android: {
         priority: "high",
-
-        // For calls: no android.notification payload (CallMessagingService handles it)
         ...(isCall
           ? {}
           : {
@@ -325,12 +428,12 @@ async function sendFcmToUser(uid, payload) {
               },
             }),
       },
-
       apns: {
         headers: { "apns-priority": "10" },
         payload: { aps: { sound: "default" } },
       },
     };
+
     console.log(
       "[push:fcm] android data.type =",
       data.type,
@@ -342,7 +445,6 @@ async function sendFcmToUser(uid, payload) {
 
     const resp = await admin.messaging().sendEachForMulticast(message);
 
-    // Disable bad tokens (best effort)
     const badTokens = [];
     resp.responses.forEach((r, idx) => {
       if (r.success) return;
