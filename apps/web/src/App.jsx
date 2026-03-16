@@ -432,6 +432,36 @@ export default function App() {
 
     (async () => {
       try {
+        let liveCall = null;
+
+        if (callId) {
+          const { data } = await api.get(
+            `/api/call/${encodeURIComponent(callId)}`,
+          );
+          liveCall = data?.item || null;
+        }
+
+        if (cancelled) return;
+
+        const terminalStatuses = [
+          "ended",
+          "missed",
+          "cancelled",
+          "declined",
+          "failed",
+        ];
+
+        if (
+          !liveCall ||
+          liveCall.endedAt ||
+          terminalStatuses.includes(liveCall.status)
+        ) {
+          setActiveCall(null);
+          setCallUiMode("expanded");
+          navigate("/inbox", { replace: true });
+          return;
+        }
+
         // ✅ If notification/deep-link means "answer this call",
         // backend must confirm it BEFORE we open CallSheet.
         if (shouldAccept && callId) {
@@ -440,8 +470,10 @@ export default function App() {
 
         if (cancelled) return;
 
-        // ✅ stale/invalid call must not open CallSheet
-        if (!room) {
+        const finalRoom = liveCall?.room || room;
+        const finalCallType = liveCall?.callType || callType;
+
+        if (!finalRoom) {
           navigate("/inbox", { replace: true });
           return;
         }
@@ -449,8 +481,8 @@ export default function App() {
         setActiveCall({
           open: true,
           callId,
-          room,
-          callType,
+          room: finalRoom,
+          callType: finalCallType,
           role: "receiver",
           fromUid: null,
           meta: {

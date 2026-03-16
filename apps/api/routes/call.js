@@ -180,6 +180,10 @@ export default function callRoutes({ requireAuth }) {
         return res.status(404).json({ error: "call_not_found" });
       }
 
+      if (String(err?.message || "") === "call_not_active") {
+        return res.status(409).json({ error: "call_not_active" });
+      }
+
       return res.status(500).json({ error: "call_accept_failed" });
     }
   });

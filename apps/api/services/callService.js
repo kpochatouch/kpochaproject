@@ -394,6 +394,13 @@ export async function acceptCall(callId, accepterUid) {
   const call = await CallRecord.findOne({ callId });
   if (!call) throw new Error("call_not_found");
 
+  if (
+    call.endedAt ||
+    ["ended", "missed", "cancelled", "declined", "failed"].includes(call.status)
+  ) {
+    throw new Error("call_not_active");
+  }
+
   // Update status/connectedAt atomically if not yet accepted
   if (!call.connectedAt) {
     call.connectedAt = new Date();

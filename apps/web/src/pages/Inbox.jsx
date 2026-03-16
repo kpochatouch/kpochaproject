@@ -142,6 +142,10 @@ function normalizeThread(raw = {}, currentUid) {
   };
 }
 
+function threadKey(t) {
+  return t?.peerUid || t?.room || null;
+}
+
 export default function Inbox() {
   const navigate = useNavigate();
   const { me: currentUser, loading: meLoading } = useMe();
@@ -190,7 +194,8 @@ export default function Inbox() {
 
       const normalized = raw
         .map((t) => normalizeThread(t, myUid))
-        .filter((t) => !!t.peerUid || !!t.room);
+        .filter((t) => !!t.peerUid || !!t.room)
+        .filter((t) => !String(t.room || "").startsWith("booking:"));
 
       normalized.sort((a, b) => {
         const ta = a.lastAt ? new Date(a.lastAt).getTime() : 0;
@@ -198,15 +203,28 @@ export default function Inbox() {
         return tb - ta;
       });
 
+      const seenKeys = new Set();
+      const dedupedInitial = [];
+
+      for (const t of normalized) {
+        const key = threadKey(t);
+        if (!key) continue;
+        if (seenKeys.has(key)) continue;
+        seenKeys.add(key);
+        dedupedInitial.push(t);
+      }
+
       if (append) {
         setThreads((prev) => {
-          const merged = [...prev, ...normalized];
-          // dedupe by peerUid keeping first occurrence (which is newest after sort)
+          const merged = [...prev, ...dedupedInitial];
+          // dedupe by peerUid OR room keeping first occurrence
           const seen = new Set();
           const deduped = [];
           for (const t of merged) {
-            if (seen.has(t.peerUid)) continue;
-            seen.add(t.peerUid);
+            const key = threadKey(t);
+            if (!key) continue;
+            if (seen.has(key)) continue;
+            seen.add(key);
             deduped.push(t);
           }
           deduped.sort(
@@ -217,7 +235,7 @@ export default function Inbox() {
           return deduped.slice(0, MAX_THREADS);
         });
       } else {
-        setThreads(normalized.slice(0, MAX_THREADS));
+        setThreads(dedupedInitial.slice(0, MAX_THREADS));
       }
 
       // set cursor/hasMore using response fields (backend-provided preferred)
@@ -291,7 +309,10 @@ export default function Inbox() {
         const at = msg.at || msg.ts || msg.createdAt || Date.now();
 
         setThreads((prev) => {
-          const existingIndex = prev.findIndex((t) => t.peerUid === peerUid);
+          const existingIndex = prev.findIndex(
+            (t) =>
+              (peerUid && t.peerUid === peerUid) || (room && t.room === room),
+          );
           let updatedThread;
 
           if (existingIndex >= 0) {
@@ -358,7 +379,10 @@ export default function Inbox() {
         const ts = at || Date.now();
 
         setThreads((prev) => {
-          const idx = prev.findIndex((t) => t.peerUid === peerUid);
+          const idx = prev.findIndex(
+            (t) =>
+              (peerUid && t.peerUid === peerUid) || (room && t.room === room),
+          );
 
           // Existing thread → bump unread
           if (idx >= 0) {
@@ -482,11 +506,11 @@ export default function Inbox() {
 
     // 2) Optimistic local update
     setThreads((prev) =>
-      prev.map((x) =>
-        x.peerUid === t.peerUid || (t.room && x.room === t.room)
-          ? { ...x, unread: 0 }
-          : x,
-      ),
+      prev.map((x) => {
+        const samePeer = t.peerUid && x.peerUid === t.peerUid;
+        const sameRoom = t.room && x.room === t.room;
+        return samePeer || sameRoom ? { ...x, unread: 0 } : x;
+      }),
     );
 
     // 3) Tell backend to zero unread
