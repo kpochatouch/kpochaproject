@@ -363,6 +363,7 @@ export async function createCall({
  */
 export async function updateCallStatus(callId, updates = {}) {
   if (!callId) throw new Error("callId required");
+
   const allowed = [
     "status",
     "connectedAt",
@@ -371,17 +372,36 @@ export async function updateCallStatus(callId, updates = {}) {
     "recordingUrl",
     "archived",
   ];
+
   const set = {};
   for (const k of Object.keys(updates || {})) {
     if (allowed.includes(k)) set[k] = updates[k];
   }
 
-  // If endedAt provided, compute duration after update
+  const nextStatus = String(set.status || "").trim();
+
+  const terminalStatuses = [
+    "ended",
+    "missed",
+    "cancelled",
+    "declined",
+    "failed",
+  ];
+
+  if (nextStatus === "accepted" && !set.connectedAt) {
+    set.connectedAt = new Date();
+  }
+
+  if (terminalStatuses.includes(nextStatus) && !set.endedAt) {
+    set.endedAt = new Date();
+  }
+
   const doc = await CallRecord.findOneAndUpdate(
     { callId },
     { $set: set },
     { new: true },
   );
+
   if (!doc) throw new Error("call_not_found");
 
   if (doc.endedAt && doc.connectedAt) {
@@ -389,7 +409,6 @@ export async function updateCallStatus(callId, updates = {}) {
     await doc.save();
   }
 
-  // Broadcast status to room and participants
   const statusPayload = {
     id: String(doc._id),
     callId: doc.callId,
@@ -400,13 +419,93 @@ export async function updateCallStatus(callId, updates = {}) {
     meta: doc.meta,
   };
 
-  // emit to room
   emitToRoom(doc.room, "call:status", statusPayload);
 
-  // emit to each participant user room
   (doc.participants || []).forEach((p) => {
     emitToUser(p.uid, "call:status", statusPayload);
   });
+
+  const callerSnap = await resolveCallerSnapshot(doc.callerUid);
+  const finalCallerName =
+    doc?.meta?.fromName ||
+    doc?.meta?.callerName ||
+    callerSnap.name ||
+    String(doc.callerUid);
+
+  const finalCallerAvatar =
+    doc?.meta?.fromAvatar || doc?.meta?.callerAvatar || callerSnap.avatar || "";
+
+  const receivers = (doc.participants || [])
+    .map((p) => p.uid)
+    .filter((u) => u && u !== doc.callerUid);
+
+  if (nextStatus === "missed") {
+    for (const r of receivers) {
+      try {
+        const missedPayload = buildMissedCallNotification({
+          callId: doc.callId,
+          room: doc.room,
+          callType: doc.callType,
+          callerUid: doc.callerUid,
+          callerName: finalCallerName,
+          callerAvatar: finalCallerAvatar,
+          duration: doc.duration,
+        });
+
+        await createNotification({
+          toUid: r,
+          fromUid: doc.callerUid,
+          type: "call_missed",
+          title: missedPayload.title,
+          body: missedPayload.body,
+          priority: "default",
+          data: missedPayload.data,
+          meta: { source: "callService:updateCallStatus" },
+        });
+
+        await sendTransientPush(r, missedPayload);
+      } catch (e) {
+        console.warn(
+          "[callService] updateCallStatus -> call_missed failed:",
+          e?.message || e,
+        );
+      }
+    }
+  }
+
+  if (nextStatus === "ended" && doc.connectedAt && doc.duration > 0) {
+    for (const r of receivers) {
+      try {
+        const endedPayload = buildCallEndedNotification({
+          callId: doc.callId,
+          room: doc.room,
+          callType: doc.callType,
+          callerUid: doc.callerUid,
+          callerName: finalCallerName,
+          callerAvatar: finalCallerAvatar,
+          duration: doc.duration,
+        });
+
+        await createNotification({
+          toUid: r,
+          fromUid: doc.callerUid,
+          type: "call_ended",
+          title: endedPayload.title,
+          body: endedPayload.body,
+          priority: "default",
+          data: endedPayload.data,
+          meta: { source: "callService:updateCallStatus" },
+        });
+
+        await sendTransientPush(r, endedPayload);
+      } catch (e) {
+        console.warn(
+          "[callService] updateCallStatus -> call_ended failed:",
+          e?.message || e,
+        );
+      }
+    }
+  }
 
   return doc;
 }
