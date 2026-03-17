@@ -498,10 +498,12 @@ export default function Inbox() {
     if (!t || (!t.peerUid && !t.room)) return;
 
     // 1) Navigate to chat
-    if (t.room) {
-      navigate(`/chat?room=${encodeURIComponent(t.room)}`);
-    } else {
+    // For normal DM threads, always prefer ?with=<peerUid>
+    // Use ?room= only for room-only conversations (booking/system/etc.)
+    if (t.peerUid) {
       navigate(`/chat?with=${encodeURIComponent(t.peerUid)}`);
+    } else if (t.room) {
+      navigate(`/chat?room=${encodeURIComponent(t.room)}`);
     }
 
     // 2) Optimistic local update
