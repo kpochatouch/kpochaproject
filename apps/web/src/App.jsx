@@ -567,15 +567,25 @@ export default function App() {
     // when server emits "call:incoming"
     const offIncoming = registerSocketHandler("call:incoming", (payload) => {
       if (!payload) return;
+      if (!payload.room || !payload.callId) return;
 
-      setActiveCall({
-        open: true,
-        callId: payload.callId,
-        room: payload.room,
-        callType: payload.callType || "audio",
-        role: "receiver",
-        fromUid: payload.callerUid,
-        meta: payload.meta || {},
+      // never mount receiver CallSheet for your own outgoing call
+      if (payload.callerUid && me?.uid && payload.callerUid === me.uid) return;
+
+      setActiveCall((prev) => {
+        if (prev?.callId && prev.callId === payload.callId) {
+          return prev;
+        }
+
+        return {
+          open: true,
+          callId: payload.callId,
+          room: payload.room,
+          callType: payload.callType || "audio",
+          role: "receiver",
+          fromUid: payload.callerUid,
+          meta: payload.meta || {},
+        };
       });
 
       setCallUiMode("expanded");
@@ -612,7 +622,7 @@ export default function App() {
       offIncoming();
       offStatus();
     };
-  }, []);
+  }, [me?.uid]);
 
   // Listener for AWS liveness events
   useEffect(() => {

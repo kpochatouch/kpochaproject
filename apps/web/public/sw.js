@@ -9,6 +9,25 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(self.clients.claim());
 });
 
+async function closeNotificationsByTag(tag) {
+  if (!tag) return;
+  try {
+    const notifications = await self.registration.getNotifications({
+      includeTriggered: true,
+    });
+    notifications.forEach((n) => {
+      try {
+        if (n.tag === tag) n.close();
+      } catch {}
+    });
+  } catch {}
+}
+
+function buildCallTag(callId, kind = "live") {
+  if (!callId) return undefined;
+  return `call:${callId}:${kind}`;
+}
+
 /**
  * Push event: display OS notification (NO caching).
  * Backend sends: { title, body, data: {...} }
@@ -19,7 +38,6 @@ self.addEventListener("push", (event) => {
   try {
     payload = event.data ? event.data.json() : {};
   } catch {
-    // If payload isn't JSON, fallback safely
     try {
       payload = { title: "Kpocha Touch", body: event.data?.text?.() || "" };
     } catch {
@@ -30,16 +48,15 @@ self.addEventListener("push", (event) => {
   const title = payload?.title || "Kpocha Touch";
   const body = payload?.body || "";
   const data = payload?.data || {};
-
   const type = data?.type || "generic";
-  const isCall =
-    type === "call_incoming" ||
-    type === "incoming_call" ||
-    type === "call_missed";
 
+  const isIncomingCall = type === "call_incoming" || type === "incoming_call";
+  const isMissedCall = type === "call_missed";
+  const isEndedCall = type === "call_ended";
   const isBooking = type === "booking_paid" || type === "booking_update";
 
-  const actorAvatar = data?.actorAvatar || data?.fromAvatar || "";
+  const actorAvatar =
+    data?.actorAvatar || data?.fromAvatar || data?.callerAvatar || "";
   const previewImage =
     data?.image ||
     data?.thumbnailUrl ||
@@ -47,37 +64,47 @@ self.addEventListener("push", (event) => {
     data?.postThumbnail ||
     "";
 
-  const notifOptions = {
-    body,
-    data,
-    icon: actorAvatar || "/icons/icon-192.png",
-    badge: "/icons/icon-192.png",
-    image: previewImage || undefined,
+  const callId = data?.callId || data?.call_id || "";
+  const liveCallTag = buildCallTag(callId, "live");
+  const missedCallTag = buildCallTag(callId, "missed");
+  const endedCallTag = buildCallTag(callId, "ended");
 
-    // collapse duplicates for the same live event
-    tag:
-      (isCall && data?.callId && `call:${data.callId}`) ||
-      (isBooking && data?.bookingId && `booking:${data.bookingId}`) ||
-      undefined,
+  const job = (async () => {
+    if (isMissedCall || isEndedCall) {
+      await closeNotificationsByTag(liveCallTag);
+    }
 
-    // make replacement notifications notify again
-    renotify: Boolean(isCall || isBooking),
+    const notifOptions = {
+      body,
+      data,
+      icon: actorAvatar || "/icons/icon-192.png",
+      badge: "/icons/icon-192.png",
+      image: previewImage || undefined,
+      tag: isIncomingCall
+        ? liveCallTag
+        : isMissedCall
+        ? missedCallTag
+        : isEndedCall
+        ? endedCallTag
+        : isBooking && data?.bookingId
+        ? `booking:${data.bookingId}`
+        : undefined,
+      renotify: Boolean(isIncomingCall || isMissedCall || isBooking),
+      requireInteraction: Boolean(isIncomingCall),
+      silent: false,
+      vibrate: isIncomingCall
+        ? [300, 150, 300, 150, 700]
+        : isMissedCall
+        ? [180, 120, 180]
+        : isBooking
+        ? [200, 120, 200, 120, 400]
+        : undefined,
+    };
 
-    // keep visible until user acts (best-effort; browser/OS decides)
-    requireInteraction: Boolean(isCall || isBooking),
+    await self.registration.showNotification(title, notifOptions);
+  })();
 
-    // ask OS for sound/vibration if supported
-    silent: false,
-
-    // Android/compatible platforms may use this
-    vibrate: isCall
-      ? [300, 150, 300, 150, 700]
-      : isBooking
-      ? [200, 120, 200, 120, 400]
-      : undefined,
-  };
-
-  event.waitUntil(self.registration.showNotification(title, notifOptions));
+  event.waitUntil(job);
 });
 
 /**
@@ -92,7 +119,7 @@ self.addEventListener("notificationclick", (event) => {
 
   let url = "/";
 
-  if (type === "call_missed") {
+  if (type === "call_missed" || type === "call_ended") {
     const peerUid = data.peerUid || data.fromUid || data.callerUid || "";
     const room = data.room || "";
 
@@ -103,30 +130,24 @@ self.addEventListener("notificationclick", (event) => {
     } else {
       url = "/inbox";
     }
-  }
-  // ✅ live incoming call opens call sheet
-  else if (
-    type === "call_incoming" ||
-    type === "incoming_call" ||
-    data.callRoom ||
-    data.call_room ||
-    ((data.callId || data.call_id) &&
-      (data.room || data.callRoom || data.call_room))
-  ) {
+  } else if (type === "call_incoming" || type === "incoming_call") {
     const callId = data.callId || data.call_id || "";
     const room = data.room || data.callRoom || data.call_room || "";
     const callType = data.callType || data.call_type || "audio";
-
     const fromName = data.fromName || data.callerName || "";
     const fromAvatar = data.fromAvatar || data.callerAvatar || "";
 
-    url =
-      `/browse?call=1&accept=1` +
-      `&callId=${encodeURIComponent(callId)}` +
-      `&room=${encodeURIComponent(room)}` +
-      `&callType=${encodeURIComponent(callType)}` +
-      `&fromName=${encodeURIComponent(fromName)}` +
-      `&fromAvatar=${encodeURIComponent(fromAvatar)}`;
+    if (callId && room) {
+      url =
+        `/browse?call=1&accept=1` +
+        `&callId=${encodeURIComponent(callId)}` +
+        `&room=${encodeURIComponent(room)}` +
+        `&callType=${encodeURIComponent(callType)}` +
+        `&fromName=${encodeURIComponent(fromName)}` +
+        `&fromAvatar=${encodeURIComponent(fromAvatar)}`;
+    } else {
+      url = "/inbox";
+    }
   } else if (type === "chat_message") {
     const peerUid =
       data.peerUid || data.fromUid || data.actorUid || data.callerUid || "";

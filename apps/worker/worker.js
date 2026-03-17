@@ -109,7 +109,14 @@ const callRingWorker = new Worker(
       attemptNumber,
     );
 
-    await sendTransientPush(receiverUid, payload);
+    await sendTransientPush(receiverUid, {
+      ...payload,
+      data: {
+        ...(payload?.data || {}),
+        ringAttempt: String(attemptNumber),
+        transient: "1",
+      },
+    });
 
     const nextAttempt = Number(attemptNumber) + 1;
 

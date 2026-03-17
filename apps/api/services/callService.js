@@ -1,7 +1,10 @@
 // apps/api/services/callService.js
 import CallRecord from "../models/CallRecord.js";
 import mongoose from "mongoose";
-import { createNotification } from "./notificationService.js";
+import {
+  createNotification,
+  sendTransientPush,
+} from "./notificationService.js";
 import { ClientProfile } from "../models/Profile.js";
 import { Pro } from "../models.js";
 import { enqueueCallRingJob } from "./callRingJobs.js";
@@ -156,6 +159,38 @@ function buildMissedCallNotification({
   };
 }
 
+function buildCallEndedNotification({
+  callId,
+  room,
+  callType = "audio",
+  callerUid,
+  callerName,
+  callerAvatar,
+  duration = 0,
+} = {}) {
+  const typeLabel = callType === "video" ? "video" : "voice";
+
+  return {
+    title: callerName || "Call ended",
+    body:
+      duration > 0 ? `${typeLabel} call ended` : `Completed ${typeLabel} call`,
+    data: {
+      type: "call_ended",
+      priority: "default",
+      callId,
+      room,
+      callType,
+      duration,
+      callerUid,
+      fromUid: callerUid,
+      fromName: callerName || String(callerUid || ""),
+      callerName: callerName || String(callerUid || ""),
+      fromAvatar: callerAvatar || "",
+      callerAvatar: callerAvatar || "",
+    },
+  };
+}
+
 export async function createCall({
   callId,
   room,
@@ -169,21 +204,27 @@ export async function createCall({
   if (!room) throw new Error("room required");
   if (!callerUid) throw new Error("callerUid required");
 
+  const normalizedReceiverUids = Array.from(
+    new Set((Array.isArray(receiverUids) ? receiverUids : []).filter(Boolean)),
+  );
+
+  if (normalizedReceiverUids.some((uid) => String(uid) === String(callerUid))) {
+    throw new Error("cannot_call_self");
+  }
+
   // Normalize participants
   const parts = Array.isArray(participants)
     ? participants
     : [
         { uid: callerUid, role: "caller" },
-        ...Array.from(
-          new Set(Array.isArray(receiverUids) ? receiverUids : []),
-        ).map((u) => ({
+        ...normalizedReceiverUids.map((u) => ({
           uid: u,
           role: "receiver",
         })),
       ];
 
   // receiverUid convenience (first non-caller)
-  const receiverUid = (Array.isArray(receiverUids) && receiverUids[0]) || null;
+  const receiverUid = normalizedReceiverUids[0] || null;
 
   // create record (unique callId)
   let call;
@@ -275,7 +316,7 @@ export async function createCall({
         },
       });
 
-      // create app notification (best-effort)
+      // send live incoming-call push only (DO NOT persist in notifications list)
       try {
         const incomingPush = buildIncomingCallPush({
           callId,
@@ -286,19 +327,8 @@ export async function createCall({
           callerAvatar,
         });
 
-        await createNotification({
-          toUid: uid,
-          fromUid: callerUid,
-          type: "call_incoming",
-          title: incomingPush.title,
-          body: incomingPush.body,
-          priority: "high",
-          data: incomingPush.data,
-          meta: { source: "callService" },
-        });
+        await sendTransientPush(uid, incomingPush);
 
-        // ✅ Keep PWA/native alerting while call is still unanswered,
-        // without creating duplicate DB notifications.
         await enqueueCallRingJob({
           callId,
           receiverUid: uid,
@@ -310,7 +340,7 @@ export async function createCall({
         });
       } catch (e) {
         console.warn(
-          "[callService] createNotification(call_incoming) failed:",
+          "[callService] sendTransientPush(call_incoming) failed:",
           e?.message || e,
         );
       }
@@ -570,28 +600,28 @@ export async function endCall(
     emitToUser(p.uid, "call:ended", payload),
   );
 
-  // If endedStatus indicates missed and no one answered, create missed notifications
+  const callerSnap = await resolveCallerSnapshot(call.callerUid);
+  const finalCallerName =
+    call?.meta?.fromName ||
+    call?.meta?.callerName ||
+    callerSnap.name ||
+    String(call.callerUid);
+
+  const finalCallerAvatar =
+    call?.meta?.fromAvatar ||
+    call?.meta?.callerAvatar ||
+    callerSnap.avatar ||
+    "";
+
+  const receivers = (call.participants || [])
+    .map((p) => p.uid)
+    .filter((u) => u && u !== call.callerUid);
+
+  // unanswered => missed call
   if (
     endedStatus === "missed" ||
     (endedStatus === "ended" && (!call.connectedAt || call.duration === 0))
   ) {
-    const callerSnap = await resolveCallerSnapshot(call.callerUid);
-    const missedCallerName =
-      call?.meta?.fromName ||
-      call?.meta?.callerName ||
-      callerSnap.name ||
-      String(call.callerUid);
-
-    const missedCallerAvatar =
-      call?.meta?.fromAvatar ||
-      call?.meta?.callerAvatar ||
-      callerSnap.avatar ||
-      "";
-
-    const receivers = (call.participants || [])
-      .map((p) => p.uid)
-      .filter((u) => u && u !== call.callerUid);
-
     for (const r of receivers) {
       try {
         const missedPayload = buildMissedCallNotification({
@@ -599,8 +629,8 @@ export async function endCall(
           room: call.room,
           callType: call.callType,
           callerUid: call.callerUid,
-          callerName: missedCallerName,
-          callerAvatar: missedCallerAvatar,
+          callerName: finalCallerName,
+          callerAvatar: finalCallerAvatar,
           duration: call.duration,
         });
 
@@ -614,9 +644,44 @@ export async function endCall(
           data: missedPayload.data,
           meta: { source: "callService" },
         });
+
+        await sendTransientPush(r, missedPayload);
       } catch (e) {
         console.warn(
-          "[callService] createNotification(call_missed) failed:",
+          "[callService] create/send call_missed failed:",
+          e?.message || e,
+        );
+      }
+    }
+  }
+
+  // answered then ended => call ended notification for receiver(s)
+  if (endedStatus === "ended" && call.connectedAt && call.duration > 0) {
+    for (const r of receivers) {
+      try {
+        const endedPayload = buildCallEndedNotification({
+          callId: call.callId,
+          room: call.room,
+          callType: call.callType,
+          callerUid: call.callerUid,
+          callerName: finalCallerName,
+          callerAvatar: finalCallerAvatar,
+          duration: call.duration,
+        });
+
+        await createNotification({
+          toUid: r,
+          fromUid: call.callerUid,
+          type: "call_ended",
+          title: endedPayload.title,
+          body: endedPayload.body,
+          priority: "default",
+          data: endedPayload.data,
+          meta: { source: "callService" },
+        });
+      } catch (e) {
+        console.warn(
+          "[callService] createNotification(call_ended) failed:",
           e?.message || e,
         );
       }

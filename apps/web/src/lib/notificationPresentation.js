@@ -21,32 +21,12 @@ export const NOTIFICATION_ROUTES = {
     return "/inbox";
   },
 
+  // historical notifications should NOT reopen live call UI
   call_incoming: (n) => {
     const peerUid =
       n?.actorUid || n?.data?.callerUid || n?.data?.fromUid || null;
 
     const room = n?.data?.room || null;
-    const callId = n?.data?.callId || null;
-    const callType = n?.data?.callType || "audio";
-    const fromName =
-      n?.data?.fromName || n?.data?.callerName || n?.meta?.actorName || "";
-    const fromAvatar =
-      n?.data?.fromAvatar ||
-      n?.data?.callerAvatar ||
-      n?.meta?.actorAvatar ||
-      "";
-
-    if (room && callId) {
-      const qs = new URLSearchParams();
-      qs.set("call", "1");
-      qs.set("accept", "1");
-      qs.set("callId", String(callId));
-      qs.set("room", String(room));
-      qs.set("callType", String(callType));
-      if (fromName) qs.set("fromName", String(fromName));
-      if (fromAvatar) qs.set("fromAvatar", String(fromAvatar));
-      return `/browse?${qs.toString()}`;
-    }
 
     if (peerUid) {
       return `/chat?with=${encodeURIComponent(peerUid)}`;
@@ -60,6 +40,23 @@ export const NOTIFICATION_ROUTES = {
   },
 
   call_missed: (n) => {
+    const peerUid =
+      n?.actorUid || n?.data?.callerUid || n?.data?.fromUid || null;
+
+    const room = n?.data?.room || null;
+
+    if (peerUid) {
+      return `/chat?with=${encodeURIComponent(peerUid)}`;
+    }
+
+    if (room) {
+      return `/chat?room=${encodeURIComponent(room)}`;
+    }
+
+    return "/inbox";
+  },
+
+  call_ended: (n) => {
     const peerUid =
       n?.actorUid || n?.data?.callerUid || n?.data?.fromUid || null;
 
@@ -136,6 +133,8 @@ export function presentNotification(n) {
     data.callerName ||
     "Someone";
 
+  const callLabel = data.callType === "video" ? "video" : "voice";
+
   if (type === "chat_message") {
     return {
       icon: "💬",
@@ -148,8 +147,8 @@ export function presentNotification(n) {
   if (type === "call_incoming") {
     return {
       icon: "📞",
-      title: `${who} is calling`,
-      body: `Incoming ${data.callType === "video" ? "video" : "voice"} call`,
+      title: who,
+      body: `Incoming ${callLabel} call`,
       target,
     };
   }
@@ -157,8 +156,17 @@ export function presentNotification(n) {
   if (type === "call_missed") {
     return {
       icon: "📞",
-      title: "Missed call",
-      body: `${who} tried to reach you`,
+      title: who,
+      body: `Missed ${callLabel} call`,
+      target,
+    };
+  }
+
+  if (type === "call_ended") {
+    return {
+      icon: "📞",
+      title: who,
+      body: "Call ended",
       target,
     };
   }
