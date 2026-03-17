@@ -10,6 +10,11 @@ import PostStats from "../models/PostStats.js";
 import redisClient from "../redis.js";
 import { scoreFrom } from "../services/postScoring.js";
 import { expandMediaForClient } from "../services/mediaResolver.js";
+import postService from "../services/postService.js";
+
+import Follow from "../models/Follow.js";
+import { ClientProfile } from "../models/Profile.js";
+import { createNotification } from "../services/notificationService.js";
 
 /* --------------------------- Auth middleware --------------------------- */
 async function requireAuth(req, res, next) {
@@ -85,7 +90,10 @@ async function sanitizePostForClient(p) {
     createdAt: obj.createdAt,
 
     authorName: obj.pro?.name || "Professional",
-    authorAvatar: obj.pro?.photoUrl || "",
+    authorAvatar: obj.pro?.photoAssetId
+      ? (await expandMediaForClient([{ assetId: obj.pro.photoAssetId }]))[0]
+          ?.url || ""
+      : "",
   };
 }
 
@@ -183,7 +191,7 @@ router.post("/posts", requireAuth, async (req, res) => {
         _id: proDoc._id,
         name: proDoc.name || "Professional",
         lga: proDoc.lga || "",
-        photoUrl: proDoc.photoUrl || proDoc.avatarUrl || "",
+        photoAssetId: proDoc.photoAssetId || null,
       },
 
       text,
@@ -198,6 +206,56 @@ router.post("/posts", requireAuth, async (req, res) => {
       { $setOnInsert: { postId: post._id, trendingScore: 0 } },
       { upsert: true, new: true },
     );
+
+    try {
+      const followers = await Follow.find({ targetUid: req.user.uid })
+        .select("followerUid -_id")
+        .lean();
+
+      if (followers.length) {
+        const actorProfile = await ClientProfile.findOne({ uid: req.user.uid })
+          .select("username")
+          .lean()
+          .catch(() => null);
+
+        let previewImage = "";
+
+        if (Array.isArray(post?.media) && post.media.length) {
+          const resolved = await expandMediaForClient(post.media.slice(0, 1));
+          previewImage =
+            resolved?.[0]?.thumbnailUrl || resolved?.[0]?.url || "";
+        }
+
+        const bodyText = post.text?.trim() || "Shared a new post";
+
+        await Promise.allSettled(
+          followers
+            .map((f) => String(f.followerUid || "").trim())
+            .filter((uid) => uid && uid !== req.user.uid)
+            .map((followerUid) =>
+              createNotification({
+                ownerUid: followerUid,
+                actorUid: req.user.uid,
+                type: "new_post",
+                title: proDoc.name || "New post",
+                body: bodyText.slice(0, 120),
+                data: {
+                  postId: String(post._id),
+                  username: actorProfile?.username || "",
+                  postThumbnail: previewImage,
+                  message: bodyText.slice(0, 120),
+                },
+                groupKey: `new_post:${req.user.uid}:${String(post._id)}`,
+              }),
+            ),
+        );
+      }
+    } catch (e) {
+      console.warn(
+        "[posts:create] new_post notifications failed:",
+        e?.message || e,
+      );
+    }
 
     return res.json({ ok: true, post: await sanitizePostForClient(post) });
   } catch (err) {
@@ -587,7 +645,7 @@ router.post("/stories", requireAuth, async (req, res) => {
         _id: proDoc._id,
         name: proDoc.name || "Professional",
         lga: proDoc.lga || "",
-        photoUrl: proDoc.photoUrl || proDoc.avatarUrl || "",
+        photoAssetId: proDoc.photoAssetId || null,
       },
       text,
       media,
@@ -726,6 +784,17 @@ router.post("/posts/:id/like", requireAuth, async (req, res) => {
       { postId: new mongoose.Types.ObjectId(id) },
       { $set: { trendingScore } },
     );
+
+    if (upd.modifiedCount > 0 || upd.upsertedCount > 0) {
+      try {
+        await postService.notifyOnLike({
+          postId: id,
+          likerUid: req.user.uid,
+        });
+      } catch (e) {
+        console.warn("[posts:like] notifyOnLike failed:", e?.message || e);
+      }
+    }
 
     return res.json({
       ok: true,

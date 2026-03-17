@@ -4,203 +4,11 @@ import { useNavigate } from "react-router-dom";
 import useNotifications from "../hooks/useNotifications";
 import MobileBackButton from "../components/MobileBackButton";
 import RouteLoader from "../components/RouteLoader.jsx";
-
-function formatTime(ts) {
-  if (!ts) return "";
-  const d = new Date(ts);
-  const now = new Date();
-
-  const sameDay =
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate();
-
-  return sameDay
-    ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-    : d.toLocaleDateString();
-}
-
-const NOTIFICATION_ROUTES = {
-  chat_message: (n) => {
-    const peerUid =
-      n?.actorUid ||
-      n?.data?.fromUid ||
-      n?.data?.peerUid ||
-      n?.data?.callerUid ||
-      null;
-
-    const room = n?.data?.room || null;
-
-    if (peerUid) {
-      return `/chat?with=${encodeURIComponent(peerUid)}`;
-    }
-
-    if (room) {
-      return `/chat?room=${encodeURIComponent(room)}`;
-    }
-
-    return "/inbox";
-  },
-
-  call_incoming: (n) => {
-    const peerUid =
-      n?.actorUid || n?.data?.callerUid || n?.data?.fromUid || null;
-
-    const room = n?.data?.room || null;
-    const callId = n?.data?.callId || null;
-    const callType = n?.data?.callType || "audio";
-    const fromName =
-      n?.data?.fromName || n?.data?.callerName || n?.meta?.actorName || "";
-    const fromAvatar =
-      n?.data?.fromAvatar ||
-      n?.data?.callerAvatar ||
-      n?.meta?.actorAvatar ||
-      "";
-
-    if (room && callId) {
-      const qs = new URLSearchParams();
-      qs.set("call", "1");
-      qs.set("accept", "1");
-      qs.set("callId", String(callId));
-      qs.set("room", String(room));
-      qs.set("callType", String(callType));
-      if (fromName) qs.set("fromName", String(fromName));
-      if (fromAvatar) qs.set("fromAvatar", String(fromAvatar));
-      return `/browse?${qs.toString()}`;
-    }
-
-    if (peerUid) {
-      return `/chat?with=${encodeURIComponent(peerUid)}`;
-    }
-
-    if (room) {
-      return `/chat?room=${encodeURIComponent(room)}`;
-    }
-
-    return "/inbox";
-  },
-
-  call_missed: (n) => {
-    const peerUid =
-      n?.actorUid || n?.data?.callerUid || n?.data?.fromUid || null;
-
-    const room = n?.data?.room || null;
-
-    if (peerUid) {
-      return `/chat?with=${encodeURIComponent(peerUid)}`;
-    }
-
-    if (room) {
-      return `/chat?room=${encodeURIComponent(room)}`;
-    }
-
-    return "/inbox";
-  },
-
-  post_like: (n) => (n?.data?.postId ? `/post/${n.data.postId}` : null),
-
-  booking_update: (n) =>
-    n?.data?.bookingId ? `/bookings/${n.data.bookingId}` : "/my-bookings",
-
-  booking_fund: () => "/wallet",
-  booking_fund_refund: () => "/wallet",
-  withdraw: () => "/wallet",
-  withdraw_pending: () => "/wallet",
-  release: () => "/wallet",
-
-  generic: () => null,
-};
-
-function presentNotification(n) {
-  const data = n.data || {};
-  const type = n.type || "generic";
-
-  const resolver = NOTIFICATION_ROUTES[type];
-  const target = resolver ? resolver(n) : null;
-
-  if (type === "chat_message") {
-    const who =
-      data.actorName || n?.meta?.actorName || data.fromName || "Someone";
-
-    return {
-      icon: "💬",
-      title: who,
-      body: data.bodyPreview || "Sent you a message",
-      target,
-    };
-  }
-
-  if (type === "call_incoming") {
-    const who =
-      data.fromName || data.callerName || n?.meta?.actorName || "Someone";
-
-    return {
-      icon: "📞",
-      title: `${who} is calling`,
-      body: `Incoming ${data.callType === "video" ? "video" : "voice"} call`,
-      target,
-    };
-  }
-
-  if (type === "call_missed") {
-    const who =
-      data.fromName || data.callerName || n?.meta?.actorName || "Someone";
-
-    return {
-      icon: "📞",
-      title: "Missed call",
-      body: `${who} tried to reach you`,
-      target,
-    };
-  }
-
-  if (type === "post_like") {
-    const who = n?.meta?.actorName || "Someone";
-    return {
-      icon: "❤️",
-      title: "New like",
-      body: `${who} liked your post`,
-      target,
-    };
-  }
-
-  if (type === "booking_update") {
-    return {
-      icon: "📅",
-      title: "Booking update",
-      body: data.body || data.message || "Your booking was updated",
-      target,
-    };
-  }
-
-  if (
-    [
-      "withdraw",
-      "withdraw_pending",
-      "booking_fund",
-      "booking_fund_refund",
-      "release",
-    ].includes(type)
-  ) {
-    return {
-      icon: "💰",
-      title: "Wallet update",
-      body: data.body || data.message || "Wallet activity updated",
-      target,
-    };
-  }
-
-  return {
-    icon: "🔔",
-    title: data.title || "Notification",
-    body: data.body || data.message || "",
-    target,
-  };
-}
-
-function getAvatar(n) {
-  return n?.meta?.actorAvatar || n?.data?.actorAvatar || null;
-}
+import {
+  presentNotification,
+  getNotificationAvatar,
+  formatNotificationTime,
+} from "../lib/notificationPresentation";
 
 export default function NotificationsPage() {
   const navigate = useNavigate();
@@ -215,7 +23,7 @@ export default function NotificationsPage() {
           id: n._id || n.id,
           seen: n.seen,
           createdAt: n.createdAt,
-          avatar: getAvatar(n),
+          avatar: getNotificationAvatar(n),
           raw: n,
         };
       }),
@@ -302,7 +110,7 @@ export default function NotificationsPage() {
                     )}
 
                     <div className="text-[11px] text-zinc-500 mt-1">
-                      {formatTime(n.createdAt)}
+                      {formatNotificationTime(n.createdAt)}
                     </div>
                   </div>
                 </div>

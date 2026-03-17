@@ -404,27 +404,16 @@ async function sendFcmToUser(uid, payload) {
       }
     }
 
+    // ✅ Data-only FCM so Android native code can render rich notifications
+    // for messages, likes, follows, new posts, wallet updates, etc.
+    data.title = payload?.title || "Kpocha Touch";
+    data.body = payload?.body || "";
+
     const message = {
       tokens,
-      ...(isCall
-        ? {}
-        : {
-            notification: {
-              title: payload?.title || "Kpocha Touch",
-              body: payload?.body || "",
-            },
-          }),
       data,
       android: {
         priority: "high",
-        ...(isCall
-          ? {}
-          : {
-              notification: {
-                channelId: "alerts",
-                sound: "default",
-              },
-            }),
       },
       apns: {
         headers: { "apns-priority": "10" },

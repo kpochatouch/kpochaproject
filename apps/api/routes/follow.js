@@ -7,6 +7,7 @@ import { Pro } from "../models.js";
 import redisClient from "../redis.js";
 import { getIO } from "../sockets/index.js";
 import { ClientProfile } from "../models/Profile.js";
+import { createNotification } from "../services/notificationService.js";
 
 const router = express.Router();
 
@@ -110,6 +111,28 @@ router.post("/follow", requireAuth, async (req, res) => {
     await invalidateProfileCacheAndEmit(targetUid, {
       followersCount: newFollowersCount,
     });
+
+    try {
+      const actorProfile = await ClientProfile.findOne({ uid: followerUid })
+        .select("username")
+        .lean()
+        .catch(() => null);
+
+      await createNotification({
+        ownerUid: targetUid,
+        actorUid: followerUid,
+        type: "follow",
+        title: "New follower",
+        body: "Someone started following you",
+        data: {
+          username: actorProfile?.username || "",
+          message: "Started following you",
+        },
+        groupKey: `follow:${followerUid}:${targetUid}`,
+      });
+    } catch (e) {
+      console.warn("[follow] createNotification failed:", e?.message || e);
+    }
 
     return res.json({
       ok: true,
@@ -215,6 +238,28 @@ router.post("/follow/:uid", requireAuth, async (req, res) => {
       followersCount: newFollowersCount,
     });
 
+    try {
+      const actorProfile = await ClientProfile.findOne({ uid: me })
+        .select("username")
+        .lean()
+        .catch(() => null);
+
+      await createNotification({
+        ownerUid: targetUid,
+        actorUid: me,
+        type: "follow",
+        title: "New follower",
+        body: "Someone started following you",
+        data: {
+          username: actorProfile?.username || "",
+          message: "Started following you",
+        },
+        groupKey: `follow:${me}:${targetUid}`,
+      });
+    } catch (e) {
+      console.warn("[follow/:uid] createNotification failed:", e?.message || e);
+    }
+
     return res.json({
       ok: true,
       following: true,
@@ -280,6 +325,31 @@ router.post("/pros/:proId/follow", requireAuth, async (req, res) => {
     await invalidateProfileCacheAndEmit(targetUid, {
       followersCount: newFollowersCount,
     });
+
+    try {
+      const actorProfile = await ClientProfile.findOne({ uid: me })
+        .select("username")
+        .lean()
+        .catch(() => null);
+
+      await createNotification({
+        ownerUid: targetUid,
+        actorUid: me,
+        type: "follow",
+        title: "New follower",
+        body: "Someone started following you",
+        data: {
+          username: actorProfile?.username || "",
+          message: "Started following you",
+        },
+        groupKey: `follow:${me}:${targetUid}`,
+      });
+    } catch (e) {
+      console.warn(
+        "[pros/:proId/follow] createNotification failed:",
+        e?.message || e,
+      );
+    }
 
     return res.json({
       ok: true,

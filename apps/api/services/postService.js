@@ -3,6 +3,7 @@ import Post from "../models/Post.js";
 import PostStats from "../models/PostStats.js";
 import { createNotification } from "./notificationService.js";
 import { getIO } from "../sockets/index.js";
+import { expandMediaForClient } from "./mediaResolver.js";
 
 /**
  * createPost(payload, proOwnerUid)
@@ -55,14 +56,25 @@ export async function notifyOnLike({ postId, likerUid }) {
   const ownerUid = post.proOwnerUid;
   if (!ownerUid || ownerUid === likerUid) return null;
 
+  let previewImage = "";
+
+  if (Array.isArray(post?.media) && post.media.length) {
+    const resolved = await expandMediaForClient(post.media.slice(0, 1));
+    previewImage = resolved?.[0]?.thumbnailUrl || resolved?.[0]?.url || "";
+  }
+
   await createNotification({
     ownerUid,
     actorUid: likerUid,
     type: "post_like",
+    title: "New like",
+    body: "Someone liked your post",
     data: {
       postId: String(postId),
+      postThumbnail: previewImage,
       message: "Your post got a new like.",
     },
+    groupKey: `post_like:${postId}`,
   });
 
   try {

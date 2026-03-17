@@ -8,6 +8,8 @@ import Post from "../models/Post.js"; // 👈 make sure this is here
 import { ClientProfile } from "../models/Profile.js";
 import { getIO } from "../sockets/index.js";
 import { scoreFrom } from "../services/postScoring.js";
+import { createNotification } from "../services/notificationService.js";
+import { expandMediaForClient } from "../services/mediaResolver.js";
 
 const router = express.Router();
 
@@ -27,7 +29,7 @@ async function requireAuth(req, res, next) {
 }
 
 // normalize a comment for client
-function shapeComment(c, profile = null) {
+async function shapeComment(c, profile = null) {
   const obj = typeof c.toObject === "function" ? c.toObject() : c;
   return {
     _id: obj._id,
@@ -37,8 +39,11 @@ function shapeComment(c, profile = null) {
     text: obj.text,
     attachments: obj.attachments || [],
     createdAt: obj.createdAt,
-    authorName: profile?.fullName || "",
-    authorAvatar: profile?.photoUrl || "",
+    authorName: profile?.displayName || profile?.fullName || "",
+    authorAvatar: profile?.photoAssetId
+      ? (await expandMediaForClient([{ assetId: profile.photoAssetId }]))[0]
+          ?.url || ""
+      : "",
   };
 }
 
@@ -59,15 +64,15 @@ router.get("/posts/:postId/comments", async (req, res) => {
     // fetch all profiles for these commenters in one go
     const uids = [...new Set(items.map((c) => c.ownerUid).filter(Boolean))];
     const profiles = uids.length
-      ? await ClientProfile.find({ ownerUid: { $in: uids } })
-          .select("ownerUid fullName photoUrl")
+      ? await ClientProfile.find({ uid: { $in: uids } })
+          .select("uid fullName displayName photoAssetId")
           .lean()
       : [];
 
-    const profileMap = new Map(profiles.map((p) => [p.ownerUid, p]));
+    const profileMap = new Map(profiles.map((p) => [p.uid, p]));
 
-    const shaped = items.map((c) =>
-      shapeComment(c, profileMap.get(c.ownerUid) || null),
+    const shaped = await Promise.all(
+      items.map((c) => shapeComment(c, profileMap.get(c.ownerUid) || null)),
     );
 
     return res.json(shaped);
@@ -89,7 +94,7 @@ router.post("/posts/:postId/comments", requireAuth, async (req, res) => {
     // 🔴 this is the piece you were missing
     // check post exists, not hidden/deleted, and comments aren’t disabled for others
     const post = await Post.findById(postId)
-      .select("proOwnerUid commentsDisabled hidden deleted")
+      .select("proOwnerUid commentsDisabled hidden deleted media")
       .lean();
     if (!post || post.deleted || post.hidden) {
       return res.status(404).json({ error: "post_not_found" });
@@ -129,12 +134,12 @@ router.post("/posts/:postId/comments", requireAuth, async (req, res) => {
 
     // fetch profile for this user so UI can show avatar immediately
     const profile =
-      (await ClientProfile.findOne({ ownerUid: req.user.uid })
-        .select("ownerUid fullName photoUrl")
+      (await ClientProfile.findOne({ uid: req.user.uid })
+        .select("uid fullName displayName photoAssetId")
         .lean()
         .catch(() => null)) || null;
 
-    const shaped = shapeComment(comment, profile);
+    const shaped = await shapeComment(comment, profile);
 
     // broadcast over socket (optional)
     const io = getIO();
@@ -144,6 +149,37 @@ router.post("/posts/:postId/comments", requireAuth, async (req, res) => {
       commentsCount: stats?.commentsCount || 1,
       trendingScore,
     });
+
+    if (post.proOwnerUid && post.proOwnerUid !== req.user.uid) {
+      try {
+        let previewImage = "";
+
+        if (Array.isArray(post?.media) && post.media.length) {
+          const resolved = await expandMediaForClient(post.media.slice(0, 1));
+          previewImage =
+            resolved?.[0]?.thumbnailUrl || resolved?.[0]?.url || "";
+        }
+
+        await createNotification({
+          ownerUid: post.proOwnerUid,
+          actorUid: req.user.uid,
+          type: "post_comment",
+          title: "New comment",
+          body: "Someone commented on your post",
+          data: {
+            postId: String(postId),
+            postThumbnail: previewImage,
+            message: "Commented on your post",
+          },
+          groupKey: `post_comment:${postId}`,
+        });
+      } catch (e) {
+        console.warn(
+          "[comments:create] createNotification failed:",
+          e?.message || e,
+        );
+      }
+    }
 
     return res.json({
       ok: true,

@@ -39,11 +39,20 @@ self.addEventListener("push", (event) => {
 
   const isBooking = type === "booking_paid" || type === "booking_update";
 
+  const actorAvatar = data?.actorAvatar || data?.fromAvatar || "";
+  const previewImage =
+    data?.image ||
+    data?.thumbnailUrl ||
+    data?.previewImage ||
+    data?.postThumbnail ||
+    "";
+
   const notifOptions = {
     body,
     data,
-    icon: "/icons/icon-192.png",
+    icon: actorAvatar || "/icons/icon-192.png",
     badge: "/icons/icon-192.png",
+    image: previewImage || undefined,
 
     // collapse duplicates for the same live event
     tag:
@@ -83,9 +92,17 @@ self.addEventListener("notificationclick", (event) => {
 
   let url = "/";
 
-  // ✅ missed call must go to inbox, never call sheet
   if (type === "call_missed") {
-    url = "/inbox";
+    const peerUid = data.peerUid || data.fromUid || data.callerUid || "";
+    const room = data.room || "";
+
+    if (peerUid) {
+      url = `/chat?with=${encodeURIComponent(peerUid)}`;
+    } else if (room) {
+      url = `/chat?room=${encodeURIComponent(room)}`;
+    } else {
+      url = "/inbox";
+    }
   }
   // ✅ live incoming call opens call sheet
   else if (
@@ -110,10 +127,30 @@ self.addEventListener("notificationclick", (event) => {
       `&callType=${encodeURIComponent(callType)}` +
       `&fromName=${encodeURIComponent(fromName)}` +
       `&fromAvatar=${encodeURIComponent(fromAvatar)}`;
-  } else if (type === "chat_message" && data.room) {
-    url = `/chat?room=${encodeURIComponent(data.room)}`;
-  } else if (type === "post_like" && data.postId) {
+  } else if (type === "chat_message") {
+    const peerUid =
+      data.peerUid || data.fromUid || data.actorUid || data.callerUid || "";
+
+    if (peerUid) {
+      url = `/chat?with=${encodeURIComponent(peerUid)}`;
+    } else if (data.room) {
+      url = `/chat?room=${encodeURIComponent(data.room)}`;
+    } else {
+      url = "/inbox";
+    }
+  } else if (
+    ["post_like", "post_comment", "new_post"].includes(type) &&
+    data.postId
+  ) {
     url = `/post/${encodeURIComponent(data.postId)}`;
+  } else if (type === "follow") {
+    if (data.username) {
+      url = `/profile/${encodeURIComponent(data.username)}`;
+    } else {
+      url = "/browse";
+    }
+  } else if (type === "booking_update" && data.bookingId) {
+    url = `/bookings/${encodeURIComponent(data.bookingId)}`;
   } else if (type === "booking_update") {
     url = "/my-bookings";
   } else if (
