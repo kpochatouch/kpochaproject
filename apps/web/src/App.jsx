@@ -67,6 +67,7 @@ const AdvertCompose = lazy(() => import("./pages/AdvertCompose.jsx"));
 const MyAdverts = lazy(() => import("./pages/MyAdverts.jsx"));
 const AdvertEdit = lazy(() => import("./pages/AdvertEdit.jsx"));
 const AdminAdvertsReview = lazy(() => import("./pages/AdminAdvertsReview.jsx"));
+const NotificationsPage = lazy(() => import("./pages/Notifications.jsx"));
 
 /* ---------- Chatbase hook ---------- */
 function useChatbase(enabled) {
@@ -931,6 +932,14 @@ export default function App() {
                   <RequireRole role="admin">
                     <AdminAdvertsReview />
                   </RequireRole>
+                }
+              />
+              <Route
+                path="/notifications"
+                element={
+                  <RequireAuth>
+                    <NotificationsPage />
+                  </RequireAuth>
                 }
               />
               {/* Catch-all */}

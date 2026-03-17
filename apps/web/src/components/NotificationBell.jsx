@@ -5,16 +5,88 @@ import useNotifications from "../hooks/useNotifications";
 
 const NOTIFICATION_ROUTES = {
   chat_message: (n) => {
-    const room = n?.data?.room;
-    return room ? `/chat?room=${encodeURIComponent(room)}` : "/inbox";
+    const peerUid =
+      n?.actorUid ||
+      n?.data?.fromUid ||
+      n?.data?.peerUid ||
+      n?.data?.callerUid ||
+      null;
+
+    const room = n?.data?.room || null;
+
+    // ✅ Prefer DM peer navigation whenever we know the other user
+    if (peerUid) {
+      return `/chat?with=${encodeURIComponent(peerUid)}`;
+    }
+
+    // ✅ Fallback only for room-only conversations
+    if (room) {
+      return `/chat?room=${encodeURIComponent(room)}`;
+    }
+
+    return "/inbox";
   },
 
-  call_incoming: () => "/inbox",
-  call_missed: () => "/inbox",
+  call_incoming: (n) => {
+    const peerUid =
+      n?.actorUid || n?.data?.callerUid || n?.data?.fromUid || null;
+
+    const room = n?.data?.room || null;
+    const callId = n?.data?.callId || null;
+    const callType = n?.data?.callType || "audio";
+    const fromName =
+      n?.data?.fromName || n?.data?.callerName || n?.meta?.actorName || "";
+    const fromAvatar =
+      n?.data?.fromAvatar ||
+      n?.data?.callerAvatar ||
+      n?.meta?.actorAvatar ||
+      "";
+
+    if (room && callId) {
+      const qs = new URLSearchParams();
+      qs.set("call", "1");
+      qs.set("accept", "1");
+      qs.set("callId", String(callId));
+      qs.set("room", String(room));
+      qs.set("callType", String(callType));
+      if (fromName) qs.set("fromName", String(fromName));
+      if (fromAvatar) qs.set("fromAvatar", String(fromAvatar));
+      return `/browse?${qs.toString()}`;
+    }
+
+    if (peerUid) {
+      return `/chat?with=${encodeURIComponent(peerUid)}`;
+    }
+
+    if (room) {
+      return `/chat?room=${encodeURIComponent(room)}`;
+    }
+
+    return "/inbox";
+  },
+
+  call_missed: (n) => {
+    const peerUid =
+      n?.actorUid || n?.data?.callerUid || n?.data?.fromUid || null;
+
+    const room = n?.data?.room || null;
+
+    // ✅ Missed call should open the person conversation when possible
+    if (peerUid) {
+      return `/chat?with=${encodeURIComponent(peerUid)}`;
+    }
+
+    if (room) {
+      return `/chat?room=${encodeURIComponent(room)}`;
+    }
+
+    return "/inbox";
+  },
 
   post_like: (n) => (n?.data?.postId ? `/post/${n.data.postId}` : null),
 
-  booking_update: () => "/my-bookings",
+  booking_update: (n) =>
+    n?.data?.bookingId ? `/bookings/${n.data.bookingId}` : "/my-bookings",
 
   booking_fund: () => "/wallet",
   booking_fund_refund: () => "/wallet",
@@ -55,37 +127,47 @@ function presentNotification(n) {
   const target = resolver ? resolver(n) : null;
 
   if (type === "chat_message") {
+    const who =
+      data.actorName || n?.meta?.actorName || data.fromName || "Someone";
+
     return {
       icon: "💬",
-      title: "New message",
-      body: data.bodyPreview || "New message",
+      title: who,
+      body: data.bodyPreview || "Sent you a message",
       target,
     };
   }
 
   if (type === "call_incoming") {
+    const who =
+      data.fromName || data.callerName || n?.meta?.actorName || "Someone";
+
     return {
       icon: "📞",
-      title: "Incoming call",
-      body: "Tap to respond",
+      title: `${who} is calling`,
+      body: `Incoming ${data.callType === "video" ? "video" : "voice"} call`,
       target,
     };
   }
 
   if (type === "call_missed") {
+    const who =
+      data.fromName || data.callerName || n?.meta?.actorName || "Someone";
+
     return {
       icon: "📞",
       title: "Missed call",
-      body: "You missed a call",
+      body: `${who} tried to reach you`,
       target,
     };
   }
 
   if (type === "post_like") {
+    const who = n?.meta?.actorName || "Someone";
     return {
       icon: "❤️",
       title: "New like",
-      body: "Someone liked your post",
+      body: `${who} liked your post`,
       target,
     };
   }
@@ -94,7 +176,7 @@ function presentNotification(n) {
     return {
       icon: "📅",
       title: "Booking update",
-      body: "Your booking was updated",
+      body: data.body || data.message || "Your booking was updated",
       target,
     };
   }
@@ -111,16 +193,16 @@ function presentNotification(n) {
     return {
       icon: "💰",
       title: "Wallet update",
-      body: "Wallet balance changed",
+      body: data.body || data.message || "Wallet activity updated",
       target,
     };
   }
 
   return {
     icon: "🔔",
-    title: "Notification",
-    body: data.message || "",
-    target: null,
+    title: data.title || "Notification",
+    body: data.body || data.message || "",
+    target,
   };
 }
 
@@ -142,6 +224,7 @@ export default function NotificationBell() {
 
   const [open, setOpen] = useState(false);
   const rootRef = useRef(null);
+  const isMobile = window.matchMedia("(max-width: 768px)").matches;
 
   // Close on outside click
   useEffect(() => {
@@ -189,7 +272,13 @@ export default function NotificationBell() {
       {/* Bell */}
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          if (isMobile) {
+            navigate("/notifications");
+            return;
+          }
+          setOpen((o) => !o);
+        }}
         aria-label="Notifications"
         className="relative inline-flex items-center justify-center
                    w-9 h-9 rounded-full border border-zinc-800

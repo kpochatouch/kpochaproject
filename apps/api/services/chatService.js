@@ -283,15 +283,27 @@ export async function saveMessage({
         if (realRecipient && realRecipient !== fromUid) {
           // create a notification record for the recipient
           try {
+            const senderName =
+              payload?.sender?.displayName || meta?.fromName || "New message";
+
+            const senderAvatar =
+              payload?.sender?.photoUrl || meta?.fromAvatar || "";
+
             await createNotification({
               toUid: realRecipient,
               fromUid,
               type: "chat_message",
+              title: senderName,
+              body: (body || "").slice(0, 140) || "Sent you a message",
               data: {
                 room,
                 fromUid,
+                peerUid: fromUid,
+                actorName: senderName,
+                actorAvatar: senderAvatar,
                 bodyPreview: (body || "").slice(0, 140),
               },
+              groupKey: `chat:${room}`,
             });
           } catch (e) {
             console.warn(
@@ -320,11 +332,27 @@ export async function saveMessage({
     } else if (toUid) {
       // not a dm room, but toUid provided (one-to-one); still notify
       try {
+        const senderName =
+          payload?.sender?.displayName || meta?.fromName || "New message";
+
+        const senderAvatar =
+          payload?.sender?.photoUrl || meta?.fromAvatar || "";
+
         await createNotification({
           toUid,
           fromUid,
           type: "chat_message",
-          data: { room, fromUid, bodyPreview: (body || "").slice(0, 140) },
+          title: senderName,
+          body: (body || "").slice(0, 140) || "Sent you a message",
+          data: {
+            room,
+            fromUid,
+            peerUid: fromUid,
+            actorName: senderName,
+            actorAvatar: senderAvatar,
+            bodyPreview: (body || "").slice(0, 140),
+          },
+          groupKey: `chat:${room}`,
         });
       } catch (e) {
         console.warn(

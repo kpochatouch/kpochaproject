@@ -529,6 +529,10 @@ export async function createNotification(rawArgs = {}, { lean = false } = {}) {
         notificationId: String(doc._id),
         type: doc.type,
         priority: doc.priority || "default",
+        actorUid: doc.actorUid || "",
+        actorName: doc?.meta?.actorName || doc?.data?.actorName || "",
+        actorAvatar: doc?.meta?.actorAvatar || doc?.data?.actorAvatar || "",
+        groupKey: doc.groupKey || "",
         ...doc.data,
       },
     };
