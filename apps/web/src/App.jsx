@@ -463,12 +463,6 @@ export default function App() {
           return;
         }
 
-        // ✅ If notification/deep-link means "answer this call",
-        // backend must confirm it BEFORE we open CallSheet.
-        if (shouldAccept && callId) {
-          await api.post(`/api/calls/${encodeURIComponent(callId)}/accept`);
-        }
-
         if (cancelled) return;
 
         const finalRoom = liveCall?.room || room;
