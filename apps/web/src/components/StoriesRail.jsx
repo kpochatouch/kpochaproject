@@ -167,6 +167,46 @@ export default function StoriesRail({
         hlsCleanupRef.current = null;
         hlsSrcRef.current = "";
       }
+
+      const el = videoRef.current;
+      if (el) {
+        try {
+          el.pause();
+        } catch {}
+
+        try {
+          el.removeAttribute("src");
+        } catch {}
+
+        try {
+          el.src = "";
+        } catch {}
+
+        try {
+          el.srcObject = null;
+        } catch {}
+
+        try {
+          el.load();
+        } catch {}
+      }
+
+      try {
+        if (navigator.mediaSession?.metadata) {
+          navigator.mediaSession.metadata = null;
+        }
+      } catch {}
+
+      try {
+        if (navigator.mediaSession?.setActionHandler) {
+          navigator.mediaSession.setActionHandler("play", null);
+          navigator.mediaSession.setActionHandler("pause", null);
+          navigator.mediaSession.setActionHandler("seekbackward", null);
+          navigator.mediaSession.setActionHandler("seekforward", null);
+          navigator.mediaSession.setActionHandler("previoustrack", null);
+          navigator.mediaSession.setActionHandler("nexttrack", null);
+        }
+      } catch {}
     };
   }, []);
 
@@ -264,14 +304,29 @@ export default function StoriesRail({
               <div className="text-sm text-zinc-500 px-1 py-3">
                 Loading stories…
               </div>
-            ) : stories.length ? (
-              stories.map((story, index) => {
+            ) : items.length ? (
+              items.map((item, index) => {
+                if (item.kind === "advert") {
+                  return (
+                    <div
+                      key={item.key}
+                      className="relative shrink-0 w-[108px] h-[190px] rounded-2xl overflow-hidden border border-zinc-800 bg-black"
+                    >
+                      <AdvertStoryCard
+                        advert={item.data}
+                        onClickAction={handleAdvertClick}
+                      />
+                    </div>
+                  );
+                }
+
+                const story = item.data;
                 const thumb = storyThumb(story);
                 const authorName = story?.authorName || "Professional";
                 const expires = timeLeftLabel(story?.expiresAt);
                 return (
                   <button
-                    key={story._id || story.id || index}
+                    key={item.key}
                     type="button"
                     onClick={() => openViewer(index)}
                     className="relative shrink-0 w-[108px] h-[190px] rounded-2xl overflow-hidden border border-zinc-800 bg-black group"

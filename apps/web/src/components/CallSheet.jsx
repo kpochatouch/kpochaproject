@@ -92,6 +92,7 @@ export default function CallSheet({
 
   const localRef = useRef(null);
   const remoteRef = useRef(null);
+  const ringtoneAudioRef = useRef(null);
   const localStreamRef = useRef(null);
   const remoteStreamRef = useRef(null);
 
@@ -114,16 +115,135 @@ export default function CallSheet({
     };
   }
 
+  function clearMediaSession() {
+    try {
+      if (!("mediaSession" in navigator)) return;
+
+      navigator.mediaSession.metadata = null;
+      navigator.mediaSession.playbackState = "none";
+
+      navigator.mediaSession.setActionHandler("play", null);
+      navigator.mediaSession.setActionHandler("pause", null);
+      navigator.mediaSession.setActionHandler("stop", null);
+      navigator.mediaSession.setActionHandler("seekbackward", null);
+      navigator.mediaSession.setActionHandler("seekforward", null);
+      navigator.mediaSession.setActionHandler("previoustrack", null);
+      navigator.mediaSession.setActionHandler("nexttrack", null);
+    } catch {}
+  }
+
   function stopAllTones() {
-    [callerToneRef, incomingToneRef].forEach((ref) => {
+    [callerToneRef, incomingToneRef, ringtoneAudioRef].forEach((ref) => {
       try {
         if (ref.current) {
           ref.current.pause();
           ref.current.currentTime = 0;
-          ref.current = null;
         }
       } catch {}
     });
+
+    try {
+      if (callerToneRef.current) {
+        callerToneRef.current.removeAttribute?.("src");
+        callerToneRef.current.src = "";
+        callerToneRef.current.load?.();
+      }
+    } catch {}
+
+    try {
+      if (
+        incomingToneRef.current &&
+        incomingToneRef.current !== ringtoneAudioRef.current
+      ) {
+        incomingToneRef.current.removeAttribute?.("src");
+        incomingToneRef.current.src = "";
+        incomingToneRef.current.load?.();
+      }
+    } catch {}
+
+    try {
+      if (ringtoneAudioRef.current) {
+        ringtoneAudioRef.current.removeAttribute("src");
+        ringtoneAudioRef.current.src = "";
+        ringtoneAudioRef.current.load?.();
+        ringtoneAudioRef.current.remove?.();
+      }
+    } catch {}
+
+    callerToneRef.current = null;
+    incomingToneRef.current = null;
+    ringtoneAudioRef.current = null;
+
+    clearMediaSession();
+  }
+
+  function startIncomingRingtone() {
+    if (Capacitor.isNativePlatform()) return;
+    if (incomingToneRef.current || ringtoneAudioRef.current) return;
+
+    try {
+      const audio = document.createElement("audio");
+      audio.src = "/sound/incoming.mp3";
+      audio.loop = true;
+      audio.preload = "auto";
+      audio.playsInline = true;
+      audio.setAttribute("playsinline", "true");
+      audio.style.display = "none";
+
+      document.body.appendChild(audio);
+
+      ringtoneAudioRef.current = audio;
+      incomingToneRef.current = audio;
+
+      try {
+        if ("mediaSession" in navigator) {
+          navigator.mediaSession.metadata = new MediaMetadata({
+            title: "Incoming call",
+            artist: peerName && peerName.trim() ? peerName : "Kpocha Touch",
+            album: callType === "video" ? "Video call" : "Voice call",
+            artwork: peerAvatar
+              ? [
+                  { src: peerAvatar, sizes: "96x96", type: "image/png" },
+                  { src: peerAvatar, sizes: "192x192", type: "image/png" },
+                  { src: peerAvatar, sizes: "512x512", type: "image/png" },
+                ]
+              : [],
+          });
+
+          navigator.mediaSession.playbackState = "playing";
+
+          navigator.mediaSession.setActionHandler("play", () => {
+            audio.play().catch(() => {});
+          });
+
+          navigator.mediaSession.setActionHandler("pause", () => {
+            audio.pause();
+          });
+
+          navigator.mediaSession.setActionHandler("stop", () => {
+            stopAllTones();
+          });
+
+          navigator.mediaSession.setActionHandler("seekbackward", null);
+          navigator.mediaSession.setActionHandler("seekforward", null);
+          navigator.mediaSession.setActionHandler("previoustrack", null);
+          navigator.mediaSession.setActionHandler("nexttrack", null);
+        }
+      } catch {}
+
+      audio.play().catch(() => {});
+    } catch {}
+  }
+
+  function startCallerTone() {
+    if (callerToneRef.current) return;
+
+    try {
+      const audio = new Audio("/sound/caller-tune.mp3");
+      audio.loop = true;
+      callerToneRef.current = audio;
+      audio.play().catch(() => {});
+    } catch {}
   }
 
   async function attachStream(
@@ -289,14 +409,7 @@ export default function CallSheet({
     let stashIce = null;
 
     if (role !== "caller") {
-      if (!Capacitor.isNativePlatform()) {
-        try {
-          const audio = new Audio("/sound/incoming.mp3");
-          audio.loop = true;
-          incomingToneRef.current = audio;
-          audio.play().catch(() => {});
-        } catch {}
-      }
+      startIncomingRingtone();
 
       stashOffer = (msg) => {
         if (peerAcceptedRef.current) {
@@ -882,14 +995,7 @@ export default function CallSheet({
         callType,
       });
 
-      if (!callerToneRef.current) {
-        try {
-          const audio = new Audio("/sound/caller-tune.mp3");
-          audio.loop = true;
-          callerToneRef.current = audio;
-          audio.play().catch(() => {});
-        } catch {}
-      }
+      startCallerTone();
 
       await safeUpdateStatus("ringing");
 

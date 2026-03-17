@@ -233,6 +233,51 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
     }
   }
 
+  function syncFeedMediaSession() {
+    const v = videoRef.current;
+    if (!v) return;
+
+    try {
+      if (!("mediaSession" in navigator)) return;
+
+      const title =
+        (post?.text && post.text.trim().slice(0, 60)) ||
+        post?.pro?.name ||
+        post?.authorName ||
+        "Kpocha Touch";
+
+      const artist = post?.pro?.name || post?.authorName || "Kpocha Touch";
+      const artworkUrl =
+        media?.thumbnailUrl || post?.pro?.photoUrl || post?.authorAvatar || "";
+
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title,
+        artist,
+        album: "Kpocha Touch",
+        artwork: artworkUrl
+          ? [
+              { src: artworkUrl, sizes: "96x96", type: "image/png" },
+              { src: artworkUrl, sizes: "192x192", type: "image/png" },
+              { src: artworkUrl, sizes: "512x512", type: "image/png" },
+            ]
+          : [],
+      });
+
+      navigator.mediaSession.setActionHandler("play", () => {
+        v.play().catch(() => {});
+      });
+
+      navigator.mediaSession.setActionHandler("pause", () => {
+        v.pause();
+      });
+
+      navigator.mediaSession.setActionHandler("seekbackward", null);
+      navigator.mediaSession.setActionHandler("seekforward", null);
+      navigator.mediaSession.setActionHandler("previoustrack", null);
+      navigator.mediaSession.setActionHandler("nexttrack", null);
+    } catch {}
+  }
+
   const canComment = useMemo(
     () => !commentsDisabled && !!currentUser,
     [commentsDisabled, currentUser],
@@ -331,6 +376,23 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
 
   useEffect(() => {
     return () => {
+      if (speakerTimerRef.current) {
+        clearTimeout(speakerTimerRef.current);
+        speakerTimerRef.current = null;
+      }
+
+      if (videoViewTimerRef.current) {
+        clearTimeout(videoViewTimerRef.current);
+        videoViewTimerRef.current = null;
+      }
+
+      if (mediaObserverRef.current) {
+        try {
+          mediaObserverRef.current.disconnect();
+        } catch {}
+        mediaObserverRef.current = null;
+      }
+
       if (hlsCleanupRef.current) {
         try {
           hlsCleanupRef.current();
@@ -338,6 +400,46 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
         hlsCleanupRef.current = null;
         hlsSrcRef.current = "";
       }
+
+      const v = videoRef.current;
+      if (v) {
+        try {
+          v.pause();
+        } catch {}
+
+        try {
+          v.removeAttribute("src");
+        } catch {}
+
+        try {
+          v.src = "";
+        } catch {}
+
+        try {
+          v.srcObject = null;
+        } catch {}
+
+        try {
+          v.load();
+        } catch {}
+      }
+
+      try {
+        if (navigator.mediaSession?.metadata) {
+          navigator.mediaSession.metadata = null;
+        }
+      } catch {}
+
+      try {
+        if (navigator.mediaSession?.setActionHandler) {
+          navigator.mediaSession.setActionHandler("play", null);
+          navigator.mediaSession.setActionHandler("pause", null);
+          navigator.mediaSession.setActionHandler("seekbackward", null);
+          navigator.mediaSession.setActionHandler("seekforward", null);
+          navigator.mediaSession.setActionHandler("previoustrack", null);
+          navigator.mediaSession.setActionHandler("nexttrack", null);
+        }
+      } catch {}
     };
   }, []);
 
@@ -458,7 +560,8 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
           playTriggeredByObserverRef.current = true;
 
           // Try sound autoplay first; fallback to muted autoplay if blocked
-          await autoplayTrySoundThenFallbackMuted(v);
+          const played = await autoplayTrySoundThenFallbackMuted(v);
+          if (played) syncFeedMediaSession();
         } else {
           // Pause when leaving view
           // Leaving view -> cancel the 3s timer
@@ -467,6 +570,12 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
             videoViewTimerRef.current = null;
           }
           v.pause();
+
+          try {
+            if (navigator.mediaSession?.metadata) {
+              navigator.mediaSession.metadata = null;
+            }
+          } catch {}
         }
       },
       { threshold: [0, 0.25, 0.6, 1] },
@@ -499,15 +608,6 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
     obs.observe(el);
     return () => obs.disconnect();
   }, [isVideo]);
-
-  useEffect(() => {
-    return () => {
-      if (speakerTimerRef.current) {
-        clearTimeout(speakerTimerRef.current);
-        speakerTimerRef.current = null;
-      }
-    };
-  }, []);
 
   async function onClickMedia() {
     if (!postId) return;
