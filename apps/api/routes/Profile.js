@@ -819,15 +819,22 @@ async function handleGetPublicProfile(req, res) {
       publicFromPro,
     });
 
+    const [clientAvatarResolved] = await expandMediaForClient([
+      {
+        assetId: client?.photoAssetId || client?.identity?.photoAssetId || null,
+        type: "image",
+      },
+    ]);
+
     const [proAvatarResolved] = await expandMediaForClient([
       {
-        assetId: pro?.photoAssetId || pro?.identity?.photoAssetId || null,
+        assetId: proDoc?.photoAssetId || proDoc?.identity?.photoAssetId || null,
         type: "image",
       },
     ]);
 
     // 3) Merge identity fields (client primary)
-    const isProProfile = Boolean(pro);
+    const isProProfile = Boolean(proDoc);
 
     const profilePublic = {
       ownerUid,
@@ -845,19 +852,15 @@ async function handleGetPublicProfile(req, res) {
           "",
 
       avatarUrl: isProProfile
-        ? (() => {
-            const assetId =
-              pro?.photoAssetId || pro?.identity?.photoAssetId || null;
-            return assetId ? undefined : "";
-          })()
+        ? (proAvatarResolved && proAvatarResolved.url) || ""
         : (clientAvatarResolved && clientAvatarResolved.url) || "",
       coverUrl: isProProfile
-        ? pro?.coverUrl || client.coverUrl || ""
-        : client.coverUrl || pro?.coverUrl || "",
+        ? proDoc?.coverUrl || client.coverUrl || ""
+        : client.coverUrl || proDoc?.coverUrl || "",
 
       bio: isProProfile
-        ? pro?.bio || client.bio || ""
-        : client.bio || pro?.bio || "",
+        ? proDoc?.bio || client.bio || ""
+        : client.bio || proDoc?.bio || "",
 
       isPro: isProProfile,
       verified,
@@ -868,9 +871,9 @@ async function handleGetPublicProfile(req, res) {
       gallery: isProProfile
         ? (publicFromPro && publicFromPro.gallery) || []
         : client.gallery || [],
-      contactPublic: isProProfile ? (pro && pro.contactPublic) || {} : {},
+      contactPublic: isProProfile ? (proDoc && proDoc.contactPublic) || {} : {},
       badges: isProProfile ? (publicFromPro && publicFromPro.badges) || [] : [],
-      metrics: isProProfile ? (pro && pro.metrics) || {} : {},
+      metrics: isProProfile ? (proDoc && proDoc.metrics) || {} : {},
 
       state: isProProfile
         ? (publicFromPro && publicFromPro.state) || client?.state || ""
@@ -882,7 +885,9 @@ async function handleGetPublicProfile(req, res) {
       followersCount: 0,
       postsCount: 0,
       jobsCompleted: 0,
-      ratingAverage: Number((pro && pro.metrics && pro.metrics.avgRating) || 0),
+      ratingAverage: Number(
+        (proDoc && proDoc.metrics && proDoc.metrics.avgRating) || 0,
+      ),
     };
 
     // 4) Counts (canonical service)

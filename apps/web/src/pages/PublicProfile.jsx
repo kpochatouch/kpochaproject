@@ -2,6 +2,7 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { api, connectSocket, registerSocketHandler } from "../lib/api";
+import { getSignedMediaUrl } from "../lib/r2Upload";
 import FeedCard from "../components/FeedCard.jsx";
 import LiveActivity from "../components/LiveActivity.jsx";
 import SideMenu from "../components/SideMenu.jsx";
@@ -18,14 +19,30 @@ function normalizeProfile(data) {
     data.ownerUid ||
     data.username ||
     data.name ||
-    data.photoUrl
+    data.photoAssetId ||
+    data.avatarAssetId ||
+    data.photoUrl ||
+    data.avatarUrl
   ) {
     return {
       ownerUid: data.ownerUid || data.uid || null,
       username: data.username || data.id || "",
       displayName: data.displayName || data.name || data.fullName || "",
-      avatarUrl: data.photoUrl || data.avatarUrl || "",
+
+      // canonical migration shape
+      avatarAssetId:
+        data.avatarAssetId ||
+        data.photoAssetId ||
+        data.identity?.photoAssetId ||
+        "",
+
+      coverAssetId: data.coverAssetId || data.bannerAssetId || "",
+
+      // keep resolved urls only if backend already provided them,
+      // but do not depend on them as source of truth
+      avatarUrl: data.avatarUrl || "",
       coverUrl: data.coverUrl || "",
+
       bio: data.bio || data.description || "",
       isPro: Boolean(data.proId || data.proOwnerUid || data.services),
       verified: Boolean(data.verified),
@@ -91,6 +108,7 @@ export default function PublicProfile() {
   const [following, setFollowing] = useState(false);
   const [followPending, setFollowPending] = useState(false);
   const [lightboxUrl, setLightboxUrl] = useState("");
+  const [avatarSrc, setAvatarSrc] = useState("");
 
   // use global MeContext
   const { me: currentUser, isAdmin: meIsAdmin } = useMe();
@@ -162,6 +180,17 @@ export default function PublicProfile() {
                 p.userUid ||
                 (p.owner && (p.owner.uid || p.owner.userId)) ||
                 null,
+
+              avatarAssetId:
+                p.avatarAssetId ||
+                p.photoAssetId ||
+                p.identity?.photoAssetId ||
+                "",
+
+              coverAssetId: p.coverAssetId || p.bannerAssetId || "",
+
+              avatarUrl: p.avatarUrl || "",
+              coverUrl: p.coverUrl || "",
             };
           }
 
@@ -260,6 +289,47 @@ export default function PublicProfile() {
   useEffect(() => {
     fetchProfile();
   }, [fetchProfile]);
+
+  useEffect(() => {
+    let alive = true;
+
+    async function resolveAvatar() {
+      const assetId =
+        profile?.avatarAssetId ||
+        profile?.photoAssetId ||
+        profile?.identity?.photoAssetId ||
+        "";
+
+      if (!assetId) {
+        setAvatarSrc("");
+        return;
+      }
+
+      try {
+        const url = await getSignedMediaUrl({
+          api,
+          assetId,
+          variant: "original",
+        });
+        if (!alive) return;
+        setAvatarSrc(url || "");
+      } catch (e) {
+        if (!alive) return;
+        console.warn("avatar resolve failed", e?.message || e);
+        setAvatarSrc("");
+      }
+    }
+
+    resolveAvatar();
+
+    return () => {
+      alive = false;
+    };
+  }, [
+    profile?.avatarAssetId,
+    profile?.photoAssetId,
+    profile?.identity?.photoAssetId,
+  ]);
 
   /* ---------------- realtime handlers: profile stats + posts ---------------- */
   useEffect(() => {
@@ -757,8 +827,7 @@ export default function PublicProfile() {
 
   const name = profile.displayName || profile.username || "Professional";
   const location = [profile.state, profile.lga].filter(Boolean).join(", ");
-  const avatar =
-    profile.avatarUrl || (profile.gallery && profile.gallery[0]) || "";
+  const avatar = avatarSrc || "";
   const services = Array.isArray(profile.services) ? profile.services : [];
   const gallery =
     Array.isArray(profile.gallery) && profile.gallery.length
