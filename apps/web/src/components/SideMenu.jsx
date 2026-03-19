@@ -182,10 +182,10 @@ export default function SideMenu({ me }) {
         >
           <div
             className={`${
-              collapsed ? "w-14" : "w-60"
+              collapsed ? "w-14" : "w-56"
             } bg-black/70 border-r border-zinc-800 h-full lg:h-auto
-              rounded-none lg:rounded-xl lg:border lg:bg-black/40
-              p-3 space-y-2 overflow-y-auto`}
+  rounded-none lg:rounded-xl lg:border lg:bg-black/40
+  p-3 space-y-2 overflow-y-auto`}
           >
             {/* collapse toggle */}
             <div className="hidden lg:flex justify-end mb-1">
@@ -304,15 +304,15 @@ function MenuButton({
     <button
       type="button"
       onClick={!disabled ? onClick : undefined}
-      className={`w-full flex items-center gap-2 px-2 py-2 rounded-lg text-sm
-        ${active ? "bg-zinc-900 text-gold" : "text-zinc-200 hover:bg-zinc-900"}
-        ${disabled ? "opacity-50 cursor-not-allowed" : ""}
-        ${collapsed ? "justify-center" : ""}`}
+      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[15px]
+  ${active ? "bg-zinc-900 text-gold" : "text-zinc-100 hover:bg-zinc-900"}
+  ${disabled ? "opacity-50 cursor-not-allowed" : ""}
+  ${collapsed ? "justify-center" : ""}`}
     >
       {icon ? (
         (() => {
           const Icon = icon;
-          return <Icon className={`w-6 h-6 ${collapsed ? "" : "shrink-0"}`} />;
+          return <Icon className={`w-5 h-5 ${collapsed ? "" : "shrink-0"}`} />;
         })()
       ) : (
         <span className="w-5 h-5 rounded bg-zinc-700 inline-block" />

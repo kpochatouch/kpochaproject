@@ -661,7 +661,7 @@ export default function App() {
   const hideChrome = location.pathname.startsWith("/aws-liveness");
   return (
     <ToastProvider>
-      <div className="min-h-screen flex flex-col bg-black text-white">
+      <div className="min-h-screen flex flex-col bg-[#0b0c10] text-white">
         <PullToRefresh disabled={Boolean(activeCall?.room)} />
 
         {/* global click → custom event used by menus/overlays */}
@@ -675,7 +675,7 @@ export default function App() {
 
         <main
           className={
-            hideChrome ? "flex-1 bg-black" : "flex-1 pb-[78px] md:pb-0"
+            hideChrome ? "flex-1 bg-[#0b0c10]" : "flex-1 pb-[78px] md:pb-0"
           }
         >
           <Suspense fallback={<RouteLoader full />}>

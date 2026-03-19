@@ -42,3 +42,11 @@ apps/web/ios/App/Podfile.lock
 # Xcode user state
 **/xcuserdata/
 **/*.xcuserstate
+
+# Local environment overrides
+.env.local
+*.env.local
+
+# Vite local env
+apps/web/.env.local
+apps/api/.env.local

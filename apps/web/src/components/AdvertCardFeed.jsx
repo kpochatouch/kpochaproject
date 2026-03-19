@@ -18,7 +18,7 @@ export default function AdvertCardFeed({ advert, onClickAction }) {
   return (
     <article className="rounded-xl border border-zinc-800 bg-black/40 overflow-hidden">
       <div className="px-4 pt-3">
-        <div className="text-[11px] uppercase tracking-wide text-zinc-400">
+        <div className="text-xs uppercase tracking-wide text-zinc-400">
           Sponsored
         </div>
       </div>

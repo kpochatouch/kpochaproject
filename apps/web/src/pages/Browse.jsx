@@ -520,9 +520,9 @@ export default function Browse() {
 
   return (
     <ErrorBoundary>
-      <div className="max-w-6xl mx-auto px-4 py-10">
+      <div className="max-w-[1400px] mx-auto px-3 md:px-4 py-5 md:py-6">
         {/* header + tabs */}
-        <div className="mb-6 flex items-center justify-between gap-3 flex-wrap">
+        <div className="mb-4 flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2">
             <img
               src="/discovery.png"
@@ -650,14 +650,14 @@ export default function Browse() {
             )}
           </>
         ) : (
-          <div className="flex flex-col lg:flex-row gap-4 items-start">
+          <div className="flex flex-col lg:grid lg:grid-cols-[240px_minmax(0,1fr)_260px] gap-3 md:gap-4 items-start">
             {/* LEFT MENU */}
             <div className="lg:w-56 w-full self-start lg:sticky lg:top-20">
               <SideMenu me={me} />
             </div>
 
             {/* FEED */}
-            <div className="flex-1 w-full max-w-2xl lg:mx-0 mx-auto">
+            <div className="w-full min-w-0 max-w-none">
               <StoriesRail />
 
               {canPostOnFeed && (
@@ -752,8 +752,8 @@ export default function Browse() {
             </div>
 
             {/* RIGHT ADS */}
-            <div className="hidden lg:block w-56 self-start lg:top-20 lg:sticky">
-              <div className="space-y-4">
+            <div className="hidden lg:block w-[240px] self-start lg:top-20 lg:sticky">
+              <div className="space-y-3">
                 <AdvertCardRail
                   advert={railAdverts?.[0] || null}
                   onClickAction={handleAdvertClick}

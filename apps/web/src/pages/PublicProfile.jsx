@@ -2,7 +2,6 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { api, connectSocket, registerSocketHandler } from "../lib/api";
-import { getSignedMediaUrl } from "../lib/r2Upload";
 import FeedCard from "../components/FeedCard.jsx";
 import LiveActivity from "../components/LiveActivity.jsx";
 import SideMenu from "../components/SideMenu.jsx";
@@ -108,7 +107,6 @@ export default function PublicProfile() {
   const [following, setFollowing] = useState(false);
   const [followPending, setFollowPending] = useState(false);
   const [lightboxUrl, setLightboxUrl] = useState("");
-  const [avatarSrc, setAvatarSrc] = useState("");
 
   // use global MeContext
   const { me: currentUser, isAdmin: meIsAdmin } = useMe();
@@ -289,47 +287,6 @@ export default function PublicProfile() {
   useEffect(() => {
     fetchProfile();
   }, [fetchProfile]);
-
-  useEffect(() => {
-    let alive = true;
-
-    async function resolveAvatar() {
-      const assetId =
-        profile?.avatarAssetId ||
-        profile?.photoAssetId ||
-        profile?.identity?.photoAssetId ||
-        "";
-
-      if (!assetId) {
-        setAvatarSrc("");
-        return;
-      }
-
-      try {
-        const url = await getSignedMediaUrl({
-          api,
-          assetId,
-          variant: "original",
-        });
-        if (!alive) return;
-        setAvatarSrc(url || "");
-      } catch (e) {
-        if (!alive) return;
-        console.warn("avatar resolve failed", e?.message || e);
-        setAvatarSrc("");
-      }
-    }
-
-    resolveAvatar();
-
-    return () => {
-      alive = false;
-    };
-  }, [
-    profile?.avatarAssetId,
-    profile?.photoAssetId,
-    profile?.identity?.photoAssetId,
-  ]);
 
   /* ---------------- realtime handlers: profile stats + posts ---------------- */
   useEffect(() => {
@@ -827,7 +784,8 @@ export default function PublicProfile() {
 
   const name = profile.displayName || profile.username || "Professional";
   const location = [profile.state, profile.lga].filter(Boolean).join(", ");
-  const avatar = avatarSrc || "";
+  const avatar =
+    profile?.avatarUrl || profile?.photoUrl || profile?.pro?.photoUrl || "";
   const services = Array.isArray(profile.services) ? profile.services : [];
   const gallery =
     Array.isArray(profile.gallery) && profile.gallery.length

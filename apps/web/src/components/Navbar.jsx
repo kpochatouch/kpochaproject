@@ -48,7 +48,9 @@ export default function Navbar() {
   const isPro = meKnown ? !!me?.isPro : false;
 
   const navLinkClass = ({ isActive }) =>
-    isActive ? "text-gold font-medium" : "hover:text-gold";
+    isActive
+      ? "text-gold font-medium text-[15px]"
+      : "hover:text-gold text-[15px] text-zinc-100";
 
   const chipClass = (active) =>
     `px-3 py-2 rounded-full border text-base whitespace-nowrap ${
@@ -58,8 +60,8 @@ export default function Navbar() {
     }`;
 
   return (
-    <header className="border-b border-zinc-800 sticky top-0 z-40 bg-black/70 backdrop-blur md:h-[60px]">
-      <div className="max-w-6xl mx-auto px-4 h-full flex items-center justify-between gap-3">
+    <header className="border-b border-zinc-800 sticky top-0 z-40 bg-[#0f1115]/90 backdrop-blur md:h-[60px]">
+      <div className="max-w-[1400px] mx-auto px-3 md:px-4 h-full flex items-center justify-between gap-3">
         {/* desktop brand only (mobile uses the custom mobile header below) */}
         <Link to="/browse" className="hidden md:flex items-center gap-2">
           <img
@@ -109,8 +111,10 @@ export default function Navbar() {
             <NavLink
               to="/inbox"
               className={({ isActive }) =>
-                `relative ${
-                  isActive ? "text-gold font-medium" : "hover:text-gold"
+                `relative text-[15px] ${
+                  isActive
+                    ? "text-gold font-medium"
+                    : "hover:text-gold text-zinc-100"
                 }`
               }
             >
@@ -140,7 +144,7 @@ export default function Navbar() {
           {authKnown && token && (
             <button
               onClick={handleSignOut}
-              className="rounded-lg border border-gold px-3 py-1 hover:bg-gold hover:text-black"
+              className="rounded-lg border border-gold px-3 py-1.5 text-sm text-zinc-100 hover:bg-gold hover:text-black"
             >
               Sign Out
             </button>
@@ -149,7 +153,7 @@ export default function Navbar() {
           {authKnown && !token && (
             <NavLink
               to="/login"
-              className="rounded-lg border border-gold px-3 py-1 hover:bg-gold hover:text-black"
+              className="rounded-lg border border-gold px-3 py-1.5 text-sm text-zinc-100 hover:bg-gold hover:text-black"
             >
               Sign In
             </NavLink>

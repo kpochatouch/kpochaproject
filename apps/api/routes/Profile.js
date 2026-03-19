@@ -852,8 +852,12 @@ async function handleGetPublicProfile(req, res) {
           "",
 
       avatarUrl: isProProfile
-        ? (proAvatarResolved && proAvatarResolved.url) || ""
-        : (clientAvatarResolved && clientAvatarResolved.url) || "",
+        ? (proAvatarResolved && proAvatarResolved.url) ||
+          (clientAvatarResolved && clientAvatarResolved.url) ||
+          ""
+        : (clientAvatarResolved && clientAvatarResolved.url) ||
+          (proAvatarResolved && proAvatarResolved.url) ||
+          "",
       coverUrl: isProProfile
         ? proDoc?.coverUrl || client.coverUrl || ""
         : client.coverUrl || proDoc?.coverUrl || "",
@@ -926,23 +930,29 @@ async function handleGetPublicProfile(req, res) {
       }, {});
     }
 
-    const publicPosts = postsRaw.map((p) => {
-      const s = statsMap[String(p._id)] || {};
-      return {
-        id: p._id?.toString?.() || String(p._id),
-        proOwnerUid: p.proOwnerUid || "",
-        proId: p.proId ? String(p.proId) : null,
-        text: p.text,
-        media: p.media || [],
-        createdAt: p.createdAt,
-        stats: {
-          likes: Number(s.likesCount || s.likes || 0),
-          comments: Number(s.commentsCount || s.comments || 0),
-          shares: Number(s.sharesCount || s.shares || 0),
-          views: Number(s.viewsCount || s.views || 0),
-        },
-      };
-    });
+    const publicPosts = await Promise.all(
+      postsRaw.map(async (p) => {
+        const s = statsMap[String(p._id)] || {};
+        const media = await expandMediaForClient(p.media || []);
+
+        return {
+          id: p._id?.toString?.() || String(p._id),
+          _id: p._id?.toString?.() || String(p._id),
+          proOwnerUid: p.proOwnerUid || "",
+          ownerUid: p.ownerUid || p.proOwnerUid || p.createdBy || "",
+          proId: p.proId ? String(p.proId) : null,
+          text: p.text,
+          media,
+          createdAt: p.createdAt,
+          stats: {
+            likes: Number(s.likesCount || s.likes || 0),
+            comments: Number(s.commentsCount || s.comments || 0),
+            shares: Number(s.sharesCount || s.shares || 0),
+            views: Number(s.viewsCount || s.views || 0),
+          },
+        };
+      }),
+    );
 
     const payload = {
       ok: true,
@@ -1079,8 +1089,12 @@ router.get("/profile/public-by-uid/:uid", async (req, res) => {
           "",
 
       avatarUrl: isProProfile
-        ? (proAvatarResolved && proAvatarResolved.url) || ""
-        : (clientAvatarResolved && clientAvatarResolved.url) || "",
+        ? (proAvatarResolved && proAvatarResolved.url) ||
+          (clientAvatarResolved && clientAvatarResolved.url) ||
+          ""
+        : (clientAvatarResolved && clientAvatarResolved.url) ||
+          (proAvatarResolved && proAvatarResolved.url) ||
+          "",
 
       coverUrl: isProProfile
         ? pro?.coverUrl || client.coverUrl || ""
@@ -1150,23 +1164,29 @@ router.get("/profile/public-by-uid/:uid", async (req, res) => {
       }, {});
     }
 
-    const publicPosts = postsRaw.map((p) => {
-      const s = statsMap[String(p._id)] || {};
-      return {
-        id: p._id?.toString?.() || String(p._id),
-        proOwnerUid: p.proOwnerUid || "",
-        proId: p.proId ? String(p.proId) : null,
-        text: p.text,
-        media: p.media || [],
-        createdAt: p.createdAt,
-        stats: {
-          likes: Number(s.likesCount || s.likes || 0),
-          comments: Number(s.commentsCount || s.comments || 0),
-          shares: Number(s.sharesCount || s.shares || 0),
-          views: Number(s.viewsCount || s.views || 0),
-        },
-      };
-    });
+    const publicPosts = await Promise.all(
+      postsRaw.map(async (p) => {
+        const s = statsMap[String(p._id)] || {};
+        const media = await expandMediaForClient(p.media || []);
+
+        return {
+          id: p._id?.toString?.() || String(p._id),
+          _id: p._id?.toString?.() || String(p._id),
+          proOwnerUid: p.proOwnerUid || "",
+          ownerUid: p.ownerUid || p.proOwnerUid || p.createdBy || "",
+          proId: p.proId ? String(p.proId) : null,
+          text: p.text,
+          media,
+          createdAt: p.createdAt,
+          stats: {
+            likes: Number(s.likesCount || s.likes || 0),
+            comments: Number(s.commentsCount || s.comments || 0),
+            shares: Number(s.sharesCount || s.shares || 0),
+            views: Number(s.viewsCount || s.views || 0),
+          },
+        };
+      }),
+    );
 
     const payload = {
       ok: true,
