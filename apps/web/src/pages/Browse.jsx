@@ -11,7 +11,6 @@ import ErrorBoundary from "../components/ErrorBoundary";
 import SideMenu from "../components/SideMenu.jsx";
 import FeedComposer from "../components/FeedComposer.jsx";
 import { connectSocket, registerSocketHandler } from "../lib/api";
-import NotificationsBell from "../components/NotificationBell.jsx";
 import StoriesRail from "../components/StoriesRail.jsx";
 import AdvertCardFeed from "../components/AdvertCardFeed.jsx";
 import AdvertCardRail from "../components/AdvertCardRail.jsx";
@@ -534,9 +533,6 @@ export default function Browse() {
           </div>
 
           <div className="flex items-center gap-3">
-            {/* 🔔 Notifications bell is always visible; badge shows only when there are unread items */}
-            <NotificationsBell />
-
             {/* tab pills */}
             <div className="inline-flex rounded-xl border border-zinc-800 overflow-hidden">
               <button
@@ -637,7 +633,7 @@ export default function Browse() {
             {loadingPros ? (
               <p className="text-zinc-400">Loading…</p>
             ) : filteredAndRanked.length ? (
-              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="max-w-5xl space-y-3">
                 {filteredAndRanked.map((pro) => (
                   <BarberCard
                     key={pro.id || pro._id}

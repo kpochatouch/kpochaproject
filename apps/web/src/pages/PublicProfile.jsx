@@ -4,7 +4,6 @@ import { useParams, useNavigate } from "react-router-dom";
 import { api, connectSocket, registerSocketHandler } from "../lib/api";
 import FeedCard from "../components/FeedCard.jsx";
 import LiveActivity from "../components/LiveActivity.jsx";
-import NotificationsMenu from "../components/NotificationsMenu.jsx";
 import SideMenu from "../components/SideMenu.jsx";
 import FeedComposer from "../components/FeedComposer.jsx";
 import { useMe } from "../context/MeContext.jsx";
@@ -40,8 +39,8 @@ function normalizeProfile(data) {
       ratingAverage: data.metrics?.avgRating ?? data.rating ?? 0,
       id: data._id || data.id || undefined,
       _posts: data.posts || null,
-      state: data.state || data.locationState || "",
-      lga: data.lga || data.locationLga || "",
+      state: data.state || data.locationState || data.profile?.state || "",
+      lga: data.lga || data.locationLga || data.profile?.lga || "",
     };
   }
 
@@ -63,6 +62,23 @@ function canonicalOwnerUid(p) {
   );
 }
 
+function isRenderableGalleryImage(item) {
+  if (!item) return false;
+
+  if (typeof item === "string") {
+    return !/\.(mp4|mov|webm|m4v|avi)(\?|#|$)/i.test(item);
+  }
+
+  const type = String(item.type || "").toLowerCase();
+  const url = String(item.url || "").trim();
+
+  if (!url) return false;
+  if (type === "video") return false;
+  if (type === "image") return true;
+
+  return !/\.(mp4|mov|webm|m4v|avi)(\?|#|$)/i.test(url);
+}
+
 export default function PublicProfile() {
   const { username: routeParam } = useParams();
   const idOrHandle = routeParam;
@@ -74,6 +90,7 @@ export default function PublicProfile() {
   const [err, setErr] = useState("");
   const [following, setFollowing] = useState(false);
   const [followPending, setFollowPending] = useState(false);
+  const [lightboxUrl, setLightboxUrl] = useState("");
 
   // use global MeContext
   const { me: currentUser, isAdmin: meIsAdmin } = useMe();
@@ -111,19 +128,18 @@ export default function PublicProfile() {
         typeof idOrHandle === "string" &&
         (idOrHandle.length > 20 || /^[0-9a-fA-F]{24}$/.test(idOrHandle));
 
+      const isMongoObjectId = /^[0-9a-fA-F]{24}$/.test(
+        String(idOrHandle || ""),
+      );
+
       const candidates = isLikelyUid
-        ? [
-            `/api/profile/public-by-uid/${encodeURIComponent(idOrHandle)}`,
-            `/api/barbers/${encodeURIComponent(idOrHandle)}`,
-            `/api/profile/pro/${encodeURIComponent(idOrHandle)}`,
-            `/api/profile/public/${encodeURIComponent(idOrHandle)}`,
-          ]
-        : [
-            `/api/profile/public/${encodeURIComponent(idOrHandle)}`,
-            `/api/profile/pro/${encodeURIComponent(idOrHandle)}`,
-            `/api/profile/public-by-uid/${encodeURIComponent(idOrHandle)}`,
-            `/api/barbers/${encodeURIComponent(idOrHandle)}`,
-          ];
+        ? isMongoObjectId
+          ? [
+              `/api/profile/public/${encodeURIComponent(idOrHandle)}`,
+              `/api/profile/public-by-uid/${encodeURIComponent(idOrHandle)}`,
+            ]
+          : [`/api/profile/public-by-uid/${encodeURIComponent(idOrHandle)}`]
+        : [`/api/profile/public/${encodeURIComponent(idOrHandle)}`];
 
       let payloadProfile = null;
       let payloadPosts = [];
@@ -137,17 +153,16 @@ export default function PublicProfile() {
           // Helper: normalize a profile object so we always have ownerUid present
           function ensureProfileOwner(p) {
             if (!p || typeof p !== "object") return p;
-            p.ownerUid =
-              p.ownerUid ||
-              p.uid ||
-              p.id ||
-              p._id ||
-              p.userId ||
-              p.userUid ||
-              (p.owner && (p.owner.uid || p.owner.userId)) ||
-              idOrHandle ||
-              null;
-            return p;
+            return {
+              ...p,
+              ownerUid:
+                p.ownerUid ||
+                p.uid ||
+                p.userId ||
+                p.userUid ||
+                (p.owner && (p.owner.uid || p.owner.userId)) ||
+                null,
+            };
           }
 
           // Helper: normalize posts array and ensure each post has ownerUid
@@ -155,17 +170,18 @@ export default function PublicProfile() {
             if (!Array.isArray(arr)) return [];
             return arr.map((post) => {
               if (!post || typeof post !== "object") return post;
-              post.ownerUid =
-                post.ownerUid ||
-                post.proOwnerUid ||
-                (post.pro && (post.pro.ownerUid || post.proOwnerUid)) ||
-                post.createdBy ||
-                post.uid ||
-                post.userId ||
-                post._ownerUid ||
-                idOrHandle ||
-                null;
-              return post;
+              return {
+                ...post,
+                ownerUid:
+                  post.ownerUid ||
+                  post.proOwnerUid ||
+                  (post.pro && (post.pro.ownerUid || post.proOwnerUid)) ||
+                  post.createdBy ||
+                  post.uid ||
+                  post.userId ||
+                  post._ownerUid ||
+                  null,
+              };
             });
           }
 
@@ -744,6 +760,14 @@ export default function PublicProfile() {
   const avatar =
     profile.avatarUrl || (profile.gallery && profile.gallery[0]) || "";
   const services = Array.isArray(profile.services) ? profile.services : [];
+  const gallery =
+    Array.isArray(profile.gallery) && profile.gallery.length
+      ? profile.gallery.filter((src) => isRenderableGalleryImage(src))
+      : posts
+          .flatMap((p) => (Array.isArray(p?.media) ? p.media : []))
+          .filter((m) => isRenderableGalleryImage(m))
+          .map((m) => (typeof m === "string" ? m : m?.url || ""))
+          .filter(Boolean);
   const rating =
     typeof profile.ratingAverage === "number"
       ? Number(profile.ratingAverage)
@@ -767,14 +791,7 @@ export default function PublicProfile() {
 
   return (
     <div className="min-h-screen bg-[#0b0c10] text-white">
-      {/* Cover */}
-      <div className="relative bg-gradient-to-r from-zinc-900 via-zinc-800 to-zinc-900 h-44 z-10">
-        <div className="absolute right-4 top-3 z-20">
-          <NotificationsMenu />
-        </div>
-      </div>
-
-      <div className="max-w-6xl mx-auto px-4 -mt-16 relative z-30">
+      <div className="max-w-6xl mx-auto px-4 pt-6 relative z-30">
         <div className="flex flex-col sm:flex-row sm:items-end gap-4 sm:gap-6">
           {/* avatar */}
           <div className="w-32 h-32 rounded-full border-4 border-[#0b0c10] bg-zinc-900 overflow-hidden shrink-0 relative z-[9999]">
@@ -919,19 +936,28 @@ export default function PublicProfile() {
           </section>
 
           <section className="rounded-lg border border-zinc-800 bg-black/40 p-4">
-            <h2 className="text-lg font-semibold mb-3">Gallery</h2>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-lg font-semibold">Photos</h2>
+              {gallery.length > 0 ? (
+                <span className="text-sm text-zinc-500">
+                  {gallery.length} photo{gallery.length > 1 ? "s" : ""}
+                </span>
+              ) : null}
+            </div>
+
             {gallery.length ? (
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              <div className="grid grid-cols-3 gap-2">
                 {gallery.map((src, i) => (
                   <button
                     key={i}
-                    onClick={() => window.open(src, "_blank")}
-                    className="block rounded-lg overflow-hidden border border-zinc-800"
+                    type="button"
+                    onClick={() => setLightboxUrl(src)}
+                    className="block overflow-hidden rounded-md border border-zinc-800 bg-zinc-950"
                   >
                     <img
                       src={src}
                       alt=""
-                      className="w-full h-40 object-cover"
+                      className="w-full aspect-square object-cover"
                       loading="lazy"
                     />
                   </button>
@@ -1173,6 +1199,19 @@ export default function PublicProfile() {
                   Advert space
                 </div>
               )}
+              {lightboxUrl ? (
+                <div
+                  className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+                  onClick={() => setLightboxUrl("")}
+                >
+                  <img
+                    src={lightboxUrl}
+                    alt="Gallery Preview"
+                    className="max-w-full max-h-[90vh] rounded-lg border border-zinc-800"
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                </div>
+              ) : null}
             </div>
           </div>
         </div>

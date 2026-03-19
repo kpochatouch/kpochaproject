@@ -2,7 +2,7 @@
 import { Link } from "react-router-dom";
 import DisplayName from "./DisplayName.jsx";
 // Env-based logo
-const APP_LOGO_URL = import.meta.env.VITE_APP_LOGO_URL || "";
+const APP_LOGO_URL = import.meta.env.VITE_APP_LOGO_URL || "/logo-kpocha.png";
 
 /* ------------------------------ helpers ------------------------------ */
 function money(n) {

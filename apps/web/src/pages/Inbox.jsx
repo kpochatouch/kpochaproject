@@ -75,12 +75,16 @@ function normalizeThread(raw = {}, currentUid) {
     raw.peerUid ||
     raw.withUid ||
     raw.otherUid ||
+    raw.userUid ||
+    raw.fromUid ||
+    raw.toUid ||
     (raw.participants &&
       Array.isArray(raw.participants) &&
       raw.participants.find((u) => u && u !== currentUid)) ||
     null;
 
-  const room = raw.room || raw.roomId || raw.threadId || null;
+  const room =
+    raw.room || raw.roomId || raw.threadId || raw.conversationId || null;
 
   const lastMessage = raw.lastMessage || raw.last || {};
   const lastMeta = lastMessage.meta || raw.lastMeta || {};
