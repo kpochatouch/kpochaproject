@@ -303,13 +303,8 @@ export function proToBarber(doc) {
         .join(" ") ||
       "",
 
-    // avatar for barber card / public identity
-    photoUrl:
-      d.photoUrl ||
-      d?.photoUrlResolved ||
-      d?.identity?.photoUrl ||
-      d?.identity?.photoUrlResolved ||
-      "",
+    // avatar is resolved later from assetId; do not revive legacy raw photo urls here
+    photoUrl: "",
 
     // expose asset pipeline id (new profile refactor)
     photoAssetId: d.photoAssetId || d?.identity?.photoAssetId || "",
@@ -334,7 +329,17 @@ export function proToBarber(doc) {
     shopName: d?.contactPublic?.shopName || "",
     shopAddress: d?.contactPublic?.shopAddress || "",
     phone: d?.contactPublic?.phone || "",
-    verified: !!d?.verified,
+    verified:
+      Boolean(d.verified) ||
+      Boolean(d.isVerified) ||
+      Boolean(d.identityVerified) ||
+      String(d.verificationStatus || "").toLowerCase() === "verified" ||
+      (Array.isArray(d.badges)
+        ? d.badges.some((b) => {
+            const value = typeof b === "string" ? b : b?.kind || b?.label || "";
+            return String(value).toLowerCase() === "verified";
+          })
+        : false),
     badges: Array.isArray(d?.badges)
       ? d.badges.map((b) => b.label || b.kind).filter(Boolean)
       : [],

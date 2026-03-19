@@ -95,7 +95,7 @@ function filterProPublic(p) {
   };
 }
 
-function computeIdentityVerified(profileDoc = null, rawProfile = null) {
+export function computeIdentityVerified(profileDoc = null, rawProfile = null) {
   const face = rawProfile?.face || profileDoc?.face || {};
   const liveness = rawProfile?.liveness || profileDoc?.liveness || {};
 
@@ -106,6 +106,34 @@ function computeIdentityVerified(profileDoc = null, rawProfile = null) {
         liveness?.lastVerifiedAt) &&
       face?.lastStatus === "match" &&
       face?.lastVerifiedAt,
+  );
+}
+
+function computePublicVerified({
+  client = null,
+  rawProfile = null,
+  proDoc = null,
+  publicFromPro = null,
+} = {}) {
+  const identityVerified = computeIdentityVerified(client, rawProfile);
+
+  const proVerified = Boolean(proDoc?.verified);
+
+  const badgeVerified = Array.isArray(publicFromPro?.badges)
+    ? publicFromPro.badges.some((b) => {
+        const value = typeof b === "string" ? b : b?.kind || b?.label || "";
+        return String(value).toLowerCase() === "verified";
+      })
+    : false;
+
+  const verificationStatusVerified =
+    String(proDoc?.verificationStatus || "").toLowerCase() === "verified";
+
+  return (
+    identityVerified ||
+    proVerified ||
+    badgeVerified ||
+    verificationStatusVerified
   );
 }
 
@@ -285,7 +313,7 @@ async function handleGetClientMe(req, res) {
     const p = await ClientProfile.findOne({ uid: req.user.uid }).lean();
 
     const pro = await Pro.findOne({ ownerUid: req.user.uid })
-      .select("_id name photoUrl status")
+      .select("_id name photoAssetId status")
       .lean()
       .catch(() => null);
 
@@ -309,7 +337,7 @@ async function handleGetClientMe(req, res) {
     const masked = maskClientProfileForClientView(p) || {};
 
     const [avatarResolved] = await expandMediaForClient([
-      { assetId: p?.photoAssetId, url: p?.photoUrl, type: "image" },
+      { assetId: p?.photoAssetId, type: "image" },
     ]);
 
     return res.json({
@@ -325,7 +353,7 @@ async function handleGetClientMe(req, res) {
             id: pro._id.toString(),
             name: pro.name || "",
             status: pro.status || "approved",
-            photoUrl: pro.photoUrl || "",
+            photoAssetId: pro.photoAssetId || "",
           }
         : null,
     });
@@ -784,47 +812,77 @@ async function handleGetPublicProfile(req, res) {
       console.warn("[public/profile raw] skipped:", e?.message || e);
     }
 
-    const verified = computeIdentityVerified(client, rawProfile);
+    const verified = computePublicVerified({
+      client,
+      rawProfile,
+      proDoc,
+      publicFromPro,
+    });
 
-    const [clientAvatarResolved] = await expandMediaForClient([
-      { assetId: client?.photoAssetId, url: client?.photoUrl, type: "image" },
+    const [proAvatarResolved] = await expandMediaForClient([
+      {
+        assetId: pro?.photoAssetId || pro?.identity?.photoAssetId || null,
+        type: "image",
+      },
     ]);
 
-    // 3) Merge identity fields (client is primary for identity)
+    // 3) Merge identity fields (client primary)
+    const isProProfile = Boolean(pro);
+
     const profilePublic = {
       ownerUid,
-      username:
-        (client && client.username) ||
-        (publicFromPro && publicFromPro.id) ||
-        username,
-      displayName:
-        (client && (client.displayName || client.fullName)) ||
-        (publicFromPro && publicFromPro.name) ||
-        "",
-      avatarUrl:
-        (clientAvatarResolved && clientAvatarResolved.url) ||
-        (publicFromPro && publicFromPro.photoUrl) ||
-        (client && client.photoUrl) ||
-        "",
-      coverUrl:
-        (client && client.coverUrl) || (proDoc && proDoc.coverUrl) || "",
-      bio: (client && client.bio) || (proDoc && proDoc.bio) || "",
-      isPro: Boolean(proDoc),
+      username: client.username || (publicFromPro && publicFromPro.id) || "",
+
+      // ✅ PUBLIC PROFILES MUST PREFER PRO DOC IDENTITY
+      displayName: isProProfile
+        ? (publicFromPro && publicFromPro.name) ||
+          client.displayName ||
+          client.fullName ||
+          ""
+        : client.displayName ||
+          client.fullName ||
+          (publicFromPro && publicFromPro.name) ||
+          "",
+
+      avatarUrl: isProProfile
+        ? (() => {
+            const assetId =
+              pro?.photoAssetId || pro?.identity?.photoAssetId || null;
+            return assetId ? undefined : "";
+          })()
+        : (clientAvatarResolved && clientAvatarResolved.url) || "",
+      coverUrl: isProProfile
+        ? pro?.coverUrl || client.coverUrl || ""
+        : client.coverUrl || pro?.coverUrl || "",
+
+      bio: isProProfile
+        ? pro?.bio || client.bio || ""
+        : client.bio || pro?.bio || "",
+
+      isPro: isProProfile,
       verified,
-      services: (publicFromPro && publicFromPro.services) || [],
-      gallery:
-        (publicFromPro && publicFromPro.gallery) ||
-        (client && client.gallery) ||
-        [],
-      contactPublic: (proDoc && proDoc.contactPublic) || {},
-      badges: (publicFromPro && publicFromPro.badges) || [],
-      metrics: (proDoc && proDoc.metrics) || {},
+
+      services: isProProfile
+        ? (publicFromPro && publicFromPro.services) || []
+        : [],
+      gallery: isProProfile
+        ? (publicFromPro && publicFromPro.gallery) || []
+        : client.gallery || [],
+      contactPublic: isProProfile ? (pro && pro.contactPublic) || {} : {},
+      badges: isProProfile ? (publicFromPro && publicFromPro.badges) || [] : [],
+      metrics: isProProfile ? (pro && pro.metrics) || {} : {},
+
+      state: isProProfile
+        ? (publicFromPro && publicFromPro.state) || client?.state || ""
+        : client?.state || (publicFromPro && publicFromPro.state) || "",
+      lga: isProProfile
+        ? (publicFromPro && publicFromPro.lga) || client?.lga || ""
+        : client?.lga || (publicFromPro && publicFromPro.lga) || "",
+
       followersCount: 0,
       postsCount: 0,
       jobsCompleted: 0,
-      ratingAverage: Number(
-        (proDoc && proDoc.metrics && proDoc.metrics.avgRating) || 0,
-      ),
+      ratingAverage: Number((pro && pro.metrics && pro.metrics.avgRating) || 0),
     };
 
     // 4) Counts (canonical service)
@@ -947,19 +1005,18 @@ router.get("/profile/public-by-uid/:uid", async (req, res) => {
       client = {
         uid: uid,
         username: pro.username || pro.handle || "",
-        displayName: pro.name || "",
-        photoUrl: pro.photoUrl || pro.avatarUrl || "",
-        coverUrl: pro.coverUrl || "",
-        bio: pro.bio || "",
-        gallery: Array.isArray(pro.gallery) ? pro.gallery : [],
-        followersCount: (pro.metrics && Number(pro.metrics.followers)) || 0,
+        displayName: "",
+        photoUrl: "",
+        coverUrl: "",
+        bio: "",
+        gallery: [],
+        followersCount: 0,
       };
     }
 
     const [clientAvatarResolved] = await expandMediaForClient([
-      { assetId: client?.photoAssetId, url: client?.photoUrl, type: "image" },
+      { assetId: client?.photoAssetId, type: "image" },
     ]);
-
     const ownerUid = client.uid;
 
     let rawProfile = null;
@@ -979,37 +1036,75 @@ router.get("/profile/public-by-uid/:uid", async (req, res) => {
       console.warn("[public/profile-by-uid raw] skipped:", e?.message || e);
     }
 
-    const verified = computeIdentityVerified(client, rawProfile);
-
     // 2) pro doc if exists
     const pro = await Pro.findOne({ ownerUid })
       .lean()
       .catch(() => null);
     const publicFromPro = pro ? proToBarber(pro) : null;
 
+    const verified = computePublicVerified({
+      client,
+      rawProfile,
+      proDoc: pro,
+      publicFromPro,
+    });
+
+    const [proAvatarResolved] = await expandMediaForClient([
+      {
+        assetId: pro?.photoAssetId || pro?.identity?.photoAssetId || null,
+        type: "image",
+      },
+    ]);
+
     // 3) Merge identity fields (client primary)
+    const isProProfile = Boolean(pro);
+
     const profilePublic = {
       ownerUid,
       username: client.username || (publicFromPro && publicFromPro.id) || "",
-      displayName:
-        client.displayName ||
-        client.fullName ||
-        (publicFromPro && publicFromPro.name) ||
-        "",
-      avatarUrl:
-        (clientAvatarResolved && clientAvatarResolved.url) ||
-        (publicFromPro && publicFromPro.photoUrl) ||
-        client.photoUrl ||
-        "",
-      coverUrl: client.coverUrl || pro?.coverUrl || "",
-      bio: client.bio || pro?.bio || "" || "",
-      isPro: Boolean(pro),
+
+      displayName: isProProfile
+        ? (publicFromPro && publicFromPro.name) ||
+          client.displayName ||
+          client.fullName ||
+          ""
+        : client.displayName ||
+          client.fullName ||
+          (publicFromPro && publicFromPro.name) ||
+          "",
+
+      avatarUrl: isProProfile
+        ? (proAvatarResolved && proAvatarResolved.url) || ""
+        : (clientAvatarResolved && clientAvatarResolved.url) || "",
+
+      coverUrl: isProProfile
+        ? pro?.coverUrl || client.coverUrl || ""
+        : client.coverUrl || pro?.coverUrl || "",
+
+      bio: isProProfile
+        ? pro?.bio || client.bio || ""
+        : client.bio || pro?.bio || "",
+
+      isPro: isProProfile,
       verified,
-      services: (publicFromPro && publicFromPro.services) || [],
-      gallery: (publicFromPro && publicFromPro.gallery) || client.gallery || [],
-      contactPublic: (pro && pro.contactPublic) || {},
-      badges: (publicFromPro && publicFromPro.badges) || [],
-      metrics: (pro && pro.metrics) || {},
+
+      services: isProProfile
+        ? (publicFromPro && publicFromPro.services) || []
+        : [],
+      gallery: isProProfile
+        ? (publicFromPro && publicFromPro.gallery) || []
+        : client.gallery || [],
+      contactPublic: isProProfile ? (pro && pro.contactPublic) || {} : {},
+      badges: isProProfile ? (publicFromPro && publicFromPro.badges) || [] : [],
+      metrics: isProProfile ? (pro && pro.metrics) || {} : {},
+
+      state: isProProfile
+        ? (publicFromPro && publicFromPro.state) || client?.state || ""
+        : client?.state || (publicFromPro && publicFromPro.state) || "",
+      lga: isProProfile
+        ? (publicFromPro && publicFromPro.lga) || client?.lga || ""
+        : client?.lga || (publicFromPro && publicFromPro.lga) || "",
+
       followersCount: 0,
       postsCount: 0,
       jobsCompleted: 0,

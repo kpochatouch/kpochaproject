@@ -48,6 +48,11 @@ export default function callRoutes({ requireAuth }) {
       });
     } catch (err) {
       console.error("[POST /api/call] error:", err?.message || err);
+
+      if (String(err?.message || "") === "cannot_call_self") {
+        return res.status(400).json({ error: "cannot_call_self" });
+      }
+
       return res.status(500).json({ error: "call_create_failed" });
     }
   });

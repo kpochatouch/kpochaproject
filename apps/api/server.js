@@ -730,8 +730,6 @@ async function getVerifiedClientIdentity(uid) {
           displayName: 1,
           phone: 1,
           identity: 1,
-          photoUrl: 1,
-          "identity.photoUrl": 1,
           photoAssetId: 1,
           "identity.photoAssetId": 1,
         },
@@ -750,17 +748,15 @@ async function getVerifiedClientIdentity(uid) {
       "";
 
     const phone = p.phone || p?.identity?.phone || "";
-    const legacy = p.photoUrl || p?.identity?.photoUrl || "";
 
     const [resolved] = await expandMediaForClient([
       {
         assetId: p?.photoAssetId || p?.identity?.photoAssetId || null,
-        url: legacy,
         type: "image",
       },
     ]);
 
-    const photoUrl = resolved?.url || legacy || "";
+    const photoUrl = resolved?.url || "";
 
     return { fullName, phone, photoUrl };
   } catch {
@@ -774,6 +770,32 @@ async function getVerifiedClientIdentity(uid) {
 function scrubPublicPro(p = {}) {
   const { phone, shopAddress, whatsapp, ...rest } = p;
   return rest;
+}
+
+function deriveBarberVerified(proDoc = {}, profileDoc = null) {
+  const proVerified =
+    Boolean(proDoc.verified) ||
+    Boolean(proDoc.isVerified) ||
+    Boolean(proDoc.identityVerified) ||
+    String(proDoc.verificationStatus || "").toLowerCase() === "verified" ||
+    (Array.isArray(proDoc.badges)
+      ? proDoc.badges.some((b) => {
+          const value = typeof b === "string" ? b : b?.kind || b?.label || "";
+          return String(value).toLowerCase() === "verified";
+        })
+      : false);
+
+  if (proVerified) return true;
+
+  const face = profileDoc?.face || {};
+  const liveness = profileDoc?.liveness || {};
+
+  return Boolean(
+    face?.enrolledAssetId &&
+      (profileDoc?.livenessVerifiedAt || liveness?.lastVerifiedAt) &&
+      face?.lastStatus === "match" &&
+      face?.lastVerifiedAt,
+  );
 }
 
 // ✅ KYC document enforcement (Facebook-style private assets)
@@ -906,15 +928,6 @@ app.get("/api/me", requireAuth, async (req, res) => {
     }
 
     function pickPhotoLegacyFallback() {
-      const identity = profileDoc?.identity || {};
-
-      const profilePhoto = profileDoc?.photoUrl || identity?.photoUrl;
-      if (profilePhoto && String(profilePhoto).trim())
-        return String(profilePhoto).trim();
-
-      if (proDoc?.photoUrl && String(proDoc.photoUrl).trim())
-        return String(proDoc.photoUrl).trim();
-
       return "";
     }
 
@@ -930,7 +943,6 @@ app.get("/api/me", requireAuth, async (req, res) => {
           proDoc?.photoAssetId ||
           proDoc?.identity?.photoAssetId ||
           null,
-        url: photoLegacy,
         type: "image",
       },
     ]);
@@ -1760,6 +1772,10 @@ app.get("/api/health", (_req, res) =>
 
 /* ------------------- Barbers ------------------- */
 app.get("/api/barbers", async (req, res) => {
+  console.log("[HIT] /api/barbers", {
+    query: req.query,
+    time: new Date().toISOString(),
+  });
   try {
     if (mongoose.connection.readyState !== 1) {
       return res.status(503).json({ error: "Database not connected" });
@@ -1799,23 +1815,55 @@ app.get("/api/barbers", async (req, res) => {
     const query = and.length ? { $and: and } : {};
 
     const docs = await Pro.find(query).lean();
+    console.log(
+      "[BARBERS DEBUG]",
+      docs.map((d) => ({
+        ownerUid: d.ownerUid,
+        photoAssetId: d.photoAssetId,
+        identityPhoto: d?.identity?.photoAssetId,
+      })),
+    );
 
-    // 1) shape first (may still include legacy photoUrl)
-    let shaped = docs.map((d) => scrubPublicPro(proToBarber(d)));
+    const ownerUids = docs
+      .map((d) => String(d?.ownerUid || "").trim())
+      .filter(Boolean);
 
-    // 2) resolve avatars from assetIds (fallback to legacy url)
+    const profileDocs = ownerUids.length
+      ? await mongoose.connection.db
+          .collection("profiles")
+          .find(
+            { uid: { $in: ownerUids } },
+            {
+              projection: {
+                uid: 1,
+                face: 1,
+                liveness: 1,
+                livenessVerifiedAt: 1,
+              },
+            },
+          )
+          .toArray()
+      : [];
+
+    const profileByUid = new Map(profileDocs.map((p) => [String(p.uid), p]));
+
     const avatarInputs = docs.map((d) => ({
       assetId: d?.photoAssetId || d?.identity?.photoAssetId || null,
-      url: d?.photoUrl || d?.identity?.photoUrl || "",
       type: "image",
     }));
 
     const resolved = await expandMediaForClient(avatarInputs);
 
-    shaped = shaped.map((p, i) => ({
-      ...p,
-      photoUrl: resolved?.[i]?.url || p.photoUrl || "",
-    }));
+    const shaped = docs.map((d, i) => {
+      const base = scrubPublicPro(proToBarber(d));
+      const profileDoc = profileByUid.get(String(d?.ownerUid || "")) || null;
+
+      return {
+        ...base,
+        photoUrl: resolved?.[i]?.url || "",
+        verified: deriveBarberVerified(d, profileDoc),
+      };
+    });
 
     return res.json(shaped);
   } catch (err) {
@@ -1838,19 +1886,16 @@ app.get("/api/barbers/:id", async (req, res) => {
 
     let doc = null;
 
-    // 1) Try _id
     try {
       doc = await Pro.findById(id).lean();
     } catch {}
 
-    // 2) Try ownerUid
     if (!doc) {
       doc = await Pro.findOne({ ownerUid: id })
         .lean()
         .catch(() => null);
     }
 
-    // 3) Try username
     if (!doc) {
       doc = await Pro.findOne({ username: id })
         .lean()
@@ -1859,20 +1904,31 @@ app.get("/api/barbers/:id", async (req, res) => {
 
     if (!doc) return res.status(404).json({ error: "Not found" });
 
-    // Convert to public shape
-    let shaped = scrubPublicPro(proToBarber(doc));
+    const shaped = scrubPublicPro(proToBarber(doc));
+
+    const profileDoc = await mongoose.connection.db
+      .collection("profiles")
+      .findOne(
+        { uid: doc.ownerUid },
+        {
+          projection: {
+            uid: 1,
+            face: 1,
+            liveness: 1,
+            livenessVerifiedAt: 1,
+          },
+        },
+      );
 
     const [resolved] = await expandMediaForClient([
       {
         assetId: doc?.photoAssetId || doc?.identity?.photoAssetId || null,
-        url: doc?.photoUrl || doc?.identity?.photoUrl || "",
         type: "image",
       },
     ]);
 
-    shaped.photoUrl = resolved?.url || shaped.photoUrl || "";
-
-    // *** FIX: always include actual ownerUid ***
+    shaped.photoUrl = resolved?.url || "";
+    shaped.verified = deriveBarberVerified(doc, profileDoc);
     shaped.ownerUid = doc.ownerUid;
 
     return res.json(shaped);
@@ -2001,9 +2057,9 @@ app.get("/api/barbers/nearby", async (req, res) => {
         },
         { $limit: 100 },
       ]);
+
       const avatarInputs = agg.map((d) => ({
         assetId: d?.photoAssetId || d?.identity?.photoAssetId || null,
-        url: d?.photoUrl || d?.identity?.photoUrl || "",
         type: "image",
       }));
 
@@ -2013,7 +2069,7 @@ app.get("/api/barbers/nearby", async (req, res) => {
         const shaped = scrubPublicPro(proToBarber(d));
         return {
           ...shaped,
-          photoUrl: resolved?.[i]?.url || shaped.photoUrl || "",
+          photoUrl: resolved?.[i]?.url || "",
           distanceKm: Math.round((d.dist / 1000) * 10) / 10,
         };
       });
@@ -2031,18 +2087,19 @@ app.get("/api/barbers/nearby", async (req, res) => {
 
       const avatarInputs = docs.map((d) => ({
         assetId: d?.photoAssetId || d?.identity?.photoAssetId || null,
-        url: d?.photoUrl || d?.identity?.photoUrl || "",
         type: "image",
       }));
 
       const resolved = await expandMediaForClient(avatarInputs);
 
-      items = docs.map((d, i) => ({
-        ...scrubPublicPro(proToBarber(d)),
-        photoUrl:
-          resolved?.[i]?.url || d?.photoUrl || d?.identity?.photoUrl || "",
-        distanceKm: null,
-      }));
+      items = docs.map((d, i) => {
+        const shaped = scrubPublicPro(proToBarber(d));
+        return {
+          ...shaped,
+          photoUrl: resolved?.[i]?.url || "",
+          distanceKm: null,
+        };
+      });
     }
 
     return res.json({ mode: used, radiusKm, count: items.length, items });

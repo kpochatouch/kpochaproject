@@ -99,6 +99,35 @@ async function resolveCallerSnapshot(uid) {
   return { name: null, avatar: null };
 }
 
+function looksLikeOpaqueRealtimeId(value) {
+  const v = String(value || "").trim();
+  if (!v) return false;
+
+  if (/_AA[A-Z0-9]+$/i.test(v)) return true;
+  if (!/\s/.test(v) && /^[A-Za-z0-9_-]{12,}$/.test(v)) return true;
+
+  return false;
+}
+
+function pickSafeDisplayName(...values) {
+  for (const raw of values) {
+    const v = String(raw || "").trim();
+    if (!v) continue;
+    if (looksLikeOpaqueRealtimeId(v)) continue;
+    return v;
+  }
+  return null;
+}
+
+function pickSafeAvatar(...values) {
+  for (const raw of values) {
+    const v = String(raw || "").trim();
+    if (!v) continue;
+    return v;
+  }
+  return "";
+}
+
 function buildIncomingCallPush({
   callId,
   room,
@@ -249,28 +278,26 @@ export async function createCall({
     throw err;
   }
 
-  // ✅ Normalize caller identity so receiver UI never shows "Unknown caller"
-  // Prefer meta, but ALWAYS fallback to DB snapshot
-  const metaCallerName =
-    meta?.fromName ||
-    meta?.callerName ||
-    meta?.fromLabel ||
-    meta?.displayName ||
-    meta?.name ||
-    null;
-
-  const metaCallerAvatar =
-    meta?.fromAvatar ||
-    meta?.callerAvatar ||
-    meta?.avatarUrl ||
-    meta?.photoUrl ||
-    meta?.photoURL ||
-    null;
-
   const snap = await resolveCallerSnapshot(callerUid);
 
-  const callerName = metaCallerName || snap.name || String(callerUid);
-  const callerAvatar = metaCallerAvatar || snap.avatar || "";
+  const callerName =
+    pickSafeDisplayName(
+      snap.name,
+      meta?.fromName,
+      meta?.callerName,
+      meta?.fromLabel,
+      meta?.displayName,
+      meta?.name,
+    ) || "Someone";
+
+  const callerAvatar = pickSafeAvatar(
+    meta?.fromAvatar,
+    meta?.callerAvatar,
+    meta?.avatarUrl,
+    meta?.photoUrl,
+    meta?.photoURL,
+    snap.avatar,
+  );
 
   const payload = {
     id: String(call._id),
@@ -424,88 +451,6 @@ export async function updateCallStatus(callId, updates = {}) {
   (doc.participants || []).forEach((p) => {
     emitToUser(p.uid, "call:status", statusPayload);
   });
-
-  const callerSnap = await resolveCallerSnapshot(doc.callerUid);
-  const finalCallerName =
-    doc?.meta?.fromName ||
-    doc?.meta?.callerName ||
-    callerSnap.name ||
-    String(doc.callerUid);
-
-  const finalCallerAvatar =
-    doc?.meta?.fromAvatar || doc?.meta?.callerAvatar || callerSnap.avatar || "";
-
-  const receivers = (doc.participants || [])
-    .map((p) => p.uid)
-    .filter((u) => u && u !== doc.callerUid);
-
-  if (nextStatus === "missed") {
-    for (const r of receivers) {
-      try {
-        const missedPayload = buildMissedCallNotification({
-          callId: doc.callId,
-          room: doc.room,
-          callType: doc.callType,
-          callerUid: doc.callerUid,
-          callerName: finalCallerName,
-          callerAvatar: finalCallerAvatar,
-          duration: doc.duration,
-        });
-
-        await createNotification({
-          toUid: r,
-          fromUid: doc.callerUid,
-          type: "call_missed",
-          title: missedPayload.title,
-          body: missedPayload.body,
-          priority: "default",
-          data: missedPayload.data,
-          meta: { source: "callService:updateCallStatus" },
-        });
-
-        await sendTransientPush(r, missedPayload);
-      } catch (e) {
-        console.warn(
-          "[callService] updateCallStatus -> call_missed failed:",
-          e?.message || e,
-        );
-      }
-    }
-  }
-
-  if (nextStatus === "ended" && doc.connectedAt && doc.duration > 0) {
-    for (const r of receivers) {
-      try {
-        const endedPayload = buildCallEndedNotification({
-          callId: doc.callId,
-          room: doc.room,
-          callType: doc.callType,
-          callerUid: doc.callerUid,
-          callerName: finalCallerName,
-          callerAvatar: finalCallerAvatar,
-          duration: doc.duration,
-        });
-
-        await createNotification({
-          toUid: r,
-          fromUid: doc.callerUid,
-          type: "call_ended",
-          title: endedPayload.title,
-          body: endedPayload.body,
-          priority: "default",
-          data: endedPayload.data,
-          meta: { source: "callService:updateCallStatus" },
-        });
-
-        await sendTransientPush(r, endedPayload);
-      } catch (e) {
-        console.warn(
-          "[callService] updateCallStatus -> call_ended failed:",
-          e?.message || e,
-        );
-      }
-    }
-  }
 
   return doc;
 }
@@ -700,17 +645,19 @@ export async function endCall(
   );
 
   const callerSnap = await resolveCallerSnapshot(call.callerUid);
-  const finalCallerName =
-    call?.meta?.fromName ||
-    call?.meta?.callerName ||
-    callerSnap.name ||
-    String(call.callerUid);
 
-  const finalCallerAvatar =
-    call?.meta?.fromAvatar ||
-    call?.meta?.callerAvatar ||
-    callerSnap.avatar ||
-    "";
+  const finalCallerName =
+    pickSafeDisplayName(
+      callerSnap.name,
+      call?.meta?.fromName,
+      call?.meta?.callerName,
+    ) || "Someone";
+
+  const finalCallerAvatar = pickSafeAvatar(
+    call?.meta?.fromAvatar,
+    call?.meta?.callerAvatar,
+    callerSnap.avatar,
+  );
 
   const receivers = (call.participants || [])
     .map((p) => p.uid)

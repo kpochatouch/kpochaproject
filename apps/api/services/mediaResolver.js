@@ -62,31 +62,53 @@ export async function expandMediaForClient(mediaArr) {
   const assets = await MediaAsset.find({ _id: { $in: ids } }).lean();
   const map = new Map(assets.map((a) => [String(a._id), a]));
 
-  return media
-    .map((m) => {
-      // Asset-based
-      const assetIdStr = toIdString(m?.assetId);
-      const thumbIdStr = toIdString(m?.thumbnailAssetId);
+  return media.map((m) => {
+    const assetIdStr = toIdString(m?.assetId);
+    const thumbIdStr = toIdString(m?.thumbnailAssetId);
 
-      if (assetIdStr && map.has(assetIdStr)) {
-        const a = map.get(assetIdStr);
+    if (assetIdStr && map.has(assetIdStr)) {
+      const a = map.get(assetIdStr);
+      const base = resolveAssetDocToClient(a);
 
-        const base = resolveAssetDocToClient(a);
-        if (!base) return null;
-
-        // Prefer explicit thumbnail asset if provided
-        const thumb = (thumbIdStr && map.get(thumbIdStr)) || null;
-
-        // ✅ Never leak thumbnail via CDN if thumb asset is private
-        const thumbnailUrl = thumb
-          ? thumb.visibility === "public"
-            ? keyToPublicUrl(thumb?.original?.key || thumb?.thumbnail?.key)
-            : ""
-          : base.thumbnailUrl;
-
-        return { ...base, thumbnailUrl };
+      if (!base) {
+        return {
+          assetId: assetIdStr,
+          visibility: "public",
+          url: "",
+          hlsUrl: "",
+          type: m?.type || "image",
+          thumbnailUrl: "",
+          width: Number(m?.width || 0),
+          height: Number(m?.height || 0),
+          durationSec: Number(m?.durationSec || 0),
+          status: "missing",
+          error: null,
+        };
       }
-      return null;
-    })
-    .filter(Boolean);
+
+      const thumb = (thumbIdStr && map.get(thumbIdStr)) || null;
+
+      const thumbnailUrl = thumb
+        ? thumb.visibility === "public"
+          ? keyToPublicUrl(thumb?.original?.key || thumb?.thumbnail?.key)
+          : ""
+        : base.thumbnailUrl;
+
+      return { ...base, thumbnailUrl };
+    }
+
+    return {
+      assetId: assetIdStr || "",
+      visibility: "public",
+      url: "",
+      hlsUrl: "",
+      type: m?.type || "image",
+      thumbnailUrl: "",
+      width: Number(m?.width || 0),
+      height: Number(m?.height || 0),
+      durationSec: Number(m?.durationSec || 0),
+      status: "missing",
+      error: null,
+    };
+  });
 }
