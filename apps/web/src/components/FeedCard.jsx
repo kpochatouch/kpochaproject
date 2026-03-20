@@ -289,6 +289,10 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
 
   // text clamp
   const [showFullText, setShowFullText] = useState(false);
+  const isLightTheme =
+    typeof document !== "undefined" &&
+    document.documentElement.getAttribute("data-theme") === "light";
+
   const MAX_TEXT = 140;
 
   // 1) load stats once (trust backend – no Math.max fights)
@@ -1020,6 +1024,9 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
         backgroundColor: "var(--app-surface)",
         border: "1px solid var(--app-border)",
         color: "var(--app-text)",
+        boxShadow: isLightTheme
+          ? "0 10px 30px rgba(15, 23, 42, 0.10), 0 2px 10px rgba(15, 23, 42, 0.06)"
+          : "none",
       }}
     >
       {(post.text || post.proId) && (
@@ -1063,8 +1070,10 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
                 <button
                   onClick={() => setMenuOpen((v) => !v)}
                   aria-label="Open post menu"
-                  className="w-9 h-9 flex items-center justify-center rounded-full"
-                  style={{ color: "var(--app-text)" }}
+                  className="w-9 h-9 flex items-center justify-center rounded-full text-[22px] leading-none"
+                  style={{
+                    color: isLightTheme ? "#111827" : "#D4AF37",
+                  }}
                   type="button"
                 >
                   ⋮

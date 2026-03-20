@@ -4,6 +4,7 @@ import { useParams, Link, useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import { useMe } from "../context/MeContext.jsx";
 import { Capacitor } from "@capacitor/core";
+import { attachHlsToVideo, isHlsUrl } from "../lib/hlsAttach";
 import { openNativeFeed } from "../lib/nativeFeed";
 import RouteLoader from "../components/RouteLoader.jsx";
 
@@ -30,17 +31,12 @@ function formatTime(sec = 0) {
 function isVideoPost(p) {
   const m = Array.isArray(p?.media) && p.media.length ? p.media[0] : null;
   if (!m) return false;
+  if (m.type !== "video") return false;
 
-  if (m.type === "video") return true;
+  const playableUrl =
+    String(m.hlsUrl || "").trim() || String(m.url || "").trim();
 
-  const u = String(m.url || "").toLowerCase();
-  return (
-    u.endsWith(".mp4") ||
-    u.endsWith(".mov") ||
-    u.endsWith(".webm") ||
-    u.endsWith(".mkv") ||
-    u.includes("/video/")
-  );
+  return !!playableUrl;
 }
 
 /**
@@ -59,13 +55,37 @@ export default function ForYou() {
   const [error, setError] = useState("");
   const [loadingMore, setLoadingMore] = useState(false);
   const [endOfFeed, setEndOfFeed] = useState(false);
-  // sentinel used by IntersectionObserver (better than window.scroll)
+
   const sentinelRef = useRef(null);
   const observerRef = useRef(null);
-  // Queue cursor to keep /next calls stable (fixes "only 2 videos")
-  const lastCursorIdRef = useRef(null);
 
-  // initial load (first + next)
+  const nextCursorRef = useRef(null);
+  const seenIdsRef = useRef(new Set());
+
+  const fetchFeedBatch = useCallback(async ({ limit = 6 } = {}) => {
+    const cursor = nextCursorRef.current;
+    const seen = Array.from(seenIdsRef.current).slice(-250).join(",");
+
+    const params = { limit };
+    if (cursor?.createdAt) params.cursorCreatedAt = cursor.createdAt;
+    if (cursor?.id) params.cursorId = cursor.id;
+    if (seen) params.seen = seen;
+
+    const { data } = await api.get("/api/posts/for-you/feed", { params });
+    const items = Array.isArray(data?.items)
+      ? data.items.filter(isVideoPost)
+      : [];
+
+    nextCursorRef.current = data?.nextCursor || null;
+
+    for (const item of items) {
+      if (item?._id) seenIdsRef.current.add(String(item._id));
+    }
+
+    return items;
+  }, []);
+
+  // initial load
   useEffect(() => {
     let cancelled = false;
 
@@ -74,69 +94,38 @@ export default function ForYou() {
       setError("");
       setFeedPosts([]);
       setEndOfFeed(false);
+      nextCursorRef.current = null;
+      seenIdsRef.current = new Set();
 
       try {
-        let firstPost = null;
+        const initial = [];
 
         if (id) {
           const { data } = await api.get(`/api/posts/${id}`);
-          firstPost = data || null;
-        } else {
-          const { data } = await api.get("/api/posts/for-you/start");
-          const primary = data?.post || data?.start || null;
-          const serverNext = data?.next || null;
-
-          firstPost = primary;
-
-          // ✅ seed the second item from server immediately (no extra /next call)
-          if (primary && primary._id) {
-            const posts = [];
-            if (isVideoPost(primary)) posts.push(primary);
-            if (
-              serverNext &&
-              serverNext._id &&
-              serverNext._id !== primary._id
-            ) {
-              if (isVideoPost(serverNext)) posts.push(serverNext);
-            }
-
-            // store for later below
-            // (we’ll still do the extra /next call only if we got < 2 videos)
-            firstPost.__seededVideos = posts;
+          if (data?._id && isVideoPost(data)) {
+            initial.push(data);
+            seenIdsRef.current.add(String(data._id));
           }
         }
 
-        if (!firstPost || !firstPost._id) {
+        const batch = await fetchFeedBatch({ limit: 6 });
+        const merged = [...initial, ...batch];
+
+        const uniq = [];
+        const seenLocal = new Set();
+        for (const item of merged) {
+          const key = String(item?._id || "");
+          if (!key || seenLocal.has(key)) continue;
+          seenLocal.add(key);
+          uniq.push(item);
+        }
+
+        if (!uniq.length) {
           throw new Error("No videos available right now.");
         }
 
-        const posts = Array.isArray(firstPost?.__seededVideos)
-          ? firstPost.__seededVideos
-          : isVideoPost(firstPost)
-          ? [firstPost]
-          : [];
-
-        // try to pre-fetch the very next post
-        try {
-          const resNext = await api.get(`/api/posts/${firstPost._id}/next`);
-          const nxt = resNext?.data?.next || null;
-          if (nxt && nxt._id && nxt._id !== firstPost._id) {
-            posts.push(nxt);
-          }
-        } catch {
-          // ignore – we'll still show the first post
-        }
-
         if (!cancelled) {
-          const onlyVideos = posts.filter(isVideoPost);
-
-          if (!onlyVideos.length) {
-            throw new Error("No videos available right now.");
-          }
-
-          setFeedPosts(onlyVideos);
-          lastCursorIdRef.current =
-            onlyVideos[onlyVideos.length - 1]?._id || null;
+          setFeedPosts(uniq);
         }
       } catch (err) {
         if (!cancelled) {
@@ -151,78 +140,29 @@ export default function ForYou() {
     return () => {
       cancelled = true;
     };
-  }, [id]);
+  }, [id, fetchFeedBatch]);
 
-  // load the "next" post based on the last item in the feed
   const loadMore = useCallback(async () => {
     if (loadingMore || endOfFeed) return;
-    if (!feedPosts.length) return;
 
     setLoadingMore(true);
-
     try {
-      // We may get duplicates or null from /next sometimes.
-      // So we attempt several hops in one "loadMore" call before giving up.
-      let attempts = 0;
-      let cursorId =
-        lastCursorIdRef.current || feedPosts[feedPosts.length - 1]?._id;
-
-      while (attempts < 6 && cursorId) {
-        attempts += 1;
-
-        const exclude = feedPosts
-          .map((p) => p?._id)
-          .filter(Boolean)
-          .slice(-80) // keep URL reasonable
-          .join(",");
-
-        const res = await api.get(`/api/posts/${cursorId}/next`, {
-          params: exclude ? { exclude } : {},
-        });
-        const nxt = res?.data?.next || null;
-
-        // If backend returns image, skip it and try next
-        if (nxt && nxt._id && !isVideoPost(nxt)) {
-          cursorId = nxt._id;
-          continue;
-        }
-
-        if (!nxt || !nxt._id) {
-          // river never dries: don’t end the feed; just stop this attempt
-          return;
-        }
-
-        // If server repeats same id, move cursor and try again (don’t end feed)
-        if (String(nxt._id) === String(cursorId)) {
-          cursorId = nxt._id;
-          continue;
-        }
-
-        // If duplicate of any already loaded, move cursor and try again
-        const already = feedPosts.some(
-          (p) => String(p._id) === String(nxt._id),
-        );
-        if (already) {
-          cursorId = nxt._id;
-          continue;
-        }
-
-        // ✅ found a new one
-        setFeedPosts((prev) => [...prev, nxt]);
-        lastCursorIdRef.current = nxt?._id || cursorId || null;
+      const batch = await fetchFeedBatch({ limit: 5 });
+      if (!batch.length) {
         return;
       }
 
-      // If we tried multiple times and kept getting duplicates, do NOT kill the feed.
-      // Just stop this attempt; next scroll may succeed.
-      return;
+      setFeedPosts((prev) => {
+        const have = new Set(prev.map((p) => String(p._id)));
+        const fresh = batch.filter((p) => !have.has(String(p._id)));
+        return fresh.length ? [...prev, ...fresh] : prev;
+      });
     } catch {
-      // On transient failure, do NOT kill the feed permanently.
       return;
     } finally {
       setLoadingMore(false);
     }
-  }, [feedPosts, loadingMore, endOfFeed]);
+  }, [loadingMore, endOfFeed, fetchFeedBatch]);
 
   // IntersectionObserver → loadMore() when sentinel becomes visible
   useEffect(() => {
@@ -323,11 +263,7 @@ export default function ForYou() {
         <div className="px-4 py-3 text-[11px] text-gray-500">Loading more…</div>
       )}
 
-      {endOfFeed && (
-        <div className="px-4 py-4 text-[11px] text-gray-600 text-center">
-          You&apos;ve reached the end for now.
-        </div>
-      )}
+      {endOfFeed && null}
 
       <div className="px-4 py-6">
         <Link to="/browse" className="text-gold">
@@ -423,6 +359,38 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
   const [videoError, setVideoError] = useState("");
   const [broken, setBroken] = useState(false);
   const [hasFirstFrame, setHasFirstFrame] = useState(false);
+
+  useEffect(() => {
+    const vid = videoRef.current;
+    if (!vid || !videoSrc) return;
+
+    let cleanup = () => {};
+
+    (async () => {
+      try {
+        if (isHlsUrl(videoSrc)) {
+          cleanup = await attachHlsToVideo(vid, videoSrc);
+        } else {
+          vid.src = videoSrc;
+          vid.setAttribute("src", videoSrc);
+          try {
+            vid.load();
+          } catch {}
+        }
+      } catch {
+        setVideoError(
+          "This video couldn't play here. Tap the video to open it.",
+        );
+      }
+    })();
+
+    return () => {
+      try {
+        cleanup();
+      } catch {}
+    };
+  }, [videoSrc]);
+
   // Flip rule: play ONLY when this page is snapped (nearly full-screen visible)
   useEffect(() => {
     const el = pageRef.current;
@@ -977,7 +945,7 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
     Array.isArray(post?.media) && post.media.length ? post.media[0] : null;
 
   const videoSrc =
-    (media && (media.url || media.secure_url || media.path)) ||
+    (media && (media.hlsUrl || media.url || media.secure_url || media.path)) ||
     post.videoUrl ||
     "";
 
@@ -1249,7 +1217,6 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
 
         <video
           ref={videoRef}
-          src={videoSrc}
           className={`absolute inset-0 w-full h-full object-cover ${
             hasFirstFrame ? "opacity-100" : "opacity-0"
           }`}

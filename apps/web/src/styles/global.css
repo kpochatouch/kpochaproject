@@ -95,13 +95,13 @@ video::-webkit-media-controls-start-playback-button {
 }
 
 :root[data-theme="light"] {
-  --app-bg: #f6f7fb;
+  --app-bg: #f5f7fb;
   --app-surface: #ffffff;
-  --app-surface-2: #f3f4f6;
-  --app-border: #d4d4d8;
+  --app-surface-2: #f8fafc;
+  --app-border: #d1d5db;
   --app-text: #111827;
   --app-text-soft: #52525b;
-  --app-hover: #f4f4f5;
-  --app-navbar: rgba(255, 255, 255, 0.92);
-  --app-chip-active: rgba(212, 175, 55, 0.18);
+  --app-hover: #eef2f7;
+  --app-navbar: rgba(255, 255, 255, 0.94);
+  --app-chip-active: #f5c542;
 }

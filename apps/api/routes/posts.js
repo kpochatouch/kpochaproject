@@ -9,8 +9,12 @@ import PostStats from "../models/PostStats.js";
 
 import redisClient from "../redis.js";
 import { scoreFrom } from "../services/postScoring.js";
-import { expandMediaForClient } from "../services/mediaResolver.js";
+import {
+  expandMediaForClient,
+  resolveAssetDocToClient,
+} from "../services/mediaResolver.js";
 import postService from "../services/postService.js";
+import MediaAsset from "../models/MediaAsset.js";
 
 import Follow from "../models/Follow.js";
 import { ClientProfile } from "../models/Profile.js";
@@ -57,6 +61,42 @@ function videoElemMatch() {
       type: "video",
     },
   };
+}
+
+function forYouBaseQuery({ lga = "" } = {}) {
+  const q = {
+    isPublic: true,
+    hidden: { $ne: true },
+    deleted: { $ne: true },
+    media: videoElemMatch(),
+    $or: [{ type: { $ne: "story" } }, { type: { $exists: false } }],
+  };
+
+  if (lga) q.lga = toUpper(String(lga));
+  return q;
+}
+
+function isResolvedPlayableVideo(post) {
+  const m = Array.isArray(post?.media) ? post.media[0] : null;
+  if (!m) return false;
+  if (m.type !== "video") return false;
+
+  const playableUrl =
+    String(m.hlsUrl || "").trim() || String(m.url || "").trim();
+
+  if (!playableUrl) return false;
+  if (m.status === "failed") return false;
+
+  return true;
+}
+
+async function sanitizePlayableForYouPosts(items = []) {
+  const out = [];
+  for (const item of items) {
+    const clean = await sanitizePostForClient(item);
+    if (isResolvedPlayableVideo(clean)) out.push(clean);
+  }
+  return out;
 }
 
 // what we send to frontend
@@ -338,6 +378,105 @@ router.get("/posts/me", requireAuth, async (req, res) => {
   }
 });
 
+/* -------------------------------------------------------------------- */
+/* FOR YOU FEED (TikTok-style batched feed) */
+/* -------------------------------------------------------------------- */
+router.get("/posts/for-you/feed", tryAuth, async (req, res) => {
+  try {
+    const {
+      lga = "",
+      limit = 6,
+      cursorCreatedAt = "",
+      cursorId = "",
+      seen = "",
+    } = req.query;
+
+    const lim = Math.max(1, Math.min(Number(limit) || 6, 12));
+
+    const seenIds = String(seen || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => /^[0-9a-fA-F]{24}$/.test(s))
+      .slice(0, 300);
+
+    const baseQuery = {
+      ...forYouBaseQuery({ lga }),
+      _id: {
+        $nin: seenIds.map((x) => new mongoose.Types.ObjectId(x)),
+      },
+    };
+
+    if (
+      cursorCreatedAt &&
+      cursorId &&
+      /^[0-9a-fA-F]{24}$/.test(String(cursorId))
+    ) {
+      const cursorDate = new Date(String(cursorCreatedAt));
+      const cursorObjId = new mongoose.Types.ObjectId(String(cursorId));
+
+      baseQuery.$and = [
+        ...(baseQuery.$and || []),
+        {
+          $or: [
+            { createdAt: { $lt: cursorDate } },
+            { createdAt: cursorDate, _id: { $lt: cursorObjId } },
+          ],
+        },
+      ];
+    }
+
+    const raw = await Post.find(baseQuery)
+      .sort({ createdAt: -1, _id: -1 })
+      .limit(lim * 4)
+      .lean();
+
+    let items = await sanitizePlayableForYouPosts(raw);
+    items = items.slice(0, lim);
+
+    // Infinite fallback: if cursor page is exhausted, loop back to newest unseen
+    if (items.length < lim) {
+      const fallbackRaw = await Post.find({
+        ...forYouBaseQuery({ lga }),
+        _id: {
+          $nin: [
+            ...seenIds.map((x) => new mongoose.Types.ObjectId(x)),
+            ...items.map((p) => new mongoose.Types.ObjectId(String(p._id))),
+          ],
+        },
+      })
+        .sort({ createdAt: -1, _id: -1 })
+        .limit(lim * 4)
+        .lean();
+
+      const fallbackItems = await sanitizePlayableForYouPosts(fallbackRaw);
+
+      const have = new Set(items.map((p) => String(p._id)));
+      for (const p of fallbackItems) {
+        const key = String(p._id);
+        if (have.has(key)) continue;
+        have.add(key);
+        items.push(p);
+        if (items.length >= lim) break;
+      }
+    }
+
+    const last = items[items.length - 1] || null;
+
+    return res.json({
+      items,
+      nextCursor: last
+        ? {
+            createdAt: last.createdAt,
+            id: last._id,
+          }
+        : null,
+    });
+  } catch (err) {
+    console.error("[posts:for-you:feed] error:", err);
+    return res.status(500).json({ error: "for_you_feed_failed" });
+  }
+});
+
 // READ: single post (public)
 router.get("/posts/:id", tryAuth, async (req, res) => {
   try {
@@ -353,144 +492,6 @@ router.get("/posts/:id", tryAuth, async (req, res) => {
   } catch (err) {
     console.error("[posts:read] error:", err);
     return res.status(500).json({ error: "post_load_failed" });
-  }
-});
-
-// NEXT video for For You
-router.get("/posts/:id/next", tryAuth, async (req, res) => {
-  try {
-    const id = req.params.id;
-    const current = await Post.findById(id).lean();
-    if (!current) return res.json({ next: null });
-
-    const viewerUid = req.user?.uid || null;
-
-    const excludeRaw = String(req.query.exclude || "");
-    const excludeIds = excludeRaw
-      .split(",")
-      .map((s) => s.trim())
-      .filter((s) => /^[0-9a-fA-F]{24}$/.test(s))
-      .slice(0, 200);
-
-    const excludeObjectIds = excludeIds.map(
-      (x) => new mongoose.Types.ObjectId(x),
-    );
-
-    const baseFilter = {
-      isPublic: true,
-      hidden: { $ne: true },
-      deleted: { $ne: true },
-
-      media: videoElemMatch(),
-      $or: [{ type: { $ne: "story" } }, { type: { $exists: false } }],
-
-      _id: { $nin: [current._id, ...excludeObjectIds] },
-    };
-
-    // 1) Same pro
-    const samePro = await Post.find({
-      ...baseFilter,
-      proOwnerUid: current.proOwnerUid,
-    })
-      .sort({ createdAt: -1 })
-      .limit(10)
-      .lean();
-
-    // 2) Same LGA
-    const sameLga = await Post.find({ ...baseFilter, lga: current.lga })
-      .sort({ createdAt: -1 })
-      .limit(20)
-      .lean();
-
-    // 3) Viewer liked
-    let likedPosts = [];
-    if (viewerUid) {
-      const likedStats = await PostStats.find({ likedBy: viewerUid })
-        .sort({ updatedAt: -1 })
-        .limit(200)
-        .lean();
-
-      const likedIds = likedStats.map((s) => s.postId).filter(Boolean);
-      if (likedIds.length) {
-        likedPosts = await Post.find({
-          ...baseFilter,
-          _id: { $in: likedIds },
-        }).lean();
-      }
-    }
-
-    // 4) Trending
-    const topStats = await PostStats.find({})
-      .sort({ trendingScore: -1 })
-      .limit(300)
-      .lean();
-    const trendingIds = topStats.map((s) => s.postId).filter(Boolean);
-
-    let trendingPosts = [];
-    if (trendingIds.length) {
-      trendingPosts = await Post.find({
-        ...baseFilter,
-        _id: { $in: trendingIds },
-      }).lean();
-
-      const order = new Map(trendingIds.map((pid, idx) => [String(pid), idx]));
-      trendingPosts.sort(
-        (a, b) =>
-          (order.get(String(a._id)) ?? 0) - (order.get(String(b._id)) ?? 0),
-      );
-    }
-
-    // 5) Recent global fallback
-    const recentGlobal = await Post.find(baseFilter)
-      .sort({ createdAt: -1 })
-      .limit(200)
-      .lean();
-
-    const queueRaw = [
-      ...likedPosts,
-      ...samePro,
-      ...sameLga,
-      ...trendingPosts,
-      ...recentGlobal,
-    ];
-
-    const seen = new Set();
-    const queue = [];
-    for (const p of queueRaw) {
-      const key = String(p._id);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      queue.push(p);
-    }
-
-    const next = queue[0] || null;
-
-    // "river never dries" fallback
-    if (!next) {
-      const loopPick = await Post.findOne({
-        isPublic: true,
-        hidden: { $ne: true },
-        deleted: { $ne: true },
-        media: videoElemMatch(),
-        $or: [{ type: { $ne: "story" } }, { type: { $exists: false } }],
-        _id: { $ne: current._id },
-      })
-        .sort({ createdAt: -1 })
-        .lean();
-
-      return res.json({
-        next: loopPick ? await sanitizePostForClient(loopPick) : null,
-        looped: !!loopPick,
-      });
-    }
-
-    return res.json({
-      next: await sanitizePostForClient(next),
-      looped: false,
-    });
-  } catch (e) {
-    console.error("[posts:next] error", e?.message || e);
-    return res.json({ next: null, looped: false });
   }
 });
 
@@ -1025,90 +1026,6 @@ router.delete("/posts/:id/save", requireAuth, async (req, res) => {
   } catch (err) {
     console.error("[posts:unsave] error:", err);
     return res.status(500).json({ error: "unsave_failed" });
-  }
-});
-
-/* -------------------------------------------------------------------- */
-/* FOR YOU START */
-/* -------------------------------------------------------------------- */
-router.get("/posts/for-you/start", tryAuth, async (req, res) => {
-  try {
-    const { lga = "" } = req.query;
-    const viewerUid = req.user?.uid || null;
-
-    const baseQuery = {
-      isPublic: true,
-      hidden: { $ne: true },
-      deleted: { $ne: true },
-      media: videoElemMatch(),
-      $or: [{ type: { $ne: "story" } }, { type: { $exists: false } }],
-    };
-
-    if (lga) baseQuery.lga = toUpper(String(lga));
-
-    let candidateIds = [];
-
-    // 1) videos this viewer has liked
-    if (viewerUid) {
-      const likedStats = await PostStats.find({ likedBy: viewerUid })
-        .sort({ updatedAt: -1 })
-        .limit(50)
-        .lean();
-      candidateIds.push(...likedStats.map((s) => s.postId));
-    }
-
-    // 2) top trending videos
-    const topStats = await PostStats.find({})
-      .sort({ trendingScore: -1 })
-      .limit(100)
-      .lean();
-    candidateIds.push(...topStats.map((s) => s.postId));
-
-    // dedupe candidate IDs
-    const seenIds = new Set();
-    candidateIds = candidateIds.filter((pid) => {
-      const key = String(pid);
-      if (seenIds.has(key)) return false;
-      seenIds.add(key);
-      return true;
-    });
-
-    let posts = [];
-    if (candidateIds.length) {
-      posts = await Post.find({
-        _id: { $in: candidateIds },
-        ...baseQuery,
-      }).lean();
-
-      const order = new Map(candidateIds.map((pid, idx) => [String(pid), idx]));
-      posts.sort(
-        (a, b) =>
-          (order.get(String(a._id)) ?? 0) - (order.get(String(b._id)) ?? 0),
-      );
-    }
-
-    // 3) fallback – newest video posts
-    if (!posts.length) {
-      posts = await Post.find(baseQuery)
-        .sort({ createdAt: -1 })
-        .limit(20)
-        .lean();
-    }
-
-    if (!posts.length) {
-      return res.json({ post: null, next: null });
-    }
-
-    const primary = posts[0];
-    const next = posts[1] || null;
-
-    return res.json({
-      post: await sanitizePostForClient(primary),
-      next: next ? await sanitizePostForClient(next) : null,
-    });
-  } catch (err) {
-    console.error("[posts:for-you:start] error:", err);
-    return res.status(500).json({ error: "for_you_start_failed" });
   }
 });
 

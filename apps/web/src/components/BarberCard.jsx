@@ -1,5 +1,6 @@
 // apps/web/src/components/BarberCard.jsx
 import { Link } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
 import DisplayName from "./DisplayName.jsx";
 
 /**
@@ -7,7 +8,13 @@ import DisplayName from "./DisplayName.jsx";
  * Vite: VITE_APP_LOGO_URL=https://your-cdn/...png
  */
 const APP_LOGO_URL = import.meta.env.VITE_APP_LOGO_URL || "/logo-kpocha.png";
-
+function isLightThemeNow() {
+  try {
+    return document.documentElement.getAttribute("data-theme") === "light";
+  } catch {
+    return false;
+  }
+}
 /* ------------------------------ Helpers ------------------------------ */
 function toArrayServices(svcs) {
   if (Array.isArray(svcs)) {
@@ -88,6 +95,10 @@ function Avatar({ url, seed, onClick }) {
 export default function BarberCard({ barber = {}, onOpen, onBook }) {
   const id = barber.id || barber._id || barber.ownerUid || "";
 
+  const cardRef = useRef(null);
+  const [revealed, setRevealed] = useState(false);
+  const [isLightTheme, setIsLightTheme] = useState(() => isLightThemeNow());
+
   const name =
     barber.name ||
     [barber.firstName, barber.lastName].filter(Boolean).join(" ").trim() ||
@@ -155,13 +166,60 @@ export default function BarberCard({ barber = {}, onOpen, onBook }) {
     onOpen?.(barber);
   }
 
+  useEffect(() => {
+    function onThemeChange() {
+      setIsLightTheme(isLightThemeNow());
+    }
+
+    window.addEventListener("kpocha:theme-change", onThemeChange);
+    return () =>
+      window.removeEventListener("kpocha:theme-change", onThemeChange);
+  }, []);
+
+  useEffect(() => {
+    if (!isLightTheme) {
+      setRevealed(true);
+      return;
+    }
+
+    const el = cardRef.current;
+    if (!el) return;
+
+    const obs = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (entry?.isIntersecting) {
+          setRevealed(true);
+          obs.disconnect();
+        }
+      },
+      {
+        threshold: 0.18,
+        rootMargin: "0px 0px -40px 0px",
+      },
+    );
+
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [isLightTheme]);
+
   return (
     <div
-      className="group w-full rounded-2xl border px-4 py-3 transition"
+      ref={cardRef}
+      className="group w-full rounded-2xl border px-4 py-3 transition-all duration-700 will-change-transform"
       style={{
         borderColor: "var(--app-border)",
         backgroundColor: "var(--app-surface)",
         color: "var(--app-text)",
+        opacity: isLightTheme ? (revealed ? 1 : 0) : 1,
+        transform: isLightTheme
+          ? revealed
+            ? "translateY(0px)"
+            : "translateY(30px)"
+          : "translateY(0px)",
+        boxShadow: isLightTheme
+          ? "0 14px 34px rgba(17, 24, 39, 0.10), 0 4px 14px rgba(17, 24, 39, 0.08)"
+          : "none",
       }}
     >
       <div className="flex items-stretch gap-3">
