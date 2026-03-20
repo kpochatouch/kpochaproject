@@ -1,4 +1,4 @@
-// apps/web/src/pages/ForYou.jsx
+//apps/web/src/pages/ForYou.jsx
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
@@ -28,23 +28,76 @@ function formatTime(sec = 0) {
   return `${m}:${s < 10 ? "0" : ""}${s}`;
 }
 
-function isVideoPost(p) {
-  const m = Array.isArray(p?.media) && p.media.length ? p.media[0] : null;
-  if (!m) return false;
-  if (m.type !== "video") return false;
-
-  const playableUrl =
-    String(m.hlsUrl || "").trim() || String(m.url || "").trim();
-
-  return !!playableUrl;
+function firstMedia(post) {
+  return Array.isArray(post?.media) && post.media.length ? post.media[0] : null;
 }
 
-/**
- * PARENT: vertical "For You" feed
- * - Loads first post (from :id or /for-you/start)
- * - Loads the next one
- * - On scroll-near-bottom, keeps loading next posts
- */
+function getVideoSrc(post) {
+  const m = firstMedia(post);
+  return (
+    String(m?.hlsUrl || "").trim() ||
+    String(m?.url || "").trim() ||
+    String(m?.secure_url || "").trim() ||
+    String(m?.path || "").trim() ||
+    String(post?.videoUrl || "").trim() ||
+    ""
+  );
+}
+
+function getThumbSrc(post) {
+  const m = firstMedia(post);
+  return (
+    String(m?.thumbnailUrl || "").trim() ||
+    String(m?.thumb || "").trim() ||
+    String(m?.poster || "").trim() ||
+    String(post?.thumbnailUrl || "").trim() ||
+    ""
+  );
+}
+
+function isVideoPost(post) {
+  const m = firstMedia(post);
+  if (!m) return false;
+
+  const explicitType = String(m.type || "").toLowerCase() === "video";
+  const src = getVideoSrc(post).toLowerCase();
+
+  if (explicitType && src) return true;
+  if (!src) return false;
+
+  return (
+    src.endsWith(".m3u8") ||
+    src.endsWith(".mp4") ||
+    src.endsWith(".mov") ||
+    src.endsWith(".webm") ||
+    src.endsWith(".mkv") ||
+    src.includes("/video/")
+  );
+}
+
+function dedupeById(items = []) {
+  const seen = new Set();
+  const out = [];
+
+  for (const item of items) {
+    const key = String(item?._id || item?.id || "").trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+
+  return out;
+}
+
+function shuffleArray(items = []) {
+  const arr = [...items];
+  for (let i = arr.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
 export default function ForYou() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -54,105 +107,143 @@ export default function ForYou() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [loadingMore, setLoadingMore] = useState(false);
-  const [endOfFeed, setEndOfFeed] = useState(false);
-  // sentinel used by IntersectionObserver (better than window.scroll)
+
   const sentinelRef = useRef(null);
   const observerRef = useRef(null);
-  // Queue cursor to keep /next calls stable (fixes "only 2 videos")
-  const lastCursorIdRef = useRef(null);
+  const oldestCreatedAtRef = useRef(null);
+  const feedPostsRef = useRef([]);
 
-  // initial load (first + next)
+  useEffect(() => {
+    feedPostsRef.current = feedPosts;
+  }, [feedPosts]);
+
+  const loadBatch = useCallback(
+    async ({ reset = false } = {}) => {
+      if (!reset && loadingMore) return;
+
+      if (reset) {
+        setLoading(true);
+        setError("");
+      } else {
+        setLoadingMore(true);
+      }
+
+      try {
+        const before =
+          !reset && oldestCreatedAtRef.current
+            ? oldestCreatedAtRef.current
+            : undefined;
+
+        const res = await api.get("/api/posts/public", {
+          params: {
+            limit: 40,
+            ...(before ? { before } : {}),
+          },
+        });
+
+        const raw = Array.isArray(res?.data) ? res.data : [];
+        const videoPosts = raw.filter(isVideoPost);
+
+        if (!videoPosts.length) {
+          if (reset) {
+            setFeedPosts([]);
+          }
+          return;
+        }
+
+        oldestCreatedAtRef.current =
+          raw[raw.length - 1]?.createdAt || oldestCreatedAtRef.current;
+
+        const existingIds = new Set(
+          (reset ? [] : feedPostsRef.current).map((p) =>
+            String(p?._id || p?.id || ""),
+          ),
+        );
+
+        let nextBatch = videoPosts.filter((p) => {
+          const key = String(p?._id || p?.id || "");
+          if (!key) return false;
+          if (!reset && existingIds.has(key)) return false;
+          return true;
+        });
+
+        nextBatch = shuffleArray(nextBatch);
+
+        if (!nextBatch.length) {
+          nextBatch = shuffleArray(videoPosts);
+        }
+
+        if (!nextBatch.length) {
+          return;
+        }
+
+        const finalBatch = reset ? nextBatch.slice(0, 6) : nextBatch;
+
+        setFeedPosts((prev) => {
+          const base = reset ? [] : prev;
+          return dedupeById([...base, ...finalBatch]);
+        });
+      } catch (err) {
+        if (reset) {
+          setError(err?.message || "Unable to load For You feed.");
+        }
+      } finally {
+        if (reset) setLoading(false);
+        else setLoadingMore(false);
+      }
+    },
+    [id, loadingMore],
+  );
+
   useEffect(() => {
     let cancelled = false;
 
-    async function loadInitial() {
-      setLoading(true);
-      setError("");
+    async function run() {
+      if (cancelled) return;
+
+      oldestCreatedAtRef.current = null;
+      feedPostsRef.current = [];
       setFeedPosts([]);
-      setEndOfFeed(false);
+      setError("");
+      setLoading(true);
 
       try {
-        let firstPost = null;
-
         if (id) {
           const { data } = await api.get(`/api/posts/${id}`);
-          firstPost = data || null;
-        } else {
-          let data = null;
+          if (cancelled) return;
 
-          try {
-            const res = await api.get("/api/posts/for-you/start");
-            data = res?.data || null;
-          } catch {
-            // temporary frontend fallback:
-            // use public posts and pick only video posts
-            const res = await api.get("/api/posts/public", {
-              params: { limit: 20 },
-            });
-
-            const videoPosts = Array.isArray(res?.data)
-              ? res.data.filter(isVideoPost)
-              : [];
-
-            data = {
-              post: videoPosts[0] || null,
-              next: videoPosts[1] || null,
-            };
+          const initial = data || null;
+          if (!initial || !initial._id || !isVideoPost(initial)) {
+            throw new Error("That video is unavailable.");
           }
 
-          const primary = data?.post || data?.start || null;
-          const serverNext = data?.next || null;
-
-          firstPost = primary;
-
-          if (primary && primary._id) {
-            const posts = [];
-            if (isVideoPost(primary)) posts.push(primary);
-            if (
-              serverNext &&
-              serverNext._id &&
-              serverNext._id !== primary._id &&
-              isVideoPost(serverNext)
-            ) {
-              posts.push(serverNext);
-            }
-
-            firstPost.__seededVideos = posts;
-          }
+          setFeedPosts([initial]);
+          feedPostsRef.current = [initial];
+          oldestCreatedAtRef.current = initial.createdAt || null;
+          return;
         }
 
-        if (!firstPost || !firstPost._id) {
-          throw new Error("No videos available right now.");
+        const res = await api.get("/api/posts/public", {
+          params: { limit: 40 },
+        });
+
+        if (cancelled) return;
+
+        const raw = Array.isArray(res?.data) ? res.data : [];
+        const videoPosts = shuffleArray(raw.filter(isVideoPost));
+        const finalBatch = dedupeById(videoPosts).slice(0, 6);
+
+        if (!finalBatch.length) {
+          setFeedPosts([]);
+          return;
         }
 
-        const posts = Array.isArray(firstPost?.__seededVideos)
-          ? firstPost.__seededVideos
-          : isVideoPost(firstPost)
-          ? [firstPost]
-          : [];
-
-        // try to pre-fetch the very next post
-        try {
-          const resNext = await api.get(`/api/posts/${firstPost._id}/next`);
-          const nxt = resNext?.data?.next || null;
-          if (nxt && nxt._id && nxt._id !== firstPost._id) {
-            posts.push(nxt);
-          }
-        } catch {
-          // ignore – we'll still show the first post
-        }
-
-        if (!cancelled) {
-          const onlyVideos = posts.filter(isVideoPost);
-
-          if (!onlyVideos.length) {
-            throw new Error("No videos available right now.");
-          }
-
-          setFeedPosts(onlyVideos);
-          lastCursorIdRef.current =
-            onlyVideos[onlyVideos.length - 1]?._id || null;
-        }
+        setFeedPosts(finalBatch);
+        feedPostsRef.current = finalBatch;
+        oldestCreatedAtRef.current =
+          raw[raw.length - 1]?.createdAt ||
+          finalBatch[finalBatch.length - 1]?.createdAt ||
+          null;
       } catch (err) {
         if (!cancelled) {
           setError(err?.message || "Unable to load For You feed.");
@@ -162,89 +253,17 @@ export default function ForYou() {
       }
     }
 
-    loadInitial();
+    run();
+
     return () => {
       cancelled = true;
     };
   }, [id]);
 
-  // load the "next" post based on the last item in the feed
-  const loadMore = useCallback(async () => {
-    if (loadingMore || endOfFeed) return;
-    if (!feedPosts.length) return;
-
-    setLoadingMore(true);
-
-    try {
-      // We may get duplicates or null from /next sometimes.
-      // So we attempt several hops in one "loadMore" call before giving up.
-      let attempts = 0;
-      let cursorId =
-        lastCursorIdRef.current || feedPosts[feedPosts.length - 1]?._id;
-
-      while (attempts < 6 && cursorId) {
-        attempts += 1;
-
-        const exclude = feedPosts
-          .map((p) => p?._id)
-          .filter(Boolean)
-          .slice(-80) // keep URL reasonable
-          .join(",");
-
-        const res = await api.get(`/api/posts/${cursorId}/next`, {
-          params: exclude ? { exclude } : {},
-        });
-        const nxt = res?.data?.next || null;
-
-        // If backend returns image, skip it and try next
-        if (nxt && nxt._id && !isVideoPost(nxt)) {
-          cursorId = nxt._id;
-          continue;
-        }
-
-        if (!nxt || !nxt._id) {
-          // river never dries: don’t end the feed; just stop this attempt
-          return;
-        }
-
-        // If server repeats same id, move cursor and try again (don’t end feed)
-        if (String(nxt._id) === String(cursorId)) {
-          cursorId = nxt._id;
-          continue;
-        }
-
-        // If duplicate of any already loaded, move cursor and try again
-        const already = feedPosts.some(
-          (p) => String(p._id) === String(nxt._id),
-        );
-        if (already) {
-          cursorId = nxt._id;
-          continue;
-        }
-
-        // ✅ found a new one
-        setFeedPosts((prev) => [...prev, nxt]);
-        lastCursorIdRef.current = nxt?._id || cursorId || null;
-        return;
-      }
-
-      // If we tried multiple times and kept getting duplicates, do NOT kill the feed.
-      // Just stop this attempt; next scroll may succeed.
-      return;
-    } catch {
-      // On transient failure, do NOT kill the feed permanently.
-      return;
-    } finally {
-      setLoadingMore(false);
-    }
-  }, [feedPosts, loadingMore, endOfFeed]);
-
-  // IntersectionObserver → loadMore() when sentinel becomes visible
   useEffect(() => {
     const el = sentinelRef.current;
     if (!el) return;
 
-    // clean up any previous observer
     if (observerRef.current) {
       try {
         observerRef.current.disconnect();
@@ -256,12 +275,11 @@ export default function ForYou() {
       (entries) => {
         const entry = entries?.[0];
         if (!entry?.isIntersecting) return;
-        // call loadMore when we're near the bottom
-        loadMore();
+        loadBatch({ reset: false });
       },
       {
-        root: null, // viewport
-        rootMargin: "1200px", // start loading earlier (before user hits bottom)
+        root: null,
+        rootMargin: "1200px",
         threshold: 0,
       },
     );
@@ -274,7 +292,7 @@ export default function ForYou() {
       } catch {}
       observerRef.current = null;
     };
-  }, [loadMore]);
+  }, [loadBatch]);
 
   if (loading) return <RouteLoader full />;
 
@@ -325,9 +343,8 @@ export default function ForYou() {
           me={me}
           navigate={navigate}
           onNeedMore={() => {
-            // preload when close to end (flip buffer)
             const remaining = feedPosts.length - 1 - index;
-            if (remaining <= 2) loadMore();
+            if (remaining <= 2) loadBatch({ reset: false });
           }}
         />
       ))}
@@ -336,12 +353,6 @@ export default function ForYou() {
 
       {loadingMore && (
         <div className="px-4 py-3 text-[11px] text-gray-500">Loading more…</div>
-      )}
-
-      {endOfFeed && (
-        <div className="px-4 py-4 text-[11px] text-gray-600 text-center">
-          You&apos;ve reached the end for now.
-        </div>
       )}
 
       <div className="px-4 py-6">
@@ -353,10 +364,6 @@ export default function ForYou() {
   );
 }
 
-/**
- * CHILD: single post in the For You feed
- * (all the video player + side buttons, comments, etc.)
- */
 function ForYouPost({ post, index, me, navigate, onNeedMore }) {
   const id = post?._id;
 
@@ -378,7 +385,6 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
   const [loadingLike, setLoadingLike] = useState(false);
   const [loadingSave, setLoadingSave] = useState(false);
 
-  // caption inside video (TikTok-like)
   const [showFullCaption, setShowFullCaption] = useState(false);
   const CAPTION_MAX = 110;
 
@@ -389,14 +395,11 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
       ? captionText.slice(0, CAPTION_MAX) + "…"
       : captionText;
 
-  // media bits (video)
   const videoRef = useRef(null);
   const pageRef = useRef(null);
   const menuRef = useRef(null);
 
   const hlsCleanupRef = useRef(null);
-  const hlsSrcRef = useRef("");
-  // ----- Global sound preference (shared with FeedCard/PostDetail) -----
   const SOUND_KEY = "kpocha_sound_enabled";
 
   function getSoundEnabled() {
@@ -423,8 +426,8 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
   const playTriggeredByObserverRef = useRef(false);
   const watchAccumRef = useRef(0);
   const lastWatchTsRef = useRef(0);
-  // ---- Global: only one <video> plays at a time (flip deck) ----
-  // Stored on window to survive re-renders without new files.
+  const isActiveRef = useRef(false);
+
   function claimActiveVideo(vid) {
     try {
       const prev = window.__kpochaActiveVideo;
@@ -439,9 +442,14 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
 
   const [showControls, setShowControls] = useState(false);
   const [videoError, setVideoError] = useState("");
-  const [broken, setBroken] = useState(false);
   const [hasFirstFrame, setHasFirstFrame] = useState(false);
-  // Flip rule: play ONLY when this page is snapped (nearly full-screen visible)
+
+  const media =
+    Array.isArray(post?.media) && post.media.length ? post.media[0] : null;
+
+  const videoSrc = getVideoSrc(post);
+  const thumbSrc = getThumbSrc(post);
+
   useEffect(() => {
     const el = pageRef.current;
     const vid = videoRef.current;
@@ -451,29 +459,30 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
       (entries) => {
         const entry = entries?.[0];
         const ratio = entry?.intersectionRatio || 0;
-
-        // Active only when almost fully in view (snap page)
         const isActive = ratio >= 0.9;
 
+        isActiveRef.current = isActive;
+
         if (isActive) {
-          // preload more when close to end
           try {
             onNeedMore && onNeedMore();
           } catch {}
 
-          // apply sound preference for autoplay
           const wantSound = getSoundEnabled();
           vid.muted = !wantSound;
           setMuted(!wantSound);
 
-          // exclusive play
           claimActiveVideo(vid);
-
-          // autoplay (muted unless user enabled sound)
           playTriggeredByObserverRef.current = true;
-          vid.play().catch(() => {});
+
+          vid.play().catch(async () => {
+            try {
+              vid.muted = true;
+              setMuted(true);
+              await vid.play();
+            } catch {}
+          });
         } else {
-          // pause when not active
           try {
             vid.pause();
           } catch {}
@@ -485,6 +494,7 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
     obs.observe(el);
 
     return () => {
+      isActiveRef.current = false;
       try {
         obs.disconnect();
       } catch {}
@@ -500,6 +510,28 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
 
     let cancelled = false;
 
+    async function tryAutoplayCurrentVideo() {
+      if (cancelled) return;
+      if (!isActiveRef.current) return;
+
+      const wantSound = getSoundEnabled();
+      vid.muted = !wantSound;
+      setMuted(!wantSound);
+
+      claimActiveVideo(vid);
+      playTriggeredByObserverRef.current = true;
+
+      try {
+        await vid.play();
+      } catch {
+        try {
+          vid.muted = true;
+          setMuted(true);
+          await vid.play();
+        } catch {}
+      }
+    }
+
     (async () => {
       try {
         if (hlsCleanupRef.current) {
@@ -507,7 +539,6 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
             hlsCleanupRef.current();
           } catch {}
           hlsCleanupRef.current = null;
-          hlsSrcRef.current = "";
         }
 
         if (isHlsUrl(videoSrc)) {
@@ -528,13 +559,16 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
           }
 
           hlsCleanupRef.current = cleanup;
-          hlsSrcRef.current = videoSrc;
+
+          tryAutoplayCurrentVideo();
         } else {
           vid.setAttribute("src", videoSrc);
           vid.src = videoSrc;
           try {
             vid.load();
           } catch {}
+
+          tryAutoplayCurrentVideo();
         }
       } catch {
         setVideoError(
@@ -551,7 +585,6 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
           hlsCleanupRef.current();
         } catch {}
         hlsCleanupRef.current = null;
-        hlsSrcRef.current = "";
       }
 
       try {
@@ -569,7 +602,6 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
     };
   }, [videoSrc]);
 
-  // load stats for this post
   useEffect(() => {
     if (!id) return;
     let on = true;
@@ -606,9 +638,7 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
           savedByMe:
             typeof srv.savedByMe === "boolean" ? srv.savedByMe : prev.savedByMe,
         }));
-      } catch {
-        // ignore
-      }
+      } catch {}
     })();
 
     return () => {
@@ -616,24 +646,22 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
     };
   }, [id]);
 
-  // load comments for this post
   useEffect(() => {
     if (!id) return;
     let on = true;
+
     (async () => {
       try {
         const res = await api.get(`/api/posts/${id}/comments`);
         if (on) setComments(res.data || []);
-      } catch {
-        // ignore
-      }
+      } catch {}
     })();
+
     return () => {
       on = false;
     };
   }, [id]);
 
-  // reset watchers when post changes
   useEffect(() => {
     watchAccumRef.current = 0;
     lastWatchTsRef.current = 0;
@@ -651,11 +679,9 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
         hlsCleanupRef.current();
       } catch {}
       hlsCleanupRef.current = null;
-      hlsSrcRef.current = "";
     }
   }, [id]);
 
-  // click-outside to close menu
   useEffect(() => {
     function onGlobalClick(e) {
       if (!menuOpen) return;
@@ -664,6 +690,7 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
       if (target && menuRef.current.contains(target)) return;
       setMenuOpen(false);
     }
+
     window.addEventListener("global-click", onGlobalClick);
     return () => window.removeEventListener("global-click", onGlobalClick);
   }, [menuOpen]);
@@ -716,12 +743,13 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
     }
   }
 
-  // LIKE / SAVE / SHARE
   async function toggleLike() {
     if (!me) return alert("Login to like");
     if (!id || loadingLike) return;
+
     setLoadingLike(true);
     const wasLiked = stats.likedByMe;
+
     setStats((prev) => ({
       ...prev,
       likedByMe: !wasLiked,
@@ -729,6 +757,7 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
         ? Math.max(0, prev.likesCount - 1)
         : prev.likesCount + 1,
     }));
+
     try {
       const res = wasLiked
         ? await api.delete(`/api/posts/${id}/like`)
@@ -750,8 +779,10 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
   async function toggleSave() {
     if (!me) return alert("Login to save");
     if (!id || loadingSave) return;
+
     setLoadingSave(true);
     const wasSaved = stats.savedByMe;
+
     setStats((prev) => ({
       ...prev,
       savedByMe: !wasSaved,
@@ -759,6 +790,7 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
         ? Math.max(0, prev.savesCount - 1)
         : prev.savesCount + 1,
     }));
+
     try {
       const res = wasSaved
         ? await api.delete(`/api/posts/${id}/save`)
@@ -779,8 +811,10 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
 
   async function handleShare() {
     if (!id) return;
+
     const base = window.location.origin;
     const url = `${base}/for-you/${id}`;
+
     try {
       const res = await api.post(`/api/posts/${id}/share`);
       mergeStatsFromServer(res?.data || {});
@@ -796,10 +830,9 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
           url,
         });
         return;
-      } catch {
-        // ignore
-      }
+      } catch {}
     }
+
     try {
       await navigator.clipboard.writeText(url);
       alert("Link copied. You can paste it to share.");
@@ -808,11 +841,11 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
     }
   }
 
-  // COMMENTS
   async function submitComment(e) {
     e?.preventDefault();
     if (!me) return alert("Login to comment");
     if (!id) return;
+
     const txt = commentText.trim();
     if (!txt) return;
 
@@ -851,6 +884,7 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
   async function handleDeleteComment(commentId) {
     if (!commentId) return;
     if (!window.confirm("Delete this comment?")) return;
+
     try {
       await api.delete(`/api/comments/${commentId}`);
       setComments((c) => c.filter((cm) => cm._id !== commentId));
@@ -866,6 +900,7 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
   async function handleHideOrDeletePost() {
     if (!id) return;
     if (!window.confirm("Delete / hide this post?")) return;
+
     setDeleting(true);
     try {
       await api.delete(`/api/posts/${id}`).catch(async () => {
@@ -880,9 +915,7 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
     }
   }
 
-  // VIDEO CONTROLS
   async function onClickVideo() {
-    // ✅ Native: open Native REELS (Facebook-style), not NativeVideoPlayer
     if (Capacitor.isNativePlatform() && id) {
       const ok = await openNativeFeed({
         lga: post?.lga || post?.pro?.lga || "",
@@ -890,10 +923,8 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
         startMode: "reels",
       });
       if (ok) return;
-      // fallback: do nothing special, keep web player
     }
 
-    // ✅ Web fallback: play/pause inside <video>
     const vid = videoRef.current;
     if (!vid) return;
 
@@ -922,6 +953,7 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
       typeof performance !== "undefined" && performance.now
         ? performance.now()
         : Date.now();
+
     if (!lastWatchTsRef.current) {
       lastWatchTsRef.current = now;
     }
@@ -930,11 +962,10 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
   function onToggleMute(e) {
     e.stopPropagation();
     const vid = videoRef.current;
-    const next = !muted; // next === true means muted
+    const next = !muted;
+
     setMuted(next);
     if (vid) vid.muted = next;
-
-    // persist global preference
     setSoundEnabled(!next);
 
     if (!next && vid?.paused) {
@@ -949,7 +980,6 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
 
     setDuration(vid.duration || 0);
 
-    // Apply global preference, but DO NOT autoplay here.
     const wantSound = getSoundEnabled();
     vid.muted = !wantSound;
     setMuted(!wantSound);
@@ -966,6 +996,7 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
         typeof performance !== "undefined" && performance.now
           ? performance.now()
           : Date.now();
+
       if (nowUi - lastTimeUpdateRef.current >= 250) {
         lastTimeUpdateRef.current = nowUi;
         setCurrentTime(vid.currentTime || 0);
@@ -976,12 +1007,14 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
       lastWatchTsRef.current = 0;
       return;
     }
+
     if (playTriggeredByObserverRef.current && !userHasInteracted) return;
 
     const now =
       typeof performance !== "undefined" && performance.now
         ? performance.now()
         : Date.now();
+
     if (!lastWatchTsRef.current) {
       lastWatchTsRef.current = now;
       return;
@@ -1013,6 +1046,7 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
       setSeeking(false);
       return;
     }
+
     const safe = Number.isFinite(v) ? v : 0;
     vid.currentTime = safe;
     setCurrentTime(safe);
@@ -1022,17 +1056,20 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
       typeof performance !== "undefined" && performance.now
         ? performance.now()
         : Date.now();
+
     lastWatchTsRef.current = now;
   }
 
   function jump(seconds) {
     const vid = videoRef.current;
     if (!vid) return;
+
     const baseDuration = duration || vid.duration || 0;
     const next = Math.min(
       Math.max((vid.currentTime || 0) + seconds, 0),
       baseDuration || 0,
     );
+
     vid.currentTime = next;
     setCurrentTime(next);
   }
@@ -1040,6 +1077,7 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
   async function toggleFullscreen() {
     const vid = videoRef.current;
     if (!vid) return;
+
     try {
       if (document.fullscreenElement) {
         await document.exitFullscreen().catch(() => {});
@@ -1047,89 +1085,18 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
       }
       if (vid.requestFullscreen) return void vid.requestFullscreen();
       const anyVid = vid;
-      if (anyVid.webkitEnterFullscreen)
+      if (anyVid.webkitEnterFullscreen) {
         return void anyVid.webkitEnterFullscreen();
-    } catch {
-      // ignore
-    }
+      }
+    } catch {}
   }
-
-  async function handleVideoError() {
-    console.warn("Video failed to load in <video>, trying fallback...");
-
-    setVideoError("This video couldn't play here. Tap the video to open it.");
-  }
-
-  function handleMouseEnter() {
-    setShowControls(true);
-  }
-  function handleMouseLeave() {
-    setShowControls(false);
-  }
-
-  // ---------- derived ----------
-  const isOwner =
-    me?.uid &&
-    (post?.proOwnerUid === me.uid ||
-      post?.ownerUid === me.uid ||
-      post?.createdBy === me.uid);
-
-  const media =
-    Array.isArray(post?.media) && post.media.length ? post.media[0] : null;
-
-  const videoSrc =
-    (media && (media.hlsUrl || media.url || media.secure_url || media.path)) ||
-    post.videoUrl ||
-    "";
-
-  const thumbSrc =
-    (media && (media.thumbnailUrl || media.thumb || media.poster)) ||
-    post?.thumbnailUrl ||
-    "";
-
-  const isVideo = (() => {
-    if (!media) return false;
-    if (media.type === "video") return true;
-
-    const u = String(
-      media.url || media.secure_url || media.path || "",
-    ).toLowerCase();
-
-    if (!u) return false;
-
-    // treat common video URLs as video even if type is missing
-    return (
-      u.endsWith(".mp4") ||
-      u.endsWith(".mov") ||
-      u.endsWith(".webm") ||
-      u.endsWith(".mkv") ||
-      u.includes("/video/")
-    );
-  })();
-
-  const pro = post?.pro || {};
-  const avatar = post?.authorAvatar || pro.photoUrl || "";
-  const proName = pro.name || post?.authorName || "Professional";
-  const lga = pro.lga || post?.lga || "";
-
-  const followTargetUid =
-    post?.proOwnerUid ||
-    post?.pro?.ownerUid ||
-    post?.ownerUid ||
-    post?.createdBy ||
-    post?.uid ||
-    post?.userId ||
-    post?._ownerUid ||
-    null;
-
-  const postUsername =
-    (post?.username && String(post.username).trim()) ||
-    (post?.pro?.username && String(post.pro.username).trim()) ||
-    (post?.ownerUsername && String(post.ownerUsername).trim()) ||
-    null;
 
   async function goToProfile() {
-    if (!post) return;
+    const postUsername =
+      (post?.username && String(post.username).trim()) ||
+      (post?.pro?.username && String(post.pro.username).trim()) ||
+      (post?.ownerUsername && String(post.ownerUsername).trim()) ||
+      null;
 
     if (postUsername) {
       navigate(`/profile/${encodeURIComponent(postUsername)}`);
@@ -1137,10 +1104,13 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
     }
 
     const uid =
-      followTargetUid ||
       post?.proOwnerUid ||
+      post?.pro?.ownerUid ||
       post?.ownerUid ||
       post?.createdBy ||
+      post?.uid ||
+      post?.userId ||
+      post?._ownerUid ||
       null;
 
     if (!uid) return;
@@ -1154,25 +1124,37 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
         navigate(`/profile/${encodeURIComponent(data.profile.username)}`);
         return;
       }
-    } catch {
-      // ignore
-    }
+    } catch {}
 
     navigate(`/profile/${encodeURIComponent(uid)}`);
   }
 
-  // This lets all videos (including old / broken Cloudinary ones) show up.
-  if (!videoSrc) {
-    // nothing to play at all, skip it
-    return null;
+  function handleMouseEnter() {
+    setShowControls(true);
   }
+
+  function handleMouseLeave() {
+    setShowControls(false);
+  }
+
+  const isOwner =
+    me?.uid &&
+    (post?.proOwnerUid === me.uid ||
+      post?.ownerUid === me.uid ||
+      post?.createdBy === me.uid);
+
+  const pro = post?.pro || {};
+  const avatar = post?.authorAvatar || pro.photoUrl || "";
+  const proName = pro.name || post?.authorName || "Professional";
+  const lga = pro.lga || post?.lga || "";
+
+  if (!videoSrc) return null;
 
   return (
     <article
       ref={pageRef}
       className="h-[100dvh] snap-start snap-always bg-black md:flex md:items-center md:justify-center"
     >
-      {/* header (DESKTOP ONLY) – keep your current desktop layout */}
       <div className="hidden md:flex px-4 pt-4 pb-2 items-start justify-between gap-3 w-full md:max-w-[560px]">
         <div className="flex gap-3">
           <div
@@ -1283,7 +1265,6 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
         </div>
       </div>
 
-      {/* VIDEO + SIDE ACTIONS */}
       <div
         className="relative w-full bg-black overflow-hidden h-[100dvh]
              md:h-[78vh] md:max-h-[760px] md:w-[420px]
@@ -1291,7 +1272,6 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
       >
-        {/* header (MOBILE ONLY) – overlay so each post stays exactly 100dvh */}
         <div className="md:hidden absolute top-0 left-0 right-0 z-[4] px-3 pt-3 pb-2 flex items-start justify-between gap-3 bg-gradient-to-b from-black/70 via-black/20 to-transparent">
           <div className="flex gap-3 min-w-0">
             <div
@@ -1366,8 +1346,10 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
           onLoadedData={() => setHasFirstFrame(true)}
           onPlaying={() => setHasFirstFrame(true)}
           onError={() => {
-            setHasFirstFrame(true); // remove overlay attempt
-            handleVideoError();
+            setHasFirstFrame(true);
+            setVideoError(
+              "This video couldn't play here. Tap the video to open it.",
+            );
           }}
         />
 
@@ -1380,7 +1362,6 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
           />
         )}
 
-        {/* CAPTION INSIDE VIDEO (bottom-left) */}
         {captionText && (
           <div className="absolute left-0 right-16 bottom-0 z-[3] px-4 pb-4 pt-10 bg-gradient-to-t from-black/80 via-black/30 to-transparent pointer-events-none">
             <div className="text-white text-sm leading-snug pointer-events-auto">
@@ -1413,9 +1394,7 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
           </div>
         )}
 
-        {/* SIDE ACTIONS like TikTok / Reels */}
         <div className="absolute right-3 bottom-4 flex flex-col items-center gap-4 z-[3]">
-          {/* Like */}
           <button
             type="button"
             onClick={toggleLike}
@@ -1434,7 +1413,6 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
           </button>
           <div className="text-[11px] text-white">{stats.likesCount ?? 0}</div>
 
-          {/* Comments toggle */}
           <button
             type="button"
             onClick={() => setShowComments((v) => !v)}
@@ -1446,7 +1424,6 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
             {stats.commentsCount ?? 0}
           </div>
 
-          {/* Save */}
           <button
             type="button"
             onClick={toggleSave}
@@ -1465,7 +1442,6 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
           </button>
           <div className="text-[11px] text-white">{stats.savesCount ?? 0}</div>
 
-          {/* Share */}
           <button
             type="button"
             onClick={handleShare}
@@ -1475,7 +1451,6 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
           </button>
           <div className="text-[11px] text-white">{stats.sharesCount ?? 0}</div>
 
-          {/* Views (eye) */}
           <div className="flex flex-col items-center gap-1 mt-1">
             <div className="w-10 h-10 rounded-full bg-black/40 flex items-center justify-center">
               <span className="text-white text-base">👁</span>
@@ -1486,10 +1461,8 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
           </div>
         </div>
 
-        {/* playback controls (appear on hover / tap) */}
         {showControls && (
           <>
-            {/* quick controls */}
             <div className="absolute bottom-3 left-3 flex gap-2 z-[2]">
               <button
                 onClick={onClickVideo}
@@ -1509,7 +1482,6 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
               </button>
             </div>
 
-            {/* bottom seek + time + fullscreen */}
             <div className="absolute inset-x-0 bottom-0 z-[2] px-3 pb-3 pt-6 bg-gradient-to-t from-black/70 via-black/20 to-transparent">
               <div className="flex items-center justify-between gap-2 mb-2">
                 <div className="flex items-center gap-2">
@@ -1567,7 +1539,6 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
         )}
       </div>
 
-      {/* comments */}
       {showComments && (
         <div className="px-4 py-3 border-t border-[#1F1F1F]">
           {!post?.commentsDisabled ? (
@@ -1591,6 +1562,7 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
               Comments are disabled for this post.
             </div>
           )}
+
           <div className="space-y-3">
             {comments.map((c) => (
               <div key={c._id} className="flex gap-2">
@@ -1632,6 +1604,7 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
                 </div>
               </div>
             ))}
+
             {comments.length === 0 && (
               <div className="text-xs text-gray-500">No comments yet.</div>
             )}
