@@ -78,26 +78,45 @@ export default function ForYou() {
           const { data } = await api.get(`/api/posts/${id}`);
           firstPost = data || null;
         } else {
-          const { data } = await api.get("/api/posts/for-you/start");
+          let data = null;
+
+          try {
+            const res = await api.get("/api/posts/for-you/start");
+            data = res?.data || null;
+          } catch {
+            // temporary frontend fallback:
+            // use public posts and pick only video posts
+            const res = await api.get("/api/posts/public", {
+              params: { limit: 20 },
+            });
+
+            const videoPosts = Array.isArray(res?.data)
+              ? res.data.filter(isVideoPost)
+              : [];
+
+            data = {
+              post: videoPosts[0] || null,
+              next: videoPosts[1] || null,
+            };
+          }
+
           const primary = data?.post || data?.start || null;
           const serverNext = data?.next || null;
 
           firstPost = primary;
 
-          // ✅ seed the second item from server immediately (no extra /next call)
           if (primary && primary._id) {
             const posts = [];
             if (isVideoPost(primary)) posts.push(primary);
             if (
               serverNext &&
               serverNext._id &&
-              serverNext._id !== primary._id
+              serverNext._id !== primary._id &&
+              isVideoPost(serverNext)
             ) {
-              if (isVideoPost(serverNext)) posts.push(serverNext);
+              posts.push(serverNext);
             }
 
-            // store for later below
-            // (we’ll still do the extra /next call only if we got < 2 videos)
             firstPost.__seededVideos = posts;
           }
         }

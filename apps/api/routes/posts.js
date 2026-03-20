@@ -1046,34 +1046,39 @@ router.get("/posts/for-you/start", tryAuth, async (req, res) => {
 
     if (lga) baseQuery.lga = toUpper(String(lga));
 
-    let candidateIds = [];
+    const seenIds = new Set();
+    const candidateIds = [];
+
+    function pushCandidateId(pid) {
+      const key = String(pid || "").trim();
+      if (!isObjId(key)) return;
+      if (seenIds.has(key)) return;
+      seenIds.add(key);
+      candidateIds.push(new mongoose.Types.ObjectId(key));
+    }
 
     // 1) videos this viewer has liked
     if (viewerUid) {
       const likedStats = await PostStats.find({ likedBy: viewerUid })
+        .select("postId -_id")
         .sort({ updatedAt: -1 })
         .limit(50)
         .lean();
-      candidateIds.push(...likedStats.map((s) => s.postId));
+
+      likedStats.forEach((s) => pushCandidateId(s?.postId));
     }
 
     // 2) top trending videos
     const topStats = await PostStats.find({})
+      .select("postId -_id")
       .sort({ trendingScore: -1 })
       .limit(100)
       .lean();
-    candidateIds.push(...topStats.map((s) => s.postId));
 
-    // dedupe candidate IDs
-    const seenIds = new Set();
-    candidateIds = candidateIds.filter((pid) => {
-      const key = String(pid);
-      if (seenIds.has(key)) return false;
-      seenIds.add(key);
-      return true;
-    });
+    topStats.forEach((s) => pushCandidateId(s?.postId));
 
     let posts = [];
+
     if (candidateIds.length) {
       posts = await Post.find({
         _id: { $in: candidateIds },
@@ -1081,6 +1086,7 @@ router.get("/posts/for-you/start", tryAuth, async (req, res) => {
       }).lean();
 
       const order = new Map(candidateIds.map((pid, idx) => [String(pid), idx]));
+
       posts.sort(
         (a, b) =>
           (order.get(String(a._id)) ?? 0) - (order.get(String(b._id)) ?? 0),
@@ -1099,12 +1105,29 @@ router.get("/posts/for-you/start", tryAuth, async (req, res) => {
       return res.json({ post: null, next: null });
     }
 
-    const primary = posts[0];
-    const next = posts[1] || null;
+    // sanitize safely so one bad post does not kill the whole endpoint
+    const settled = await Promise.allSettled(
+      posts.map((p) => sanitizePostForClient(p)),
+    );
+
+    const safePosts = settled
+      .filter((r) => r.status === "fulfilled")
+      .map((r) => r.value)
+      .filter(Boolean)
+      .filter((p) => {
+        const m = Array.isArray(p.media) && p.media.length ? p.media[0] : null;
+        if (!m) return false;
+        if (m.type !== "video") return false;
+        return !!String(m.hlsUrl || m.url || "").trim();
+      });
+
+    if (!safePosts.length) {
+      return res.json({ post: null, next: null });
+    }
 
     return res.json({
-      post: await sanitizePostForClient(primary),
-      next: next ? await sanitizePostForClient(next) : null,
+      post: safePosts[0] || null,
+      next: safePosts[1] || null,
     });
   } catch (err) {
     console.error("[posts:for-you:start] error:", err);
