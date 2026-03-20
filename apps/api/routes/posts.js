@@ -71,51 +71,6 @@ function videoElemMatch() {
   };
 }
 
-function forYouBaseQuery({ lga = "" } = {}) {
-  const q = {
-    isPublic: true,
-    hidden: { $ne: true },
-    deleted: { $ne: true },
-    media: videoElemMatch(),
-    $or: [{ type: { $ne: "story" } }, { type: { $exists: false } }],
-  };
-
-  if (lga) q.lga = toUpper(String(lga));
-  return q;
-}
-
-function isResolvedPlayableVideo(post) {
-  const m = Array.isArray(post?.media) ? post.media[0] : null;
-  if (!m) return false;
-  if (m.type !== "video") return false;
-
-  const playableUrl =
-    String(m.hlsUrl || "").trim() || String(m.url || "").trim();
-
-  if (!playableUrl) return false;
-  if (m.status === "failed") return false;
-
-  return true;
-}
-
-async function sanitizePlayableForYouPosts(items = []) {
-  const out = [];
-
-  for (const item of items) {
-    try {
-      const clean = await sanitizePostForClient(item);
-      if (isResolvedPlayableVideo(clean)) out.push(clean);
-    } catch (err) {
-      console.error("[posts:sanitizePlayableForYouPosts] skipping bad post", {
-        postId: String(item?._id || ""),
-        message: err?.message || err,
-      });
-    }
-  }
-
-  return out;
-}
-
 // what we send to frontend
 async function sanitizePostForClient(p) {
   const obj = typeof p.toObject === "function" ? p.toObject() : { ...p };
@@ -422,104 +377,50 @@ router.get("/posts/me", requireAuth, async (req, res) => {
 });
 
 /* -------------------------------------------------------------------- */
-/* FOR YOU FEED (TikTok-style batched feed) */
+/* FOR YOU FEED (temporary minimal safe version) */
 /* -------------------------------------------------------------------- */
 router.get("/posts/for-you/feed", tryAuth, async (req, res) => {
   try {
-    const {
-      lga = "",
-      limit = 6,
-      cursorCreatedAt = "",
-      cursorId = "",
-      seen = "",
-    } = req.query;
-
+    const { limit = 6 } = req.query;
     const lim = Math.max(1, Math.min(Number(limit) || 6, 12));
 
-    const seenIds = String(seen || "")
-      .split(",")
-      .map((s) => s.trim())
-      .filter((s) => /^[0-9a-fA-F]{24}$/.test(s))
-      .slice(0, 300);
-
-    const baseQuery = {
-      ...forYouBaseQuery({ lga }),
-      _id: {
-        $nin: seenIds.map((x) => new mongoose.Types.ObjectId(x)),
-      },
-    };
-
-    if (
-      cursorCreatedAt &&
-      cursorId &&
-      /^[0-9a-fA-F]{24}$/.test(String(cursorId))
-    ) {
-      const cursorDate = new Date(String(cursorCreatedAt));
-      const cursorObjId = new mongoose.Types.ObjectId(String(cursorId));
-
-      baseQuery.$and = [
-        ...(baseQuery.$and || []),
-        {
-          $or: [
-            { createdAt: { $lt: cursorDate } },
-            { createdAt: cursorDate, _id: { $lt: cursorObjId } },
-          ],
-        },
-      ];
-    }
-
-    const raw = await Post.find(baseQuery)
+    const raw = await Post.find({
+      isPublic: true,
+      hidden: { $ne: true },
+      deleted: { $ne: true },
+      $or: [{ type: { $ne: "story" } }, { type: { $exists: false } }],
+    })
       .sort({ createdAt: -1, _id: -1 })
-      .limit(lim * 4)
+      .limit(40)
       .lean();
 
-    let items = await sanitizePlayableForYouPosts(raw);
-    items = items.slice(0, lim);
+    const safe = [];
+    for (const item of raw) {
+      try {
+        const clean = await sanitizePostForClient(item);
+        const m = Array.isArray(clean?.media) ? clean.media[0] : null;
+        const playableUrl =
+          String(m?.hlsUrl || "").trim() || String(m?.url || "").trim();
 
-    // Infinite fallback: if cursor page is exhausted, loop back to newest unseen
-    if (items.length < lim) {
-      const fallbackRaw = await Post.find({
-        ...forYouBaseQuery({ lga }),
-        _id: {
-          $nin: [
-            ...seenIds.map((x) => new mongoose.Types.ObjectId(x)),
-            ...items.map((p) => new mongoose.Types.ObjectId(String(p._id))),
-          ],
-        },
-      })
-        .sort({ createdAt: -1, _id: -1 })
-        .limit(lim * 4)
-        .lean();
-
-      const fallbackItems = await sanitizePlayableForYouPosts(fallbackRaw);
-
-      const have = new Set(items.map((p) => String(p._id)));
-      for (const p of fallbackItems) {
-        const key = String(p._id);
-        if (have.has(key)) continue;
-        have.add(key);
-        items.push(p);
-        if (items.length >= lim) break;
+        if (m?.type === "video" && playableUrl) {
+          safe.push(clean);
+        }
+      } catch (e) {
+        console.error("[posts:for-you:feed:minimal] skipping bad post", {
+          postId: String(item?._id || ""),
+          message: e?.message || e,
+        });
       }
     }
 
-    const last = items[items.length - 1] || null;
-
     return res.json({
-      items,
-      nextCursor: last
-        ? {
-            createdAt: last.createdAt,
-            id: last._id,
-          }
-        : null,
+      items: safe.slice(0, lim),
+      nextCursor: null,
     });
   } catch (err) {
-    console.error("[posts:for-you:feed] error", {
+    console.error("[posts:for-you:feed:minimal] fatal", {
       message: err?.message || err,
       stack: err?.stack || "",
-      query: req.query,
-      userUid: req.user?.uid || null,
     });
     return res.status(500).json({ error: "for_you_feed_failed" });
   }
