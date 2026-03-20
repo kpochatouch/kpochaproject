@@ -53,8 +53,20 @@ const todayStr = () => new Date().toISOString().slice(0, 10); // YYYY-MM-DD
 function videoElemMatch() {
   return {
     $elemMatch: {
-      assetId: { $exists: true, $ne: "" },
-      type: "video",
+      $or: [
+        {
+          assetId: { $exists: true, $ne: "" },
+          type: "video",
+        },
+        {
+          url: {
+            $regex: "(\\.mp4|\\.mov|\\.webm|\\.mkv|\\.m3u8)(\\?|$)",
+            $options: "i",
+          },
+        },
+        { url: { $regex: "/video/", $options: "i" } },
+        { url: { $regex: "/video/upload/", $options: "i" } },
+      ],
     },
   };
 }
