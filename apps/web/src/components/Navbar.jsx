@@ -1,11 +1,13 @@
 // apps/web/src/components/Navbar.jsx
 import { Link, NavLink, useLocation } from "react-router-dom";
+import { useEffect, useState } from "react";
 import { signOut } from "firebase/auth";
 import { auth } from "../lib/firebase";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useMe } from "../context/MeContext.jsx";
 import NotificationBell from "./NotificationBell.jsx";
 import InstallAppButton from "./InstallAppButton.jsx";
+import { getTheme, toggleTheme } from "../lib/theme";
 
 export default function Navbar() {
   const { user, loading: authLoading } = useAuth();
@@ -49,18 +51,41 @@ export default function Navbar() {
 
   const navLinkClass = ({ isActive }) =>
     isActive
-      ? "text-gold font-medium text-[15px]"
-      : "hover:text-gold text-[15px] text-zinc-100";
+      ? "text-gold font-semibold text-[16px]"
+      : "hover:text-gold text-[16px] font-medium text-[var(--app-text)]";
 
   const chipClass = (active) =>
-    `px-3 py-2 rounded-full border text-base whitespace-nowrap ${
+    `px-3 py-2 rounded-full border text-[15px] font-medium whitespace-nowrap ${
       active
-        ? "border-gold text-gold bg-zinc-900/40"
-        : "border-zinc-700 text-zinc-200 hover:border-zinc-500"
+        ? "border-gold text-gold"
+        : "text-[var(--app-text)] hover:border-zinc-500"
     }`;
 
+  const [theme, setThemeState] = useState(() => getTheme());
+
+  useEffect(() => {
+    function onThemeChange(e) {
+      setThemeState(e?.detail || getTheme());
+    }
+    window.addEventListener("kpocha:theme-change", onThemeChange);
+    return () =>
+      window.removeEventListener("kpocha:theme-change", onThemeChange);
+  }, []);
+
+  function handleToggleTheme() {
+    const next = toggleTheme();
+    setThemeState(next);
+  }
+
   return (
-    <header className="border-b border-zinc-800 sticky top-0 z-40 bg-[#0f1115]/90 backdrop-blur md:h-[60px]">
+    <header
+      className="border-b sticky top-0 z-40 backdrop-blur md:h-[60px]"
+      style={{
+        borderColor: "var(--app-border)",
+        background: "var(--app-navbar)",
+        color: "var(--app-text)",
+      }}
+    >
       <div className="max-w-[1400px] mx-auto px-3 md:px-4 h-full flex items-center justify-between gap-3">
         {/* desktop brand only (mobile uses the custom mobile header below) */}
         <Link to="/browse" className="hidden md:flex items-center gap-2">
@@ -75,7 +100,7 @@ export default function Navbar() {
         </Link>
 
         {/* desktop */}
-        <nav className="hidden md:flex items-center gap-4">
+        <nav className="hidden md:flex items-center gap-5">
           <NavLink to="/browse" className={navLinkClass}>
             Browse
           </NavLink>
@@ -111,10 +136,10 @@ export default function Navbar() {
             <NavLink
               to="/inbox"
               className={({ isActive }) =>
-                `relative text-[15px] ${
+                `relative text-[16px] ${
                   isActive
-                    ? "text-gold font-medium"
-                    : "hover:text-gold text-zinc-100"
+                    ? "text-gold font-semibold"
+                    : "hover:text-gold text-[var(--app-text)] font-medium"
                 }`
               }
             >
@@ -138,13 +163,26 @@ export default function Navbar() {
             </NavLink>
           )}
 
+          <button
+            onClick={handleToggleTheme}
+            className="rounded-xl border px-4 py-2 text-[15px] font-medium"
+            style={{
+              borderColor: "var(--app-border)",
+              color: "var(--app-text)",
+              backgroundColor: "var(--app-surface)",
+            }}
+            type="button"
+          >
+            {theme === "light" ? "Dark" : "Bright"}
+          </button>
+
           {/* notification bell + signout */}
           {token && <NotificationBell />}
 
           {authKnown && token && (
             <button
               onClick={handleSignOut}
-              className="rounded-lg border border-gold px-3 py-1.5 text-sm text-zinc-100 hover:bg-gold hover:text-black"
+              className="rounded-xl border border-gold px-4 py-2 text-[15px] font-medium text-[var(--app-text)] hover:bg-gold hover:text-black"
             >
               Sign Out
             </button>
@@ -153,7 +191,7 @@ export default function Navbar() {
           {authKnown && !token && (
             <NavLink
               to="/login"
-              className="rounded-lg border border-gold px-3 py-1.5 text-sm text-zinc-100 hover:bg-gold hover:text-black"
+              className="rounded-xl border border-gold px-4 py-2 text-[15px] font-medium text-[var(--app-text)] hover:bg-gold hover:text-black"
             >
               Sign In
             </NavLink>
@@ -175,6 +213,19 @@ export default function Navbar() {
             <div className="flex items-center gap-2">
               {/* Install stays visible on mobile */}
               <InstallAppButton />
+
+              <button
+                onClick={handleToggleTheme}
+                className="rounded-lg border px-3 py-1 text-sm"
+                style={{
+                  borderColor: "var(--app-border)",
+                  color: "var(--app-text)",
+                  backgroundColor: "var(--app-surface)",
+                }}
+                type="button"
+              >
+                {theme === "light" ? "Dark" : "Bright"}
+              </button>
 
               {token && <NotificationBell />}
 

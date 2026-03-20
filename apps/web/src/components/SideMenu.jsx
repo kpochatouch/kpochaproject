@@ -167,7 +167,8 @@ export default function SideMenu({ me }) {
       <div className="relative">
         {open && (
           <div
-            className="fixed inset-0 bg-black/30 backdrop-blur-sm z-30 lg:hidden"
+            className="fixed inset-0 z-40 lg:hidden"
+            style={{ backgroundColor: "var(--app-bg)" }}
             onClick={() => setOpen(false)}
           />
         )}
@@ -176,17 +177,40 @@ export default function SideMenu({ me }) {
           className={`${
             open ? "translate-x-0" : "-translate-x-full"
           } lg:translate-x-0 lg:!transform-none transition-transform duration-200
-             fixed lg:sticky top-16 lg:top-20 left-0 z-40
-             h-[calc(100vh-4rem)] lg:h-auto
-             flex`}
+     fixed lg:sticky inset-0 lg:inset-auto lg:top-20 lg:left-0 z-50 lg:z-40
+     h-screen lg:h-auto
+     w-screen lg:w-auto
+     flex`}
         >
           <div
             className={`${
-              collapsed ? "w-14" : "w-56"
-            } bg-black/70 border-r border-zinc-800 h-full lg:h-auto
-  rounded-none lg:rounded-xl lg:border lg:bg-black/40
-  p-3 space-y-2 overflow-y-auto`}
+              collapsed ? "w-14 lg:w-14" : "w-full lg:w-56"
+            } border-r h-full lg:h-auto
+  rounded-none lg:rounded-xl lg:border
+  p-4 space-y-2 overflow-y-auto`}
+            style={{
+              backgroundColor: "var(--app-bg)",
+              borderColor: "var(--app-border)",
+              color: "var(--app-text)",
+            }}
           >
+            {open && (
+              <div className="lg:hidden flex items-center justify-between mb-3">
+                <div className="text-base font-semibold">Menu</div>
+                <button
+                  type="button"
+                  onClick={() => setOpen(false)}
+                  className="rounded-lg border px-3 py-2 text-sm"
+                  style={{
+                    borderColor: "var(--app-border)",
+                    backgroundColor: "var(--app-surface)",
+                    color: "var(--app-text)",
+                  }}
+                >
+                  Close
+                </button>
+              </div>
+            )}
             {/* collapse toggle */}
             <div className="hidden lg:flex justify-end mb-1">
               <button
@@ -200,7 +224,10 @@ export default function SideMenu({ me }) {
             </div>
 
             {!collapsed && (
-              <div className="text-[10px] tracking-wide uppercase text-zinc-500">
+              <div
+                className="text-[11px] tracking-[0.14em] uppercase font-semibold"
+                style={{ color: "var(--app-text-soft)" }}
+              >
                 Navigation
               </div>
             )}
@@ -216,7 +243,10 @@ export default function SideMenu({ me }) {
             ))}
 
             {!collapsed && (
-              <div className="pt-1 text-[10px] tracking-wide uppercase text-zinc-500">
+              <div
+                className="pt-2 text-[11px] tracking-[0.14em] uppercase font-semibold"
+                style={{ color: "var(--app-text-soft)" }}
+              >
                 Social
               </div>
             )}
@@ -236,7 +266,10 @@ export default function SideMenu({ me }) {
             {proNav.length ? (
               <>
                 {!collapsed && (
-                  <div className="pt-1 text-[10px] tracking-wide uppercase text-zinc-500">
+                  <div
+                    className="pt-2 text-[11px] tracking-[0.14em] uppercase font-semibold"
+                    style={{ color: "var(--app-text-soft)" }}
+                  >
                     Pro
                   </div>
                 )}
@@ -256,7 +289,10 @@ export default function SideMenu({ me }) {
             {adminNav.length ? (
               <>
                 {!collapsed && (
-                  <div className="pt-1 text-[10px] tracking-wide uppercase text-zinc-500">
+                  <div
+                    className="pt-2 text-[11px] tracking-[0.14em] uppercase font-semibold"
+                    style={{ color: "var(--app-text-soft)" }}
+                  >
                     Admin
                   </div>
                 )}
@@ -274,7 +310,10 @@ export default function SideMenu({ me }) {
             ) : null}
 
             {!collapsed && (
-              <div className="pt-1 text-[10px] tracking-wide uppercase text-zinc-500">
+              <div
+                className="pt-2 text-[11px] tracking-[0.14em] uppercase font-semibold"
+                style={{ color: "var(--app-text-soft)" }}
+              >
                 Help
               </div>
             )}
@@ -304,10 +343,21 @@ function MenuButton({
     <button
       type="button"
       onClick={!disabled ? onClick : undefined}
-      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[15px]
-  ${active ? "bg-zinc-900 text-gold" : "text-zinc-100 hover:bg-zinc-900"}
+      className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-[16px] font-medium transition-colors
   ${disabled ? "opacity-50 cursor-not-allowed" : ""}
-  ${collapsed ? "justify-center" : ""}`}
+  ${collapsed ? "justify-center px-2" : ""}`}
+      style={{
+        backgroundColor: active ? "#F5C542" : "transparent",
+        color: active ? "#000000" : "var(--app-text)",
+      }}
+      onMouseEnter={(e) => {
+        if (!active && !disabled)
+          e.currentTarget.style.backgroundColor = "var(--app-hover)";
+      }}
+      onMouseLeave={(e) => {
+        if (!active && !disabled)
+          e.currentTarget.style.backgroundColor = "transparent";
+      }}
     >
       {icon ? (
         (() => {
@@ -320,12 +370,14 @@ function MenuButton({
 
       {!collapsed && <span className="flex-1 text-left">{label}</span>}
 
-      {/* small active dot */}
-      {active && !collapsed ? <span className="text-[8px]">●</span> : null}
+      {active && !collapsed ? (
+        <span className="text-[10px]" style={{ color: "#000000" }}>
+          ●
+        </span>
+      ) : null}
 
-      {/* badge (for unread counts, etc) */}
       {!collapsed && badge > 0 && (
-        <span className="ml-2 bg-red-600 text-white text-[10px] rounded-full px-1.5 py-0.5 font-semibold">
+        <span className="ml-2 bg-red-600 text-white text-[11px] rounded-full px-2 py-0.5 font-semibold min-w-[22px] text-center">
           {badge > 99 ? "99+" : badge}
         </span>
       )}

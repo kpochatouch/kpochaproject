@@ -13,7 +13,14 @@ export default function AdvertCardRail({ advert, onClickAction }) {
 
   if (!advert) {
     return (
-      <div className="h-40 rounded-lg border border-zinc-800 bg-black/20 flex items-center justify-center text-xs text-zinc-500">
+      <div
+        className="h-44 rounded-2xl border flex items-center justify-center text-sm"
+        style={{
+          borderColor: "var(--app-border)",
+          backgroundColor: "var(--app-surface)",
+          color: "var(--app-text-soft)",
+        }}
+      >
         Advert space
       </div>
     );
@@ -22,8 +29,18 @@ export default function AdvertCardRail({ advert, onClickAction }) {
   const media = advert.media?.[0];
 
   return (
-    <div className="rounded-lg border border-zinc-800 overflow-hidden bg-black/40">
-      <div className="px-3 pt-3 text-[11px] uppercase tracking-wide text-zinc-400">
+    <div
+      className="rounded-2xl border overflow-hidden"
+      style={{
+        backgroundColor: "var(--app-surface)",
+        borderColor: "var(--app-border)",
+        color: "var(--app-text)",
+      }}
+    >
+      <div
+        className="px-4 pt-4 text-[11px] uppercase tracking-[0.16em] font-semibold"
+        style={{ color: "var(--app-text-soft)" }}
+      >
         Sponsored
       </div>
 
@@ -39,24 +56,34 @@ export default function AdvertCardRail({ advert, onClickAction }) {
             loop
             playsInline
             autoPlay
-            className="w-full h-40 object-cover mt-2"
+            className="w-full h-48 object-cover mt-3"
           />
         ) : media?.url ? (
           <img
             src={media.url}
             alt={advert.title || "Advert"}
-            className="w-full h-40 object-cover mt-2"
+            className="w-full h-48 object-cover mt-3"
           />
         ) : null}
       </button>
 
-      <div className="p-3">
-        <div className="text-sm font-medium line-clamp-2">
+      <div className="p-4">
+        <div className="text-[16px] font-semibold leading-6 line-clamp-2">
           {advert.title || "Advert"}
         </div>
+
+        {!!advert.text && (
+          <div
+            className="mt-2 text-[14px] leading-6 line-clamp-3"
+            style={{ color: "var(--app-text-soft)" }}
+          >
+            {advert.text}
+          </div>
+        )}
+
         <button
           onClick={() => onClickAction?.(advert)}
-          className="mt-3 w-full rounded-md bg-white text-black px-3 py-2 text-sm"
+          className="mt-4 w-full rounded-xl bg-white text-black px-4 py-2.5 text-[15px] font-semibold"
         >
           {advert.buttonLabel || "Learn more"}
         </button>

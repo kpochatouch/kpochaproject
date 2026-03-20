@@ -80,3 +80,28 @@ video::-webkit-media-controls-start-playback-button {
 .kpo-star-glow {
   animation: kpo-star-glow 2s ease-in-out infinite alternate;
 }
+
+:root,
+:root[data-theme="dark"] {
+  --app-bg: #10141c;
+  --app-surface: #0f1115;
+  --app-surface-2: #111318;
+  --app-border: #27272a;
+  --app-text: #ffffff;
+  --app-text-soft: #a1a1aa;
+  --app-hover: #18181b;
+  --app-navbar: rgba(15, 17, 21, 0.9);
+  --app-chip-active: rgba(212, 175, 55, 0.16);
+}
+
+:root[data-theme="light"] {
+  --app-bg: #f6f7fb;
+  --app-surface: #ffffff;
+  --app-surface-2: #f3f4f6;
+  --app-border: #d4d4d8;
+  --app-text: #111827;
+  --app-text-soft: #52525b;
+  --app-hover: #f4f4f5;
+  --app-navbar: rgba(255, 255, 255, 0.92);
+  --app-chip-active: rgba(212, 175, 55, 0.18);
+}

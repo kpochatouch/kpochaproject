@@ -520,38 +520,46 @@ export default function Browse() {
 
   return (
     <ErrorBoundary>
-      <div className="max-w-[1400px] mx-auto px-3 md:px-4 py-5 md:py-6">
+      <div className="max-w-[1440px] mx-auto px-4 md:px-5 py-5 md:py-6">
         {/* header + tabs */}
-        <div className="mb-4 flex items-center justify-between gap-3 flex-wrap">
+        <div className="mb-5 flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2">
             <img
               src="/discovery.png"
               alt="Discover"
               className="w-6 h-6 object-contain max-w-full"
             />
-            <h1 className="text-2xl font-semibold">Discover</h1>
+            <h1 className="text-[32px] leading-none font-semibold">Discover</h1>
           </div>
 
           <div className="flex items-center gap-3">
             {/* tab pills */}
-            <div className="inline-flex rounded-xl border border-zinc-800 overflow-hidden">
+            <div
+              className="inline-flex rounded-xl border overflow-hidden"
+              style={{ borderColor: "var(--app-border)" }}
+            >
               <button
-                className={`px-4 py-2 text-sm border-r border-zinc-800 ${
-                  isFeedTab
-                    ? "bg-gold text-black font-semibold"
-                    : "hover:bg-zinc-900"
+                className={`px-4 py-2.5 text-[15px] font-medium border-r ${
+                  isFeedTab ? "bg-gold text-black font-semibold" : ""
                 }`}
+                style={{
+                  borderRightColor: "var(--app-border)",
+                  color: isFeedTab ? "#000" : "var(--app-text)",
+                  backgroundColor: isFeedTab ? undefined : "var(--app-surface)",
+                }}
                 onClick={() => setTabAndUrl("feed")}
                 type="button"
               >
                 Feed
               </button>
               <button
-                className={`px-4 py-2 text-sm ${
-                  isProsTab
-                    ? "bg-gold text-black font-semibold"
-                    : "hover:bg-zinc-900"
+                className={`px-4 py-2.5 text-[15px] font-medium ${
+                  isProsTab ? "bg-gold text-black font-semibold" : ""
                 }`}
+                style={{
+                  color: isProsTab ? "#000" : "var(--app-text)",
+                  backgroundColor: isProsTab ? undefined : "var(--app-surface)",
+                }}
                 onClick={() => setTabAndUrl("pros")}
                 type="button"
               >
@@ -563,77 +571,100 @@ export default function Browse() {
 
         {/* filters — only show on Pros tab */}
         {isProsTab && (
-          <div className="flex flex-wrap items-center gap-2 mb-6">
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Search by name or description…"
-              className="bg-black border border-zinc-800 rounded-lg px-3 py-2 w-56 max-w-full"
-            />
+          <div className="max-w-6xl mx-auto mb-7">
+            <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_160px_160px_auto] gap-3 items-start">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <input
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  placeholder="Search by name or description…"
+                  className="w-full rounded-xl px-4 py-3 text-[15px]"
+                  style={{
+                    backgroundColor: "var(--app-surface)",
+                    border: "1px solid var(--app-border)",
+                    color: "var(--app-text)",
+                  }}
+                />
 
-            <div className="w-56 max-w-full">
-              {/* ServicePicker meta.name = service NAME filter */}
-              <ServicePicker
-                value={service}
-                onChange={(_value, meta) => setService(meta?.name || "")}
-                placeholder="All services"
-                includeOther={false}
-              />
+                <div className="w-full">
+                  <ServicePicker
+                    value={service}
+                    onChange={(_value, meta) => setService(meta?.name || "")}
+                    placeholder="All services"
+                    includeOther={false}
+                  />
+                </div>
+              </div>
+
+              <select
+                value={stateName}
+                onChange={(e) => {
+                  const val = e.target.value.toUpperCase();
+                  setStateName(val);
+                  setLga("");
+                }}
+                className="w-full rounded-xl px-4 py-3 text-[15px]"
+                style={{
+                  backgroundColor: "var(--app-surface)",
+                  border: "1px solid var(--app-border)",
+                  color: "var(--app-text)",
+                }}
+              >
+                <option value="">All States</option>
+                {states.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={lga}
+                onChange={(e) => setLga(e.target.value.toUpperCase())}
+                className="w-full rounded-xl px-4 py-3 text-[15px]"
+                style={{
+                  backgroundColor: "var(--app-surface)",
+                  border: "1px solid var(--app-border)",
+                  color: "var(--app-text)",
+                }}
+                disabled={stateName && !lgasForState.length}
+              >
+                <option value="">All LGAs</option>
+                {(stateName ? lgasForState : []).map((x) => (
+                  <option key={x} value={x}>
+                    {x}
+                  </option>
+                ))}
+              </select>
+
+              <button
+                onClick={clearFilters}
+                className="rounded-xl px-4 py-3 text-[15px] font-medium"
+                style={{
+                  border: "1px solid var(--app-border)",
+                  backgroundColor: "var(--app-surface)",
+                  color: "var(--app-text)",
+                }}
+                type="button"
+              >
+                Clear
+              </button>
             </div>
-
-            <select
-              value={stateName}
-              onChange={(e) => {
-                const val = e.target.value.toUpperCase();
-                setStateName(val);
-                setLga("");
-              }}
-              className="bg-black border border-zinc-800 rounded-lg px-3 py-2"
-            >
-              <option value="">All States</option>
-              {states.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
-
-            <select
-              value={lga}
-              onChange={(e) => setLga(e.target.value.toUpperCase())}
-              className="bg-black border border-zinc-800 rounded-lg px-3 py-2"
-              disabled={stateName && !lgasForState.length}
-            >
-              <option value="">All LGAs</option>
-              {(stateName ? lgasForState : []).map((x) => (
-                <option key={x} value={x}>
-                  {x}
-                </option>
-              ))}
-            </select>
-
-            <button
-              onClick={clearFilters}
-              className="rounded-lg border border-zinc-700 px-3 py-2 text-sm"
-              type="button"
-            >
-              Clear
-            </button>
           </div>
         )}
 
         {/* content */}
         {isProsTab ? (
-          <>
+          <div className="max-w-6xl mx-auto">
             {errPros && (
               <div className="mb-4 rounded border border-red-800 bg-red-900/30 text-red-100 px-3 py-2">
                 {errPros}
               </div>
             )}
             {loadingPros ? (
-              <p className="text-zinc-400">Loading…</p>
+              <p style={{ color: "var(--app-text-soft)" }}>Loading…</p>
             ) : filteredAndRanked.length ? (
-              <div className="max-w-5xl space-y-3">
+              <div className="space-y-4">
                 {filteredAndRanked.map((pro) => (
                   <BarberCard
                     key={pro.id || pro._id}
@@ -644,11 +675,18 @@ export default function Browse() {
                 ))}
               </div>
             ) : (
-              <div className="text-zinc-400">
+              <div
+                className="rounded-2xl px-6 py-10 text-center"
+                style={{
+                  border: "1px solid var(--app-border)",
+                  backgroundColor: "var(--app-surface)",
+                  color: "var(--app-text-soft)",
+                }}
+              >
                 No professionals match your filters.
               </div>
             )}
-          </>
+          </div>
         ) : (
           <div className="flex flex-col lg:grid lg:grid-cols-[240px_minmax(0,1fr)_260px] gap-3 md:gap-4 items-start">
             {/* LEFT MENU */}
@@ -658,14 +696,14 @@ export default function Browse() {
 
             {/* FEED */}
             <div className="w-full min-w-0 max-w-none">
-              <StoriesRail />
-
               {canPostOnFeed && (
                 <FeedComposer
                   lga={lga}
                   onPosted={() => fetchFeed({ append: false, before: null })}
                 />
               )}
+
+              <StoriesRail />
               {errFeed && (
                 <div className="mb-4 rounded border border-red-800 bg-red-900/30 text-red-100 px-3 py-2">
                   {errFeed}

@@ -51,7 +51,8 @@ function Avatar({ url, seed, onClick }) {
       <img
         src={url}
         alt="Profile"
-        className="w-14 h-14 rounded-full border border-zinc-700 object-cover shadow cursor-pointer"
+        className="w-14 h-14 rounded-full object-cover shadow cursor-pointer"
+        style={{ border: "1px solid var(--app-border)" }}
         onClick={onClick}
       />
     );
@@ -68,7 +69,12 @@ function Avatar({ url, seed, onClick }) {
 
   return (
     <div
-      className="w-14 h-14 rounded-full border border-zinc-700 bg-zinc-900 flex items-center justify-center text-sm font-semibold cursor-pointer"
+      className="w-14 h-14 rounded-full flex items-center justify-center text-sm font-semibold cursor-pointer"
+      style={{
+        border: "1px solid var(--app-border)",
+        backgroundColor: "var(--app-surface-2)",
+        color: "var(--app-text)",
+      }}
       onClick={onClick}
     >
       {initials}
@@ -150,7 +156,14 @@ export default function BarberCard({ barber = {}, onOpen, onBook }) {
   }
 
   return (
-    <div className="group w-full rounded-2xl border border-zinc-800 bg-black/40 px-4 py-3 text-white hover:bg-zinc-900/50 transition">
+    <div
+      className="group w-full rounded-2xl border px-4 py-3 transition"
+      style={{
+        borderColor: "var(--app-border)",
+        backgroundColor: "var(--app-surface)",
+        color: "var(--app-text)",
+      }}
+    >
       <div className="flex items-stretch gap-3">
         <div className="shrink-0 self-start">
           <Avatar url={photoUrl} seed={name} onClick={handleAvatarClick} />
@@ -169,14 +182,17 @@ export default function BarberCard({ barber = {}, onOpen, onBook }) {
                 </div>
 
                 {startingPrice > 0 && (
-                  <span className="shrink-0 inline-flex items-center rounded-full border border-gold/20 bg-gold/10 px-2 py-0.5 text-[11px] text-gold">
+                  <span className="shrink-0 inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-medium text-black bg-gold">
                     From ₦{startingPrice.toLocaleString()}
                   </span>
                 )}
               </div>
 
               {rating > 0 && (
-                <div className="mt-1 flex items-center gap-1 text-xs text-zinc-300">
+                <div
+                  className="mt-1 flex items-center gap-1 text-xs"
+                  style={{ color: "var(--app-text-soft)" }}
+                >
                   <span className="inline-flex items-center gap-0.5">
                     {Array.from({ length: fullStars }).map((_, i) => (
                       <span key={`f${i}`} className="text-yellow-400">
@@ -196,7 +212,10 @@ export default function BarberCard({ barber = {}, onOpen, onBook }) {
                 </div>
               )}
 
-              <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-zinc-400">
+              <div
+                className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs"
+                style={{ color: "var(--app-text-soft)" }}
+              >
                 {(state || lga) && (
                   <span className="truncate">
                     {[state, lga].filter(Boolean).join(", ")}
@@ -204,14 +223,16 @@ export default function BarberCard({ barber = {}, onOpen, onBook }) {
                 )}
                 {availability && (
                   <>
-                    {(state || lga) && <span className="text-zinc-600">•</span>}
+                    {(state || lga) && (
+                      <span style={{ color: "var(--app-text-soft)" }}>•</span>
+                    )}
                     <span>{availability}</span>
                   </>
                 )}
                 {role && (
                   <>
                     {(state || lga || availability) && (
-                      <span className="text-zinc-600">•</span>
+                      <span style={{ color: "var(--app-text-soft)" }}>•</span>
                     )}
                     <span>{role}</span>
                   </>
@@ -240,7 +261,12 @@ export default function BarberCard({ barber = {}, onOpen, onBook }) {
                     key={`${svcName}-${i}`}
                     type="button"
                     onClick={() => onBook(svcName)}
-                    className="rounded-full border border-zinc-700 bg-zinc-950/70 px-3 py-1 text-[11px] text-zinc-200 hover:bg-zinc-900"
+                    className="rounded-full px-3 py-1 text-[11px] hover:opacity-90"
+                    style={{
+                      border: "1px solid var(--app-border)",
+                      backgroundColor: "var(--app-surface-2)",
+                      color: "var(--app-text)",
+                    }}
                     title={`Book ${svcName}`}
                   >
                     {label}
@@ -248,7 +274,12 @@ export default function BarberCard({ barber = {}, onOpen, onBook }) {
                 ) : (
                   <span
                     key={`${label}-${i}`}
-                    className="rounded-full border border-zinc-700 bg-zinc-950/70 px-3 py-1 text-[11px] text-zinc-200"
+                    className="rounded-full px-3 py-1 text-[11px]"
+                    style={{
+                      border: "1px solid var(--app-border)",
+                      backgroundColor: "var(--app-surface-2)",
+                      color: "var(--app-text)",
+                    }}
                   >
                     {label}
                   </span>
@@ -258,35 +289,43 @@ export default function BarberCard({ barber = {}, onOpen, onBook }) {
           )}
 
           {bio && (
-            <p className="mt-2 line-clamp-2 text-sm text-zinc-400">{bio}</p>
+            <p
+              className="mt-2 line-clamp-2 text-sm"
+              style={{ color: "var(--app-text-soft)" }}
+            >
+              {bio}
+            </p>
           )}
         </div>
 
-        <div className="shrink-0 flex">
-          <div className="flex h-full min-w-[96px] flex-col overflow-hidden rounded-[999px] border border-zinc-700 bg-black/70">
+        <div className="shrink-0 flex items-start">
+          <div className="flex flex-col gap-2">
             {onBook ? (
               <button
                 type="button"
                 onClick={() => onBook(null)}
-                className="px-3 py-2 text-[13px] font-semibold text-black bg-gold hover:opacity-90 transition-transform duration-200 group-hover:scale-[1.04] group-focus-within:scale-[1.04]"
+                className="rounded-full px-4 py-2 text-[14px] font-semibold text-black bg-gold hover:opacity-90"
               >
                 Book now
               </button>
             ) : (
               <Link
                 to={id ? `/book/${id}` : "#"}
-                className="px-3 py-2 text-center text-[13px] font-semibold text-black bg-gold hover:opacity-90 transition-transform duration-200 group-hover:scale-[1.04] group-focus-within:scale-[1.04]"
+                className="rounded-full px-4 py-2 text-[14px] font-semibold text-black bg-gold hover:opacity-90 text-center"
                 onClick={(e) => !id && e.preventDefault()}
               >
                 Book now
               </Link>
             )}
 
-            <div className="h-px bg-zinc-700" />
-
             <Link
               to={id ? `/profile/${id}` : "#"}
-              className="px-3 py-2 text-center text-[13px] font-semibold text-white bg-black hover:bg-zinc-900"
+              className="rounded-full px-4 py-2 text-[14px] font-semibold text-center hover:opacity-90"
+              style={{
+                color: "var(--app-text)",
+                backgroundColor: "var(--app-surface-2)",
+                border: "1px solid var(--app-border)",
+              }}
               onClick={(e) => !id && e.preventDefault()}
               title="View public profile"
             >

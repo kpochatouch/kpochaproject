@@ -11,13 +11,8 @@ function normName(s = "") {
     .trim();
 }
 
-/**
- * Default unisex salon/beauty catalog (names only).
- * Keep IDs stable (snake-case). Prices are NOT included here.
- */
 export function getDefaultCatalog() {
   const list = [
-    // ===== Core Hair (Women/Unisex)
     { id: "wash_blow_dry", name: "Wash & Blow-dry" },
     { id: "silk_press", name: "Silk press" },
     { id: "trim_dusting", name: "Trim / Dusting" },
@@ -46,7 +41,6 @@ export function getDefaultCatalog() {
     { id: "wig_making_machine_hand", name: "Wig Making (machine/hand)" },
     { id: "wig_revamp", name: "Wig Revamp (wash, restyle, repair)" },
 
-    // ===== Braids
     { id: "braids_ghana_weaving", name: "Braids: Ghana weaving" },
     { id: "braids_knotless_sml", name: "Braids: Knotless braids (S/M/L)" },
     { id: "braids_box", name: "Braids: Box braids" },
@@ -59,7 +53,6 @@ export function getDefaultCatalog() {
     { id: "boho_braids", name: "Boho braids" },
     { id: "crochet_install", name: "Crochet install" },
 
-    // ===== Locs
     { id: "starter_locs", name: "Starter locs (coils/twist/interlock)" },
     { id: "loc_retwist", name: "Retwist (locs)" },
     { id: "loc_interlocking", name: "Interlocking (locs)" },
@@ -67,7 +60,6 @@ export function getDefaultCatalog() {
     { id: "loc_repair", name: "Loc repair" },
     { id: "loc_styling", name: "Loc styling" },
 
-    // ===== Twists & Natural Styles
     { id: "two_strand_twists", name: "Two-strand twists" },
     { id: "flat_twists", name: "Flat twists" },
     { id: "bantu_knots", name: "Bantu knots" },
@@ -75,7 +67,6 @@ export function getDefaultCatalog() {
     { id: "wash_and_go", name: "Wash-and-go" },
     { id: "gel_packing_ponytail", name: "Gel packing/ponytail" },
 
-    // ===== Children (0–12)
     { id: "child_cut", name: "Children’s Hair (0–12): Cut" },
     { id: "child_cornrows", name: "Children’s Hair (0–12): Cornrows" },
     { id: "child_basic_braids", name: "Children’s Hair (0–12): Basic braids" },
@@ -84,14 +75,12 @@ export function getDefaultCatalog() {
       name: "Children’s Hair (0–12): Treatment & style",
     },
 
-    // ===== Hair Coloring
     { id: "root_touch_up", name: "Color root touch-up" },
     { id: "full_color", name: "Full color (permanent/semi)" },
     { id: "highlights_lowlights", name: "Highlights/lowlights" },
     { id: "balayage_ombre", name: "Balayage/ombre" },
     { id: "color_correction", name: "Color correction" },
 
-    // ===== Barbering (Men/Unisex)
     { id: "low_cut_all_round", name: "Low cut / All-round" },
     { id: "fade_taper_low_mid_high", name: "Fade: Taper/Low/Mid/High" },
     { id: "afro_shape_sponge_curls", name: "Afro shape / Sponge curls" },
@@ -105,7 +94,6 @@ export function getDefaultCatalog() {
     { id: "designs_basic_advanced", name: "Designs (basic/advanced)" },
     { id: "kids_cut_0_12", name: "Kids cut (0–12)" },
 
-    // ===== Nails
     { id: "classic_manicure", name: "Classic Manicure" },
     { id: "classic_pedicure", name: "Classic Pedicure" },
     {
@@ -125,7 +113,6 @@ export function getDefaultCatalog() {
     { id: "paraffin_wax_treatment", name: "Paraffin wax treatment" },
     { id: "foot_callus_treatment", name: "Foot callus treatment" },
 
-    // ===== Makeup & Head-Tie
     { id: "soft_glam_day_makeup", name: "Soft glam / Day makeup" },
     { id: "full_glam_night_makeup", name: "Full glam / Night glam" },
     { id: "bridal_trial", name: "Bridal trial" },
@@ -137,7 +124,6 @@ export function getDefaultCatalog() {
       name: "Gele tying (auto/turbo/classic)",
     },
 
-    // ===== Lashes & Brows
     { id: "lash_ext_classic", name: "Lash Extensions: Classic" },
     { id: "lash_ext_hybrid", name: "Lash Extensions: Hybrid" },
     { id: "lash_ext_volume", name: "Lash Extensions: Volume" },
@@ -151,7 +137,6 @@ export function getDefaultCatalog() {
       name: "Microblading / Microshading / Combo brows",
     },
 
-    // ===== Skincare & Spa
     {
       id: "express_deep_cleanse_facial",
       name: "Express facial / Deep-cleanse facial",
@@ -171,7 +156,6 @@ export function getDefaultCatalog() {
     { id: "body_scrub_polish", name: "Body scrub / Polish" },
     { id: "body_wrap", name: "Body wrap" },
 
-    // ===== Hair Removal
     { id: "waxing_eyebrow", name: "Waxing: Eyebrow" },
     { id: "waxing_upper_lip", name: "Waxing: Upper lip" },
     { id: "waxing_underarm", name: "Waxing: Underarm" },
@@ -188,7 +172,6 @@ export function getDefaultCatalog() {
     { id: "threading_full_face", name: "Threading: Full face" },
     { id: "sugaring", name: "Sugaring" },
 
-    // ===== Bridal & Events (Bundles)
     {
       id: "bridal_hair_makeup_trial_day",
       name: "Bridal Hair + Makeup (trial + day)",
@@ -208,7 +191,6 @@ export function getDefaultCatalog() {
       name: "Home Service Bridal (with travel)",
     },
 
-    // ===== Tattoos & Piercing (Optional)
     { id: "piercing_ear_lobe", name: "Piercing: Ear lobe" },
     { id: "piercing_cartilage", name: "Piercing: Cartilage" },
     { id: "piercing_nose", name: "Piercing: Nose" },
@@ -217,7 +199,6 @@ export function getDefaultCatalog() {
     { id: "tattoo_medium", name: "Tattoo (medium)" },
     { id: "tattoo_large", name: "Tattoo (large)" },
 
-    // ===== Add-Ons (attach to any main service)
     { id: "shampoo_condition", name: "Shampoo & condition" },
     { id: "blowdry_silk_finish", name: "Blow-dry / Silk press finish" },
     { id: "trim_ends_dusting", name: "Trim / Ends dusting" },
@@ -256,7 +237,6 @@ export function getDefaultCatalog() {
       name: "Assistant/extra time fee (very long/thick hair)",
     },
 
-    // ===== Kids & Teens (Bundle)
     {
       id: "kids_cornrows_braids_basic",
       name: "Kids cornrows / braids (basic)",
@@ -271,7 +251,6 @@ export function getDefaultCatalog() {
       name: "Party styling (beads/ribbons)",
     },
 
-    // ===== Maintenance / Recurring
     { id: "wig_wash_restyle", name: "Wig wash & restyle" },
     { id: "weave_tightening", name: "Weave tightening" },
     { id: "braids_refresh_frontline", name: "Braids refresh (front line)" },
@@ -284,7 +263,6 @@ export function getDefaultCatalog() {
       name: "Color root touch-up (maintenance)",
     },
 
-    // ===== Your original baseline (kept for backward-compat; de-dup will remove overlap)
     { id: "haircut", name: "Haircut" },
     { id: "kids_cut", name: "Kids’ Cut" },
     { id: "beard_trim", name: "Beard Trim / Line Up" },
@@ -309,7 +287,6 @@ export function getDefaultCatalog() {
     { id: "edge_control", name: "Edge Control / Touch-up" },
   ];
 
-  // De-dup by id and by normalized name to be extra safe
   const seenId = new Set();
   const seenName = new Set();
   const deduped = [];
@@ -324,26 +301,12 @@ export function getDefaultCatalog() {
   return deduped;
 }
 
-// names we *never* show as real services, even if present in the TXT
 const BLOCKED_NAMES = new Set([
   "(For rare or emerging categories)",
   "KPOCHA TOUCH — MASTER SERVICE LIST (BY CATEGORY)",
   "KPOCHA TOUCH - MASTER SERVICE LIST (BY CATEGORY)",
 ]);
 
-/**
- * Props:
- * - value: selected id or name
- * - onChange: (value, meta) => void; meta = { id, name, price? }
- * - catalog?: [{ id, name, price?, category? }]
- * - includeOther?: boolean (default true)
- * - otherText?: string
- * - onOtherText?: (text)=>void
- * - showPrice?: boolean (default false)
- * - className?: string
- * - selectProps?: any
- * - placeholder?: string (default "Select a service…")
- */
 export default function ServicePicker({
   value,
   onChange,
@@ -359,7 +322,6 @@ export default function ServicePicker({
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
 
-  // 1️⃣ Merge salon catalog + universal list (or use provided catalog)
   const allItems = useMemo(() => {
     let base;
 
@@ -391,7 +353,6 @@ export default function ServicePicker({
       const name = String(raw.name).trim();
       if (!name) continue;
 
-      // skip meta / heading-ish rows defensively
       const plain = name.replace(/\s+/g, " ");
       const isMeta =
         BLOCKED_NAMES.has(plain) ||
@@ -421,11 +382,10 @@ export default function ServicePicker({
     }
 
     const arr = Array.from(map.values());
-    arr.sort((a, b) => a.name.localeCompare(b.name)); // A → Z
+    arr.sort((a, b) => a.name.localeCompare(b.name));
     return arr;
   }, [catalog]);
 
-  // 2️⃣ Category list (for first dropdown)
   const categories = useMemo(() => {
     const set = new Set();
     for (const it of allItems) {
@@ -434,7 +394,6 @@ export default function ServicePicker({
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [allItems]);
 
-  // 3️⃣ Filtered services by category + search
   const filteredItems = useMemo(() => {
     let list = allItems;
 
@@ -481,13 +440,19 @@ export default function ServicePicker({
     }
   }
 
+  const fieldStyle = {
+    backgroundColor: "var(--app-surface)",
+    border: "1px solid var(--app-border)",
+    color: "var(--app-text)",
+  };
+
   return (
     <div className={`space-y-2 ${className}`}>
-      {/* STEP 1: Category */}
       <select
         value={categoryFilter}
         onChange={(e) => setCategoryFilter(e.target.value)}
-        className="w-full bg-black border border-zinc-800 rounded-lg px-3 py-2 text-sm"
+        className="w-full rounded-xl px-4 py-3 text-[15px]"
+        style={fieldStyle}
       >
         <option value="">All categories</option>
         {categories.map((c) => (
@@ -497,19 +462,19 @@ export default function ServicePicker({
         ))}
       </select>
 
-      {/* Search box (within selected category / all) */}
       <input
         value={search}
         onChange={(e) => setSearch(e.target.value)}
-        placeholder="Search service…"
-        className="w-full bg-black border border-zinc-800 rounded-lg px-3 py-2 text-sm"
+        placeholder="Search service..."
+        className="w-full rounded-xl px-4 py-3 text-[15px]"
+        style={fieldStyle}
       />
 
-      {/* STEP 2: Service select */}
       <select
         value={selectedIsOther ? "other" : value || ""}
         onChange={handleSelect}
-        className="w-full bg-black border border-zinc-800 rounded-lg px-3 py-2"
+        className="w-full rounded-xl px-4 py-3 text-[15px]"
+        style={fieldStyle}
         {...selectProps}
       >
         <option value="" disabled>
@@ -527,8 +492,9 @@ export default function ServicePicker({
         <input
           value={otherText}
           onChange={handleOtherText}
-          placeholder="Describe the service…"
-          className="w-full bg-black border border-zinc-800 rounded-lg px-3 py-2"
+          placeholder="Describe the service..."
+          className="w-full rounded-xl px-4 py-3 text-[15px]"
+          style={fieldStyle}
         />
       )}
     </div>

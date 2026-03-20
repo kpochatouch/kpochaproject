@@ -2,13 +2,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 
-/**
- * Props:
- * - targetUid: string | null   (the pro's ownerUid — preferred)
- * - proId:     string | null   (fallback if you follow by proId)
- * - disabled:  boolean         (optional hard disable)
- * - className: string          (optional extra classes)
- */
 export default function FollowButton({
   targetUid,
   proId,
@@ -18,7 +11,6 @@ export default function FollowButton({
   const [following, setFollowing] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  // best-effort initial status
   useEffect(() => {
     let stop = false;
     (async () => {
@@ -43,9 +35,7 @@ export default function FollowButton({
         if (!stop && data && typeof data.following === "boolean") {
           setFollowing(data.following);
         }
-      } catch {
-        // ignore
-      }
+      } catch {}
     })();
     return () => {
       stop = true;
@@ -56,7 +46,7 @@ export default function FollowButton({
     if (disabled || busy || (!targetUid && !proId)) return;
     setBusy(true);
     const was = following;
-    setFollowing(!was); // optimistic
+    setFollowing(!was);
 
     try {
       if (!was) {
@@ -67,7 +57,7 @@ export default function FollowButton({
         else await api.delete(`/api/pros/${proId}/follow`);
       }
     } catch {
-      setFollowing(was); // revert
+      setFollowing(was);
       alert("Couldn't update follow. Please try again.");
     } finally {
       setBusy(false);
@@ -81,11 +71,14 @@ export default function FollowButton({
       onClick={toggle}
       disabled={busy || disabled || (!targetUid && !proId)}
       className={[
-        "flex-1 py-2 text-sm flex items-center justify-center gap-1 rounded-none",
-        following ? "text-[#F5C542]" : "text-gray-200",
-        busy || disabled ? "opacity-60 cursor-not-allowed" : "hover:text-white",
+        "flex-1 py-3 text-[15px] font-medium flex items-center justify-center gap-1 rounded-none transition-colors",
+        busy || disabled ? "opacity-60 cursor-not-allowed" : "",
         className,
       ].join(" ")}
+      style={{
+        color: following ? "#000000" : "var(--app-text)",
+        backgroundColor: following ? "#F5C542" : "transparent",
+      }}
       aria-pressed={following}
       aria-busy={busy ? "true" : "false"}
     >

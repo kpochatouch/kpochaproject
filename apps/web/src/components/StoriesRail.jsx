@@ -278,23 +278,34 @@ export default function StoriesRail({
 
   return (
     <>
-      <div className={`mb-4 ${className}`}>
+      <div className={`mb-5 ${className}`}>
         <div className="overflow-x-auto no-scrollbar">
-          <div className="flex items-start gap-3 min-w-max">
+          <div className="flex items-start gap-3 min-w-max pb-1">
             {showCreate && me ? (
               <button
                 type="button"
                 onClick={openCreate}
-                className="shrink-0 w-[108px] rounded-2xl overflow-hidden border border-zinc-800 bg-[#111] hover:bg-[#151515] transition"
+                className="shrink-0 w-[108px] rounded-2xl overflow-hidden border transition"
+                style={{
+                  borderColor: "var(--app-border)",
+                  backgroundColor: "var(--app-surface)",
+                  color: "var(--app-text)",
+                }}
                 aria-label="Create story"
               >
-                <div className="h-[145px] relative bg-zinc-900 flex items-end justify-center">
-                  <div className="absolute inset-0 bg-gradient-to-b from-zinc-800/40 to-black/20" />
+                <div
+                  className="h-[145px] relative flex items-end justify-center"
+                  style={{ backgroundColor: "var(--app-surface-2)" }}
+                >
+                  <div className="absolute inset-0 bg-gradient-to-b from-black/10 to-black/5" />
                   <div className="absolute bottom-8 w-10 h-10 rounded-full bg-gold text-black flex items-center justify-center text-3xl leading-none border-4 border-[#111]">
                     +
                   </div>
                 </div>
-                <div className="px-2 py-2 text-xs text-white font-medium text-center">
+                <div
+                  className="px-2 py-2 text-[13px] font-medium text-center"
+                  style={{ color: "var(--app-text)" }}
+                >
                   Create story
                 </div>
               </button>
@@ -310,7 +321,11 @@ export default function StoriesRail({
                   return (
                     <div
                       key={item.key}
-                      className="relative shrink-0 w-[108px] h-[190px] rounded-2xl overflow-hidden border border-zinc-800 bg-black"
+                      className="relative shrink-0 w-[108px] h-[190px] rounded-2xl overflow-hidden border"
+                      style={{
+                        borderColor: "var(--app-border)",
+                        backgroundColor: "var(--app-surface)",
+                      }}
                     >
                       <AdvertStoryCard
                         advert={item.data}
@@ -329,7 +344,11 @@ export default function StoriesRail({
                     key={item.key}
                     type="button"
                     onClick={() => openViewer(index)}
-                    className="relative shrink-0 w-[108px] h-[190px] rounded-2xl overflow-hidden border border-zinc-800 bg-black group"
+                    className="relative shrink-0 w-[108px] h-[190px] rounded-2xl overflow-hidden border group"
+                    style={{
+                      borderColor: "var(--app-border)",
+                      backgroundColor: "var(--app-surface)",
+                    }}
                     aria-label={`Open story by ${authorName}`}
                   >
                     {thumb ? (

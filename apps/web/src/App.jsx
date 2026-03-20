@@ -1,5 +1,12 @@
 // apps/web/src/App.jsx
-import React, { Suspense, lazy, useEffect, useRef, useState } from "react";
+import React, {
+  Suspense,
+  lazy,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   Routes,
   Route,
@@ -26,6 +33,7 @@ import usePostPaymentRecovery from "./hooks/usePostPaymentRecovery";
 import { ensurePushSubscribed, getDeviceId } from "./lib/pushClient";
 import MobileTabBar from "./components/MobileTabBar.jsx";
 import PullToRefresh from "./components/PullToRefresh.jsx";
+import { initTheme, getTheme } from "./lib/theme";
 console.log("[push] App.jsx loaded");
 
 // ---------- pages (lazy) ----------
@@ -317,6 +325,22 @@ function FindProSmart() {
 /* ---------- App ---------- */
 export default function App() {
   const location = useLocation();
+
+  const [theme, setTheme] = useState(() => getTheme());
+
+  useLayoutEffect(() => {
+    const applied = initTheme();
+    setTheme(applied);
+  }, []);
+
+  useEffect(() => {
+    function onThemeChange(e) {
+      setTheme(e?.detail || getTheme());
+    }
+    window.addEventListener("kpocha:theme-change", onThemeChange);
+    return () =>
+      window.removeEventListener("kpocha:theme-change", onThemeChange);
+  }, []);
 
   const hideChatbase =
     location.pathname.startsWith("/chat") ||
@@ -661,7 +685,13 @@ export default function App() {
   const hideChrome = location.pathname.startsWith("/aws-liveness");
   return (
     <ToastProvider>
-      <div className="min-h-screen flex flex-col bg-[#0b0c10] text-white">
+      <div
+        className="min-h-screen flex flex-col"
+        style={{
+          backgroundColor: "var(--app-bg)",
+          color: "var(--app-text)",
+        }}
+      >
         <PullToRefresh disabled={Boolean(activeCall?.room)} />
 
         {/* global click → custom event used by menus/overlays */}
@@ -674,9 +704,8 @@ export default function App() {
         )}
 
         <main
-          className={
-            hideChrome ? "flex-1 bg-[#0b0c10]" : "flex-1 pb-[78px] md:pb-0"
-          }
+          className="flex-1 pb-[78px] md:pb-0"
+          style={hideChrome ? { backgroundColor: "var(--app-bg)" } : undefined}
         >
           <Suspense fallback={<RouteLoader full />}>
             <Routes>

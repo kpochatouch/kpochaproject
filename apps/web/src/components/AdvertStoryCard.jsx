@@ -35,17 +35,21 @@ export default function AdvertStoryCard({ advert, onClickAction }) {
       ) : null}
 
       <div className="absolute inset-x-0 top-0 p-4 bg-gradient-to-b from-black/70 to-transparent">
-        <div className="text-xs uppercase tracking-wide text-white/80">
+        <div className="text-[11px] uppercase tracking-[0.16em] text-white/80 font-semibold">
           Sponsored
         </div>
-        <div className="mt-2 text-white font-semibold">{advert.title}</div>
-        <div className="text-sm text-white/80 mt-1">{advert.text}</div>
+        <div className="mt-2 text-white text-[14px] font-semibold line-clamp-2">
+          {advert.title}
+        </div>
+        <div className="text-[12px] leading-5 text-white/80 mt-1 line-clamp-3">
+          {advert.text}
+        </div>
       </div>
 
       <div className="absolute inset-x-0 bottom-0 p-4 bg-gradient-to-t from-black/80 to-transparent">
         <button
           onClick={() => onClickAction?.(advert)}
-          className="w-full rounded-lg bg-white text-black px-4 py-3 text-sm font-medium"
+          className="w-full rounded-xl bg-white text-black px-4 py-3 text-[14px] font-semibold"
         >
           {advert.buttonLabel || "Learn more"}
         </button>

@@ -1078,7 +1078,13 @@ export default function PostDetail() {
       )}
 
       {/* counts */}
-      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 text-xs text-gray-400 border-t border-[#1F1F1F]">
+      <div
+        className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 text-xs border-t"
+        style={{
+          color: "var(--app-text-soft)",
+          borderColor: "var(--app-border)",
+        }}
+      >
         <div className="flex flex-wrap gap-4">
           <button
             type="button"

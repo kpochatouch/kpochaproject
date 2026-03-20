@@ -1015,117 +1015,153 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
   return (
     <div
       ref={cardRef}
-      className="bg-[#0F0F0F] border border-[#1F1F1F] rounded-xl overflow-hidden"
+      className="rounded-xl overflow-hidden"
+      style={{
+        backgroundColor: "var(--app-surface)",
+        border: "1px solid var(--app-border)",
+        color: "var(--app-text)",
+      }}
     >
-      {/* header */}
-      <div className="relative z-10 flex items-start justify-between px-4 py-3 gap-3">
-        <div className="flex-1" />
-
-        <div className="flex items-center gap-2">
-          {post.proId && (
-            <Link
-              to={`/book/${post.proId}`}
-              className="rounded-md bg-gold text-black px-3 py-1 text-sm font-semibold"
-            >
-              Book
-            </Link>
-          )}
-
-          <div className="relative" ref={menuRef}>
-            <button
-              onClick={() => setMenuOpen((v) => !v)}
-              aria-label="Open post menu"
-              className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-800 text-white"
-              type="button"
-            >
-              ⋮
-            </button>
-
-            {menuOpen && (
-              <div className="absolute right-0 mt-2 w-56 bg-[#141414] border border-[#2a2a2a] rounded-lg shadow-lg z-30">
-                <button
-                  onClick={toggleSave}
-                  className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
-                  type="button"
-                >
-                  {stats.savedByMe
-                    ? "Unsave post"
-                    : "Save post / Add to collection"}
-                </button>
-
-                <button
-                  onClick={handleCopyLink}
-                  className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
-                  type="button"
-                >
-                  Copy link
-                </button>
-
-                {isOwner ? (
+      {(post.text || post.proId) && (
+        <div className="px-4 sm:px-5 pt-4 pb-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              {post.text ? (
+                <>
                   <button
-                    onClick={handleHideOrDeletePost}
-                    disabled={deleting}
-                    className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b] text-red-300 disabled:opacity-50"
+                    onClick={goToPostDetail}
+                    className="text-left w-full text-[16px] leading-7"
+                    style={{ color: "var(--app-text)" }}
                     type="button"
                   >
-                    {deleting ? "Deleting…" : "Delete / Hide Post"}
+                    {shownText}
                   </button>
-                ) : (
-                  <button
-                    onClick={() => alert("You can only hide your own post")}
-                    className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
-                    type="button"
-                  >
-                    Hide Post
-                  </button>
-                )}
+                  {textTooLong && !showFullText && (
+                    <button
+                      onClick={() => setShowFullText(true)}
+                      className="mt-2 block text-[14px] font-medium text-gold"
+                      type="button"
+                    >
+                      View more
+                    </button>
+                  )}
+                </>
+              ) : null}
+            </div>
 
-                {isOwner && (
-                  <>
-                    {commentsDisabled ? (
+            <div className="shrink-0 flex items-center gap-2">
+              {post.proId && (
+                <Link
+                  to={`/book/${post.proId}`}
+                  className="rounded-lg bg-gold text-black px-4 py-2 text-[15px] font-semibold"
+                >
+                  Book
+                </Link>
+              )}
+
+              <div className="relative" ref={menuRef}>
+                <button
+                  onClick={() => setMenuOpen((v) => !v)}
+                  aria-label="Open post menu"
+                  className="w-9 h-9 flex items-center justify-center rounded-full"
+                  style={{ color: "var(--app-text)" }}
+                  type="button"
+                >
+                  ⋮
+                </button>
+
+                {menuOpen && (
+                  <div
+                    className="absolute right-0 mt-2 w-56 rounded-lg shadow-lg z-30"
+                    style={{
+                      backgroundColor: "var(--app-surface)",
+                      border: "1px solid var(--app-border)",
+                      color: "var(--app-text)",
+                    }}
+                  >
+                    <button
+                      onClick={toggleSave}
+                      className="w-full text-left px-3 py-2 text-sm"
+                      style={{
+                        backgroundColor: "transparent",
+                        color: "var(--app-text)",
+                      }}
+                      type="button"
+                    >
+                      {stats.savedByMe
+                        ? "Unsave post"
+                        : "Save post / Add to collection"}
+                    </button>
+
+                    <button
+                      onClick={handleCopyLink}
+                      className="w-full text-left px-3 py-2 text-sm"
+                      style={{
+                        backgroundColor: "transparent",
+                        color: "var(--app-text)",
+                      }}
+                      type="button"
+                    >
+                      Copy link
+                    </button>
+
+                    {isOwner ? (
                       <button
-                        onClick={handleEnableComments}
-                        className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
+                        onClick={handleHideOrDeletePost}
+                        disabled={deleting}
+                        className="w-full text-left px-3 py-2 text-sm text-red-300 disabled:opacity-50"
                         type="button"
                       >
-                        Enable comments
+                        {deleting ? "Deleting…" : "Delete / Hide Post"}
                       </button>
                     ) : (
                       <button
-                        onClick={handleDisableComments}
-                        className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
+                        onClick={() => alert("You can only hide your own post")}
+                        className="w-full text-left px-3 py-2 text-sm"
+                        style={{
+                          backgroundColor: "transparent",
+                          color: "var(--app-text)",
+                        }}
                         type="button"
                       >
-                        Disable comments
+                        Hide Post
                       </button>
                     )}
-                  </>
+
+                    {isOwner && (
+                      <>
+                        {commentsDisabled ? (
+                          <button
+                            onClick={handleEnableComments}
+                            className="w-full text-left px-3 py-2 text-sm"
+                            style={{
+                              backgroundColor: "transparent",
+                              color: "var(--app-text)",
+                            }}
+                            type="button"
+                          >
+                            Enable comments
+                          </button>
+                        ) : (
+                          <button
+                            onClick={handleDisableComments}
+                            className="w-full text-left px-3 py-2 text-sm"
+                            style={{
+                              backgroundColor: "transparent",
+                              color: "var(--app-text)",
+                            }}
+                            type="button"
+                          >
+                            Disable comments
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
                 )}
               </div>
-            )}
+            </div>
           </div>
-        </div>
-      </div>
-
-      {/* text (with “view more”) */}
-      {post.text && (
-        <div className="px-4 pb-3 text-sm text-white">
-          <button
-            onClick={goToPostDetail}
-            className="text-left w-full inline-block"
-            type="button"
-          >
-            {shownText}
-          </button>
-          {textTooLong && !showFullText && (
-            <button
-              onClick={() => setShowFullText(true)}
-              className="ml-1 text-xs text-gold"
-              type="button"
-            >
-              View more
-            </button>
-          )}
         </div>
       )}
 
@@ -1135,7 +1171,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
           {/* ✅ Banner overlay (top) */}
           <div className="absolute inset-x-0 top-0 z-[40] pointer-events-none">
             {/* fade so text is readable */}
-            <div className="px-3 pt-3 pb-8 bg-gradient-to-b from-black/75 via-black/25 to-transparent">
+            <div className="px-4 pt-4 pb-10 bg-gradient-to-b from-black/75 via-black/25 to-transparent">
               <div className="flex items-center justify-between gap-2">
                 {/* left: author + time */}
                 <button
@@ -1148,7 +1184,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
                   aria-label="View profile"
                   title="View profile"
                 >
-                  <div className="w-8 h-8 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center">
+                  <div className="w-10 h-10 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center">
                     {avatar ? (
                       <img
                         src={avatar}
@@ -1164,7 +1200,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
                   </div>
 
                   <div className="min-w-0">
-                    <div className="text-xs font-semibold text-white truncate max-w-[220px]">
+                    <div className="text-[15px] font-semibold text-white truncate max-w-[260px]">
                       <DisplayName
                         name={proName}
                         verified={proVerified}
@@ -1184,7 +1220,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
                     e.stopPropagation();
                     goToPostDetail();
                   }}
-                  className="pointer-events-auto text-[11px] text-white/90 bg-black/35 hover:bg-black/50 rounded-full px-3 py-1"
+                  className="pointer-events-auto text-[13px] font-medium text-white/90 bg-black/35 hover:bg-black/50 rounded-full px-4 py-1.5"
                 >
                   View post
                 </button>
@@ -1271,8 +1307,14 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
       )}
 
       {/* counts row */}
-      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 text-xs text-gray-400 border-t border-[#1F1F1F]">
-        <div className="flex flex-wrap gap-4">
+      <div
+        className="flex flex-wrap items-center justify-between gap-3 px-4 sm:px-5 py-3 text-[14px] border-t"
+        style={{
+          color: "var(--app-text-soft)",
+          borderColor: "var(--app-border)",
+        }}
+      >
+        <div className="flex flex-wrap gap-5">
           <div>{stats.likesCount} likes</div>
           <button onClick={handleToggleComments} type="button">
             {stats.commentsCount} comments
@@ -1289,7 +1331,13 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
       </div>
 
       {/* actions */}
-      <div className="relative z-[1] flex border-t border-[#1F1F1F]">
+      <div
+        className="relative z-[1] flex border-t"
+        style={{
+          borderColor: "var(--app-border)",
+          backgroundColor: "var(--app-surface)",
+        }}
+      >
         <LikeButton active={stats.likedByMe} onClick={toggleLike} />
         <CommentToggle onClick={handleToggleComments} />
         <ShareButton onClick={handleShare} />
@@ -1307,20 +1355,28 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
 
       {/* comments */}
       {showComments && (
-        <div className="px-4 py-3 border-t border-[#1F1F1F]">
+        <div
+          className="px-4 py-3 border-t"
+          style={{ borderColor: "var(--app-border)" }}
+        >
           {!commentsDisabled ? (
-            <form onSubmit={submitComment} className="flex gap-2 mb-3">
+            <form onSubmit={submitComment} className="flex gap-2 mb-4">
               <input
                 value={commentText}
                 onChange={(e) => setCommentText(e.target.value)}
                 placeholder={
                   currentUser ? "Write a comment..." : "Login to comment..."
                 }
-                className="flex-1 bg-[#121212] border border-[#2b2b2b] rounded-full px-3 py-2 text-sm text-white"
+                className="flex-1 rounded-full px-4 py-3 text-[15px]"
+                style={{
+                  backgroundColor: "var(--app-surface-2)",
+                  border: "1px solid var(--app-border)",
+                  color: "var(--app-text)",
+                }}
                 disabled={!currentUser}
               />
               <button
-                className="text-sm bg-[#F5C542] text-black rounded-full px-3 py-1"
+                className="text-[15px] font-medium bg-[#F5C542] text-black rounded-full px-4 py-2"
                 type="submit"
                 disabled={!currentUser}
               >
@@ -1349,13 +1405,22 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
                   )}
                 </div>
                 <div className="flex-1">
-                  <div className="text-xs text-white font-semibold">
+                  <div className="text-[14px] text-white font-semibold">
                     {c.authorName || "User"}
                   </div>
-                  <div className="bg-[#141414] rounded-2xl px-3 py-2 text-sm text-gray-200">
+                  <div
+                    className="rounded-2xl px-4 py-3 text-[15px] leading-6"
+                    style={{
+                      backgroundColor: "var(--app-surface-2)",
+                      color: "var(--app-text)",
+                    }}
+                  >
                     {c.text}
                   </div>
-                  <div className="flex gap-3 items-center text-[10px] text-gray-500 mt-1">
+                  <div
+                    className="flex gap-3 items-center text-[12px] mt-2"
+                    style={{ color: "var(--app-text-soft)" }}
+                  >
                     <span>
                       {c.createdAt
                         ? new Date(c.createdAt).toLocaleString()
@@ -1375,7 +1440,12 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
               </div>
             ))}
             {comments.length === 0 && (
-              <div className="text-xs text-gray-500">No comments yet.</div>
+              <div
+                className="text-xs"
+                style={{ color: "var(--app-text-soft)" }}
+              >
+                No comments yet.
+              </div>
             )}
           </div>
         </div>

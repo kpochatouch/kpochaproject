@@ -2,11 +2,6 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
 
-/**
- * FeedComposer (compact launcher only)
- * - Inline feed launcher that opens /compose
- * - Intentionally small so it stops taking unnecessary space
- */
 export default function FeedComposer({ inline = true } = {}) {
   const navigate = useNavigate();
 
@@ -17,15 +12,34 @@ export default function FeedComposer({ inline = true } = {}) {
   if (!inline) return null;
 
   return (
-    <div className="mb-4 w-full max-w-2xl mx-auto flex justify-end">
+    <div className="mb-3 w-full">
       <button
         type="button"
         onClick={openCompose}
         aria-label="Create post"
         title="Create post"
-        className="w-12 h-12 rounded-full bg-gold text-black text-2xl font-semibold flex items-center justify-center shadow-md hover:scale-[1.03] active:scale-[0.98] transition"
+        className="w-full rounded-2xl border px-4 py-3.5 flex items-center gap-3 text-left transition hover:opacity-95"
+        style={{
+          backgroundColor: "var(--app-surface)",
+          borderColor: "var(--app-border)",
+          color: "var(--app-text)",
+        }}
       >
-        +
+        <span className="w-11 h-11 rounded-full bg-gold text-black text-3xl font-semibold flex items-center justify-center shrink-0">
+          +
+        </span>
+
+        <span className="min-w-0 flex-1">
+          <span className="block text-[16px] font-medium">
+            Share something with people around you
+          </span>
+          <span
+            className="block text-[13px] mt-0.5"
+            style={{ color: "var(--app-text-soft)" }}
+          >
+            Post text, photo, or video
+          </span>
+        </span>
       </button>
     </div>
   );
