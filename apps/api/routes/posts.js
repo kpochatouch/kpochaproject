@@ -53,20 +53,8 @@ const todayStr = () => new Date().toISOString().slice(0, 10); // YYYY-MM-DD
 function videoElemMatch() {
   return {
     $elemMatch: {
-      $or: [
-        {
-          assetId: { $exists: true, $ne: "" },
-          type: "video",
-        },
-        {
-          url: {
-            $regex: "(\\.mp4|\\.mov|\\.webm|\\.mkv|\\.m3u8)(\\?|$)",
-            $options: "i",
-          },
-        },
-        { url: { $regex: "/video/", $options: "i" } },
-        { url: { $regex: "/video/upload/", $options: "i" } },
-      ],
+      assetId: { $exists: true, $ne: "" },
+      type: "video",
     },
   };
 }
@@ -74,37 +62,7 @@ function videoElemMatch() {
 // what we send to frontend
 async function sanitizePostForClient(p) {
   const obj = typeof p.toObject === "function" ? p.toObject() : { ...p };
-
-  let mediaNorm = [];
-  try {
-    mediaNorm = await expandMediaForClient(
-      Array.isArray(obj.media) ? obj.media : [],
-    );
-  } catch (err) {
-    console.error("[posts:sanitizePostForClient:media] failed", {
-      postId: String(obj?._id || ""),
-      message: err?.message || err,
-      media: obj?.media,
-    });
-    mediaNorm = [];
-  }
-
-  let authorAvatar = "";
-  try {
-    if (obj?.pro?.photoAssetId) {
-      const resolvedAvatar = await expandMediaForClient([
-        { assetId: obj.pro.photoAssetId },
-      ]);
-      authorAvatar = resolvedAvatar?.[0]?.url || "";
-    }
-  } catch (err) {
-    console.error("[posts:sanitizePostForClient:authorAvatar] failed", {
-      postId: String(obj?._id || ""),
-      photoAssetId: String(obj?.pro?.photoAssetId || ""),
-      message: err?.message || err,
-    });
-    authorAvatar = "";
-  }
+  const mediaNorm = await expandMediaForClient(obj.media);
 
   return {
     _id: obj._id,
@@ -112,6 +70,7 @@ async function sanitizePostForClient(p) {
     proId: obj.proId,
     proOwnerUid: obj.proOwnerUid,
 
+    // canonical ownerUid (preferred by frontend)
     ownerUid:
       obj.ownerUid ||
       obj.proOwnerUid ||
@@ -131,7 +90,10 @@ async function sanitizePostForClient(p) {
     createdAt: obj.createdAt,
 
     authorName: obj.pro?.name || "Professional",
-    authorAvatar,
+    authorAvatar: obj.pro?.photoAssetId
+      ? (await expandMediaForClient([{ assetId: obj.pro.photoAssetId }]))[0]
+          ?.url || ""
+      : "",
   };
 }
 
@@ -376,56 +338,6 @@ router.get("/posts/me", requireAuth, async (req, res) => {
   }
 });
 
-/* -------------------------------------------------------------------- */
-/* FOR YOU FEED (temporary minimal safe version) */
-/* -------------------------------------------------------------------- */
-router.get("/posts/for-you/feed", tryAuth, async (req, res) => {
-  try {
-    const { limit = 6 } = req.query;
-    const lim = Math.max(1, Math.min(Number(limit) || 6, 12));
-
-    const raw = await Post.find({
-      isPublic: true,
-      hidden: { $ne: true },
-      deleted: { $ne: true },
-      $or: [{ type: { $ne: "story" } }, { type: { $exists: false } }],
-    })
-      .sort({ createdAt: -1, _id: -1 })
-      .limit(40)
-      .lean();
-
-    const safe = [];
-    for (const item of raw) {
-      try {
-        const clean = await sanitizePostForClient(item);
-        const m = Array.isArray(clean?.media) ? clean.media[0] : null;
-        const playableUrl =
-          String(m?.hlsUrl || "").trim() || String(m?.url || "").trim();
-
-        if (m?.type === "video" && playableUrl) {
-          safe.push(clean);
-        }
-      } catch (e) {
-        console.error("[posts:for-you:feed:minimal] skipping bad post", {
-          postId: String(item?._id || ""),
-          message: e?.message || e,
-        });
-      }
-    }
-
-    return res.json({
-      items: safe.slice(0, lim),
-      nextCursor: null,
-    });
-  } catch (err) {
-    console.error("[posts:for-you:feed:minimal] fatal", {
-      message: err?.message || err,
-      stack: err?.stack || "",
-    });
-    return res.status(500).json({ error: "for_you_feed_failed" });
-  }
-});
-
 // READ: single post (public)
 router.get("/posts/:id", tryAuth, async (req, res) => {
   try {
@@ -441,6 +353,144 @@ router.get("/posts/:id", tryAuth, async (req, res) => {
   } catch (err) {
     console.error("[posts:read] error:", err);
     return res.status(500).json({ error: "post_load_failed" });
+  }
+});
+
+// NEXT video for For You
+router.get("/posts/:id/next", tryAuth, async (req, res) => {
+  try {
+    const id = req.params.id;
+    const current = await Post.findById(id).lean();
+    if (!current) return res.json({ next: null });
+
+    const viewerUid = req.user?.uid || null;
+
+    const excludeRaw = String(req.query.exclude || "");
+    const excludeIds = excludeRaw
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => /^[0-9a-fA-F]{24}$/.test(s))
+      .slice(0, 200);
+
+    const excludeObjectIds = excludeIds.map(
+      (x) => new mongoose.Types.ObjectId(x),
+    );
+
+    const baseFilter = {
+      isPublic: true,
+      hidden: { $ne: true },
+      deleted: { $ne: true },
+
+      media: videoElemMatch(),
+      $or: [{ type: { $ne: "story" } }, { type: { $exists: false } }],
+
+      _id: { $nin: [current._id, ...excludeObjectIds] },
+    };
+
+    // 1) Same pro
+    const samePro = await Post.find({
+      ...baseFilter,
+      proOwnerUid: current.proOwnerUid,
+    })
+      .sort({ createdAt: -1 })
+      .limit(10)
+      .lean();
+
+    // 2) Same LGA
+    const sameLga = await Post.find({ ...baseFilter, lga: current.lga })
+      .sort({ createdAt: -1 })
+      .limit(20)
+      .lean();
+
+    // 3) Viewer liked
+    let likedPosts = [];
+    if (viewerUid) {
+      const likedStats = await PostStats.find({ likedBy: viewerUid })
+        .sort({ updatedAt: -1 })
+        .limit(200)
+        .lean();
+
+      const likedIds = likedStats.map((s) => s.postId).filter(Boolean);
+      if (likedIds.length) {
+        likedPosts = await Post.find({
+          ...baseFilter,
+          _id: { $in: likedIds },
+        }).lean();
+      }
+    }
+
+    // 4) Trending
+    const topStats = await PostStats.find({})
+      .sort({ trendingScore: -1 })
+      .limit(300)
+      .lean();
+    const trendingIds = topStats.map((s) => s.postId).filter(Boolean);
+
+    let trendingPosts = [];
+    if (trendingIds.length) {
+      trendingPosts = await Post.find({
+        ...baseFilter,
+        _id: { $in: trendingIds },
+      }).lean();
+
+      const order = new Map(trendingIds.map((pid, idx) => [String(pid), idx]));
+      trendingPosts.sort(
+        (a, b) =>
+          (order.get(String(a._id)) ?? 0) - (order.get(String(b._id)) ?? 0),
+      );
+    }
+
+    // 5) Recent global fallback
+    const recentGlobal = await Post.find(baseFilter)
+      .sort({ createdAt: -1 })
+      .limit(200)
+      .lean();
+
+    const queueRaw = [
+      ...likedPosts,
+      ...samePro,
+      ...sameLga,
+      ...trendingPosts,
+      ...recentGlobal,
+    ];
+
+    const seen = new Set();
+    const queue = [];
+    for (const p of queueRaw) {
+      const key = String(p._id);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      queue.push(p);
+    }
+
+    const next = queue[0] || null;
+
+    // "river never dries" fallback
+    if (!next) {
+      const loopPick = await Post.findOne({
+        isPublic: true,
+        hidden: { $ne: true },
+        deleted: { $ne: true },
+        media: videoElemMatch(),
+        $or: [{ type: { $ne: "story" } }, { type: { $exists: false } }],
+        _id: { $ne: current._id },
+      })
+        .sort({ createdAt: -1 })
+        .lean();
+
+      return res.json({
+        next: loopPick ? await sanitizePostForClient(loopPick) : null,
+        looped: !!loopPick,
+      });
+    }
+
+    return res.json({
+      next: await sanitizePostForClient(next),
+      looped: false,
+    });
+  } catch (e) {
+    console.error("[posts:next] error", e?.message || e);
+    return res.json({ next: null, looped: false });
   }
 });
 
@@ -975,6 +1025,90 @@ router.delete("/posts/:id/save", requireAuth, async (req, res) => {
   } catch (err) {
     console.error("[posts:unsave] error:", err);
     return res.status(500).json({ error: "unsave_failed" });
+  }
+});
+
+/* -------------------------------------------------------------------- */
+/* FOR YOU START */
+/* -------------------------------------------------------------------- */
+router.get("/posts/for-you/start", tryAuth, async (req, res) => {
+  try {
+    const { lga = "" } = req.query;
+    const viewerUid = req.user?.uid || null;
+
+    const baseQuery = {
+      isPublic: true,
+      hidden: { $ne: true },
+      deleted: { $ne: true },
+      media: videoElemMatch(),
+      $or: [{ type: { $ne: "story" } }, { type: { $exists: false } }],
+    };
+
+    if (lga) baseQuery.lga = toUpper(String(lga));
+
+    let candidateIds = [];
+
+    // 1) videos this viewer has liked
+    if (viewerUid) {
+      const likedStats = await PostStats.find({ likedBy: viewerUid })
+        .sort({ updatedAt: -1 })
+        .limit(50)
+        .lean();
+      candidateIds.push(...likedStats.map((s) => s.postId));
+    }
+
+    // 2) top trending videos
+    const topStats = await PostStats.find({})
+      .sort({ trendingScore: -1 })
+      .limit(100)
+      .lean();
+    candidateIds.push(...topStats.map((s) => s.postId));
+
+    // dedupe candidate IDs
+    const seenIds = new Set();
+    candidateIds = candidateIds.filter((pid) => {
+      const key = String(pid);
+      if (seenIds.has(key)) return false;
+      seenIds.add(key);
+      return true;
+    });
+
+    let posts = [];
+    if (candidateIds.length) {
+      posts = await Post.find({
+        _id: { $in: candidateIds },
+        ...baseQuery,
+      }).lean();
+
+      const order = new Map(candidateIds.map((pid, idx) => [String(pid), idx]));
+      posts.sort(
+        (a, b) =>
+          (order.get(String(a._id)) ?? 0) - (order.get(String(b._id)) ?? 0),
+      );
+    }
+
+    // 3) fallback – newest video posts
+    if (!posts.length) {
+      posts = await Post.find(baseQuery)
+        .sort({ createdAt: -1 })
+        .limit(20)
+        .lean();
+    }
+
+    if (!posts.length) {
+      return res.json({ post: null, next: null });
+    }
+
+    const primary = posts[0];
+    const next = posts[1] || null;
+
+    return res.json({
+      post: await sanitizePostForClient(primary),
+      next: next ? await sanitizePostForClient(next) : null,
+    });
+  } catch (err) {
+    console.error("[posts:for-you:start] error:", err);
+    return res.status(500).json({ error: "for_you_start_failed" });
   }
 });
 
