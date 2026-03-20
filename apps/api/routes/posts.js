@@ -9,12 +9,8 @@ import PostStats from "../models/PostStats.js";
 
 import redisClient from "../redis.js";
 import { scoreFrom } from "../services/postScoring.js";
-import {
-  expandMediaForClient,
-  resolveAssetDocToClient,
-} from "../services/mediaResolver.js";
+import { expandMediaForClient } from "../services/mediaResolver.js";
 import postService from "../services/postService.js";
-import MediaAsset from "../models/MediaAsset.js";
 
 import Follow from "../models/Follow.js";
 import { ClientProfile } from "../models/Profile.js";
@@ -92,17 +88,56 @@ function isResolvedPlayableVideo(post) {
 
 async function sanitizePlayableForYouPosts(items = []) {
   const out = [];
+
   for (const item of items) {
-    const clean = await sanitizePostForClient(item);
-    if (isResolvedPlayableVideo(clean)) out.push(clean);
+    try {
+      const clean = await sanitizePostForClient(item);
+      if (isResolvedPlayableVideo(clean)) out.push(clean);
+    } catch (err) {
+      console.error("[posts:sanitizePlayableForYouPosts] skipping bad post", {
+        postId: String(item?._id || ""),
+        message: err?.message || err,
+      });
+    }
   }
+
   return out;
 }
 
 // what we send to frontend
 async function sanitizePostForClient(p) {
   const obj = typeof p.toObject === "function" ? p.toObject() : { ...p };
-  const mediaNorm = await expandMediaForClient(obj.media);
+
+  let mediaNorm = [];
+  try {
+    mediaNorm = await expandMediaForClient(
+      Array.isArray(obj.media) ? obj.media : [],
+    );
+  } catch (err) {
+    console.error("[posts:sanitizePostForClient:media] failed", {
+      postId: String(obj?._id || ""),
+      message: err?.message || err,
+      media: obj?.media,
+    });
+    mediaNorm = [];
+  }
+
+  let authorAvatar = "";
+  try {
+    if (obj?.pro?.photoAssetId) {
+      const resolvedAvatar = await expandMediaForClient([
+        { assetId: obj.pro.photoAssetId },
+      ]);
+      authorAvatar = resolvedAvatar?.[0]?.url || "";
+    }
+  } catch (err) {
+    console.error("[posts:sanitizePostForClient:authorAvatar] failed", {
+      postId: String(obj?._id || ""),
+      photoAssetId: String(obj?.pro?.photoAssetId || ""),
+      message: err?.message || err,
+    });
+    authorAvatar = "";
+  }
 
   return {
     _id: obj._id,
@@ -110,7 +145,6 @@ async function sanitizePostForClient(p) {
     proId: obj.proId,
     proOwnerUid: obj.proOwnerUid,
 
-    // canonical ownerUid (preferred by frontend)
     ownerUid:
       obj.ownerUid ||
       obj.proOwnerUid ||
@@ -130,10 +164,7 @@ async function sanitizePostForClient(p) {
     createdAt: obj.createdAt,
 
     authorName: obj.pro?.name || "Professional",
-    authorAvatar: obj.pro?.photoAssetId
-      ? (await expandMediaForClient([{ assetId: obj.pro.photoAssetId }]))[0]
-          ?.url || ""
-      : "",
+    authorAvatar,
   };
 }
 
@@ -472,7 +503,12 @@ router.get("/posts/for-you/feed", tryAuth, async (req, res) => {
         : null,
     });
   } catch (err) {
-    console.error("[posts:for-you:feed] error:", err);
+    console.error("[posts:for-you:feed] error", {
+      message: err?.message || err,
+      stack: err?.stack || "",
+      query: req.query,
+      userUid: req.user?.uid || null,
+    });
     return res.status(500).json({ error: "for_you_feed_failed" });
   }
 });
