@@ -105,3 +105,125 @@ video::-webkit-media-controls-start-playback-button {
   --app-navbar: rgba(255, 255, 255, 0.94);
   --app-chip-active: #f5c542;
 }
+
+/* =====================================================
+   Shared mobile page header / safe layout helpers
+   ===================================================== */
+:root {
+  --page-header-height: 64px;
+}
+
+.kpo-page-shell {
+  min-height: 100dvh;
+  width: 100%;
+  overflow-x: hidden;
+}
+
+.kpo-page-header {
+  min-height: var(--page-header-height);
+  padding-top: max(10px, env(safe-area-inset-top));
+  padding-left: 12px;
+  padding-right: 12px;
+  padding-bottom: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--app-border);
+  background: var(--app-surface);
+  color: var(--app-text);
+}
+
+.kpo-page-header-left,
+.kpo-page-header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.kpo-page-back-btn {
+  min-width: 44px;
+  width: 44px;
+  height: 44px;
+  border-radius: 9999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--app-border);
+  background: var(--app-surface-2);
+  color: var(--app-text);
+  font-size: 28px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.kpo-page-pill-btn {
+  height: 38px;
+  padding: 0 14px;
+  border-radius: 9999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--app-border);
+  background: var(--app-surface-2);
+  color: var(--app-text);
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.kpo-page-title-wrap {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.kpo-page-eyebrow {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #f5c542;
+  line-height: 1.1;
+}
+
+.kpo-page-title {
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.1;
+  color: var(--app-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kpo-page-subtitle {
+  font-size: 11px;
+  line-height: 1.2;
+  color: var(--app-text-soft);
+}
+
+.kpo-mobile-content {
+  min-height: 0;
+  width: 100%;
+  overflow-x: hidden;
+}
+
+.kpo-hide-scroll-x {
+  overflow-x: hidden;
+}
+
+.kpo-mobile-media-frame {
+  width: 100%;
+  height: calc(100dvh - var(--page-header-height));
+  max-height: calc(100dvh - var(--page-header-height));
+  overflow: hidden;
+}
+
+@media (max-width: 768px) {
+  .kpo-tight-mobile-top {
+    padding-top: 0 !important;
+    margin-top: 0 !important;
+  }
+}

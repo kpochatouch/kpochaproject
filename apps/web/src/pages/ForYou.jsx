@@ -98,6 +98,67 @@ function shuffleArray(items = []) {
   return arr;
 }
 
+function ForYouDesktopRail() {
+  return (
+    <aside className="hidden md:flex w-[220px] shrink-0 border-r border-white/10 bg-black text-white flex-col px-5 py-5">
+      <Link to="/browse" className="flex items-center gap-2 mb-6">
+        <span className="text-[22px] leading-none">♛</span>
+        <span className="text-[18px] font-bold">Kpocha</span>
+      </Link>
+
+      <div className="mb-5">
+        <div className="w-full rounded-full bg-white/10 px-4 py-3 text-sm text-white/60">
+          Search
+        </div>
+      </div>
+
+      <nav className="flex flex-col gap-1">
+        <Link
+          to="/for-you"
+          className="rounded-xl px-4 py-3 text-[16px] font-semibold text-[#F5C542] bg-white/5"
+        >
+          For You
+        </Link>
+
+        <Link
+          to="/browse"
+          className="rounded-xl px-4 py-3 text-[16px] font-medium text-white hover:bg-white/5"
+        >
+          Explore
+        </Link>
+
+        <Link
+          to="/inbox"
+          className="rounded-xl px-4 py-3 text-[16px] font-medium text-white hover:bg-white/5"
+        >
+          Messages
+        </Link>
+
+        <Link
+          to="/my-bookings"
+          className="rounded-xl px-4 py-3 text-[16px] font-medium text-white hover:bg-white/5"
+        >
+          My Bookings
+        </Link>
+
+        <Link
+          to="/profile"
+          className="rounded-xl px-4 py-3 text-[16px] font-medium text-white hover:bg-white/5"
+        >
+          Profile
+        </Link>
+
+        <Link
+          to="/settings"
+          className="rounded-xl px-4 py-3 text-[16px] font-medium text-white hover:bg-white/5"
+        >
+          More
+        </Link>
+      </nav>
+    </aside>
+  );
+}
+
 export default function ForYou() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -290,13 +351,24 @@ export default function ForYou() {
 
   if (error) {
     return (
-      <div className="max-w-xl mx-auto p-4">
-        <div className="bg-[#151515] border border-[#2a2a2a] rounded-xl p-6">
-          <div className="text-lg font-semibold mb-2">For You</div>
-          <div className="text-sm text-gray-400">{error}</div>
+      <div className="kpo-page-shell max-w-xl mx-auto p-4">
+        <div
+          className="rounded-2xl border p-6"
+          style={{
+            background: "var(--app-surface)",
+            borderColor: "var(--app-border)",
+          }}
+        >
+          <div className="kpo-page-title-wrap mb-2">
+            <div className="kpo-page-eyebrow">Video Feed</div>
+            <div className="kpo-page-title">For You</div>
+          </div>
+          <div className="text-sm" style={{ color: "var(--app-text-soft)" }}>
+            {error}
+          </div>
           <div className="mt-4">
-            <Link to="/browse" className="text-gold">
-              ← Back to feed
+            <Link to="/browse" className="kpo-page-pill-btn">
+              Feed
             </Link>
           </div>
         </div>
@@ -306,15 +378,24 @@ export default function ForYou() {
 
   if (!feedPosts.length) {
     return (
-      <div className="max-w-xl mx-auto p-4">
-        <div className="bg-[#151515] border border-[#2a2a2a] rounded-xl p-6">
-          <div className="text-lg font-semibold mb-2">For You</div>
-          <div className="text-sm text-gray-400">
+      <div className="kpo-page-shell max-w-xl mx-auto p-4">
+        <div
+          className="rounded-2xl border p-6"
+          style={{
+            background: "var(--app-surface)",
+            borderColor: "var(--app-border)",
+          }}
+        >
+          <div className="kpo-page-title-wrap mb-2">
+            <div className="kpo-page-eyebrow">Video Feed</div>
+            <div className="kpo-page-title">For You</div>
+          </div>
+          <div className="text-sm" style={{ color: "var(--app-text-soft)" }}>
             No videos available right now.
           </div>
           <div className="mt-4">
-            <Link to="/browse" className="text-gold">
-              ← Back to feed
+            <Link to="/browse" className="kpo-page-pill-btn">
+              Feed
             </Link>
           </div>
         </div>
@@ -323,49 +404,56 @@ export default function ForYou() {
   }
 
   return (
-    <div className="w-full h-[100dvh] bg-black flex flex-col">
-      <div className="md:hidden flex items-center gap-2 px-3 py-3 border-b border-[#1f1f1f]">
-        <button
-          type="button"
-          onClick={() => navigate(-1)}
-          className="min-w-[44px] h-11 px-3 flex items-center justify-center rounded-full text-white text-3xl leading-none"
-          aria-label="Go back"
-        >
-          ‹
-        </button>
-        <div className="text-white font-semibold text-lg">For You</div>
-      </div>
+    <div className="kpo-page-shell bg-black flex h-screen overflow-hidden kpo-hide-scroll-x">
+      <ForYouDesktopRail />
 
-      <div
-        className="flex-1 overflow-y-auto snap-y snap-mandatory bg-black"
-        style={{ WebkitOverflowScrolling: "touch" }}
-      >
-        {feedPosts.map((post, index) => (
-          <ForYouPost
-            key={post._id}
-            post={post}
-            index={index}
-            me={me}
-            navigate={navigate}
-            onNeedMore={() => {
-              const remaining = feedPosts.length - 1 - index;
-              if (remaining <= 2) loadBatch({ reset: false });
-            }}
-          />
-        ))}
+      <div className="flex-1 flex flex-col min-w-0">
+        <div className="kpo-page-header md:hidden">
+          <div className="kpo-page-header-left">
+            <button
+              type="button"
+              onClick={() => navigate(-1)}
+              className="kpo-page-back-btn"
+              aria-label="Go back"
+            >
+              ‹
+            </button>
 
-        <div ref={sentinelRef} className="h-1 w-full" aria-hidden="true" />
-
-        {loadingMore && (
-          <div className="px-4 py-3 text-[11px] text-gray-500">
-            Loading more…
+            <div className="kpo-page-title-wrap">
+              <div className="kpo-page-eyebrow">Video Feed</div>
+              <div className="kpo-page-title">For You</div>
+            </div>
           </div>
-        )}
 
-        <div className="px-4 py-6">
-          <Link to="/browse" className="text-gold">
-            ← Back to feed
-          </Link>
+          <div className="kpo-page-header-right">
+            <Link to="/browse" className="kpo-page-pill-btn">
+              Feed
+            </Link>
+          </div>
+        </div>
+
+        <div
+          className="flex-1 min-h-0 overflow-y-auto snap-y snap-mandatory bg-black kpo-mobile-content"
+          style={{
+            WebkitOverflowScrolling: "touch",
+            scrollSnapType: "y mandatory",
+          }}
+        >
+          {feedPosts.map((post, index) => (
+            <ForYouPost
+              key={post._id}
+              post={post}
+              index={index}
+              me={me}
+              navigate={navigate}
+              onNeedMore={() => {
+                const remaining = feedPosts.length - 1 - index;
+                if (remaining <= 2) loadBatch({ reset: false });
+              }}
+            />
+          ))}
+
+          <div ref={sentinelRef} className="h-1 w-full" aria-hidden="true" />
         </div>
       </div>
     </div>
@@ -1161,58 +1249,25 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
   return (
     <article
       ref={pageRef}
-      className="h-[100dvh] snap-start snap-always bg-black md:flex md:items-center md:justify-center"
+      className="snap-start snap-always bg-black md:flex md:items-center md:justify-center"
+      style={{
+        height: "100dvh",
+        minHeight: "100dvh",
+      }}
     >
-      <div className="hidden md:flex px-4 pt-4 pb-2 items-start justify-between gap-3 w-full md:max-w-[560px]">
-        <div className="flex gap-3">
-          <div
-            className="w-10 h-10 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center cursor-pointer"
-            onClick={goToProfile}
-            title="View profile"
-            role="button"
-            aria-label="View profile"
-          >
-            {avatar ? (
-              <img
-                src={avatar}
-                alt={proName}
-                className="w-full h-full object-cover"
-              />
-            ) : (
-              <span className="text-sm text-white">
-                {proName.slice(0, 1).toUpperCase()}
-              </span>
-            )}
-          </div>
-          <div>
-            <div
-              className="text-sm font-semibold text-white truncate max-w-[180px] cursor-pointer"
-              onClick={goToProfile}
-              title="View profile"
-            >
-              {proName}
-            </div>
-
-            <div className="text-xs text-gray-400">
-              {lga || "Nigeria"} • {timeAgo(post.createdAt)}
-            </div>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {post.proId && (
-            <Link
-              to={`/book/${post.proId}`}
-              className="rounded-md bg-gold text-black px-3 py-1 text-sm font-semibold"
-            >
-              Book
-            </Link>
-          )}
+      <div
+        className="relative w-full bg-black overflow-hidden kpo-mobile-media-frame
+       md:h-[86vh] md:max-h-none md:w-[420px]
+       md:rounded-2xl md:overflow-hidden"
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+      >
+        <div className="absolute top-0 left-0 right-0 z-[4] px-3 pt-3 pb-2 flex items-start justify-end bg-gradient-to-b from-black/70 via-black/20 to-transparent">
           <div className="relative" ref={menuRef}>
             <button
               onClick={() => setMenuOpen((v) => !v)}
               aria-label="Open post menu"
-              className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-800 text-white"
+              className="w-9 h-9 flex items-center justify-center rounded-full bg-black/40 text-white"
               type="button"
             >
               ⋯
@@ -1220,6 +1275,19 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
 
             {menuOpen && (
               <div className="absolute right-0 mt-2 w-56 bg-[#141414] border border-[#2a2a2a] rounded-lg shadow-lg z-30">
+                {post.proId && (
+                  <button
+                    onClick={() => {
+                      navigate(`/book/${post.proId}`);
+                      setMenuOpen(false);
+                    }}
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-[#1b1b1b]"
+                    type="button"
+                  >
+                    Book now
+                  </button>
+                )}
+
                 <button
                   onClick={() => {
                     toggleSave();
@@ -1271,70 +1339,6 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
             )}
           </div>
         </div>
-      </div>
-
-      <div
-        className="relative w-full bg-black overflow-hidden h-[100dvh]
-             md:h-[78vh] md:max-h-[760px] md:w-[420px]
-             md:rounded-2xl md:overflow-hidden md:shadow-lg"
-        onMouseEnter={handleMouseEnter}
-        onMouseLeave={handleMouseLeave}
-      >
-        <div className="md:hidden absolute top-0 left-0 right-0 z-[4] px-3 pt-3 pb-2 flex items-start justify-between gap-3 bg-gradient-to-b from-black/70 via-black/20 to-transparent">
-          <div className="flex gap-3 min-w-0">
-            <div
-              className="w-10 h-10 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center cursor-pointer shrink-0"
-              onClick={goToProfile}
-              title="View profile"
-              role="button"
-              aria-label="View profile"
-            >
-              {avatar ? (
-                <img
-                  src={avatar}
-                  alt={proName}
-                  className="w-full h-full object-cover"
-                />
-              ) : (
-                <span className="text-sm text-white">
-                  {proName.slice(0, 1).toUpperCase()}
-                </span>
-              )}
-            </div>
-
-            <div className="min-w-0">
-              <div
-                className="text-sm font-semibold text-white truncate max-w-[220px] cursor-pointer"
-                onClick={goToProfile}
-                title="View profile"
-              >
-                {proName}
-              </div>
-              <div className="text-xs text-gray-300">
-                {lga || "Nigeria"} • {timeAgo(post.createdAt)}
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 shrink-0">
-            {post.proId && (
-              <Link
-                to={`/book/${post.proId}`}
-                className="rounded-md bg-gold text-black px-3 py-1 text-sm font-semibold"
-              >
-                Book
-              </Link>
-            )}
-            <button
-              onClick={() => setMenuOpen((v) => !v)}
-              aria-label="Open post menu"
-              className="w-8 h-8 flex items-center justify-center rounded-full bg-black/40 text-white"
-              type="button"
-            >
-              ⋯
-            </button>
-          </div>
-        </div>
 
         <video
           ref={videoRef}
@@ -1370,37 +1374,74 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
           />
         )}
 
-        {captionText && (
-          <div className="absolute left-0 right-16 bottom-0 z-[3] px-4 pb-4 pt-10 bg-gradient-to-t from-black/80 via-black/30 to-transparent pointer-events-none">
-            <div className="text-white text-sm leading-snug pointer-events-auto">
-              <span>{captionShown}</span>
-              {captionTooLong && !showFullCaption && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setShowFullCaption(true);
-                  }}
-                  className="ml-2 text-xs text-gold"
+        <div className="absolute left-0 right-16 bottom-0 z-[3] px-4 pb-4 pt-12 bg-gradient-to-t from-black/85 via-black/35 to-transparent pointer-events-none">
+          <div className="pointer-events-auto">
+            <div className="flex items-center gap-3 mb-2">
+              <div
+                className="w-10 h-10 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center cursor-pointer shrink-0"
+                onClick={goToProfile}
+                title="View profile"
+                role="button"
+                aria-label="View profile"
+              >
+                {avatar ? (
+                  <img
+                    src={avatar}
+                    alt={proName}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <span className="text-sm text-white">
+                    {proName.slice(0, 1).toUpperCase()}
+                  </span>
+                )}
+              </div>
+
+              <div className="min-w-0">
+                <div
+                  className="text-sm font-semibold text-white truncate max-w-[220px] cursor-pointer"
+                  onClick={goToProfile}
+                  title="View profile"
                 >
-                  more…
-                </button>
-              )}
-              {captionTooLong && showFullCaption && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setShowFullCaption(false);
-                  }}
-                  className="ml-2 text-xs text-gold"
-                >
-                  less
-                </button>
-              )}
+                  {proName}
+                </div>
+                <div className="text-xs text-gray-300">
+                  {lga || "Nigeria"} • {timeAgo(post.createdAt)}
+                </div>
+              </div>
             </div>
+
+            {captionText ? (
+              <div className="text-white text-sm leading-snug">
+                <span>{captionShown}</span>
+                {captionTooLong && !showFullCaption && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowFullCaption(true);
+                    }}
+                    className="ml-2 text-xs text-gold"
+                  >
+                    more…
+                  </button>
+                )}
+                {captionTooLong && showFullCaption && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowFullCaption(false);
+                    }}
+                    className="ml-2 text-xs text-gold"
+                  >
+                    less
+                  </button>
+                )}
+              </div>
+            ) : null}
           </div>
-        )}
+        </div>
 
         <div className="absolute right-3 bottom-4 flex flex-col items-center gap-4 z-[3]">
           <button

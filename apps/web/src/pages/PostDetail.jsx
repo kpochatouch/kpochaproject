@@ -779,13 +779,24 @@ export default function PostDetail() {
 
   if (error || !post) {
     return (
-      <div className="max-w-xl mx-auto p-4">
-        <div className="bg-[#151515] border border-[#2a2a2a] rounded-xl p-6">
-          <div className="text-lg font-semibold mb-2">Post</div>
-          <div className="text-sm text-gray-400">{error || "Not found"}</div>
+      <div className="kpo-page-shell max-w-xl mx-auto p-4">
+        <div
+          className="rounded-2xl border p-6"
+          style={{
+            background: "var(--app-surface)",
+            borderColor: "var(--app-border)",
+          }}
+        >
+          <div className="kpo-page-title-wrap mb-2">
+            <div className="kpo-page-eyebrow">Post View</div>
+            <div className="kpo-page-title">Post</div>
+          </div>
+          <div className="text-sm" style={{ color: "var(--app-text-soft)" }}>
+            {error || "Not found"}
+          </div>
           <div className="mt-4">
-            <Link to="/browse" className="text-gold">
-              ← Back to feed
+            <Link to="/browse" className="kpo-page-pill-btn">
+              Feed
             </Link>
           </div>
         </div>
@@ -794,17 +805,29 @@ export default function PostDetail() {
   }
 
   return (
-    <div className="max-w-xl mx-auto">
-      <div className="md:hidden flex items-center gap-2 px-3 py-3 border-b border-[#1f1f1f]">
-        <button
-          type="button"
-          onClick={() => navigate(-1)}
-          className="min-w-[44px] h-11 px-3 flex items-center justify-center rounded-full text-white text-3xl leading-none"
-          aria-label="Go back"
-        >
-          ‹
-        </button>
-        <div className="text-white font-semibold text-lg">Post</div>
+    <div className="max-w-xl mx-auto kpo-page-shell kpo-hide-scroll-x">
+      <div className="kpo-page-header md:hidden">
+        <div className="kpo-page-header-left">
+          <button
+            type="button"
+            onClick={() => navigate(-1)}
+            className="kpo-page-back-btn"
+            aria-label="Go back"
+          >
+            ‹
+          </button>
+
+          <div className="kpo-page-title-wrap">
+            <div className="kpo-page-eyebrow">Post View</div>
+            <div className="kpo-page-title">Post</div>
+          </div>
+        </div>
+
+        <div className="kpo-page-header-right">
+          <Link to="/browse" className="kpo-page-pill-btn">
+            Feed
+          </Link>
+        </div>
       </div>
 
       {/* header */}
@@ -961,7 +984,9 @@ export default function PostDetail() {
 
       {/* text */}
       {post.text && (
-        <div className="px-4 pb-3 text-sm text-white">{post.text}</div>
+        <div className="px-4 pb-3 text-sm" style={{ color: "var(--app-text)" }}>
+          {post.text}
+        </div>
       )}
 
       {/* media */}
@@ -1332,13 +1357,6 @@ export default function PostDetail() {
           Preparing next video…
         </div>
       )}
-
-      {/* back link */}
-      <div className="px-4 py-6">
-        <Link to="/browse" className="text-gold">
-          ← Back to feed
-        </Link>
-      </div>
     </div>
   );
 }

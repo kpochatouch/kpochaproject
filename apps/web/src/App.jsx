@@ -684,9 +684,8 @@ export default function App() {
 
   const hideChrome =
     location.pathname.startsWith("/aws-liveness") ||
-    (isMobile &&
-      (location.pathname.startsWith("/for-you") ||
-        location.pathname.startsWith("/post/")));
+    location.pathname.startsWith("/for-you") ||
+    (isMobile && location.pathname.startsWith("/post/"));
   return (
     <ToastProvider>
       <div
@@ -708,7 +707,7 @@ export default function App() {
         )}
 
         <main
-          className="flex-1 pb-[78px] md:pb-0"
+          className={`flex-1 ${hideChrome ? "" : "pb-[78px] md:pb-0"}`}
           style={hideChrome ? { backgroundColor: "var(--app-bg)" } : undefined}
         >
           <Suspense fallback={<RouteLoader full />}>

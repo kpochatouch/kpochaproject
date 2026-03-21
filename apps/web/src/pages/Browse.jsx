@@ -53,6 +53,12 @@ export default function Browse() {
 
   const [feedAdverts, setFeedAdverts] = useState([]);
   const [railAdverts, setRailAdverts] = useState([]);
+  const FEED_CACHE_KEY = `kpocha:browse:feed:v1:${(
+    lga || "ALL"
+  ).toUpperCase()}`;
+  const FEED_SCROLL_KEY = `kpocha:browse:scroll:v1:${(
+    lga || "ALL"
+  ).toUpperCase()}`;
 
   // sentinel + latest state refs
   const sentinelRef = useRef(null);
@@ -60,6 +66,8 @@ export default function Browse() {
   const hasMoreRef = useRef(hasMore);
   const loadingMoreRef = useRef(loadingMore);
   const loadingFeedRef = useRef(loadingFeed);
+  const restoredFeedRef = useRef(false);
+  const restoredScrollRef = useRef(false);
 
   useEffect(() => {
     hasMoreRef.current = hasMore;
@@ -70,6 +78,10 @@ export default function Browse() {
   useEffect(() => {
     loadingFeedRef.current = loadingFeed;
   }, [loadingFeed]);
+  useEffect(() => {
+    restoredFeedRef.current = false;
+    restoredScrollRef.current = false;
+  }, [FEED_CACHE_KEY, FEED_SCROLL_KEY]);
 
   const isFeedTab = tab === "feed";
   const isProsTab = tab === "pros";
@@ -286,12 +298,90 @@ export default function Browse() {
     [lga, pageSize],
   );
 
-  // initial load & when lga or tab changes
   useEffect(() => {
     if (!isFeedTab) return;
+    if (restoredFeedRef.current) return;
+
+    try {
+      const raw = sessionStorage.getItem(FEED_CACHE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        const cachedItems = Array.isArray(parsed?.items) ? parsed.items : [];
+        const cachedHasMore =
+          typeof parsed?.hasMore === "boolean" ? parsed.hasMore : true;
+
+        if (cachedItems.length) {
+          setFeed(cachedItems);
+          setHasMore(cachedHasMore);
+        }
+      }
+    } catch {}
+
+    restoredFeedRef.current = true;
+  }, [isFeedTab, FEED_CACHE_KEY]);
+
+  // initial load only when there is no restored cached feed for this LGA
+  useEffect(() => {
+    if (!isFeedTab) return;
+    if (!restoredFeedRef.current) return;
+    if (feed.length) return;
+
     setHasMore(true);
     fetchFeed({ append: false, before: null });
-  }, [fetchFeed, isFeedTab, lga]);
+  }, [fetchFeed, isFeedTab, lga, feed.length]);
+
+  useEffect(() => {
+    if (!isFeedTab) return;
+
+    try {
+      sessionStorage.setItem(
+        FEED_CACHE_KEY,
+        JSON.stringify({
+          items: feed,
+          hasMore,
+        }),
+      );
+    } catch {}
+  }, [isFeedTab, FEED_CACHE_KEY, feed, hasMore]);
+
+  useEffect(() => {
+    if (!isFeedTab) return;
+
+    function saveScroll() {
+      try {
+        sessionStorage.setItem(
+          FEED_SCROLL_KEY,
+          String(window.scrollY || window.pageYOffset || 0),
+        );
+      } catch {}
+    }
+
+    window.addEventListener("scroll", saveScroll, { passive: true });
+    saveScroll();
+
+    return () => {
+      window.removeEventListener("scroll", saveScroll);
+    };
+  }, [isFeedTab, FEED_SCROLL_KEY]);
+
+  useEffect(() => {
+    if (!isFeedTab) return;
+    if (!feed.length) return;
+    if (restoredScrollRef.current) return;
+
+    try {
+      const raw = sessionStorage.getItem(FEED_SCROLL_KEY);
+      const y = Number(raw || 0);
+
+      if (Number.isFinite(y) && y > 0) {
+        requestAnimationFrame(() => {
+          window.scrollTo(0, y);
+        });
+      }
+    } catch {}
+
+    restoredScrollRef.current = true;
+  }, [isFeedTab, FEED_SCROLL_KEY, feed.length]);
 
   // force feed tab if ?post= is present (already handled in the URL sync effect)
 
