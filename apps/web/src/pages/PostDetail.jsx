@@ -795,8 +795,20 @@ export default function PostDetail() {
 
   return (
     <div className="max-w-xl mx-auto">
+      <div className="md:hidden flex items-center gap-2 px-3 py-3 border-b border-[#1f1f1f]">
+        <button
+          type="button"
+          onClick={() => navigate(-1)}
+          className="min-w-[44px] h-11 px-3 flex items-center justify-center rounded-full text-white text-3xl leading-none"
+          aria-label="Go back"
+        >
+          ‹
+        </button>
+        <div className="text-white font-semibold text-lg">Post</div>
+      </div>
+
       {/* header */}
-      <div className="px-4 pt-4 pb-2 flex items-start justify-between gap-3">
+      <div className="px-4 pt-3 md:pt-4 pb-2 flex items-start justify-between gap-3">
         <div className="flex gap-3">
           <div
             className="w-10 h-10 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center cursor-pointer"

@@ -15,10 +15,11 @@ export default function MobileBackButton({ fallback = "/" }) {
   return (
     <button
       onClick={goBack}
-      className="md:hidden p-2 rounded-full hover:bg-zinc-800"
+      className="md:hidden min-w-[44px] h-11 px-3 flex items-center justify-center rounded-full hover:bg-zinc-800 text-white"
       aria-label="Go back"
+      type="button"
     >
-      ‹
+      <span className="text-3xl leading-none">‹</span>
     </button>
   );
 }

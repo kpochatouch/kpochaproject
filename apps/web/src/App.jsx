@@ -682,7 +682,11 @@ export default function App() {
     import("./pages/PublicProfile.jsx");
   }, []);
 
-  const hideChrome = location.pathname.startsWith("/aws-liveness");
+  const hideChrome =
+    location.pathname.startsWith("/aws-liveness") ||
+    (isMobile &&
+      (location.pathname.startsWith("/for-you") ||
+        location.pathname.startsWith("/post/")));
   return (
     <ToastProvider>
       <div

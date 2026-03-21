@@ -403,12 +403,17 @@ router.get("/posts/for-you/start", tryAuth, async (req, res) => {
       );
     }
 
-    // 3) fallback – newest video posts
+    // 3) fallback – fresh video pool, then rotate start point
     if (!posts.length) {
       posts = await Post.find(baseQuery)
         .sort({ createdAt: -1 })
         .limit(20)
         .lean();
+
+      if (posts.length > 1) {
+        const startIndex = Math.floor(Math.random() * posts.length);
+        posts = [...posts.slice(startIndex), ...posts.slice(0, startIndex)];
+      }
     }
 
     if (!posts.length) {

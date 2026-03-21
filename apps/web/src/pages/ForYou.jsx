@@ -323,34 +323,50 @@ export default function ForYou() {
   }
 
   return (
-    <div
-      className="w-full h-[100dvh] overflow-y-auto snap-y snap-mandatory bg-black"
-      style={{ WebkitOverflowScrolling: "touch" }}
-    >
-      {feedPosts.map((post, index) => (
-        <ForYouPost
-          key={post._id}
-          post={post}
-          index={index}
-          me={me}
-          navigate={navigate}
-          onNeedMore={() => {
-            const remaining = feedPosts.length - 1 - index;
-            if (remaining <= 2) loadBatch({ reset: false });
-          }}
-        />
-      ))}
+    <div className="w-full h-[100dvh] bg-black flex flex-col">
+      <div className="md:hidden flex items-center gap-2 px-3 py-3 border-b border-[#1f1f1f]">
+        <button
+          type="button"
+          onClick={() => navigate(-1)}
+          className="min-w-[44px] h-11 px-3 flex items-center justify-center rounded-full text-white text-3xl leading-none"
+          aria-label="Go back"
+        >
+          ‹
+        </button>
+        <div className="text-white font-semibold text-lg">For You</div>
+      </div>
 
-      <div ref={sentinelRef} className="h-1 w-full" aria-hidden="true" />
+      <div
+        className="flex-1 overflow-y-auto snap-y snap-mandatory bg-black"
+        style={{ WebkitOverflowScrolling: "touch" }}
+      >
+        {feedPosts.map((post, index) => (
+          <ForYouPost
+            key={post._id}
+            post={post}
+            index={index}
+            me={me}
+            navigate={navigate}
+            onNeedMore={() => {
+              const remaining = feedPosts.length - 1 - index;
+              if (remaining <= 2) loadBatch({ reset: false });
+            }}
+          />
+        ))}
 
-      {loadingMore && (
-        <div className="px-4 py-3 text-[11px] text-gray-500">Loading more…</div>
-      )}
+        <div ref={sentinelRef} className="h-1 w-full" aria-hidden="true" />
 
-      <div className="px-4 py-6">
-        <Link to="/browse" className="text-gold">
-          ← Back to feed
-        </Link>
+        {loadingMore && (
+          <div className="px-4 py-3 text-[11px] text-gray-500">
+            Loading more…
+          </div>
+        )}
+
+        <div className="px-4 py-6">
+          <Link to="/browse" className="text-gold">
+            ← Back to feed
+          </Link>
+        </div>
       </div>
     </div>
   );
