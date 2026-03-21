@@ -89,6 +89,15 @@ function dedupeById(items = []) {
   return out;
 }
 
+function shuffleArray(items = []) {
+  const arr = Array.isArray(items) ? [...items] : [];
+  for (let i = arr.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
 export default function ForYou() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -103,6 +112,7 @@ export default function ForYou() {
   const observerRef = useRef(null);
   const feedPostsRef = useRef([]);
   const lastCursorIdRef = useRef(null);
+  const loadingMoreRef = useRef(false);
 
   useEffect(() => {
     feedPostsRef.current = feedPosts;
@@ -110,12 +120,13 @@ export default function ForYou() {
 
   const loadBatch = useCallback(
     async ({ reset = false } = {}) => {
-      if (!reset && loadingMore) return;
+      if (!reset && loadingMoreRef.current) return;
 
       if (reset) {
         setLoading(true);
         setError("");
       } else {
+        loadingMoreRef.current = true;
         setLoadingMore(true);
       }
 
@@ -222,11 +233,15 @@ export default function ForYou() {
           setError(err?.message || "Unable to load For You feed.");
         }
       } finally {
-        if (reset) setLoading(false);
-        else setLoadingMore(false);
+        if (reset) {
+          setLoading(false);
+        } else {
+          loadingMoreRef.current = false;
+          setLoadingMore(false);
+        }
       }
     },
-    [id, loadingMore],
+    [id],
   );
 
   useEffect(() => {

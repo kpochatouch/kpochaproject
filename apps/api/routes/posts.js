@@ -562,7 +562,7 @@ router.get("/posts/:id/next", tryAuth, async (req, res) => {
       if (likedIds.length) {
         likedPosts = await Post.find({
           ...baseFilter,
-          _id: { $in: likedIds },
+          _id: { $in: likedIds, $nin: [current._id, ...excludeObjectIds] },
         }).lean();
       }
     }
@@ -578,7 +578,7 @@ router.get("/posts/:id/next", tryAuth, async (req, res) => {
     if (trendingIds.length) {
       trendingPosts = await Post.find({
         ...baseFilter,
-        _id: { $in: trendingIds },
+        _id: { $in: trendingIds, $nin: [current._id, ...excludeObjectIds] },
       }).lean();
 
       const order = new Map(trendingIds.map((pid, idx) => [String(pid), idx]));
