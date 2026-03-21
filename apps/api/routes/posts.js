@@ -338,6 +338,154 @@ router.get("/posts/me", requireAuth, async (req, res) => {
   }
 });
 
+/* -------------------------------------------------------------------- */
+/* FOR YOU START */
+/* -------------------------------------------------------------------- */
+router.get("/posts/for-you/start", tryAuth, async (req, res) => {
+  try {
+    const { lga = "" } = req.query;
+    const viewerUid = req.user?.uid || null;
+
+    const baseQuery = {
+      isPublic: true,
+      hidden: { $ne: true },
+      deleted: { $ne: true },
+      media: videoElemMatch(),
+      $or: [{ type: { $ne: "story" } }, { type: { $exists: false } }],
+    };
+
+    if (lga) baseQuery.lga = toUpper(String(lga));
+
+    const seenIds = new Set();
+    const candidateIds = [];
+
+    function pushCandidateId(pid) {
+      const key = String(pid || "").trim();
+      if (!isObjId(key)) return;
+      if (seenIds.has(key)) return;
+      seenIds.add(key);
+      candidateIds.push(new mongoose.Types.ObjectId(key));
+    }
+
+    // 1) videos this viewer has liked
+    if (viewerUid) {
+      const likedStats = await PostStats.find({ likedBy: viewerUid })
+        .select("postId -_id")
+        .sort({ updatedAt: -1 })
+        .limit(50)
+        .lean();
+
+      likedStats.forEach((s) => pushCandidateId(s?.postId));
+    }
+
+    // 2) top trending videos
+    const topStats = await PostStats.find({})
+      .select("postId -_id")
+      .sort({ trendingScore: -1 })
+      .limit(100)
+      .lean();
+
+    topStats.forEach((s) => pushCandidateId(s?.postId));
+
+    let posts = [];
+
+    if (candidateIds.length) {
+      posts = await Post.find({
+        _id: { $in: candidateIds },
+        ...baseQuery,
+      }).lean();
+
+      const order = new Map(candidateIds.map((pid, idx) => [String(pid), idx]));
+
+      posts.sort(
+        (a, b) =>
+          (order.get(String(a._id)) ?? 0) - (order.get(String(b._id)) ?? 0),
+      );
+    }
+
+    // 3) fallback – newest video posts
+    if (!posts.length) {
+      posts = await Post.find(baseQuery)
+        .sort({ createdAt: -1 })
+        .limit(20)
+        .lean();
+    }
+
+    if (!posts.length) {
+      return res.json({ post: null, next: null });
+    }
+
+    // sanitize safely so one bad post does not kill the whole endpoint
+    const settled = await Promise.allSettled(
+      posts.map((p) => sanitizePostForClient(p)),
+    );
+
+    const safePosts = settled
+      .filter((r) => r.status === "fulfilled")
+      .map((r) => r.value)
+      .filter(Boolean)
+      .filter((p) => {
+        const m = Array.isArray(p.media) && p.media.length ? p.media[0] : null;
+        if (!m) return false;
+        if (m.type !== "video") return false;
+        return !!String(m.hlsUrl || m.url || "").trim();
+      });
+
+    if (!safePosts.length) {
+      return res.json({ post: null, next: null });
+    }
+
+    return res.json({
+      post: safePosts[0] || null,
+      next: safePosts[1] || null,
+    });
+  } catch (err) {
+    console.error("[posts:for-you:start] error:", err);
+    return res.status(500).json({ error: "for_you_start_failed" });
+  }
+});
+
+/* -------------------------------------------------------------------- */
+/* TRENDING */
+/* -------------------------------------------------------------------- */
+router.get("/posts/trending", async (req, res) => {
+  try {
+    const { lga = "", limit = 20 } = req.query;
+    const lim = Math.max(1, Math.min(Number(limit) || 20, 50));
+
+    const q = {
+      isPublic: true,
+      hidden: { $ne: true },
+      deleted: { $ne: true },
+      $or: [{ type: { $ne: "story" } }, { type: { $exists: false } }],
+    };
+
+    if (lga) q.lga = toUpper(String(lga));
+
+    const topStats = await PostStats.find({})
+      .sort({ trendingScore: -1 })
+      .limit(lim * 2)
+      .lean();
+
+    const ids = topStats.map((s) => s.postId);
+    const posts = await Post.find({ _id: { $in: ids }, ...q }).lean();
+
+    const order = new Map(ids.map((id, idx) => [String(id), idx]));
+    posts.sort(
+      (a, b) =>
+        (order.get(String(a._id)) ?? 0) - (order.get(String(b._id)) ?? 0),
+    );
+
+    const out = await Promise.all(
+      posts.slice(0, lim).map(sanitizePostForClient),
+    );
+    return res.json(out);
+  } catch (err) {
+    console.error("[posts:trending] error:", err);
+    return res.status(500).json({ error: "trending_failed" });
+  }
+});
+
 // READ: single post (public)
 router.get("/posts/:id", tryAuth, async (req, res) => {
   try {
@@ -1025,154 +1173,6 @@ router.delete("/posts/:id/save", requireAuth, async (req, res) => {
   } catch (err) {
     console.error("[posts:unsave] error:", err);
     return res.status(500).json({ error: "unsave_failed" });
-  }
-});
-
-/* -------------------------------------------------------------------- */
-/* FOR YOU START */
-/* -------------------------------------------------------------------- */
-router.get("/posts/for-you/start", tryAuth, async (req, res) => {
-  try {
-    const { lga = "" } = req.query;
-    const viewerUid = req.user?.uid || null;
-
-    const baseQuery = {
-      isPublic: true,
-      hidden: { $ne: true },
-      deleted: { $ne: true },
-      media: videoElemMatch(),
-      $or: [{ type: { $ne: "story" } }, { type: { $exists: false } }],
-    };
-
-    if (lga) baseQuery.lga = toUpper(String(lga));
-
-    const seenIds = new Set();
-    const candidateIds = [];
-
-    function pushCandidateId(pid) {
-      const key = String(pid || "").trim();
-      if (!isObjId(key)) return;
-      if (seenIds.has(key)) return;
-      seenIds.add(key);
-      candidateIds.push(new mongoose.Types.ObjectId(key));
-    }
-
-    // 1) videos this viewer has liked
-    if (viewerUid) {
-      const likedStats = await PostStats.find({ likedBy: viewerUid })
-        .select("postId -_id")
-        .sort({ updatedAt: -1 })
-        .limit(50)
-        .lean();
-
-      likedStats.forEach((s) => pushCandidateId(s?.postId));
-    }
-
-    // 2) top trending videos
-    const topStats = await PostStats.find({})
-      .select("postId -_id")
-      .sort({ trendingScore: -1 })
-      .limit(100)
-      .lean();
-
-    topStats.forEach((s) => pushCandidateId(s?.postId));
-
-    let posts = [];
-
-    if (candidateIds.length) {
-      posts = await Post.find({
-        _id: { $in: candidateIds },
-        ...baseQuery,
-      }).lean();
-
-      const order = new Map(candidateIds.map((pid, idx) => [String(pid), idx]));
-
-      posts.sort(
-        (a, b) =>
-          (order.get(String(a._id)) ?? 0) - (order.get(String(b._id)) ?? 0),
-      );
-    }
-
-    // 3) fallback – newest video posts
-    if (!posts.length) {
-      posts = await Post.find(baseQuery)
-        .sort({ createdAt: -1 })
-        .limit(20)
-        .lean();
-    }
-
-    if (!posts.length) {
-      return res.json({ post: null, next: null });
-    }
-
-    // sanitize safely so one bad post does not kill the whole endpoint
-    const settled = await Promise.allSettled(
-      posts.map((p) => sanitizePostForClient(p)),
-    );
-
-    const safePosts = settled
-      .filter((r) => r.status === "fulfilled")
-      .map((r) => r.value)
-      .filter(Boolean)
-      .filter((p) => {
-        const m = Array.isArray(p.media) && p.media.length ? p.media[0] : null;
-        if (!m) return false;
-        if (m.type !== "video") return false;
-        return !!String(m.hlsUrl || m.url || "").trim();
-      });
-
-    if (!safePosts.length) {
-      return res.json({ post: null, next: null });
-    }
-
-    return res.json({
-      post: safePosts[0] || null,
-      next: safePosts[1] || null,
-    });
-  } catch (err) {
-    console.error("[posts:for-you:start] error:", err);
-    return res.status(500).json({ error: "for_you_start_failed" });
-  }
-});
-
-/* -------------------------------------------------------------------- */
-/* TRENDING */
-/* -------------------------------------------------------------------- */
-router.get("/posts/trending", async (req, res) => {
-  try {
-    const { lga = "", limit = 20 } = req.query;
-    const lim = Math.max(1, Math.min(Number(limit) || 20, 50));
-
-    const q = {
-      isPublic: true,
-      hidden: { $ne: true },
-      deleted: { $ne: true },
-      $or: [{ type: { $ne: "story" } }, { type: { $exists: false } }],
-    };
-
-    if (lga) q.lga = toUpper(String(lga));
-
-    const topStats = await PostStats.find({})
-      .sort({ trendingScore: -1 })
-      .limit(lim * 2)
-      .lean();
-
-    const ids = topStats.map((s) => s.postId);
-    const posts = await Post.find({ _id: { $in: ids }, ...q }).lean();
-
-    const order = new Map(ids.map((id, idx) => [String(id), idx]));
-    posts.sort(
-      (a, b) =>
-        (order.get(String(a._id)) ?? 0) - (order.get(String(b._id)) ?? 0),
-    );
-
-    const out = await Promise.all(
-      posts.slice(0, lim).map(sanitizePostForClient),
-    );
-    return res.json(out);
-  } catch (err) {
-    console.error("[posts:trending] error:", err);
-    return res.status(500).json({ error: "trending_failed" });
   }
 });
 

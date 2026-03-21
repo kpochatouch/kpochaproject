@@ -89,15 +89,6 @@ function dedupeById(items = []) {
   return out;
 }
 
-function shuffleArray(items = []) {
-  const arr = [...items];
-  for (let i = arr.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-  }
-  return arr;
-}
-
 export default function ForYou() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -110,8 +101,8 @@ export default function ForYou() {
 
   const sentinelRef = useRef(null);
   const observerRef = useRef(null);
-  const oldestCreatedAtRef = useRef(null);
   const feedPostsRef = useRef([]);
+  const lastCursorIdRef = useRef(null);
 
   useEffect(() => {
     feedPostsRef.current = feedPosts;
@@ -129,60 +120,103 @@ export default function ForYou() {
       }
 
       try {
-        const before =
-          !reset && oldestCreatedAtRef.current
-            ? oldestCreatedAtRef.current
-            : undefined;
+        // direct open: /for-you/:id
+        if (reset && id) {
+          const { data } = await api.get(`/api/posts/${id}`);
+          const initial = data || null;
 
-        const res = await api.get("/api/posts/public", {
-          params: {
-            limit: 40,
-            ...(before ? { before } : {}),
-          },
-        });
-
-        const raw = Array.isArray(res?.data) ? res.data : [];
-        const videoPosts = raw.filter(isVideoPost);
-
-        if (!videoPosts.length) {
-          if (reset) {
-            setFeedPosts([]);
+          if (!initial || !initial._id || !isVideoPost(initial)) {
+            throw new Error("That video is unavailable.");
           }
+
+          setFeedPosts([initial]);
+          feedPostsRef.current = [initial];
+          lastCursorIdRef.current = initial._id;
           return;
         }
 
-        oldestCreatedAtRef.current =
-          raw[raw.length - 1]?.createdAt || oldestCreatedAtRef.current;
+        // initial For You start
+        if (reset) {
+          const res = await api.get("/api/posts/for-you/start");
+          const start = res?.data || {};
+          const first = start?.post || null;
+          const second = start?.next || null;
 
-        const existingIds = new Set(
-          (reset ? [] : feedPostsRef.current).map((p) =>
-            String(p?._id || p?.id || ""),
-          ),
+          const initialBatch = [first, second]
+            .filter(Boolean)
+            .filter(isVideoPost);
+
+          if (!initialBatch.length) {
+            setFeedPosts([]);
+            feedPostsRef.current = [];
+            lastCursorIdRef.current = null;
+            return;
+          }
+
+          const clean = dedupeById(initialBatch);
+          setFeedPosts(clean);
+          feedPostsRef.current = clean;
+          lastCursorIdRef.current =
+            clean[clean.length - 1]?._id || clean[0]?._id || null;
+          return;
+        }
+
+        const currentPosts = feedPostsRef.current || [];
+        const cursorId =
+          lastCursorIdRef.current ||
+          currentPosts[currentPosts.length - 1]?._id ||
+          null;
+
+        if (!cursorId) return;
+
+        const exclude = currentPosts
+          .map((p) => p?._id)
+          .filter(Boolean)
+          .slice(-100)
+          .join(",");
+
+        const res = await api.get(`/api/posts/${cursorId}/next`, {
+          params: exclude ? { exclude } : {},
+        });
+
+        const nxt = res?.data?.next || null;
+
+        if (!nxt || !nxt._id || !isVideoPost(nxt)) {
+          return;
+        }
+
+        // small pool support:
+        // if backend loops an already-seen post, replace the whole deck
+        // with a reshuffled mini-batch starting from that returned post.
+        const alreadyLoaded = currentPosts.some(
+          (p) => String(p?._id) === String(nxt._id),
         );
 
-        let nextBatch = videoPosts.filter((p) => {
-          const key = String(p?._id || p?.id || "");
-          if (!key) return false;
-          if (!reset && existingIds.has(key)) return false;
-          return true;
-        });
+        if (alreadyLoaded) {
+          const publicRes = await api.get("/api/posts/public", {
+            params: { limit: 40 },
+          });
 
-        nextBatch = shuffleArray(nextBatch);
+          const raw = Array.isArray(publicRes?.data) ? publicRes.data : [];
+          const videoPosts = shuffleArray(raw.filter(isVideoPost));
 
-        if (!nextBatch.length) {
-          nextBatch = shuffleArray(videoPosts);
-        }
+          if (!videoPosts.length) return;
 
-        if (!nextBatch.length) {
+          const rebuilt = dedupeById([nxt, ...videoPosts]).slice(0, 6);
+          setFeedPosts(rebuilt);
+          feedPostsRef.current = rebuilt;
+          lastCursorIdRef.current =
+            rebuilt[rebuilt.length - 1]?._id || nxt._id || null;
           return;
         }
 
-        const finalBatch = reset ? nextBatch.slice(0, 6) : nextBatch;
-
         setFeedPosts((prev) => {
-          const base = reset ? [] : prev;
-          return dedupeById([...base, ...finalBatch]);
+          const nextList = dedupeById([...prev, nxt]);
+          feedPostsRef.current = nextList;
+          return nextList;
         });
+
+        lastCursorIdRef.current = nxt._id;
       } catch (err) {
         if (reset) {
           setError(err?.message || "Unable to load For You feed.");
@@ -196,69 +230,12 @@ export default function ForYou() {
   );
 
   useEffect(() => {
-    let cancelled = false;
-
-    async function run() {
-      if (cancelled) return;
-
-      oldestCreatedAtRef.current = null;
-      feedPostsRef.current = [];
-      setFeedPosts([]);
-      setError("");
-      setLoading(true);
-
-      try {
-        if (id) {
-          const { data } = await api.get(`/api/posts/${id}`);
-          if (cancelled) return;
-
-          const initial = data || null;
-          if (!initial || !initial._id || !isVideoPost(initial)) {
-            throw new Error("That video is unavailable.");
-          }
-
-          setFeedPosts([initial]);
-          feedPostsRef.current = [initial];
-          oldestCreatedAtRef.current = initial.createdAt || null;
-          return;
-        }
-
-        const res = await api.get("/api/posts/public", {
-          params: { limit: 40 },
-        });
-
-        if (cancelled) return;
-
-        const raw = Array.isArray(res?.data) ? res.data : [];
-        const videoPosts = shuffleArray(raw.filter(isVideoPost));
-        const finalBatch = dedupeById(videoPosts).slice(0, 6);
-
-        if (!finalBatch.length) {
-          setFeedPosts([]);
-          return;
-        }
-
-        setFeedPosts(finalBatch);
-        feedPostsRef.current = finalBatch;
-        oldestCreatedAtRef.current =
-          raw[raw.length - 1]?.createdAt ||
-          finalBatch[finalBatch.length - 1]?.createdAt ||
-          null;
-      } catch (err) {
-        if (!cancelled) {
-          setError(err?.message || "Unable to load For You feed.");
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-
-    run();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [id]);
+    feedPostsRef.current = [];
+    lastCursorIdRef.current = null;
+    setFeedPosts([]);
+    setError("");
+    loadBatch({ reset: true });
+  }, [id, loadBatch]);
 
   useEffect(() => {
     const el = sentinelRef.current;
@@ -512,7 +489,7 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
 
     async function tryAutoplayCurrentVideo() {
       if (cancelled) return;
-      if (!isActiveRef.current) return;
+      if (!isActiveRef.current && index !== 0) return;
 
       const wantSound = getSoundEnabled();
       vid.muted = !wantSound;
