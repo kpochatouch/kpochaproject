@@ -53,8 +53,8 @@ const todayStr = () => new Date().toISOString().slice(0, 10); // YYYY-MM-DD
 function videoElemMatch() {
   return {
     $elemMatch: {
-      assetId: { $exists: true, $ne: "" },
       type: "video",
+      assetId: { $exists: true, $ne: null },
     },
   };
 }
