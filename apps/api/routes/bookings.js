@@ -303,32 +303,8 @@ router.post("/bookings", requireAuth, async (req, res) => {
       status: "pending_payment",
     });
 
-    // 🔔 Notify pro owner about new scheduled booking (pending payment)
-    try {
-      if (proOwnerUid) {
-        await createNotification({
-          toUid: proOwnerUid,
-          fromUid: req.user.uid,
-          type: "booking_created",
-          title: "New booking request",
-          body:
-            (clientName || "A client") +
-            ` requested ${svcSnap.serviceName} in ${toUpper(lga || "")}.`,
-          priority: "high",
-          data: {
-            bookingId: b._id.toString(),
-            status: b.status,
-            paymentStatus: b.paymentStatus,
-            kind: "scheduled",
-          },
-        });
-      }
-    } catch (notifyErr) {
-      console.warn(
-        "[bookings:create] notify pro failed:",
-        notifyErr?.message || notifyErr,
-      );
-    }
+    // Do NOT send urgent pro booking alert before payment is confirmed.
+    // Real actionable alert must happen only when booking becomes paid + scheduled.
 
     // create booking thread + snapshot (best-effort)
     try {
@@ -522,31 +498,8 @@ router.post("/bookings/instant", requireAuth, async (req, res) => {
       },
     });
 
-    // 🔔 Notify pro owner about new instant booking (pending payment)
-    try {
-      if (proOwnerUid) {
-        await createNotification({
-          toUid: proOwnerUid,
-          fromUid: req.user.uid,
-          type: "booking_created",
-          title: "New booking request",
-          body:
-            (clientName || "A client") +
-            ` requested ${svcSnap.serviceName} in ${normalizedLga}.`,
-          data: {
-            bookingId: b._id.toString(),
-            status: b.status,
-            paymentStatus: b.paymentStatus,
-            kind: "instant",
-          },
-        });
-      }
-    } catch (notifyErr) {
-      console.warn(
-        "[bookings:instant] notify pro failed:",
-        notifyErr?.message || notifyErr,
-      );
-    }
+    // Do NOT send urgent pro booking alert before payment is confirmed.
+    // Real actionable alert must happen only when booking becomes paid + scheduled.
 
     // create booking thread + snapshot (best-effort)
     try {

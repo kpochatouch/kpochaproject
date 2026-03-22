@@ -56,7 +56,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
   });
 
   const [comments, setComments] = useState([]);
-  const [showComments, setShowComments] = useState(false);
+  const [commentsOpen, setCommentsOpen] = useState(false);
   const [commentText, setCommentText] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [loadingLike, setLoadingLike] = useState(false);
@@ -355,6 +355,17 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
     window.addEventListener("global-click", onGlobalClick);
     return () => window.removeEventListener("global-click", onGlobalClick);
   }, [menuOpen]);
+
+  useEffect(() => {
+    if (!commentsOpen) return;
+
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [commentsOpen]);
 
   // Reset internal flags when post changes
   useEffect(() => {
@@ -821,14 +832,14 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
   }
 
   async function handleToggleComments() {
-    const to = !showComments;
-    setShowComments(to);
-    if (to && comments.length === 0 && postId) {
+    setCommentsOpen(true);
+
+    if (comments.length === 0 && postId) {
       try {
         const res = await api.get(`/api/posts/${postId}/comments`);
-        setComments(res.data || []);
+        setComments(Array.isArray(res.data) ? res.data : []);
       } catch {
-        // ignore
+        setComments([]);
       }
     }
   }
@@ -927,7 +938,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
     try {
       await api.patch(`/api/posts/${postId}/comments/disable`);
       setCommentsDisabled(true);
-      setShowComments(false);
+      setCommentsOpen(false);
       setMenuOpen(false);
     } catch {
       alert("Failed to disable comments");
@@ -1017,115 +1028,80 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
       : post.text;
 
   return (
-    <div
-      ref={cardRef}
-      className="rounded-xl overflow-hidden"
-      style={{
-        backgroundColor: "var(--app-surface)",
-        border: "1px solid var(--app-border)",
-        color: "var(--app-text)",
-        boxShadow: isLightTheme
-          ? "0 10px 30px rgba(15, 23, 42, 0.10), 0 2px 10px rgba(15, 23, 42, 0.06)"
-          : "none",
-      }}
-    >
-      {(post.text || post.proId) && (
-        <div className="px-4 sm:px-5 pt-4 pb-4">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0 flex-1">
-              {post.text ? (
-                <>
-                  <button
-                    onClick={goToPostDetail}
-                    className="text-left w-full text-[16px] leading-7"
-                    style={{ color: "var(--app-text)" }}
-                    type="button"
-                  >
-                    {shownText}
-                  </button>
-                  {textTooLong && !showFullText && (
+    <>
+      <div
+        ref={cardRef}
+        className="rounded-xl overflow-hidden"
+        style={{
+          backgroundColor: "var(--app-surface)",
+          border: "1px solid var(--app-border)",
+          color: "var(--app-text)",
+          boxShadow: isLightTheme
+            ? "0 10px 30px rgba(15, 23, 42, 0.10), 0 2px 10px rgba(15, 23, 42, 0.06)"
+            : "none",
+        }}
+      >
+        {(post.text || post.proId) && (
+          <div className="px-4 sm:px-5 pt-4 pb-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                {post.text ? (
+                  <>
                     <button
-                      onClick={() => setShowFullText(true)}
-                      className="mt-2 block text-[14px] font-medium text-gold"
+                      onClick={goToPostDetail}
+                      className="text-left w-full text-[16px] leading-7"
+                      style={{ color: "var(--app-text)" }}
                       type="button"
                     >
-                      View more
+                      {shownText}
                     </button>
-                  )}
-                </>
-              ) : null}
-            </div>
-
-            <div className="shrink-0 flex items-center gap-2">
-              {post.proId && (
-                <Link
-                  to={`/book/${post.proId}`}
-                  className="rounded-lg bg-gold text-black px-4 py-2 text-[15px] font-semibold"
-                >
-                  Book
-                </Link>
-              )}
-
-              <div className="relative" ref={menuRef}>
-                <button
-                  onClick={() => setMenuOpen((v) => !v)}
-                  aria-label="Open post menu"
-                  className="w-9 h-9 flex items-center justify-center rounded-full text-[22px] leading-none"
-                  style={{
-                    color: isLightTheme ? "#111827" : "#D4AF37",
-                  }}
-                  type="button"
-                >
-                  ⋮
-                </button>
-
-                {menuOpen && (
-                  <div
-                    className="absolute right-0 mt-2 w-56 rounded-lg shadow-lg z-30"
-                    style={{
-                      backgroundColor: "var(--app-surface)",
-                      border: "1px solid var(--app-border)",
-                      color: "var(--app-text)",
-                    }}
-                  >
-                    <button
-                      onClick={toggleSave}
-                      className="w-full text-left px-3 py-2 text-sm"
-                      style={{
-                        backgroundColor: "transparent",
-                        color: "var(--app-text)",
-                      }}
-                      type="button"
-                    >
-                      {stats.savedByMe
-                        ? "Unsave post"
-                        : "Save post / Add to collection"}
-                    </button>
-
-                    <button
-                      onClick={handleCopyLink}
-                      className="w-full text-left px-3 py-2 text-sm"
-                      style={{
-                        backgroundColor: "transparent",
-                        color: "var(--app-text)",
-                      }}
-                      type="button"
-                    >
-                      Copy link
-                    </button>
-
-                    {isOwner ? (
+                    {textTooLong && !showFullText && (
                       <button
-                        onClick={handleHideOrDeletePost}
-                        disabled={deleting}
-                        className="w-full text-left px-3 py-2 text-sm text-red-300 disabled:opacity-50"
+                        onClick={() => setShowFullText(true)}
+                        className="mt-2 block text-[14px] font-medium text-gold"
                         type="button"
                       >
-                        {deleting ? "Deleting…" : "Delete / Hide Post"}
+                        View more
                       </button>
-                    ) : (
+                    )}
+                  </>
+                ) : null}
+              </div>
+
+              <div className="shrink-0 flex items-center gap-2">
+                {post.proId && (
+                  <Link
+                    to={`/book/${post.proId}`}
+                    className="rounded-lg bg-gold text-black px-4 py-2 text-[15px] font-semibold"
+                  >
+                    Book
+                  </Link>
+                )}
+
+                <div className="relative" ref={menuRef}>
+                  <button
+                    onClick={() => setMenuOpen((v) => !v)}
+                    aria-label="Open post menu"
+                    className="w-9 h-9 flex items-center justify-center rounded-full text-[22px] leading-none"
+                    style={{
+                      color: isLightTheme ? "#111827" : "#D4AF37",
+                    }}
+                    type="button"
+                  >
+                    ⋮
+                  </button>
+
+                  {menuOpen && (
+                    <div
+                      className="absolute right-0 mt-2 w-56 rounded-lg shadow-lg z-30"
+                      style={{
+                        backgroundColor: "var(--app-surface)",
+                        border: "1px solid var(--app-border)",
+                        color: "var(--app-text)",
+                      }}
+                    >
                       <button
-                        onClick={() => alert("You can only hide your own post")}
+                        onClick={toggleSave}
                         className="w-full text-left px-3 py-2 text-sm"
                         style={{
                           backgroundColor: "transparent",
@@ -1133,332 +1109,421 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
                         }}
                         type="button"
                       >
-                        Hide Post
+                        {stats.savedByMe
+                          ? "Unsave post"
+                          : "Save post / Add to collection"}
                       </button>
-                    )}
 
-                    {isOwner && (
-                      <>
-                        {commentsDisabled ? (
-                          <button
-                            onClick={handleEnableComments}
-                            className="w-full text-left px-3 py-2 text-sm"
-                            style={{
-                              backgroundColor: "transparent",
-                              color: "var(--app-text)",
-                            }}
-                            type="button"
-                          >
-                            Enable comments
-                          </button>
-                        ) : (
-                          <button
-                            onClick={handleDisableComments}
-                            className="w-full text-left px-3 py-2 text-sm"
-                            style={{
-                              backgroundColor: "transparent",
-                              color: "var(--app-text)",
-                            }}
-                            type="button"
-                          >
-                            Disable comments
-                          </button>
-                        )}
-                      </>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+                      <button
+                        onClick={handleCopyLink}
+                        className="w-full text-left px-3 py-2 text-sm"
+                        style={{
+                          backgroundColor: "transparent",
+                          color: "var(--app-text)",
+                        }}
+                        type="button"
+                      >
+                        Copy link
+                      </button>
 
-      {/* media */}
-      {media && (
-        <div className="relative z-0 isolate w-full bg-black overflow-hidden aspect-[4/5] sm:aspect-[4/5] lg:aspect-[3/4] xl:aspect-[1/1] max-h-[80vh]">
-          {/* ✅ Banner overlay (top) */}
-          <div className="absolute inset-x-0 top-0 z-[40] pointer-events-none">
-            {/* fade so text is readable */}
-            <div className="px-4 pt-4 pb-10 bg-gradient-to-b from-black/75 via-black/25 to-transparent">
-              <div className="flex items-center justify-between gap-2">
-                {/* left: author + time */}
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    goToProfile();
-                  }}
-                  className="pointer-events-auto flex items-center gap-2"
-                  aria-label="View profile"
-                  title="View profile"
-                >
-                  <div className="w-10 h-10 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center">
-                    {avatar ? (
-                      <img
-                        src={avatar}
-                        alt={proName}
-                        className="w-full h-full object-cover"
-                        loading="lazy"
-                      />
-                    ) : (
-                      <span className="text-xs text-white">
-                        {proName.slice(0, 1).toUpperCase()}
-                      </span>
-                    )}
-                  </div>
+                      {isOwner ? (
+                        <button
+                          onClick={handleHideOrDeletePost}
+                          disabled={deleting}
+                          className="w-full text-left px-3 py-2 text-sm text-red-300 disabled:opacity-50"
+                          type="button"
+                        >
+                          {deleting ? "Deleting…" : "Delete / Hide Post"}
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() =>
+                            alert("You can only hide your own post")
+                          }
+                          className="w-full text-left px-3 py-2 text-sm"
+                          style={{
+                            backgroundColor: "transparent",
+                            color: "var(--app-text)",
+                          }}
+                          type="button"
+                        >
+                          Hide Post
+                        </button>
+                      )}
 
-                  <div className="min-w-0">
-                    <div className="text-[15px] font-semibold text-white truncate max-w-[260px]">
-                      <DisplayName
-                        name={proName}
-                        verified={proVerified}
-                        badgeClassName="w-4 h-4"
-                      />
+                      {isOwner && (
+                        <>
+                          {commentsDisabled ? (
+                            <button
+                              onClick={handleEnableComments}
+                              className="w-full text-left px-3 py-2 text-sm"
+                              style={{
+                                backgroundColor: "transparent",
+                                color: "var(--app-text)",
+                              }}
+                              type="button"
+                            >
+                              Enable comments
+                            </button>
+                          ) : (
+                            <button
+                              onClick={handleDisableComments}
+                              className="w-full text-left px-3 py-2 text-sm"
+                              style={{
+                                backgroundColor: "transparent",
+                                color: "var(--app-text)",
+                              }}
+                              type="button"
+                            >
+                              Disable comments
+                            </button>
+                          )}
+                        </>
+                      )}
                     </div>
-                    <div className="text-[10px] text-gray-300">
-                      {lga || "Nigeria"} • {timeAgo(post.createdAt)}
-                    </div>
-                  </div>
-                </button>
-
-                {/* right: open post */}
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    goToPostDetail();
-                  }}
-                  className="pointer-events-auto text-[13px] font-medium text-white/90 bg-black/35 hover:bg-black/50 rounded-full px-4 py-1.5"
-                >
-                  View post
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {isVideo ? (
-            <>
-              <video
-                ref={videoRef}
-                data-src={media.url}
-                className={`absolute inset-0 w-full h-full object-cover z-[1] ${
-                  hasFirstFrame ? "opacity-100" : "opacity-0"
-                }`}
-                poster={
-                  Capacitor.isNativePlatform() ? undefined : media?.thumbnailUrl
-                }
-                muted={muted}
-                loop
-                playsInline
-                preload="metadata"
-                controls={false}
-                onClick={onClickMedia}
-                onPlay={onVideoPlay}
-                onLoadedMetadata={onLoadedMetadata}
-                onTimeUpdate={onTimeUpdate}
-                onLoadedData={() => setHasFirstFrame(true)}
-                onPlaying={() => setHasFirstFrame(true)}
-                onError={() => setHasFirstFrame(true)}
-              />
-
-              {!hasFirstFrame && !!media?.thumbnailUrl && (
-                <img
-                  src={media.thumbnailUrl}
-                  alt=""
-                  className="absolute inset-0 w-full h-full object-cover z-[2] pointer-events-none"
-                  loading="lazy"
-                />
-              )}
-
-              {/* ✅ Speaker icon OVER the video (inside the same relative container) */}
-              {(showSpeaker || muted) && (
-                <button
-                  type="button"
-                  onMouseDown={(e) => e.stopPropagation()}
-                  onClick={(e) => {
-                    e.stopPropagation();
-
-                    const vid = videoRef.current;
-                    if (!vid) return;
-
-                    const nextMuted = !muted;
-                    setMuted(nextMuted);
-                    vid.muted = nextMuted;
-                    setSoundEnabled(!nextMuted);
-
-                    if (!nextMuted && vid.paused) {
-                      playTriggeredByObserverRef.current = false;
-                      vid.play().catch(() => {});
-                    }
-
-                    showSpeakerBrief(1200);
-                  }}
-                  aria-label={muted ? "Unmute" : "Mute"}
-                  className="absolute bottom-3 right-3 z-[50] w-9 h-9 rounded-full bg-black/35 flex items-center justify-center pointer-events-auto transform-gpu"
-                >
-                  <span className="text-white text-[16px] leading-none">
-                    {muted ? "🔇" : "🔊"}
-                  </span>
-                </button>
-              )}
-            </>
-          ) : (
-            <img
-              src={media.url}
-              alt=""
-              loading="lazy"
-              onClick={onClickMedia}
-              className="absolute inset-0 w-full h-full object-cover cursor-pointer"
-            />
-          )}
-        </div>
-      )}
-
-      {/* counts row */}
-      <div
-        className="flex flex-wrap items-center justify-between gap-3 px-4 sm:px-5 py-3 text-[14px] border-t"
-        style={{
-          color: "var(--app-text-soft)",
-          borderColor: "var(--app-border)",
-        }}
-      >
-        <div className="flex flex-wrap gap-5">
-          <div>{stats.likesCount} likes</div>
-          <button onClick={handleToggleComments} type="button">
-            {stats.commentsCount} comments
-          </button>
-          <div>{stats.sharesCount} shares</div>
-        </div>
-        <div className="flex items-center gap-1">
-          <span role="img" aria-label="views">
-            👁
-          </span>
-          <span>Views</span>
-          <span>{stats.viewsCount}</span>
-        </div>
-      </div>
-
-      {/* actions */}
-      <div
-        className="relative z-[1] flex border-t"
-        style={{
-          borderColor: "var(--app-border)",
-          backgroundColor: "var(--app-surface)",
-        }}
-      >
-        <LikeButton active={stats.likedByMe} onClick={toggleLike} />
-        <CommentToggle onClick={handleToggleComments} />
-        <ShareButton onClick={handleShare} />
-        {!isOwner ? (
-          <FollowButton
-            targetUid={followTargetUid}
-            proId={post.proId || null}
-          />
-        ) : (
-          <ActionButton disabled className="text-gray-500 select-none">
-            —
-          </ActionButton>
-        )}
-      </div>
-
-      {/* comments */}
-      {showComments && (
-        <div
-          className="px-4 py-3 border-t"
-          style={{ borderColor: "var(--app-border)" }}
-        >
-          {!commentsDisabled ? (
-            <form onSubmit={submitComment} className="flex gap-2 mb-4">
-              <input
-                value={commentText}
-                onChange={(e) => setCommentText(e.target.value)}
-                placeholder={
-                  currentUser ? "Write a comment..." : "Login to comment..."
-                }
-                className="flex-1 rounded-full px-4 py-3 text-[15px]"
-                style={{
-                  backgroundColor: "var(--app-surface-2)",
-                  border: "1px solid var(--app-border)",
-                  color: "var(--app-text)",
-                }}
-                disabled={!currentUser}
-              />
-              <button
-                className="text-[15px] font-medium bg-[#F5C542] text-black rounded-full px-4 py-2"
-                type="submit"
-                disabled={!currentUser}
-              >
-                Post
-              </button>
-            </form>
-          ) : (
-            <div className="text-xs text-red-400 mb-3">
-              Comments are disabled for this post.
-            </div>
-          )}
-
-          <div className="space-y-3">
-            {comments.map((c) => (
-              <div key={c._id} className="flex gap-2">
-                <div className="w-8 h-8 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center text-xs text-white">
-                  {c.authorAvatar ? (
-                    <img
-                      src={c.authorAvatar}
-                      alt={c.authorName}
-                      className="w-full h-full object-cover"
-                      loading="lazy"
-                    />
-                  ) : (
-                    (c.authorName || "U").slice(0, 1).toUpperCase()
                   )}
                 </div>
-                <div className="flex-1">
-                  <div className="text-[14px] text-white font-semibold">
-                    {c.authorName || "User"}
-                  </div>
-                  <div
-                    className="rounded-2xl px-4 py-3 text-[15px] leading-6"
-                    style={{
-                      backgroundColor: "var(--app-surface-2)",
-                      color: "var(--app-text)",
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* media */}
+        {media && (
+          <div className="relative z-0 isolate w-full bg-black overflow-hidden aspect-[4/5] sm:aspect-[4/5] lg:aspect-[3/4] xl:aspect-[1/1] max-h-[80vh]">
+            {/* ✅ Banner overlay (top) */}
+            <div className="absolute inset-x-0 top-0 z-[40] pointer-events-none">
+              {/* fade so text is readable */}
+              <div className="px-4 pt-4 pb-10 bg-gradient-to-b from-black/75 via-black/25 to-transparent">
+                <div className="flex items-center justify-between gap-2">
+                  {/* left: author + time */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      goToProfile();
                     }}
+                    className="pointer-events-auto flex items-center gap-2"
+                    aria-label="View profile"
+                    title="View profile"
                   >
-                    {c.text}
-                  </div>
-                  <div
-                    className="flex gap-3 items-center text-[12px] mt-2"
-                    style={{ color: "var(--app-text-soft)" }}
+                    <div className="w-10 h-10 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center">
+                      {avatar ? (
+                        <img
+                          src={avatar}
+                          alt={proName}
+                          className="w-full h-full object-cover"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <span className="text-xs text-white">
+                          {proName.slice(0, 1).toUpperCase()}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="min-w-0">
+                      <div className="text-[15px] font-semibold text-white truncate max-w-[260px]">
+                        <DisplayName
+                          name={proName}
+                          verified={proVerified}
+                          badgeClassName="w-4 h-4"
+                        />
+                      </div>
+                      <div className="text-[10px] text-gray-300">
+                        {lga || "Nigeria"} • {timeAgo(post.createdAt)}
+                      </div>
+                    </div>
+                  </button>
+
+                  {/* right: open post */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      goToPostDetail();
+                    }}
+                    className="pointer-events-auto text-[13px] font-medium text-white/90 bg-black/35 hover:bg-black/50 rounded-full px-4 py-1.5"
                   >
-                    <span>
-                      {c.createdAt
-                        ? new Date(c.createdAt).toLocaleString()
-                        : ""}
-                    </span>
-                    {currentUser?.uid && currentUser.uid === c.ownerUid && (
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteComment(c._id)}
-                        className="text-red-300 hover:text-red-100"
-                      >
-                        Delete
-                      </button>
-                    )}
-                  </div>
+                    View post
+                  </button>
                 </div>
               </div>
-            ))}
-            {comments.length === 0 && (
-              <div
-                className="text-xs"
-                style={{ color: "var(--app-text-soft)" }}
-              >
-                No comments yet.
-              </div>
+            </div>
+
+            {isVideo ? (
+              <>
+                <video
+                  ref={videoRef}
+                  data-src={media.url}
+                  className={`absolute inset-0 w-full h-full object-cover z-[1] ${
+                    hasFirstFrame ? "opacity-100" : "opacity-0"
+                  }`}
+                  poster={
+                    Capacitor.isNativePlatform()
+                      ? undefined
+                      : media?.thumbnailUrl
+                  }
+                  muted={muted}
+                  loop
+                  playsInline
+                  preload="metadata"
+                  controls={false}
+                  onClick={onClickMedia}
+                  onPlay={onVideoPlay}
+                  onLoadedMetadata={onLoadedMetadata}
+                  onTimeUpdate={onTimeUpdate}
+                  onLoadedData={() => setHasFirstFrame(true)}
+                  onPlaying={() => setHasFirstFrame(true)}
+                  onError={() => setHasFirstFrame(true)}
+                />
+
+                {!hasFirstFrame && !!media?.thumbnailUrl && (
+                  <img
+                    src={media.thumbnailUrl}
+                    alt=""
+                    className="absolute inset-0 w-full h-full object-cover z-[2] pointer-events-none"
+                    loading="lazy"
+                  />
+                )}
+
+                {/* ✅ Speaker icon OVER the video (inside the same relative container) */}
+                {(showSpeaker || muted) && (
+                  <button
+                    type="button"
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.stopPropagation();
+
+                      const vid = videoRef.current;
+                      if (!vid) return;
+
+                      const nextMuted = !muted;
+                      setMuted(nextMuted);
+                      vid.muted = nextMuted;
+                      setSoundEnabled(!nextMuted);
+
+                      if (!nextMuted && vid.paused) {
+                        playTriggeredByObserverRef.current = false;
+                        vid.play().catch(() => {});
+                      }
+
+                      showSpeakerBrief(1200);
+                    }}
+                    aria-label={muted ? "Unmute" : "Mute"}
+                    className="absolute bottom-3 right-3 z-[50] w-9 h-9 rounded-full bg-black/35 flex items-center justify-center pointer-events-auto transform-gpu"
+                  >
+                    <span className="text-white text-[16px] leading-none">
+                      {muted ? "🔇" : "🔊"}
+                    </span>
+                  </button>
+                )}
+              </>
+            ) : (
+              <img
+                src={media.url}
+                alt=""
+                loading="lazy"
+                onClick={onClickMedia}
+                className="absolute inset-0 w-full h-full object-cover cursor-pointer"
+              />
             )}
+          </div>
+        )}
+
+        {/* counts row */}
+        <div
+          className="flex flex-wrap items-center justify-between gap-3 px-4 sm:px-5 py-3 text-[14px] border-t"
+          style={{
+            color: "var(--app-text-soft)",
+            borderColor: "var(--app-border)",
+          }}
+        >
+          <div className="flex flex-wrap gap-5">
+            <div>{stats.likesCount} likes</div>
+            <button onClick={handleToggleComments} type="button">
+              {stats.commentsCount} comments
+            </button>
+            <div>{stats.sharesCount} shares</div>
+          </div>
+          <div className="flex items-center gap-1">
+            <span role="img" aria-label="views">
+              👁
+            </span>
+            <span>Views</span>
+            <span>{stats.viewsCount}</span>
+          </div>
+        </div>
+
+        {/* actions */}
+        <div
+          className="relative z-[1] flex border-t"
+          style={{
+            borderColor: "var(--app-border)",
+            backgroundColor: "var(--app-surface)",
+          }}
+        >
+          <LikeButton active={stats.likedByMe} onClick={toggleLike} />
+          <CommentToggle onClick={handleToggleComments} />
+          <ShareButton onClick={handleShare} />
+          {!isOwner ? (
+            <FollowButton
+              targetUid={followTargetUid}
+              proId={post.proId || null}
+            />
+          ) : (
+            <ActionButton disabled className="text-gray-500 select-none">
+              —
+            </ActionButton>
+          )}
+        </div>
+      </div>
+
+      {commentsOpen && (
+        <div
+          className="fixed inset-0 z-[120] bg-black/70 flex items-center justify-center p-3 sm:p-4"
+          onClick={() => setCommentsOpen(false)}
+        >
+          <div
+            className="w-full max-w-2xl max-h-[88vh] rounded-2xl overflow-hidden shadow-2xl"
+            style={{
+              backgroundColor: "var(--app-surface)",
+              border: "1px solid var(--app-border)",
+              color: "var(--app-text)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              className="px-4 sm:px-5 py-4 border-b flex items-center justify-between"
+              style={{ borderColor: "var(--app-border)" }}
+            >
+              <div className="min-w-0">
+                <div className="text-[18px] font-semibold">Comments</div>
+                <div
+                  className="text-[13px] mt-1"
+                  style={{ color: "var(--app-text-soft)" }}
+                >
+                  {stats.commentsCount} comments
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setCommentsOpen(false)}
+                className="w-10 h-10 rounded-full flex items-center justify-center text-[22px]"
+                style={{
+                  backgroundColor: "var(--app-surface-2)",
+                  color: "var(--app-text)",
+                }}
+                aria-label="Close comments"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="overflow-y-auto max-h-[58vh] px-4 sm:px-5 py-4 space-y-4">
+              {comments.length ? (
+                comments.map((c) => (
+                  <div key={c._id} className="flex gap-3 items-start">
+                    <div className="w-10 h-10 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center text-xs text-white shrink-0">
+                      {c.authorAvatar ? (
+                        <img
+                          src={c.authorAvatar}
+                          alt={c.authorName}
+                          className="w-full h-full object-cover"
+                          loading="lazy"
+                        />
+                      ) : (
+                        (c.authorName || "U").slice(0, 1).toUpperCase()
+                      )}
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[14px] font-semibold">
+                        {c.authorName || "User"}
+                      </div>
+
+                      <div
+                        className="mt-1 rounded-2xl px-4 py-3 text-[15px] leading-6"
+                        style={{
+                          backgroundColor: "var(--app-surface-2)",
+                          color: "var(--app-text)",
+                        }}
+                      >
+                        {c.text}
+                      </div>
+
+                      <div
+                        className="flex gap-3 items-center text-[12px] mt-2"
+                        style={{ color: "var(--app-text-soft)" }}
+                      >
+                        <span>
+                          {c.createdAt
+                            ? new Date(c.createdAt).toLocaleString()
+                            : ""}
+                        </span>
+
+                        {currentUser?.uid && currentUser.uid === c.ownerUid && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteComment(c._id)}
+                            className="text-red-300 hover:text-red-100"
+                          >
+                            Delete
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div
+                  className="text-sm"
+                  style={{ color: "var(--app-text-soft)" }}
+                >
+                  No comments yet.
+                </div>
+              )}
+            </div>
+
+            <div
+              className="px-4 sm:px-5 py-4 border-t"
+              style={{ borderColor: "var(--app-border)" }}
+            >
+              {!commentsDisabled ? (
+                <form onSubmit={submitComment} className="flex gap-2">
+                  <input
+                    value={commentText}
+                    onChange={(e) => setCommentText(e.target.value)}
+                    placeholder={
+                      currentUser ? "Write a comment..." : "Login to comment..."
+                    }
+                    className="flex-1 rounded-full px-4 py-3 text-[15px]"
+                    style={{
+                      backgroundColor: "var(--app-surface-2)",
+                      border: "1px solid var(--app-border)",
+                      color: "var(--app-text)",
+                    }}
+                    disabled={!currentUser}
+                  />
+
+                  <button
+                    className="text-[15px] font-medium bg-[#F5C542] text-black rounded-full px-5 py-2"
+                    type="submit"
+                    disabled={!currentUser}
+                  >
+                    Post
+                  </button>
+                </form>
+              ) : (
+                <div className="text-sm text-red-400">
+                  Comments are disabled for this post.
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 }

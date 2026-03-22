@@ -18,7 +18,7 @@ export default function BookingAlert({
 
   const audioRef = useRef(null);
   const queueRef = useRef([]); // avoid stale closure
-  const STORAGE_KEY = "pro:lastBookingAlertAt";
+  const STORAGE_KEY = "pro:lastBookingAlertAt:v2";
 
   useEffect(() => {
     queueRef.current = queue;
@@ -82,28 +82,46 @@ export default function BookingAlert({
 
       // STRICT actionable: scheduled + paid
       const actionable = (Array.isArray(data) ? data : []).filter(
-        (b) => b.status === "scheduled" && b.paymentStatus === "paid"
+        (b) => b.status === "scheduled" && b.paymentStatus === "paid",
       );
 
       const lastAtMs = Number(localStorage.getItem(STORAGE_KEY) || 0);
 
       const norm = actionable.map((b) => ({
         ...b,
-        // backend truth: ring window starts when payment is confirmed
-        _createdMs: new Date(
-          b.ringingStartedAt || b.updatedAt || b.createdAt || Date.now()
-        ).getTime(),
+        // Use only stable "new booking became ringable" time.
+        // DO NOT use updatedAt, because unrelated edits can retrigger sound.
+        _createdMs: new Date(b.ringingStartedAt || b.createdAt || 0).getTime(),
       }));
 
-      const existingIds = new Set(queueRef.current.map((q) => q._id));
+      const actionableIds = new Set(norm.map((b) => String(b._id)));
+
+      // Remove queue entries that are no longer actionable
+      const cleanedQueue = queueRef.current.filter((q) =>
+        actionableIds.has(String(q._id)),
+      );
+
+      if (cleanedQueue.length !== queueRef.current.length) {
+        setQueue(cleanedQueue);
+      }
+
+      const existingIds = new Set(cleanedQueue.map((q) => String(q._id)));
 
       const fresh = norm
-        .filter((b) => b._createdMs > lastAtMs && !existingIds.has(b._id))
+        .filter((b) => {
+          const id = String(b._id);
+          return b._createdMs > lastAtMs && !existingIds.has(id);
+        })
         .sort((a, b) => b._createdMs - a._createdMs);
 
       if (fresh.length) {
-        setQueue((q) => [...q, ...fresh]);
-        localStorage.setItem(STORAGE_KEY, String(fresh[0]._createdMs));
+        setQueue((q) => {
+          const base = q.filter((item) => actionableIds.has(String(item._id)));
+          return [...base, ...fresh];
+        });
+
+        const newestMs = Math.max(...fresh.map((b) => b._createdMs || 0));
+        localStorage.setItem(STORAGE_KEY, String(newestMs));
 
         if (playSound && audioRef.current) {
           try {
@@ -119,7 +137,8 @@ export default function BookingAlert({
 
   // Socket-first: booking paid -> refresh
   useEffect(() => {
-    const off = registerSocketHandler("booking:paid", () => {
+    const off = registerSocketHandler("booking:paid", (evt) => {
+      if (!evt) return;
       refreshAndEnqueue();
     });
     return () => off?.();

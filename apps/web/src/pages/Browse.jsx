@@ -53,10 +53,8 @@ export default function Browse() {
 
   const [feedAdverts, setFeedAdverts] = useState([]);
   const [railAdverts, setRailAdverts] = useState([]);
-  const FEED_CACHE_KEY = `kpocha:browse:feed:v1:${(
-    lga || "ALL"
-  ).toUpperCase()}`;
-  const FEED_SCROLL_KEY = `kpocha:browse:scroll:v1:${(
+
+  const FEED_SCROLL_KEY = `kpocha:browse:scroll:v2:${(
     lga || "ALL"
   ).toUpperCase()}`;
 
@@ -66,12 +64,18 @@ export default function Browse() {
   const hasMoreRef = useRef(hasMore);
   const loadingMoreRef = useRef(loadingMore);
   const loadingFeedRef = useRef(loadingFeed);
-  const restoredFeedRef = useRef(false);
   const restoredScrollRef = useRef(false);
+  const nextBeforeRef = useRef(null);
+  const loopModeRef = useRef(false);
 
   useEffect(() => {
     hasMoreRef.current = hasMore;
   }, [hasMore]);
+
+  useEffect(() => {
+    loopModeRef.current = !hasMore;
+  }, [hasMore]);
+
   useEffect(() => {
     loadingMoreRef.current = loadingMore;
   }, [loadingMore]);
@@ -79,9 +83,8 @@ export default function Browse() {
     loadingFeedRef.current = loadingFeed;
   }, [loadingFeed]);
   useEffect(() => {
-    restoredFeedRef.current = false;
     restoredScrollRef.current = false;
-  }, [FEED_CACHE_KEY, FEED_SCROLL_KEY]);
+  }, [FEED_SCROLL_KEY]);
 
   const isFeedTab = tab === "feed";
   const isProsTab = tab === "pros";
@@ -239,6 +242,66 @@ export default function Browse() {
     setLga("");
   }
 
+  function dedupePosts(list = []) {
+    const seen = new Set();
+    return list.filter((item) => {
+      const id = item?._id || item?.id;
+      if (!id) return false;
+      if (seen.has(String(id))) return false;
+      seen.add(String(id));
+      return true;
+    });
+  }
+
+  function shufflePosts(list = []) {
+    const arr = [...list];
+    for (let i = arr.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+
+  function buildMixedBrowseFeed({ trending = [], recent = [] } = {}) {
+    const t = shufflePosts(trending);
+    const r = shufflePosts(recent);
+
+    const out = [];
+    let ti = 0;
+    let ri = 0;
+
+    // pattern: 1 trending, 2 recent
+    while (ti < t.length || ri < r.length) {
+      if (ti < t.length) out.push(t[ti++]);
+      if (ri < r.length) out.push(r[ri++]);
+      if (ri < r.length) out.push(r[ri++]);
+    }
+
+    return dedupePosts(out);
+  }
+
+  function getOldestCursor(list = []) {
+    let oldestTs = null;
+    let oldestRaw = null;
+
+    for (const item of list) {
+      const raw = item?.createdAt || item?._id || null;
+      if (!raw) continue;
+
+      const d = new Date(raw);
+      const ts = isNaN(d.getTime()) ? null : d.getTime();
+
+      if (ts === null) continue;
+
+      if (oldestTs === null || ts < oldestTs) {
+        oldestTs = ts;
+        oldestRaw = d.toISOString();
+      }
+    }
+
+    return oldestRaw;
+  }
+
   // fetch feed (cursor-based)
   const fetchFeed = useCallback(
     async ({ append = false, before = null } = {}) => {
@@ -247,6 +310,7 @@ export default function Browse() {
         else setLoadingFeed(true);
 
         setErrFeed("");
+
         const params = { limit: pageSize };
         if (lga) params.lga = lga.toUpperCase();
 
@@ -263,6 +327,47 @@ export default function Browse() {
           }
         }
 
+        // INITIAL LOAD FOR BROWSE:
+        // mix trending + public recent so the first screen is not always newest-first
+        if (!append && !before) {
+          const [recentRes, trendingRes] = await Promise.all([
+            api
+              .get("/api/posts/public", { params })
+              .catch(() => ({ data: [] })),
+            api
+              .get("/api/posts/trending", {
+                params: {
+                  limit: pageSize,
+                  ...(lga ? { lga: lga.toUpperCase() } : {}),
+                },
+              })
+              .catch(() => ({ data: [] })),
+          ]);
+
+          const recent = Array.isArray(recentRes.data)
+            ? recentRes.data
+            : Array.isArray(recentRes.data?.items)
+            ? recentRes.data.items
+            : [];
+
+          const trending = Array.isArray(trendingRes.data)
+            ? trendingRes.data
+            : Array.isArray(trendingRes.data?.items)
+            ? trendingRes.data.items
+            : [];
+
+          const mixed = buildMixedBrowseFeed({ trending, recent });
+          const nextBefore = getOldestCursor(recent);
+
+          nextBeforeRef.current = nextBefore;
+
+          setFeed(mixed);
+          setHasMore(recent.length >= pageSize && !!nextBefore);
+          return;
+        }
+
+        // PAGINATION:
+        // keep loading older public posts, but do not disturb the mixed first screen
         const r = await api
           .get("/api/posts/public", { params })
           .catch(() => ({ data: [] }));
@@ -273,20 +378,33 @@ export default function Browse() {
           ? r.data.items
           : [];
 
+        const nextBefore = getOldestCursor(list);
+        nextBeforeRef.current = nextBefore;
+
         if (append) {
           setFeed((prev) => {
-            const existingIds = new Set(prev.map((f) => f._id || f.id));
-            const newItems = list.filter(
-              (it) => !existingIds.has(it._id || it.id),
+            const existingIds = new Set(
+              prev.map((f) => String(f?._id || f?.id)),
             );
-            return newItems.length ? [...prev, ...newItems] : prev;
+
+            const newItems = list.filter(
+              (it) => !existingIds.has(String(it?._id || it?.id)),
+            );
+
+            if (!newItems.length) return prev;
+
+            const shuffledPage = shufflePosts(newItems);
+            return [...prev, ...shuffledPage];
           });
         } else {
           setFeed(list);
         }
 
-        if (!list.length || list.length < pageSize) setHasMore(false);
-        else setHasMore(true);
+        if (!list.length || list.length < pageSize || !nextBefore) {
+          setHasMore(false);
+        } else {
+          setHasMore(true);
+        }
       } catch (err) {
         console.error("fetchFeed error:", err);
         setErrFeed("Could not load feed.");
@@ -300,49 +418,10 @@ export default function Browse() {
 
   useEffect(() => {
     if (!isFeedTab) return;
-    if (restoredFeedRef.current) return;
-
-    try {
-      const raw = sessionStorage.getItem(FEED_CACHE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        const cachedItems = Array.isArray(parsed?.items) ? parsed.items : [];
-        const cachedHasMore =
-          typeof parsed?.hasMore === "boolean" ? parsed.hasMore : true;
-
-        if (cachedItems.length) {
-          setFeed(cachedItems);
-          setHasMore(cachedHasMore);
-        }
-      }
-    } catch {}
-
-    restoredFeedRef.current = true;
-  }, [isFeedTab, FEED_CACHE_KEY]);
-
-  // initial load only when there is no restored cached feed for this LGA
-  useEffect(() => {
-    if (!isFeedTab) return;
-    if (!restoredFeedRef.current) return;
-    if (feed.length) return;
 
     setHasMore(true);
     fetchFeed({ append: false, before: null });
-  }, [fetchFeed, isFeedTab, lga, feed.length]);
-
-  useEffect(() => {
-    if (!isFeedTab) return;
-
-    try {
-      sessionStorage.setItem(
-        FEED_CACHE_KEY,
-        JSON.stringify({
-          items: feed,
-          hasMore,
-        }),
-      );
-    } catch {}
-  }, [isFeedTab, FEED_CACHE_KEY, feed, hasMore]);
+  }, [fetchFeed, isFeedTab, lga]);
 
   useEffect(() => {
     if (!isFeedTab) return;
@@ -386,15 +465,22 @@ export default function Browse() {
   // force feed tab if ?post= is present (already handled in the URL sync effect)
 
   const loadMore = useCallback(async () => {
-    if (!hasMoreRef.current || loadingMoreRef.current) return;
-    const last = feed[feed.length - 1];
-    if (!last) return;
-    const rawCursor = last.createdAt || last._id || null;
-    if (!rawCursor) return;
-    const d = new Date(rawCursor);
-    const before = isNaN(d.getTime()) ? rawCursor : d.toISOString();
+    if (loadingMoreRef.current || loadingFeedRef.current) return;
+
+    if (!hasMoreRef.current) {
+      setFeed((prev) => (prev.length ? shufflePosts(prev) : prev));
+      return;
+    }
+
+    const before = nextBeforeRef.current;
+    if (!before) {
+      setHasMore(false);
+      setFeed((prev) => (prev.length ? shufflePosts(prev) : prev));
+      return;
+    }
+
     await fetchFeed({ append: true, before });
-  }, [feed, fetchFeed]);
+  }, [fetchFeed]);
 
   // Realtime feed socket handlers
   useEffect(() => {
@@ -420,9 +506,13 @@ export default function Browse() {
         }
         setFeed((prev) => {
           const id = payload._id || payload.id;
-          if (!id) return [payload, ...prev];
+          if (!id) return prev;
           if (prev.some((p) => (p._id || p.id) === id)) return prev;
-          return [payload, ...prev];
+
+          // Keep current Browse ranking stable.
+          // New posts should not jump to the very top while user is browsing.
+          if (!prev.length) return [payload];
+          return prev;
         });
       } catch (err) {
         console.warn("post:created handler failed", err);
@@ -486,9 +576,11 @@ export default function Browse() {
 
   // setup IntersectionObserver for automatic infinite scroll
   useEffect(() => {
+    if (!isFeedTab) return;
+    if (!feed.length) return;
+
     const sentinel = sentinelRef.current;
     if (!sentinel) return;
-    if (!isFeedTab) return;
 
     if (observerRef.current) {
       observerRef.current.disconnect();
@@ -500,7 +592,7 @@ export default function Browse() {
         for (const entry of entries) {
           if (entry.isIntersecting) {
             if (
-              hasMoreRef.current &&
+              (hasMoreRef.current || loopModeRef.current) &&
               !loadingMoreRef.current &&
               !loadingFeedRef.current
             ) {
@@ -509,7 +601,7 @@ export default function Browse() {
           }
         }
       },
-      { root: null, rootMargin: "800px", threshold: 0 },
+      { root: null, rootMargin: "800px 0px", threshold: 0 },
     );
 
     observerRef.current.observe(sentinel);
@@ -520,7 +612,26 @@ export default function Browse() {
         observerRef.current = null;
       }
     };
-  }, [isFeedTab, loadMore]);
+  }, [isFeedTab, feed.length, loadMore]);
+
+  useEffect(() => {
+    if (!isFeedTab) return;
+    if (!feed.length) return;
+    if (loadingFeed || loadingMore) return;
+
+    const doc = document.documentElement;
+    const pageTooShort =
+      (doc?.scrollHeight || 0) <= (window.innerHeight || 0) + 120;
+
+    if (!pageTooShort) return;
+    if (!(hasMore || loopModeRef.current)) return;
+
+    const id = requestAnimationFrame(() => {
+      loadMore();
+    });
+
+    return () => cancelAnimationFrame(id);
+  }, [isFeedTab, feed.length, loadingFeed, loadingMore, hasMore, loadMore]);
 
   function goBook(pro, chosenService) {
     const svcName = chosenService || service || null; // service NAME
@@ -837,39 +948,17 @@ export default function Browse() {
                     })}
                   </div>
 
-                  {/* invisible sentinel */}
-                  <div ref={sentinelRef} className="h-1 w-full" aria-hidden />
+                  {/* auto-load sentinel */}
+                  <div ref={sentinelRef} className="w-full h-16" aria-hidden />
 
-                  <div className="mt-6 flex justify-center">
+                  <div className="mt-2 mb-4 flex justify-center pointer-events-none">
                     {loadingMore ? (
-                      <div className="text-sm text-zinc-400">Loading…</div>
-                    ) : hasMore ? (
-                      <button
-                        onClick={loadMore}
-                        className="flex items-center gap-2 px-4 py-2 rounded-md border border-zinc-700 hover:bg-zinc-900"
-                        aria-label="Load more posts"
-                        type="button"
-                      >
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          className="w-5 h-5"
-                          aria-hidden
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth="2"
-                            d="M19 9l-7 7-7-7"
-                          />
-                        </svg>
-                        <span className="text-sm">Load more</span>
-                      </button>
-                    ) : (
-                      <div className="text-xs text-zinc-500">No more posts</div>
-                    )}
+                      <div className="text-sm text-zinc-400">Loading more…</div>
+                    ) : !hasMore ? (
+                      <div className="text-xs text-zinc-500">
+                        Shuffling feed…
+                      </div>
+                    ) : null}
                   </div>
                 </>
               ) : (

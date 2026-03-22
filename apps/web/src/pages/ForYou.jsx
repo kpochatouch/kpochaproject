@@ -103,7 +103,7 @@ function ForYouDesktopRail() {
     <aside className="hidden md:flex w-[220px] shrink-0 border-r border-white/10 bg-black text-white flex-col px-5 py-5">
       <Link to="/browse" className="flex items-center gap-2 mb-6">
         <span className="text-[22px] leading-none">♛</span>
-        <span className="text-[18px] font-bold">Kpocha</span>
+        <span className="text-[18px] font-bold">ForYou</span>
       </Link>
 
       <div className="mb-5">
@@ -124,14 +124,14 @@ function ForYouDesktopRail() {
           to="/browse"
           className="rounded-xl px-4 py-3 text-[16px] font-medium text-white hover:bg-white/5"
         >
-          Explore
+          Discover
         </Link>
 
         <Link
           to="/inbox"
           className="rounded-xl px-4 py-3 text-[16px] font-medium text-white hover:bg-white/5"
         >
-          Messages
+          Inbox
         </Link>
 
         <Link

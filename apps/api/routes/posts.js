@@ -285,7 +285,7 @@ router.get("/posts/public", async (req, res) => {
 
     const items = await Post.find(q)
       .sort({ createdAt: -1 })
-      .limit(Math.max(1, Math.min(Number(limit) || 20, 50)))
+      .limit(Math.max(1, Math.min(Number(limit) || 20, 100)))
       .lean();
 
     const out = await Promise.all(items.map(sanitizePostForClient));
