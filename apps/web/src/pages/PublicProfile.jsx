@@ -979,12 +979,12 @@ export default function PublicProfile() {
                     key={i}
                     type="button"
                     onClick={() => setLightboxUrl(src)}
-                    className="block overflow-hidden rounded-md border border-zinc-800 bg-zinc-950"
+                    className="block w-full overflow-hidden rounded-md border border-zinc-800 bg-zinc-950 touch-manipulation"
                   >
                     <img
                       src={src}
                       alt=""
-                      className="w-full aspect-square object-cover"
+                      className="block w-full aspect-square object-cover pointer-events-none"
                       loading="lazy"
                     />
                   </button>
@@ -1226,23 +1226,24 @@ export default function PublicProfile() {
                   Advert space
                 </div>
               )}
-              {lightboxUrl ? (
-                <div
-                  className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
-                  onClick={() => setLightboxUrl("")}
-                >
-                  <img
-                    src={lightboxUrl}
-                    alt="Gallery Preview"
-                    className="max-w-full max-h-[90vh] rounded-lg border border-zinc-800"
-                    onClick={(e) => e.stopPropagation()}
-                  />
-                </div>
-              ) : null}
             </div>
           </div>
         </div>
       </div>
+
+      {lightboxUrl ? (
+        <div
+          className="fixed inset-0 z-[10000] bg-black/85 flex items-center justify-center p-4"
+          onClick={() => setLightboxUrl("")}
+        >
+          <img
+            src={lightboxUrl}
+            alt="Gallery Preview"
+            className="max-w-full max-h-[90vh] rounded-lg border border-zinc-800"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }
