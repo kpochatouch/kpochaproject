@@ -14,6 +14,23 @@ import { getAuth, onIdTokenChanged } from "firebase/auth";
 import { Amplify } from "aws-amplify";
 import awsconfig from "./aws-exports.js";
 
+// 🔒 CANONICAL DOMAIN: redirect Vercel URL to custom domain
+(function () {
+  try {
+    if (typeof window === "undefined") return;
+
+    const host = window.location.hostname;
+    if (host === "kpochatouch.vercel.app") {
+      const next =
+        "https://kpochatouch.com" +
+        window.location.pathname +
+        window.location.search +
+        window.location.hash;
+      window.location.replace(next);
+    }
+  } catch {}
+})();
+
 // ✅ configure AWS safely
 if (typeof window !== "undefined") {
   if (!window.__KPOCHA_AWS_CONFIGURED__) {
