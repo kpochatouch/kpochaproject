@@ -31,13 +31,14 @@ export default function FeedComposer({ inline = true } = {}) {
 
         <span className="min-w-0 flex-1">
           <span className="block text-[16px] font-medium">
-            Share something with people around you
+            Share your work, service, or update
           </span>
           <span
             className="block text-[13px] mt-0.5"
             style={{ color: "var(--app-text-soft)" }}
           >
-            Post text, photo, or video
+            Post photos, videos, results, or service updates so people can
+            discover you and book with confidence
           </span>
         </span>
       </button>

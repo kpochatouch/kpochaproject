@@ -52,13 +52,13 @@ export default function SideMenu({ me }) {
   const baseNav = [
     {
       key: "feed",
-      label: "Feed",
+      label: "Showcase",
       to: "/browse",
       active: isFeed,
     },
     {
       key: "browse",
-      label: "Browse Pros",
+      label: "Book Professionals",
       to: "/browse?tab=pros",
       active: isBrowsePros,
     },

@@ -724,13 +724,24 @@ export default function Browse() {
       <div className="max-w-[1440px] mx-auto px-4 md:px-5 py-5 md:py-6">
         {/* header + tabs */}
         <div className="mb-5 flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex items-center gap-2">
+          <div className="flex items-start gap-3">
             <img
               src="/discovery.png"
               alt="Discover"
-              className="w-6 h-6 object-contain max-w-full"
+              className="w-6 h-6 object-contain max-w-full mt-1"
             />
-            <h1 className="text-[32px] leading-none font-semibold">Discover</h1>
+            <div>
+              <h1 className="text-[32px] leading-none font-semibold">
+                Discover
+              </h1>
+              <p
+                className="mt-2 text-sm md:text-[15px] max-w-[760px]"
+                style={{ color: "var(--app-text-soft)" }}
+              >
+                Discover professionals, explore real work, share updates, and
+                book trusted services — all in one place.
+              </p>
+            </div>
           </div>
 
           <div className="flex items-center gap-3">
@@ -751,7 +762,7 @@ export default function Browse() {
                 onClick={() => setTabAndUrl("feed")}
                 type="button"
               >
-                Feed
+                Showcase
               </button>
               <button
                 className={`px-4 py-2.5 text-[15px] font-medium ${
@@ -764,7 +775,7 @@ export default function Browse() {
                 onClick={() => setTabAndUrl("pros")}
                 type="button"
               >
-                Pros
+                Book Pros
               </button>
             </div>
           </div>
@@ -884,7 +895,8 @@ export default function Browse() {
                   color: "var(--app-text-soft)",
                 }}
               >
-                No professionals match your filters.
+                No professionals match your filters yet. Try widening your
+                search and discover more trusted talent.
               </div>
             )}
           </div>
@@ -963,7 +975,8 @@ export default function Browse() {
                 </>
               ) : (
                 <div className="rounded-lg border border-zinc-800 p-6 text-zinc-400">
-                  No updates yet.
+                  No showcases yet. New work, fresh updates, and trusted
+                  services will appear here.
                 </div>
               )}
             </div>

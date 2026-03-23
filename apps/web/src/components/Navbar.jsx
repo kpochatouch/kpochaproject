@@ -102,7 +102,7 @@ export default function Navbar() {
         {/* desktop */}
         <nav className="hidden md:flex items-center gap-5">
           <NavLink to="/browse" className={navLinkClass}>
-            Browse
+            Discover
           </NavLink>
 
           <NavLink to="/for-you" className={navLinkClass}>
@@ -256,7 +256,7 @@ export default function Navbar() {
             </NavLink>
 
             <NavLink to="/browse?tab=pros" className={() => chipClass(isPros)}>
-              Browse Pros
+              Book Professionals
             </NavLink>
 
             {token ? (
