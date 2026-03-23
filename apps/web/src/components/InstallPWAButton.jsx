@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Capacitor } from "@capacitor/core";
 
 const KEY_LAST_NAG = "kpocha:pwaLastNagAt";
-const NAG_EVERY_MS = 12 * 60 * 60 * 1000;
+const NAG_EVERY_MS = 24 * 60 * 60 * 1000;
 
 export default function InstallPWAButton() {
   const [deferredPrompt, setDeferredPrompt] = useState(null);
@@ -46,17 +46,35 @@ export default function InstallPWAButton() {
     window.addEventListener("beforeinstallprompt", onBip);
     window.addEventListener("appinstalled", onInstalled);
 
-    // 🔥 FORCE popup (your original intent)
+    // ✅ Do NOT auto-open for bots/crawlers.
+    // ✅ For real users, delay the nag so page content is seen first.
     try {
-      const last = Number(localStorage.getItem(KEY_LAST_NAG) || "0");
-      const now = Date.now();
-      if (!last || now - last >= NAG_EVERY_MS) {
-        setOpen(true);
-        localStorage.setItem(KEY_LAST_NAG, String(now));
+      const ua = String(navigator.userAgent || "");
+      const isBot =
+        /googlebot|bingbot|slurp|duckduckbot|baiduspider|yandexbot|crawler|spider|crawling/i.test(
+          ua,
+        );
+
+      if (!isBot) {
+        const last = Number(localStorage.getItem(KEY_LAST_NAG) || "0");
+        const now = Date.now();
+
+        if (!last || now - last >= NAG_EVERY_MS) {
+          const t = window.setTimeout(() => {
+            setOpen(true);
+            try {
+              localStorage.setItem(KEY_LAST_NAG, String(now));
+            } catch {}
+          }, 5000);
+
+          return () => {
+            window.removeEventListener("beforeinstallprompt", onBip);
+            window.removeEventListener("appinstalled", onInstalled);
+            window.clearTimeout(t);
+          };
+        }
       }
-    } catch {
-      setOpen(true);
-    }
+    } catch {}
 
     return () => {
       window.removeEventListener("beforeinstallprompt", onBip);

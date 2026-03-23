@@ -713,7 +713,7 @@ export default function App() {
           <Suspense fallback={<RouteLoader full />}>
             <Routes>
               {/* Public routes */}
-              <Route path="/" element={<Navigate to="/browse" replace />} />
+              <Route path="/" element={<Browse />} />
               <Route path="/browse" element={<Browse />} />
               <Route path="/post/:id" element={<PostDetail />} />
               <Route path="/home" element={<Home />} />

@@ -9,4 +9,17 @@
     <loc>https://kpochatouch.com/browse</loc>
   </url>
 
+  <url>
+    <loc>https://kpochatouch.com/browse?tab=pros</loc>
+  </url>
+
+  <!-- REAL CONTENT -->
+  <url>
+    <loc>https://kpochatouch.com/profile/6909d767fa9303da361f40bd</loc>
+  </url>
+
+  <url>
+    <loc>https://kpochatouch.com/post/690f35d86d72aca73f0c25b8</loc>
+  </url>
+
 </urlset>
