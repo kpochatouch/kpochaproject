@@ -98,6 +98,47 @@ function shuffleArray(items = []) {
   return arr;
 }
 
+const FOR_YOU_LAST_FIRST_KEY = "kpocha:for-you:last-first-post-id";
+
+function getPostId(post) {
+  return String(post?._id || post?.id || "").trim();
+}
+
+function pickFreshForYouBatch(items = [], size = 6) {
+  const videoPosts = dedupeById(items.filter(isVideoPost));
+  if (!videoPosts.length) return [];
+
+  let avoidId = "";
+  try {
+    avoidId = sessionStorage.getItem(FOR_YOU_LAST_FIRST_KEY) || "";
+  } catch {}
+
+  const shuffled = shuffleArray(videoPosts);
+
+  // Prefer a different first video from the previous refresh
+  if (
+    avoidId &&
+    shuffled.length > 1 &&
+    getPostId(shuffled[0]) === String(avoidId)
+  ) {
+    const swapIndex = shuffled.findIndex(
+      (p) => getPostId(p) !== String(avoidId),
+    );
+    if (swapIndex > 0) {
+      [shuffled[0], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[0]];
+    }
+  }
+
+  const batch = shuffled.slice(0, size);
+
+  try {
+    const firstId = getPostId(batch[0]);
+    if (firstId) sessionStorage.setItem(FOR_YOU_LAST_FIRST_KEY, firstId);
+  } catch {}
+
+  return batch;
+}
+
 function ForYouDesktopRail() {
   return (
     <aside className="hidden md:flex w-[220px] shrink-0 border-r border-white/10 bg-black text-white flex-col px-5 py-5">
@@ -209,14 +250,33 @@ export default function ForYou() {
 
         // initial For You start
         if (reset) {
-          const res = await api.get("/api/posts/for-you/start");
-          const start = res?.data || {};
-          const first = start?.post || null;
-          const second = start?.next || null;
+          const [publicRes, trendingRes] = await Promise.all([
+            api
+              .get("/api/posts/public", { params: { limit: 40 } })
+              .catch(() => ({ data: [] })),
+            api
+              .get("/api/posts/trending", { params: { limit: 20 } })
+              .catch(() => ({ data: [] })),
+          ]);
 
-          const initialBatch = [first, second]
-            .filter(Boolean)
-            .filter(isVideoPost);
+          const publicItems = Array.isArray(publicRes?.data)
+            ? publicRes.data
+            : Array.isArray(publicRes?.data?.items)
+            ? publicRes.data.items
+            : [];
+
+          const trendingItems = Array.isArray(trendingRes?.data)
+            ? trendingRes.data
+            : Array.isArray(trendingRes?.data?.items)
+            ? trendingRes.data.items
+            : [];
+
+          const combined = dedupeById([
+            ...trendingItems.filter(isVideoPost),
+            ...publicItems.filter(isVideoPost),
+          ]);
+
+          const initialBatch = pickFreshForYouBatch(combined, 6);
 
           if (!initialBatch.length) {
             setFeedPosts([]);
@@ -225,11 +285,12 @@ export default function ForYou() {
             return;
           }
 
-          const clean = dedupeById(initialBatch);
-          setFeedPosts(clean);
-          feedPostsRef.current = clean;
+          setFeedPosts(initialBatch);
+          feedPostsRef.current = initialBatch;
           lastCursorIdRef.current =
-            clean[clean.length - 1]?._id || clean[0]?._id || null;
+            initialBatch[initialBatch.length - 1]?._id ||
+            initialBatch[0]?._id ||
+            null;
           return;
         }
 

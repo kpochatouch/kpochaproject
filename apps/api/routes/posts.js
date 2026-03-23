@@ -59,6 +59,41 @@ function videoElemMatch() {
   };
 }
 
+function shuffleItems(list = []) {
+  const arr = Array.isArray(list) ? [...list] : [];
+  for (let i = arr.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+function dedupeDocsById(list = []) {
+  const seen = new Set();
+  const out = [];
+
+  for (const item of list) {
+    const key = String(item?._id || "").trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+
+  return out;
+}
+
+function pickOneFresh(list = [], avoidIds = []) {
+  const clean = dedupeDocsById(list);
+  if (!clean.length) return null;
+
+  const avoid = new Set((avoidIds || []).map((x) => String(x || "").trim()));
+  const preferred = clean.filter((item) => !avoid.has(String(item?._id || "")));
+
+  const pool = preferred.length ? preferred : clean;
+  const idx = Math.floor(Math.random() * pool.length);
+  return pool[idx] || null;
+}
+
 // what we send to frontend
 async function sanitizePostForClient(p) {
   const obj = typeof p.toObject === "function" ? p.toObject() : { ...p };
@@ -401,6 +436,11 @@ router.get("/posts/for-you/start", tryAuth, async (req, res) => {
         (a, b) =>
           (order.get(String(a._id)) ?? 0) - (order.get(String(b._id)) ?? 0),
       );
+
+      // keep ranking influence, but stop returning the same exact start order
+      const head = posts.slice(0, 12);
+      const tail = posts.slice(12);
+      posts = [...shuffleItems(head), ...tail];
     }
 
     // 3) fallback – fresh video pool, then rotate start point
@@ -440,9 +480,13 @@ router.get("/posts/for-you/start", tryAuth, async (req, res) => {
       return res.json({ post: null, next: null });
     }
 
+    const shuffledSafePosts = shuffleItems(safePosts);
+    const first = shuffledSafePosts[0] || null;
+    const second = shuffledSafePosts[1] || null;
+
     return res.json({
-      post: safePosts[0] || null,
-      next: safePosts[1] || null,
+      post: first,
+      next: second,
     });
   } catch (err) {
     console.error("[posts:for-you:start] error:", err);
@@ -541,19 +585,23 @@ router.get("/posts/:id/next", tryAuth, async (req, res) => {
     };
 
     // 1) Same pro
-    const samePro = await Post.find({
-      ...baseFilter,
-      proOwnerUid: current.proOwnerUid,
-    })
-      .sort({ createdAt: -1 })
-      .limit(10)
-      .lean();
+    const samePro = shuffleItems(
+      await Post.find({
+        ...baseFilter,
+        proOwnerUid: current.proOwnerUid,
+      })
+        .sort({ createdAt: -1 })
+        .limit(10)
+        .lean(),
+    );
 
     // 2) Same LGA
-    const sameLga = await Post.find({ ...baseFilter, lga: current.lga })
-      .sort({ createdAt: -1 })
-      .limit(20)
-      .lean();
+    const sameLga = shuffleItems(
+      await Post.find({ ...baseFilter, lga: current.lga })
+        .sort({ createdAt: -1 })
+        .limit(20)
+        .lean(),
+    );
 
     // 3) Viewer liked
     let likedPosts = [];
@@ -565,10 +613,12 @@ router.get("/posts/:id/next", tryAuth, async (req, res) => {
 
       const likedIds = likedStats.map((s) => s.postId).filter(Boolean);
       if (likedIds.length) {
-        likedPosts = await Post.find({
-          ...baseFilter,
-          _id: { $in: likedIds, $nin: [current._id, ...excludeObjectIds] },
-        }).lean();
+        likedPosts = shuffleItems(
+          await Post.find({
+            ...baseFilter,
+            _id: { $in: likedIds, $nin: [current._id, ...excludeObjectIds] },
+          }).lean(),
+        );
       }
     }
 
@@ -591,13 +641,16 @@ router.get("/posts/:id/next", tryAuth, async (req, res) => {
         (a, b) =>
           (order.get(String(a._id)) ?? 0) - (order.get(String(b._id)) ?? 0),
       );
+
+      const trendingHead = trendingPosts.slice(0, 20);
+      const trendingTail = trendingPosts.slice(20);
+      trendingPosts = [...shuffleItems(trendingHead), ...trendingTail];
     }
 
     // 5) Recent global fallback
-    const recentGlobal = await Post.find(baseFilter)
-      .sort({ createdAt: -1 })
-      .limit(200)
-      .lean();
+    const recentGlobal = shuffleItems(
+      await Post.find(baseFilter).sort({ createdAt: -1 }).limit(200).lean(),
+    );
 
     const queueRaw = [
       ...likedPosts,
@@ -616,7 +669,7 @@ router.get("/posts/:id/next", tryAuth, async (req, res) => {
       queue.push(p);
     }
 
-    const next = queue[0] || null;
+    const next = pickOneFresh(queue);
 
     // "river never dries" fallback
     if (!next) {
