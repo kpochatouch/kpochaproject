@@ -259,6 +259,11 @@ function FindProSmart() {
 export default function App() {
   const location = useLocation();
 
+  const isMobile =
+    typeof window !== "undefined"
+      ? window.matchMedia("(max-width: 768px)").matches
+      : false;
+
   const [theme, setTheme] = useState(() => getTheme());
 
   useLayoutEffect(() => {
