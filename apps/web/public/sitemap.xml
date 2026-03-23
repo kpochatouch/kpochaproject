@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 
+  <!-- CORE PUBLIC PAGES -->
   <url>
     <loc>https://kpochatouch.com/</loc>
   </url>
@@ -13,13 +14,21 @@
     <loc>https://kpochatouch.com/browse?tab=pros</loc>
   </url>
 
-  <!-- REAL CONTENT -->
+  <!-- IMPORTANT STATIC PAGES -->
   <url>
-    <loc>https://kpochatouch.com/profile/6909d767fa9303da361f40bd</loc>
+    <loc>https://kpochatouch.com/login</loc>
   </url>
 
   <url>
-    <loc>https://kpochatouch.com/post/690f35d86d72aca73f0c25b8</loc>
+    <loc>https://kpochatouch.com/signup</loc>
+  </url>
+
+  <url>
+    <loc>https://kpochatouch.com/legal</loc>
+  </url>
+
+  <url>
+    <loc>https://kpochatouch.com/become</loc>
   </url>
 
 </urlset>
