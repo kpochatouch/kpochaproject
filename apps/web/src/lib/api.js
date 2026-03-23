@@ -125,6 +125,55 @@ export function getInstantCashoutEligibility({
   return { eligible: true, reason: "ok", holdDays };
 }
 
+/* Support */
+export async function supportGetSession() {
+  const { data } = await api.post("/api/support/session");
+  return data;
+}
+
+export async function supportGetMessages() {
+  const { data } = await api.get("/api/support/messages");
+  return data;
+}
+
+export async function supportSendMessage(text) {
+  const { data } = await api.post("/api/support/messages", { text });
+  return data;
+}
+
+export async function adminSupportGetSessions() {
+  const { data } = await api.get("/api/admin/support/sessions");
+  return data;
+}
+
+export async function adminSupportGetMessages(sessionId) {
+  const { data } = await api.get(
+    `/api/admin/support/sessions/${encodeURIComponent(sessionId)}/messages`,
+  );
+  return data;
+}
+
+export async function adminSupportSendMessage(sessionId, text) {
+  const { data } = await api.post(
+    `/api/admin/support/sessions/${encodeURIComponent(sessionId)}/messages`,
+    { text },
+  );
+  return data;
+}
+
+export async function adminSupportUpdateSession(sessionId, payload) {
+  const { data } = await api.patch(
+    `/api/admin/support/sessions/${encodeURIComponent(sessionId)}`,
+    payload,
+  );
+  return data;
+}
+
+export async function submitContactMessage(payload) {
+  const { data } = await api.post("/api/contact", payload);
+  return data;
+}
+
 /* =========================================
    BASE URL (normalize, no trailing slash, no /api suffix)
    ========================================= */
@@ -1342,4 +1391,13 @@ export default {
 
   // booking helper
   getRingTimeoutMsFromSettings,
+
+  supportGetSession,
+  supportGetMessages,
+  supportSendMessage,
+  adminSupportGetSessions,
+  adminSupportGetMessages,
+  adminSupportSendMessage,
+  adminSupportUpdateSession,
+  submitContactMessage,
 };

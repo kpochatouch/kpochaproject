@@ -51,6 +51,8 @@ const userRoom = (uid) => `user:${String(uid)}`;
 const profileRoom = (uid) => `profile:${String(uid)}`;
 const bookingRoom = (id) => `booking:${String(id)}`;
 const postRoom = (id) => `post:${String(id)}`;
+const supportSessionRoom = (id) => `support:session:${String(id)}`;
+const adminsRoom = () => "admins";
 
 /* ---------------------------------------------------
    safeEmit (never throw)
@@ -186,6 +188,25 @@ export default function attachSockets(httpServer) {
       });
 
       ack?.({ ok: true, room: r, peers, count: peers.length + 1 });
+    });
+
+    socket.on("join:support-session", async ({ sessionId } = {}, ack) => {
+      await authReady;
+      const id = String(sessionId || "").trim();
+      if (!id) return ack?.({ ok: false, error: "sessionId_required" });
+
+      const r = supportSessionRoom(id);
+      socket.join(r);
+      ack?.({ ok: true, room: r });
+    });
+
+    socket.on("join:admin-support", async (_payload = {}, ack) => {
+      await authReady;
+      const uid = socket.data.uid || hinted || null;
+      if (!uid) return ack?.({ ok: false, error: "no_uid" });
+
+      socket.join(adminsRoom());
+      ack?.({ ok: true, room: adminsRoom() });
     });
 
     socket.on("room:leave", async ({ room } = {}, ack) => {

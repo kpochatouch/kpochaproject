@@ -37,7 +37,7 @@ export default function MobileTabBar({ me }) {
 
   const authed = !!me;
   function openHelp() {
-    window.dispatchEvent(new Event("kpocha:open-chatbase"));
+    window.dispatchEvent(new Event("kpocha:open-support"));
   }
 
   return (

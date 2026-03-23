@@ -20,6 +20,7 @@ import { PushNotifications } from "@capacitor/push-notifications";
 import { api, registerSocketHandler } from "./lib/api";
 import CallSheet from "./components/CallSheet.jsx";
 import InstallPWAButton from "./components/InstallPWAButton.jsx";
+import SupportWidget from "./components/SupportWidget.jsx";
 import { ToastProvider } from "./components/Toast.jsx";
 
 import Navbar from "./components/Navbar.jsx";
@@ -51,6 +52,7 @@ const Signup = lazy(() => import("./pages/Signup.jsx"));
 const BecomePro = lazy(() => import("./pages/BecomePro.jsx"));
 const ProDashboard = lazy(() => import("./pages/ProDashboard.jsx"));
 const Admin = lazy(() => import("./pages/Admin.jsx"));
+const AdminSupport = lazy(() => import("./pages/AdminSupport.jsx"));
 const Settings = lazy(() => import("./pages/Settings.jsx"));
 const ClientSettings = lazy(() => import("./pages/ClientSettings.jsx"));
 const AdminDecline = lazy(() => import("./pages/AdminDecline.jsx"));
@@ -76,75 +78,6 @@ const MyAdverts = lazy(() => import("./pages/MyAdverts.jsx"));
 const AdvertEdit = lazy(() => import("./pages/AdvertEdit.jsx"));
 const AdminAdvertsReview = lazy(() => import("./pages/AdminAdvertsReview.jsx"));
 const NotificationsPage = lazy(() => import("./pages/Notifications.jsx"));
-
-/* ---------- Chatbase hook ---------- */
-function useChatbase(enabled) {
-  useEffect(() => {
-    if (!enabled) return;
-
-    const CHATBOT_ID = import.meta.env.VITE_CHATBASE_ID;
-    if (!CHATBOT_ID) return;
-
-    (async () => {
-      const cfg = { chatbotId: CHATBOT_ID };
-
-      try {
-        const r = await api.get("/api/chatbase/userhash");
-        if (r?.data?.userId && r?.data?.userHash) {
-          cfg.userId = r.data.userId;
-          cfg.userHash = r.data.userHash;
-        }
-      } catch {
-        /* ignore */
-      }
-
-      window.chatbaseConfig = cfg;
-
-      if (!document.getElementById(CHATBOT_ID)) {
-        const s = document.createElement("script");
-        s.src = "https://www.chatbase.co/embed.min.js";
-        s.id = CHATBOT_ID;
-        s.defer = true;
-        s.dataset.domain = "www.chatbase.co";
-        document.body.appendChild(s);
-      }
-    })();
-  }, [enabled]);
-}
-
-/* ---------- Chatbase: load-on-demand (mobile) ---------- */
-function ensureChatbaseLoaded() {
-  const CHATBOT_ID = import.meta.env.VITE_CHATBASE_ID;
-  if (!CHATBOT_ID) return false;
-
-  // already loaded
-  if (document.getElementById(CHATBOT_ID)) return true;
-
-  // bootstrap chatbase queue (official-ish pattern)
-  if (!window.chatbase || window.chatbase("getState") !== "initialized") {
-    const q = (...args) => {
-      if (!window.chatbase.q) window.chatbase.q = [];
-      window.chatbase.q.push(args);
-    };
-    window.chatbase = new Proxy(q, {
-      get(target, prop) {
-        if (prop === "q") return target.q;
-        return (...args) => target(prop, ...args);
-      },
-    });
-  }
-
-  window.chatbaseConfig = { chatbotId: CHATBOT_ID };
-
-  const s = document.createElement("script");
-  s.src = "https://www.chatbase.co/embed.min.js";
-  s.id = CHATBOT_ID;
-  s.defer = true;
-  s.dataset.domain = "www.chatbase.co";
-  document.body.appendChild(s);
-
-  return true;
-}
 
 /* ---------- role guards ---------- */
 function RequireRole({ role, children }) {
@@ -342,18 +275,6 @@ export default function App() {
       window.removeEventListener("kpocha:theme-change", onThemeChange);
   }, []);
 
-  const hideChatbase =
-    location.pathname.startsWith("/chat") ||
-    location.pathname.startsWith("/inbox") ||
-    (location.pathname.includes("/bookings/") &&
-      location.pathname.endsWith("/chat"));
-
-  const isMobile = window.matchMedia("(max-width: 768px)").matches;
-
-  // Desktop: keep chatbase as before
-  // Mobile: do NOT autoload chatbase
-  useChatbase(!hideChatbase && !isMobile);
-
   const navigate = useNavigate();
 
   const { me } = useMe();
@@ -547,27 +468,6 @@ export default function App() {
       cancelled = true;
     };
   }, [location.pathname, location.search, navigate, activeCall]);
-
-  // MobileTabBar: tap Help -> load Chatbase on demand (mobile only)
-  useEffect(() => {
-    if (!isMobile) return;
-
-    function onOpenChatbase() {
-      const ok = ensureChatbaseLoaded();
-      if (!ok) return;
-
-      // try to open if API exists; otherwise user can tap the bubble
-      setTimeout(() => {
-        try {
-          window.chatbase?.("open");
-        } catch {}
-      }, 250);
-    }
-
-    window.addEventListener("kpocha:open-chatbase", onOpenChatbase);
-    return () =>
-      window.removeEventListener("kpocha:open-chatbase", onOpenChatbase);
-  }, [isMobile]);
 
   // 🔔 Web/PWA only: subscribe for Web Push (never inside native Capacitor)
   useEffect(() => {
@@ -923,6 +823,14 @@ export default function App() {
                 }
               />
               <Route
+                path="/admin/support"
+                element={
+                  <RequireRole role="admin">
+                    <AdminSupport />
+                  </RequireRole>
+                }
+              />
+              <Route
                 path="/admin/decline/:id"
                 element={
                   <RequireRole role="admin">
@@ -1042,6 +950,7 @@ export default function App() {
             }}
           />
         )}
+        <SupportWidget />
         <InstallPWAButton />
       </div>
     </ToastProvider>

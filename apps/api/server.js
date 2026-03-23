@@ -59,6 +59,9 @@ import { getIO } from "./sockets/index.js";
 import pushRoutes from "./routes/push.js";
 import mediaRoutes from "./routes/media.js";
 import advertsRoutes from "./routes/adverts.js";
+import supportRoutes from "./routes/support.js";
+import adminSupportRoutes from "./routes/adminSupport.js";
+import contactRoutes from "./routes/contact.js";
 
 dotenv.config();
 
@@ -1362,6 +1365,9 @@ app.use("/api", webrtcRoutes);
 app.use("/api", pushRoutes);
 app.use("/api", mediaRoutes({ requireAuth }));
 app.use("/api", advertsRoutes);
+app.use("/api", supportRoutes({ requireAuth, requireAdmin }));
+app.use("/api", adminSupportRoutes({ requireAuth, requireAdmin }));
+app.use("/api", contactRoutes({ requireAuth }));
 
 // admin pros
 try {
@@ -2106,25 +2112,6 @@ app.get("/api/barbers/nearby", async (req, res) => {
   } catch (err) {
     console.error("[barbers/nearby] error:", err);
     res.status(500).json({ error: "nearby_failed" });
-  }
-});
-
-/* ------------------- Chatbase user verification ------------------- */
-const CHATBASE_SECRET = process.env.CHATBASE_SECRET || "";
-
-app.get("/api/chatbase/userhash", requireAuth, async (req, res) => {
-  try {
-    if (!CHATBASE_SECRET) {
-      return res.status(500).json({ error: "chatbase_secret_missing" });
-    }
-    const userId = req.user.uid;
-    const userHash = crypto
-      .createHmac("sha256", CHATBASE_SECRET)
-      .update(userId)
-      .digest("hex");
-    return res.json({ userId, userHash });
-  } catch (e) {
-    return res.status(500).json({ error: "hash_failed" });
   }
 });
 
