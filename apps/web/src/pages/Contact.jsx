@@ -1,8 +1,45 @@
 //apps/web/src/pages/Contact.jsx
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { submitContactMessage } from "../lib/api.js";
 
-const SUPPORT_EMAIL = "kpochaout@gmail.com";
+const SUPPORT_EMAIL = "support@kpochatouch.com";
+const SUPPORT_PHONE = "+2348130118690";
+const WHATSAPP_LINK = "https://wa.me/2348130118690";
+const OFFICE_ADDRESS = "23, Adesuwa Road, G. R. A., Benin City";
+const SUPPORT_CHAT_PATH = "/support";
+
+const CONTACT_CARDS = [
+  {
+    title: "Our Location",
+    body: [OFFICE_ADDRESS],
+    icon: "⌂",
+    href: null,
+  },
+  {
+    title: "Email Address",
+    body: [SUPPORT_EMAIL],
+    icon: "✉",
+    href: `mailto:${SUPPORT_EMAIL}`,
+  },
+  {
+    title: "Phone Number",
+    body: [SUPPORT_PHONE],
+    icon: "☎",
+    href: `tel:${SUPPORT_PHONE}`,
+  },
+  {
+    title: "WhatsApp",
+    body: ["Chat with our support team on WhatsApp"],
+    icon: "◉",
+    href: WHATSAPP_LINK,
+  },
+  {
+    title: "In-App Support",
+    body: ["Open support chat inside Kpocha Touch"],
+    icon: "💬",
+    href: SUPPORT_CHAT_PATH,
+  },
+];
 
 function buildSupportMailto({ bookingId = "", serviceName = "" } = {}) {
   const subject = bookingId
@@ -30,7 +67,6 @@ export default function Contact() {
   const bookingId = params.get("bookingId") || "";
   const serviceName = params.get("serviceName") || "";
 
-  const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(false);
   const [ok, setOk] = useState("");
   const [err, setErr] = useState("");
@@ -55,24 +91,48 @@ export default function Contact() {
     [bookingId, serviceName],
   );
 
+  useEffect(() => {
+    const items = document.querySelectorAll(".revealUp");
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) entry.target.classList.add("isVisible");
+        });
+      },
+      {
+        threshold: 0.18,
+        rootMargin: "0px 0px -40px 0px",
+      },
+    );
+
+    items.forEach((item) => observer.observe(item));
+    return () => observer.disconnect();
+  }, []);
+
   function update(e) {
     const { name, value } = e.target;
     setForm((prev) => ({ ...prev, [name]: value }));
   }
 
-  async function copyEmail() {
-    try {
-      await navigator.clipboard.writeText(SUPPORT_EMAIL);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {}
+  function handleEmailClick(e) {
+    const isDesktop = window.matchMedia("(min-width: 921px)").matches;
+
+    if (!isDesktop) return;
+
+    e.preventDefault();
+
+    const formSection = document.getElementById("contact-form");
+    if (formSection) {
+      formSection.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
   }
 
   async function submit(e) {
     e.preventDefault();
     setLoading(true);
-    setOk("");
     setErr("");
+    setOk("");
 
     try {
       await submitContactMessage(form);
@@ -101,152 +161,311 @@ export default function Contact() {
   }
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-10">
-      <div className="mb-8">
-        <h1 className="text-2xl font-semibold">Contact Support</h1>
-        <p className="text-sm text-zinc-400 mt-2">
-          Send us a message directly here, or use your email app if you prefer.
-        </p>
-      </div>
-
-      <div className="grid gap-6 md:grid-cols-[1fr_1.1fr]">
-        <div className="rounded-xl border border-zinc-800 bg-black/40 p-4 space-y-4">
-          <div>
-            <div className="text-sm text-zinc-500">Support email</div>
-            <div className="mt-1 text-base font-semibold break-all">
-              {SUPPORT_EMAIL}
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={copyEmail}
-            className="px-3 py-2 rounded-lg border border-zinc-700 text-sm hover:bg-zinc-900"
-          >
-            {copied ? "Copied" : "Copy email"}
-          </button>
-
-          {(bookingId || serviceName) && (
-            <div className="text-xs text-zinc-500 space-y-1">
-              {bookingId ? <div>Booking ID: {bookingId}</div> : null}
-              {serviceName ? <div>Service: {serviceName}</div> : null}
-            </div>
-          )}
-
-          <div className="flex flex-wrap gap-2 pt-2">
-            <a
-              href={mailto}
-              className="px-4 py-2 rounded-lg bg-gold text-black font-semibold"
-            >
-              Try opening email app
-            </a>
-
-            <a
-              href={`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(
-                SUPPORT_EMAIL,
-              )}&su=${encodeURIComponent(
-                bookingId
-                  ? `Kpocha Touch Support — Booking ${bookingId}`
-                  : "Kpocha Touch Support",
-              )}`}
-              target="_blank"
-              rel="noreferrer"
-              className="px-4 py-2 rounded-lg border border-zinc-700 text-sm hover:bg-zinc-900"
-            >
-              Open Gmail in browser
-            </a>
-          </div>
-
-          <p className="text-xs text-zinc-500">
-            Tip: If you’re using the installed app (PWA), Gmail-in-browser
-            usually works even when mailto doesn’t.
-          </p>
+    <main className="contactPage">
+      <section className="contactHero">
+        <div className="homeHeroBackdrop" aria-hidden="true">
+          <div className="homeHeroBackdropGlow homeHeroGlowA" />
+          <div className="homeHeroBackdropGlow homeHeroGlowB" />
+          <div className="homeHeroBackdropGrid" />
         </div>
 
-        <form
-          onSubmit={submit}
-          className="rounded-xl border border-zinc-800 bg-black/40 p-4 space-y-4"
-        >
-          {err ? (
-            <div className="rounded-lg border border-red-800 bg-red-950/40 px-3 py-2 text-sm text-red-300">
-              {err}
+        <div className="container">
+          <div className="contactHeroShell">
+            <div className="contactHeroCopy">
+              <div className="pill revealUp reveal1">
+                Client Support • Professional Support • Business Enquiries
+              </div>
+
+              <h1 className="contactHeroTitle revealUp reveal2">
+                Contact the Kpocha Touch support team.
+              </h1>
+
+              <p className="contactHeroLead revealUp reveal3">
+                Reach out for booking help, account questions, onboarding
+                support, professional enquiries, or general assistance. Kpocha
+                Touch gives clients and professionals multiple ways to get help
+                quickly and directly.
+              </p>
             </div>
-          ) : null}
 
-          {ok ? (
-            <div className="rounded-lg border border-emerald-800 bg-emerald-950/40 px-3 py-2 text-sm text-emerald-300">
-              {ok}
+            <div className="contactHeroPanel revealUp reveal4">
+              <div className="contactHeroPanelInner">
+                <span className="contactPanelKicker">Direct Support</span>
+                <h2>Speak with our team</h2>
+                <p>
+                  Use the contact details below, chat with us on the platform,
+                  or send us a message directly from this page.
+                </p>
+
+                <div className="contactHeroMiniList">
+                  <a
+                    className="contactHeroMiniItem"
+                    href={mailto}
+                    onClick={handleEmailClick}
+                  >
+                    <span className="contactHeroMiniIcon">✉</span>
+                    <div>
+                      <strong>Email Support</strong>
+                      <small>{SUPPORT_EMAIL}</small>
+                    </div>
+                  </a>
+
+                  <a
+                    className="contactHeroMiniItem"
+                    href={`tel:${SUPPORT_PHONE}`}
+                  >
+                    <span className="contactHeroMiniIcon">☎</span>
+                    <div>
+                      <strong>Phone Line</strong>
+                      <small>{SUPPORT_PHONE}</small>
+                    </div>
+                  </a>
+
+                  <a
+                    className="contactHeroMiniItem"
+                    href={WHATSAPP_LINK}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <span className="contactHeroMiniIcon">◉</span>
+                    <div>
+                      <strong>WhatsApp</strong>
+                      <small>Chat with our support team on WhatsApp</small>
+                    </div>
+                  </a>
+
+                  <a className="contactHeroMiniItem" href={SUPPORT_CHAT_PATH}>
+                    <span className="contactHeroMiniIcon">💬</span>
+                    <div>
+                      <strong>In-App Support</strong>
+                      <small>Open support chat inside Kpocha Touch</small>
+                    </div>
+                  </a>
+
+                  <div className="contactHeroMiniItem">
+                    <span className="contactHeroMiniIcon">⌂</span>
+                    <div>
+                      <strong>Location</strong>
+                      <small>{OFFICE_ADDRESS}</small>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
-          ) : null}
+          </div>
+        </div>
+      </section>
 
-          <div>
-            <label className="block text-sm text-zinc-400 mb-1">
-              Your name
-            </label>
-            <input
-              className="input w-full"
-              name="name"
-              value={form.name}
-              onChange={update}
-              required
-            />
+      <section className="contactDetailsSection">
+        <div className="container">
+          <div className="contactSectionHead revealUp reveal1">
+            <div className="kicker center">CONTACT US</div>
+            <h2 className="homeH2 center">Speak with our team</h2>
           </div>
 
-          <div>
-            <label className="block text-sm text-zinc-400 mb-1">
-              Your email
-            </label>
-            <input
-              className="input w-full"
-              type="email"
-              name="email"
-              value={form.email}
-              onChange={update}
-              required
+          <div className="contactCardsGrid">
+            {CONTACT_CARDS.map((item, i) => {
+              const cardClass = `contactCard revealUp reveal${Math.min(
+                i + 2,
+                5,
+              )}${item.href ? " contactCardLink" : ""}`;
+
+              const inner = (
+                <>
+                  <div className="contactCardIcon">{item.icon}</div>
+                  <h3>{item.title}</h3>
+                  <div className="contactCardText">
+                    {item.body.map((line) => (
+                      <div key={line}>{line}</div>
+                    ))}
+                  </div>
+                </>
+              );
+
+              if (!item.href) {
+                return (
+                  <div className={cardClass} key={item.title}>
+                    {inner}
+                  </div>
+                );
+              }
+
+              const isExternal =
+                item.href.startsWith("http") ||
+                item.href.startsWith("mailto:") ||
+                item.href.startsWith("tel:");
+
+              return isExternal ? (
+                <a
+                  className={cardClass}
+                  key={item.title}
+                  href={item.href}
+                  target={item.href.startsWith("http") ? "_blank" : undefined}
+                  rel={item.href.startsWith("http") ? "noreferrer" : undefined}
+                  onClick={
+                    item.href.startsWith("mailto:")
+                      ? handleEmailClick
+                      : undefined
+                  }
+                >
+                  {inner}
+                </a>
+              ) : (
+                <a className={cardClass} key={item.title} href={item.href}>
+                  {inner}
+                </a>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      <section className="contactMapSection">
+        <div className="container">
+          <div className="contactMapCard revealUp reveal2">
+            <iframe
+              title="Kpocha Touch location map"
+              src="https://www.google.com/maps?q=23%20Adesuwa%20Road%2C%20GRA%2C%20Benin%20City&z=15&output=embed"
+              loading="lazy"
+              referrerPolicy="no-referrer-when-downgrade"
             />
           </div>
+        </div>
+      </section>
 
-          <div>
-            <label className="block text-sm text-zinc-400 mb-1">Phone</label>
-            <input
-              className="input w-full"
-              name="phone"
-              value={form.phone}
-              onChange={update}
-            />
+      <section id="contact-form" className="contactFormSection">
+        <div className="container">
+          <div className="contactSectionHead revealUp reveal1">
+            <div className="kicker center">SEND A MESSAGE</div>
+            <h2 className="homeH2 center">We’d love to hear from you</h2>
           </div>
 
-          <div>
-            <label className="block text-sm text-zinc-400 mb-1">Subject</label>
-            <input
-              className="input w-full"
-              name="subject"
-              value={form.subject}
-              onChange={update}
-              required
-            />
-          </div>
+          <form className="contactFormCard revealUp reveal2" onSubmit={submit}>
+            {err ? (
+              <div className="contactNotice contactNoticeError">{err}</div>
+            ) : null}
 
-          <div>
-            <label className="block text-sm text-zinc-400 mb-1">Message</label>
-            <textarea
-              className="input w-full min-h-[180px]"
-              name="message"
-              value={form.message}
-              onChange={update}
-              required
-            />
-          </div>
+            {ok ? (
+              <div className="contactNotice contactNoticeSuccess">{ok}</div>
+            ) : null}
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="px-4 py-2 rounded-lg bg-gold text-black font-semibold disabled:opacity-60"
-          >
-            {loading ? "Sending..." : "Send message"}
-          </button>
-        </form>
-      </div>
-    </div>
+            <div className="grid2">
+              <div>
+                <label className="label" htmlFor="contact-name">
+                  Your Name
+                </label>
+                <input
+                  id="contact-name"
+                  className="input"
+                  name="name"
+                  value={form.name}
+                  onChange={update}
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="label" htmlFor="contact-email">
+                  Your Email
+                </label>
+                <input
+                  id="contact-email"
+                  className="input"
+                  type="email"
+                  name="email"
+                  value={form.email}
+                  onChange={update}
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="grid2">
+              <div>
+                <label className="label" htmlFor="contact-phone">
+                  Phone
+                </label>
+                <input
+                  id="contact-phone"
+                  className="input"
+                  name="phone"
+                  value={form.phone}
+                  onChange={update}
+                />
+              </div>
+
+              <div>
+                <label className="label" htmlFor="contact-subject">
+                  Subject
+                </label>
+                <input
+                  id="contact-subject"
+                  className="input"
+                  name="subject"
+                  value={form.subject}
+                  onChange={update}
+                  required
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="label" htmlFor="contact-message">
+                Type message
+              </label>
+              <textarea
+                id="contact-message"
+                className="input contactTextarea"
+                rows="8"
+                name="message"
+                value={form.message}
+                onChange={update}
+                required
+              />
+            </div>
+
+            <div className="contactFormActions">
+              <button
+                className="btn btnPrimary"
+                type="submit"
+                disabled={loading}
+              >
+                {loading ? "Sending..." : "Send Message"}
+              </button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <section className="contactSubscribeSection">
+        <div className="container">
+          <div className="contactSubscribeInner revealUp reveal3">
+            <div>
+              <h3 className="contactSubscribeTitle">
+                Stay informed with Kpocha Touch updates
+              </h3>
+              <p className="muted contactSubscribeText">
+                Receive product updates, support news, and important platform
+                information for clients and professionals.
+              </p>
+            </div>
+
+            <form
+              className="contactSubscribeForm"
+              onSubmit={(e) => e.preventDefault()}
+            >
+              <input
+                className="input contactSubscribeInput"
+                type="email"
+                placeholder="Your email"
+              />
+              <button className="btn btnPrimary" type="submit">
+                Subscribe Now
+              </button>
+            </form>
+          </div>
+        </div>
+      </section>
+    </main>
   );
 }
