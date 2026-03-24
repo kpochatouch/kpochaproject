@@ -1,6 +1,7 @@
 // apps/web/src/pages/Admin.jsx
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
+import useNotifications from "../hooks/useNotifications";
 
 const API =
   import.meta.env.VITE_API_BASE_URL ||
@@ -20,6 +21,14 @@ export default function Admin() {
       : "pending";
 
   const [tab, setTab] = useState(initialTab);
+
+  const { items: notificationItems = [] } = useNotifications();
+
+  const supportUnread = useMemo(() => {
+    return notificationItems.filter(
+      (n) => n?.type === "support_escalated" && !n?.seen,
+    ).length;
+  }, [notificationItems]);
 
   // ---------- Shared helpers ----------
   const [token, setToken] = useState(() => localStorage.getItem("token") || "");
@@ -482,9 +491,14 @@ export default function Admin() {
       <div className="mt-4 flex flex-wrap gap-3">
         <Link
           to="/admin/support"
-          className="inline-flex rounded-lg border border-zinc-700 px-4 py-2 text-sm hover:bg-zinc-900"
+          className="inline-flex items-center gap-2 rounded-lg border border-zinc-700 px-4 py-2 text-sm hover:bg-zinc-900"
         >
-          Open Support Inbox
+          <span>Open Support Inbox</span>
+          {supportUnread > 0 ? (
+            <span className="inline-flex min-w-[22px] items-center justify-center rounded-full bg-red-600 px-2 py-0.5 text-[11px] font-semibold text-white">
+              {supportUnread > 99 ? "99+" : supportUnread}
+            </span>
+          ) : null}
         </Link>
 
         <Link

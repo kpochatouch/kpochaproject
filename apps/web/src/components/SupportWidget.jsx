@@ -36,7 +36,7 @@ function supportHeader(session, messages) {
     }
     return {
       title: "KPOCHA TOUCH Support!",
-      subtitle: "Connecting you to support",
+      subtitle: "Your message has been sent to human support",
     };
   }
 
@@ -192,7 +192,13 @@ export default function SupportWidget() {
           <div className="kpo-support-card">
             <div className="kpo-support-topbar">
               <div className="kpo-support-brand">
-                <div className="kpo-support-brand-badge">KT</div>
+                <div className="kpo-support-brand-badge">
+                  <img
+                    src="/icons/icon-512.png"
+                    alt="Kpocha Touch"
+                    className="kpo-support-brand-logo"
+                  />
+                </div>
                 <div className="kpo-support-brand-copy">
                   <div className="kpo-support-brand-title">{header.title}</div>
                   <div className="kpo-support-brand-subtitle">
@@ -265,18 +271,28 @@ export default function SupportWidget() {
                         </div>
                       </>
                     ) : (
-                      messages.map((m) => (
-                        <div
-                          key={m.id}
-                          className={`kpo-support-msg ${
-                            m.sender === "user"
-                              ? "kpo-support-msg-user"
-                              : "kpo-support-msg-bot"
-                          }`}
-                        >
-                          {m.text}
-                        </div>
-                      ))
+                      <>
+                        {session?.mode === "human" &&
+                        !messages.some((m) => m.sender === "agent") ? (
+                          <div className="kpo-support-pill">
+                            Your message has been sent to human support. Replies
+                            will appear here.
+                          </div>
+                        ) : null}
+
+                        {messages.map((m) => (
+                          <div
+                            key={m.id}
+                            className={`kpo-support-msg ${
+                              m.sender === "user"
+                                ? "kpo-support-msg-user"
+                                : "kpo-support-msg-bot"
+                            }`}
+                          >
+                            {m.text}
+                          </div>
+                        ))}
+                      </>
                     )}
                   </div>
 

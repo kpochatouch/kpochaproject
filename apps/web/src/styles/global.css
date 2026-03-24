@@ -103,7 +103,7 @@ video::-webkit-media-controls-start-playback-button {
   --app-text-soft: #52525b;
   --app-hover: #eef2f7;
   --app-navbar: rgba(255, 255, 255, 0.94);
-  --app-chip-active: #f5c542;
+  --app-chip-active: var(--brand-gold);
 }
 
 /* =====================================================
@@ -111,6 +111,9 @@ video::-webkit-media-controls-start-playback-button {
    ===================================================== */
 :root {
   --page-header-height: 64px;
+   --brand-gold: #d4af37;
+  --brand-gold-dark: #b68f1e;
+  --brand-gold-soft: rgba(212, 175, 55, 0.16);
 }
 
 .kpo-page-shell {
@@ -184,7 +187,7 @@ video::-webkit-media-controls-start-playback-button {
   font-weight: 800;
   letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: #f5c542;
+  color: var(--brand-gold);
   line-height: 1.1;
 }
 
@@ -369,8 +372,8 @@ video::-webkit-media-controls-start-playback-button {
 }
 
 .adminChatSessionItem.isActive {
-  border-color: #f5c542;
-  background: rgba(245, 197, 66, 0.12);
+  border-color: var(--brand-gold);
+  background: rgba(212, 175, 55, 0.12);
 }
 
 .adminChatSessionTop {
@@ -494,7 +497,7 @@ video::-webkit-media-controls-start-playback-button {
 }
 
 .input:focus {
-  border-color: #f5c542;
+  border-color: var(--brand-gold);
 }
 
 .btn {
@@ -514,9 +517,9 @@ video::-webkit-media-controls-start-playback-button {
 }
 
 .btnPrimary {
-  background: #f5c542;
+  background: var(--brand-gold);
   color: #111;
-  border-color: #f5c542;
+  border-color: var(--brand-gold);
 }
 
 .btnOutline,
@@ -547,9 +550,9 @@ video::-webkit-media-controls-start-playback-button {
 }
 
 .msg.me {
-  background: #f5c542;
+  background: var(--brand-gold);
   color: #111;
-  border-color: #f5c542;
+  border-color: var(--brand-gold);
   margin-left: auto;
 }
 
@@ -622,19 +625,23 @@ video::-webkit-media-controls-start-playback-button {
 }
 
 .kpo-support-brand-badge {
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
   border-radius: 9999px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(180deg, #2a2a2a, #111);
-  border: 1px solid rgba(245, 197, 66, 0.35);
-  color: #f5c542;
-  font-size: 14px;
-  font-weight: 800;
-  letter-spacing: 0.04em;
+  background: #0f1116;
+  border: 1px solid rgba(212, 175, 55, 0.35);
+  overflow: hidden;
   flex-shrink: 0;
+}
+
+.kpo-support-brand-logo {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 .kpo-support-brand-copy {
@@ -728,7 +735,7 @@ video::-webkit-media-controls-start-playback-button {
 
 .kpo-support-msg-user {
   align-self: flex-end;
-  background: #f0c343;
+  background: var(--brand-gold);
   color: #111;
 }
 
@@ -753,8 +760,8 @@ video::-webkit-media-controls-start-playback-button {
 }
 
 .kpo-support-auth-btn-primary {
-  background: #f0c343;
-  border-color: #f0c343;
+  background: var(--brand-gold);
+  border-color: var(--brand-gold);
   color: #111;
 }
 
@@ -775,7 +782,7 @@ video::-webkit-media-controls-start-playback-button {
 }
 
 .kpo-support-contact-link {
-  color: #f5c542;
+  color: var(--brand-gold);
   text-decoration: none;
   font-weight: 700;
   white-space: nowrap;
@@ -809,7 +816,7 @@ video::-webkit-media-controls-start-playback-button {
 }
 
 .kpo-support-input:focus {
-  border-color: rgba(245, 197, 66, 0.55);
+  border-color: rgba(212, 175, 55, 0.55);
 }
 
 .kpo-support-send {

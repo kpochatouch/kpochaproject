@@ -5,6 +5,11 @@ import SupportSession from "../models/SupportSession.js";
 import SupportMessage from "../models/SupportMessage.js";
 import { getSupportDecision } from "../services/supportAiService.js";
 import { getIO } from "../sockets/index.js";
+import { Pro } from "../models.js";
+import {
+  sendTransientPush,
+  createNotification,
+} from "../services/notificationService.js";
 
 function mapSession(session) {
   return {
@@ -110,6 +115,119 @@ async function getOrCreateOpenSupportSession(userUid) {
   }
 
   return session;
+}
+
+async function buildSupportAiContext(req, session) {
+  let displayName = "";
+  let email = req.user?.email || "";
+  let isPro = false;
+
+  try {
+    const rec = await admin.auth().getUser(String(req.user.uid));
+    displayName = rec?.displayName || "";
+    email = rec?.email || email || "";
+  } catch {}
+
+  try {
+    const pro = await Pro.findOne({ ownerUid: req.user.uid })
+      .select("_id")
+      .lean();
+    isPro = !!pro;
+  } catch {}
+
+  return {
+    user: {
+      uid: req.user.uid,
+      email,
+      displayName,
+      isPro,
+    },
+    session: {
+      mode: session?.mode || "bot",
+      status: session?.status || "open",
+      escalated: !!session?.escalated,
+    },
+    platform: [
+      "Kpocha Touch is a social platform for professionals and clients",
+      "Professionals showcase work through posts, photos, and videos",
+      "Clients discover professionals in the feed and can book them",
+      "Support chat can escalate to human support",
+      "Sponsored adverts can appear in the feed",
+    ],
+  };
+}
+
+async function createAdminEscalationNotifications(
+  session,
+  userMsg,
+  handoffMsg,
+) {
+  const adminUids = String(process.env.ADMIN_UIDS || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  if (!adminUids.length) return;
+
+  const body =
+    handoffMsg?.text ||
+    userMsg?.text ||
+    "A support conversation was escalated.";
+
+  await Promise.allSettled(
+    adminUids.map(async (uid) => {
+      try {
+        await createNotification({
+          ownerUid: uid,
+          actorUid: String(session.userUid),
+          type: "support_escalated",
+          data: {
+            title: "Support escalation",
+            body,
+            sessionId: String(session._id),
+            userUid: String(session.userUid),
+            url: "/admin/support",
+          },
+          priority: "high",
+          groupKey: `support:session:${String(session._id)}`,
+        });
+      } catch (err) {
+        console.warn(
+          "[support] createAdminEscalationNotifications failed:",
+          err?.message || err,
+        );
+      }
+    }),
+  );
+}
+
+async function notifyAdminsOfEscalation(session, userMsg, handoffMsg) {
+  const adminUids = String(process.env.ADMIN_UIDS || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  if (!adminUids.length) return;
+
+  const preview =
+    handoffMsg?.text ||
+    userMsg?.text ||
+    "A support conversation was escalated.";
+
+  await Promise.allSettled(
+    adminUids.map((uid) =>
+      sendTransientPush(uid, {
+        title: "Support escalation",
+        body: preview,
+        data: {
+          type: "support_escalated",
+          sessionId: String(session._id),
+          userUid: String(session.userUid),
+          url: "/admin/support",
+        },
+      }),
+    ),
+  );
 }
 
 export default function supportRoutes({ requireAuth }) {
@@ -231,18 +349,21 @@ export default function supportRoutes({ requireAuth }) {
 
       let triage;
       try {
+        const aiContext = await buildSupportAiContext(req, session);
+
         triage = await getSupportDecision({
           text: clean,
           history: historyDocs.map((m) => ({
             sender: m.sender,
             text: m.text,
           })),
+          context: aiContext,
         });
       } catch (err) {
         console.error("[support-ai] failed:", err?.message || err);
         triage = {
           type: "escalate",
-          text: "I’m escalating this conversation to a support specialist.",
+          text: "I’ve sent this to our human support team. Replies will appear here as soon as an agent responds.",
         };
       }
 
@@ -359,6 +480,9 @@ export default function supportRoutes({ requireAuth }) {
       emitToSupportAdmins("admin-support:session-updated", {
         session: mappedSession,
       });
+
+      await createAdminEscalationNotifications(session, userMsg, handoffMsg);
+      await notifyAdminsOfEscalation(session, userMsg, handoffMsg);
 
       return res.json({
         ok: true,

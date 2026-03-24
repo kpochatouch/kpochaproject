@@ -100,6 +100,11 @@ export const NOTIFICATION_ROUTES = {
   withdraw: () => "/wallet",
   withdraw_pending: () => "/wallet",
   release: () => "/wallet",
+  support_escalated: (n) =>
+    n?.data?.url ||
+    (n?.data?.sessionId
+      ? `/admin/support?session=${encodeURIComponent(n.data.sessionId)}`
+      : "/admin/support"),
 
   generic: () => null,
 };
@@ -229,6 +234,16 @@ export function presentNotification(n) {
       icon: "💰",
       title: "Wallet update",
       body: data.body || data.message || "Wallet activity updated",
+      target,
+    };
+  }
+
+  if (type === "support_escalated") {
+    return {
+      icon: "🆘",
+      title: data.title || "Support escalation",
+      body:
+        data.body || data.message || "A support conversation needs attention",
       target,
     };
   }

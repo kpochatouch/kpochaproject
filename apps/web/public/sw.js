@@ -184,6 +184,8 @@ self.addEventListener("notificationclick", (event) => {
     ].includes(type)
   ) {
     url = "/wallet";
+  } else if (type === "support_escalated") {
+    url = data.url || "/admin/support";
   }
 
   event.waitUntil(
