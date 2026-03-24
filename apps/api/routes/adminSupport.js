@@ -1,5 +1,6 @@
 //apps/api/routes/adminSupport.js
 import express from "express";
+import admin from "firebase-admin";
 import SupportSession from "../models/SupportSession.js";
 import SupportMessage from "../models/SupportMessage.js";
 import { getIO } from "../sockets/index.js";
@@ -35,6 +36,29 @@ function mapMessage(message) {
     createdAt: message.createdAt ? message.createdAt.getTime() : null,
     updatedAt: message.updatedAt ? message.updatedAt.getTime() : null,
   };
+}
+
+async function decorateSessionIdentity(session) {
+  const base = mapSession(session);
+
+  let userName = "";
+  let userEmail = "";
+
+  try {
+    const rec = await admin.auth().getUser(String(session.userUid));
+    userName = rec?.displayName || "";
+    userEmail = rec?.email || "";
+  } catch {}
+
+  return {
+    ...base,
+    userName,
+    userEmail,
+  };
+}
+
+async function decorateSessionListIdentity(rows) {
+  return Promise.all(rows.map((row) => decorateSessionIdentity(row)));
 }
 
 function emitToSupportUser(userUid, event, payload) {
@@ -95,7 +119,7 @@ export default function adminSupportRoutes({ requireAuth, requireAdmin }) {
 
         return res.json({
           ok: true,
-          sessions: sessions.map(mapSession),
+          sessions: await decorateSessionListIdentity(sessions),
         });
       } catch (err) {
         console.error("[admin/support/sessions] failed:", err?.message || err);
@@ -148,7 +172,7 @@ export default function adminSupportRoutes({ requireAuth, requireAdmin }) {
 
         return res.json({
           ok: true,
-          session: mapSession(refreshed),
+          session: await decorateSessionIdentity(refreshed),
           messages: messages.map(mapMessage),
         });
       } catch (err) {
@@ -196,29 +220,30 @@ export default function adminSupportRoutes({ requireAuth, requireAdmin }) {
         session.unreadAdminCount = 0;
         await session.save();
 
+        const mappedSession = await decorateSessionIdentity(session);
+
         const payload = {
-          session: mapSession(session),
+          session: mappedSession,
           message: mapMessage(msg),
         };
 
         emitToSupportUser(String(session.userUid), "support:message", payload);
         emitToSupportUser(String(session.userUid), "support:session-updated", {
-          session: mapSession(session),
+          session: mappedSession,
         });
 
-        emitToSupportSession(String(session._id), "support:message", payload);
         emitToSupportSession(String(session._id), "support:session-updated", {
-          session: mapSession(session),
+          session: mappedSession,
         });
 
         emitToSupportAdmins("admin-support:message", payload);
         emitToSupportAdmins("admin-support:session-updated", {
-          session: mapSession(session),
+          session: mappedSession,
         });
 
         return res.json({
           ok: true,
-          session: mapSession(session),
+          session: mappedSession,
           message: mapMessage(msg),
         });
       } catch (err) {
@@ -264,19 +289,21 @@ export default function adminSupportRoutes({ requireAuth, requireAdmin }) {
 
         await session.save();
 
+        const mappedSession = await decorateSessionIdentity(session);
+
         emitToSupportAdmins("admin-support:session-updated", {
-          session: mapSession(session),
+          session: mappedSession,
         });
         emitToSupportUser(String(session.userUid), "support:session-updated", {
-          session: mapSession(session),
+          session: mappedSession,
         });
         emitToSupportSession(String(session._id), "support:session-updated", {
-          session: mapSession(session),
+          session: mappedSession,
         });
 
         return res.json({
           ok: true,
-          session: mapSession(session),
+          session: mappedSession,
         });
       } catch (err) {
         console.error(

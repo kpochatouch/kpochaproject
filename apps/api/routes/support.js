@@ -1,5 +1,6 @@
 //apps/api/routes/support.js
 import express from "express";
+import admin from "firebase-admin";
 import SupportSession from "../models/SupportSession.js";
 import SupportMessage from "../models/SupportMessage.js";
 import { getSupportDecision } from "../services/supportAiService.js";
@@ -35,6 +36,25 @@ function mapMessage(message) {
     deliveryStatus: message.deliveryStatus || "sent",
     createdAt: message.createdAt ? message.createdAt.getTime() : null,
     updatedAt: message.updatedAt ? message.updatedAt.getTime() : null,
+  };
+}
+
+async function decorateSessionIdentity(session) {
+  const base = mapSession(session);
+
+  let userName = "";
+  let userEmail = "";
+
+  try {
+    const rec = await admin.auth().getUser(String(session.userUid));
+    userName = rec?.displayName || "";
+    userEmail = rec?.email || "";
+  } catch {}
+
+  return {
+    ...base,
+    userName,
+    userEmail,
   };
 }
 
@@ -184,21 +204,23 @@ export default function supportRoutes({ requireAuth }) {
         session.unreadAdminCount = Number(session.unreadAdminCount || 0) + 1;
         await session.save();
 
+        const mappedSession = await decorateSessionIdentity(session);
+
         const payload = {
-          session: mapSession(session),
+          session: mappedSession,
           message: mapMessage(userMsg),
         };
 
         emitToSupportAdmins("admin-support:message", payload);
         emitToSupportAdmins("admin-support:session-updated", {
-          session: mapSession(session),
+          session: mappedSession,
         });
         emitToSupportUser(String(session.userUid), "support:message", payload);
         emitToSupportSession(String(session._id), "support:message", payload);
 
         return res.json({
           ok: true,
-          session: mapSession(session),
+          session: mappedSession,
           messages: [mapMessage(userMsg)],
         });
       }
@@ -241,13 +263,15 @@ export default function supportRoutes({ requireAuth }) {
         session.lastSender = "assistant";
         await session.save();
 
+        const mappedSession = await decorateSessionIdentity(session);
+
         const payloads = [
           {
-            session: mapSession(session),
+            session: mappedSession,
             message: mapMessage(userMsg),
           },
           {
-            session: mapSession(session),
+            session: mappedSession,
             message: mapMessage(botMsg),
           },
         ];
@@ -262,15 +286,15 @@ export default function supportRoutes({ requireAuth }) {
         });
 
         emitToSupportUser(String(session.userUid), "support:session-updated", {
-          session: mapSession(session),
+          session: mappedSession,
         });
         emitToSupportSession(String(session._id), "support:session-updated", {
-          session: mapSession(session),
+          session: mappedSession,
         });
 
         return res.json({
           ok: true,
-          session: mapSession(session),
+          session: mappedSession,
           messages: [mapMessage(userMsg), mapMessage(botMsg)],
         });
       }
@@ -292,13 +316,15 @@ export default function supportRoutes({ requireAuth }) {
       session.unreadAdminCount = Number(session.unreadAdminCount || 0) + 1;
       await session.save();
 
+      const mappedSession = await decorateSessionIdentity(session);
+
       const userPayload = {
-        session: mapSession(session),
+        session: mappedSession,
         message: mapMessage(userMsg),
       };
 
       const handoffPayload = {
-        session: mapSession(session),
+        session: mappedSession,
         message: mapMessage(handoffMsg),
       };
 
@@ -313,7 +339,7 @@ export default function supportRoutes({ requireAuth }) {
         handoffPayload,
       );
       emitToSupportUser(String(session.userUid), "support:session-updated", {
-        session: mapSession(session),
+        session: mappedSession,
       });
 
       emitToSupportSession(String(session._id), "support:message", userPayload);
@@ -323,20 +349,20 @@ export default function supportRoutes({ requireAuth }) {
         handoffPayload,
       );
       emitToSupportSession(String(session._id), "support:session-updated", {
-        session: mapSession(session),
+        session: mappedSession,
       });
 
       emitToSupportAdmins("admin-support:escalated", {
-        session: mapSession(session),
+        session: mappedSession,
         messages: [mapMessage(userMsg), mapMessage(handoffMsg)],
       });
       emitToSupportAdmins("admin-support:session-updated", {
-        session: mapSession(session),
+        session: mappedSession,
       });
 
       return res.json({
         ok: true,
-        session: mapSession(session),
+        session: mappedSession,
         messages: [mapMessage(userMsg), mapMessage(handoffMsg)],
       });
     } catch (err) {

@@ -41,6 +41,11 @@ function senderLabel(sender) {
   return sender || "Unknown";
 }
 
+function sessionTitle(session) {
+  if (!session) return "Unknown session";
+  return session.userName || session.userEmail || session.userUid || session.id;
+}
+
 export default function AdminSupport() {
   const { isAdmin, loading } = useMe();
 
@@ -390,7 +395,11 @@ export default function AdminSupport() {
                       <div className="adminChatSessionTop">
                         <div className="adminChatSessionMain">
                           <div className="adminChatSessionTitle">
-                            {session.userUid}
+                            {sessionTitle(session)}
+                          </div>
+
+                          <div className="muted text-xs break-all mt-1">
+                            {session.userEmail || session.userUid}
                           </div>
 
                           <div className="muted adminChatSessionPreview">
@@ -426,14 +435,17 @@ export default function AdminSupport() {
               <div>
                 <strong>
                   {selectedSessionFromList
-                    ? selectedSessionFromList.userUid
+                    ? sessionTitle(selectedSessionFromList)
                     : "Select a session"}
                 </strong>
                 <div className="muted adminChatMainSub">
                   {selectedSessionFromList
-                    ? `Mode: ${selectedSessionFromList.mode || "-"} • Status: ${
-                        selectedSessionFromList.status || "-"
-                      }`
+                    ? `${
+                        selectedSessionFromList.userEmail ||
+                        selectedSessionFromList.userUid
+                      } • Mode: ${
+                        selectedSessionFromList.mode || "-"
+                      } • Status: ${selectedSessionFromList.status || "-"}`
                     : "Choose an escalated session from the left."}
                 </div>
               </div>

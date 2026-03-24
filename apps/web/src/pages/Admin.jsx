@@ -479,7 +479,14 @@ export default function Admin() {
         Review pro applications and configure how the platform runs itself.
       </p>
 
-      <div className="mt-4">
+      <div className="mt-4 flex flex-wrap gap-3">
+        <Link
+          to="/admin/support"
+          className="inline-flex rounded-lg border border-zinc-700 px-4 py-2 text-sm hover:bg-zinc-900"
+        >
+          Open Support Inbox
+        </Link>
+
         <Link
           to="/admin/adverts"
           className="inline-flex rounded-lg border border-zinc-700 px-4 py-2 text-sm hover:bg-zinc-900"

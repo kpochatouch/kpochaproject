@@ -30,19 +30,19 @@ function supportHeader(session, messages) {
     const hasAgentReply = messages.some((m) => m.sender === "agent");
     if (hasAgentReply) {
       return {
-        title: "Kpocha Support",
+        title: "KPOCHA TOUCH Support!",
         subtitle: "A support agent is replying here",
       };
     }
     return {
-      title: "Kpocha Support",
+      title: "KPOCHA TOUCH Support!",
       subtitle: "Connecting you to support",
     };
   }
 
   return {
-    title: "Kpocha Assistant",
-    subtitle: "Quick support for common questions",
+    title: "KPOCHA TOUCH Support!",
+    subtitle: "How can I assist you today?",
   };
 }
 
@@ -188,103 +188,166 @@ export default function SupportWidget() {
   return (
     <>
       {open && (
-        <div
-          className="fixed bottom-20 right-4 z-[120] w-[min(92vw,380px)] rounded-2xl border border-white/10 shadow-2xl overflow-hidden"
-          style={{
-            background: "var(--app-surface, #111)",
-            color: "var(--app-text, #fff)",
-          }}
-        >
-          <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
-            <div>
-              <strong>{header.title}</strong>
-              <div className="text-xs opacity-70">{header.subtitle}</div>
-            </div>
-
-            <button className="btn btnGhost" onClick={() => setOpen(false)}>
-              Close
-            </button>
-          </div>
-
-          {!authLoading ? (
-            !user ? (
-              <div
-                ref={bodyRef}
-                className="p-4 space-y-4 max-h-[55vh] overflow-y-auto"
-              >
-                <div className="msg bot">
-                  Support chat is available for signed-in users. Please sign in
-                  to continue.
-                </div>
-
-                <div className="flex gap-2">
-                  <Link className="btn btnOutline" to="/login">
-                    Login
-                  </Link>
-                  <Link className="btn btnPrimary" to="/client/register">
-                    Sign Up
-                  </Link>
+        <div className="kpo-support-shell">
+          <div className="kpo-support-card">
+            <div className="kpo-support-topbar">
+              <div className="kpo-support-brand">
+                <div className="kpo-support-brand-badge">KT</div>
+                <div className="kpo-support-brand-copy">
+                  <div className="kpo-support-brand-title">{header.title}</div>
+                  <div className="kpo-support-brand-subtitle">
+                    {header.subtitle}
+                  </div>
                 </div>
               </div>
-            ) : (
-              <>
-                <div
-                  ref={bodyRef}
-                  className="p-4 space-y-3 max-h-[55vh] overflow-y-auto"
+
+              <div className="kpo-support-topbar-actions">
+                <button
+                  type="button"
+                  className="kpo-support-icon-btn"
+                  aria-label="More"
                 >
-                  {err ? <div className="msg bot">{err}</div> : null}
-
-                  {loading ? (
-                    <div className="msg bot">Loading conversation…</div>
-                  ) : messages.length === 0 ? (
-                    <div className="msg bot">
-                      Hello. How can we help you today?
-                    </div>
-                  ) : (
-                    messages.map((m) => (
-                      <div
-                        key={m.id}
-                        className={`msg ${m.sender === "user" ? "me" : "bot"}`}
-                      >
-                        {m.text}
-                      </div>
-                    ))
-                  )}
-                </div>
-
-                <div className="p-3 border-t border-white/10 flex gap-2">
-                  <input
-                    className="input flex-1"
-                    value={text}
-                    onChange={(e) => setText(e.target.value)}
-                    onKeyDown={onEnter}
-                    placeholder={
-                      session?.mode === "human"
-                        ? "Reply to support…"
-                        : "Ask for help…"
-                    }
-                  />
-                  <button
-                    className="btn btnPrimary"
-                    onClick={send}
-                    disabled={sending}
-                  >
-                    {sending ? "..." : "Send"}
-                  </button>
-                </div>
-              </>
-            )
-          ) : (
-            <div ref={bodyRef} className="p-4">
-              <div className="msg bot">Loading support…</div>
+                  •••
+                </button>
+                <button
+                  type="button"
+                  className="kpo-support-icon-btn"
+                  onClick={() => setOpen(false)}
+                  aria-label="Close support"
+                >
+                  ✕
+                </button>
+              </div>
             </div>
-          )}
+
+            {!authLoading ? (
+              !user ? (
+                <div ref={bodyRef} className="kpo-support-body">
+                  <div className="kpo-support-pill">
+                    Support chat is available for signed-in users.
+                  </div>
+                  <div className="kpo-support-pill">
+                    Please sign in to continue.
+                  </div>
+
+                  <div className="kpo-support-auth-row">
+                    <Link className="kpo-support-auth-btn" to="/login">
+                      Login
+                    </Link>
+                    <Link
+                      className="kpo-support-auth-btn kpo-support-auth-btn-primary"
+                      to="/client/register"
+                    >
+                      Sign Up
+                    </Link>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div ref={bodyRef} className="kpo-support-body">
+                    {err ? (
+                      <div className="kpo-support-msg kpo-support-msg-bot">
+                        {err}
+                      </div>
+                    ) : null}
+
+                    {loading ? (
+                      <div className="kpo-support-msg kpo-support-msg-bot">
+                        Loading conversation…
+                      </div>
+                    ) : messages.length === 0 ? (
+                      <>
+                        <div className="kpo-support-pill">
+                          Welcome to KPOCHA TOUCH Support!
+                        </div>
+                        <div className="kpo-support-pill">
+                          How can I assist you today?
+                        </div>
+                      </>
+                    ) : (
+                      messages.map((m) => (
+                        <div
+                          key={m.id}
+                          className={`kpo-support-msg ${
+                            m.sender === "user"
+                              ? "kpo-support-msg-user"
+                              : "kpo-support-msg-bot"
+                          }`}
+                        >
+                          {m.text}
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  <div className="kpo-support-footer">
+                    <div className="kpo-support-contact-row">
+                      <span>Need a longer message?</span>
+                      <Link
+                        to="/contact"
+                        className="kpo-support-contact-link"
+                        onClick={() => setOpen(false)}
+                      >
+                        Open contact form
+                      </Link>
+                    </div>
+
+                    <div className="kpo-support-composer">
+                      <input
+                        className="kpo-support-input"
+                        value={text}
+                        onChange={(e) => setText(e.target.value)}
+                        onKeyDown={onEnter}
+                        placeholder={
+                          session?.mode === "human"
+                            ? "Reply to support..."
+                            : "Message..."
+                        }
+                      />
+
+                      <button
+                        type="button"
+                        className="kpo-support-send"
+                        onClick={send}
+                        disabled={sending}
+                        aria-label="Send support message"
+                      >
+                        {sending ? "…" : "↑"}
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )
+            ) : (
+              <div ref={bodyRef} className="kpo-support-body">
+                <div className="kpo-support-msg kpo-support-msg-bot">
+                  Loading support…
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
-      <div className="fixed bottom-24 right-4 z-[110]">
-        <button className="btn btnPrimary" onClick={() => setOpen((v) => !v)}>
-          {open ? "Hide Help" : "Help"}
+      <div className="hidden md:block kpo-support-bubble-wrap">
+        <button
+          type="button"
+          className="kpo-support-bubble"
+          onClick={() => setOpen((v) => !v)}
+          aria-label={open ? "Hide support" : "Open support"}
+        >
+          <span className="kpo-support-bubble-icon">
+            <svg
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+              className="kpo-support-bubble-svg"
+            >
+              <path
+                d="M12 3C6.477 3 2 6.94 2 11.8c0 2.274.987 4.346 2.606 5.91L4 22l4.69-2.184c1.015.25 2.096.384 3.31.384 5.523 0 10-3.94 10-8.8S17.523 3 12 3Zm-4 7.8h8a1 1 0 1 1 0 2H8a1 1 0 1 1 0-2Zm0-3h8a1 1 0 1 1 0 2H8a1 1 0 1 1 0-2Zm0 6h5a1 1 0 1 1 0 2H8a1 1 0 1 1 0-2Z"
+                fill="currentColor"
+              />
+            </svg>
+          </span>
         </button>
       </div>
     </>
