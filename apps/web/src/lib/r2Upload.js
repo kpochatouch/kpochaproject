@@ -72,6 +72,37 @@ export async function uploadMediaAsset({
   };
 }
 
+export async function waitForMediaAssetReady({
+  api,
+  assetId,
+  timeoutMs = 180000,
+  intervalMs = 2000,
+}) {
+  if (!api) throw new Error("waitForMediaAssetReady: api is required");
+  if (!assetId) throw new Error("waitForMediaAssetReady: assetId is required");
+
+  const started = Date.now();
+
+  while (Date.now() - started < timeoutMs) {
+    const res = await api.get(`/api/media/${assetId}`);
+    const status = String(res?.data?.asset?.status || "");
+
+    if (status === "ready") {
+      return res?.data?.asset || null;
+    }
+
+    if (status === "failed") {
+      const errMsg =
+        res?.data?.asset?.error?.message || "Video processing failed.";
+      throw new Error(errMsg);
+    }
+
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+
+  throw new Error("Video processing timed out.");
+}
+
 /**
  * Optional helper:
  * owner-only signed URL (good for immediate preview after upload)

@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import ImageCropperModal from "../components/ImageCropper.jsx";
 import { useToast } from "../components/Toast.jsx";
-import { uploadMediaAsset } from "../lib/r2Upload";
+import { uploadMediaAsset, waitForMediaAssetReady } from "../lib/r2Upload";
 
 const MAX_WORDS = 500;
 
@@ -174,6 +174,7 @@ export default function Compose() {
   // FFmpeg lazy refs
   const ffmpegRef = useRef(null);
   const ffmpegLoadingRef = useRef(false);
+  const [trimUnavailable, setTrimUnavailable] = useState(false);
 
   const wordCount = useMemo(() => wordsCount(text), [text]);
   const canPost = useMemo(() => {
@@ -221,29 +222,28 @@ export default function Compose() {
 
     ffmpegLoadingRef.current = true;
     try {
-      const [{ FFmpeg }, { fetchFile, toBlobURL }] = await Promise.all([
+      const [{ FFmpeg }, { fetchFile }] = await Promise.all([
         import("@ffmpeg/ffmpeg"),
         import("@ffmpeg/util"),
       ]);
 
       const ffmpeg = new FFmpeg();
-      // Load FFmpeg core from local /public/ffmpeg (you copied these files)
-      await ffmpeg.load({
-        coreURL: await toBlobURL("/ffmpeg/ffmpeg-core.js", "text/javascript"),
-        wasmURL: await toBlobURL(
-          "/ffmpeg/ffmpeg-core.wasm",
-          "application/wasm",
-        ),
-        workerURL: await toBlobURL(
-          "/ffmpeg/ffmpeg-core.worker.js",
-          "text/javascript",
-        ),
-      });
 
-      // stash helper funcs on instance for later
+      try {
+        await ffmpeg.load({
+          coreURL: "/ffmpeg/ffmpeg-core.js",
+          wasmURL: "/ffmpeg/ffmpeg-core.wasm",
+          workerURL: "/ffmpeg/ffmpeg-core.worker.js",
+        });
+      } catch (err) {
+        console.error("[compose][ffmpeg] load failed", err);
+        setTrimUnavailable(true);
+        throw new Error("FFMPEG_LOAD_FAILED");
+      }
+
       ffmpeg.__fetchFile = fetchFile;
-
       ffmpegRef.current = ffmpeg;
+      setTrimUnavailable(false);
       return ffmpeg;
     } finally {
       ffmpegLoadingRef.current = false;
@@ -464,10 +464,14 @@ export default function Compose() {
 
       toast.success("Trim applied.");
     } catch (err) {
-      // ✅ show real error (so we can fix the actual cause)
-      const msg =
-        (err && (err.message || String(err))) || "Trim failed (unknown error).";
-      toast.error(`Trim failed: ${msg}`);
+      const msg = String(err?.message || err || "");
+      console.error("[compose][trim] failed", err);
+
+      if (msg.includes("FFMPEG_LOAD_FAILED")) {
+        toast.error("Video trimming is unavailable on this device right now.");
+      } else {
+        toast.error("Unable to trim this video right now.");
+      }
     } finally {
       setTrimming(false);
     }
@@ -505,10 +509,18 @@ export default function Compose() {
           api,
           file: mediaFile,
           type: mediaType,
-          visibility: "public", // ✅ post media is public
+          visibility: "public",
         });
         mediaAssetId = main.assetId;
-        // optional thumbnail upload (image asset)
+
+        if (mediaType === "video") {
+          toast.info("Processing video…");
+          await waitForMediaAssetReady({
+            api,
+            assetId: mediaAssetId,
+          });
+        }
+
         if (mediaType === "video" && videoThumbUrl) {
           try {
             const blob = await fetch(videoThumbUrl).then((r) => r.blob());
@@ -519,7 +531,7 @@ export default function Compose() {
               api,
               file: thumbFile,
               type: "image",
-              visibility: "public", // ✅ thumbnail is public with post
+              visibility: "public",
             });
             thumbAssetId = t.assetId;
           } catch {}
@@ -678,7 +690,11 @@ export default function Compose() {
                   </div>
                 </div>
 
-                {mustTrim ? (
+                {trimUnavailable ? (
+                  <div className="text-[11px] text-red-300 mb-2">
+                    Video trimming is unavailable on this device right now.
+                  </div>
+                ) : mustTrim ? (
                   <div className="text-[11px] text-red-300 mb-2">
                     Longer than 2:00 — trimming is required.
                   </div>
@@ -813,7 +829,13 @@ export default function Compose() {
                   <button
                     type="button"
                     onClick={() => {
-                      // guard: if too long, toast instead of doing work
+                      if (trimUnavailable) {
+                        toast.error(
+                          "Video trimming is unavailable on this device right now.",
+                        );
+                        return;
+                      }
+
                       if (
                         Number(trimEnd) - Number(trimStart) >
                         MAX_VIDEO_SECONDS
@@ -821,10 +843,12 @@ export default function Compose() {
                         toast.error("Trim must be 2:00 max. Reduce the range.");
                         return;
                       }
+
                       applyVideoTrim();
                     }}
                     className="ml-auto rounded-md border border-zinc-700 px-4 py-2 text-sm hover:bg-zinc-900 disabled:opacity-50"
                     disabled={
+                      trimUnavailable ||
                       trimming ||
                       uploading ||
                       posting ||

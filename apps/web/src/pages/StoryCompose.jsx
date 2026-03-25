@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
-import { uploadMediaAsset } from "../lib/r2Upload";
+import { uploadMediaAsset, waitForMediaAssetReady } from "../lib/r2Upload";
 import { useToast } from "../components/Toast.jsx";
 import ImageCropperModal from "../components/ImageCropper.jsx";
 
@@ -122,6 +122,14 @@ export default function StoryCompose() {
   const textareaRef = useRef(null);
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
+  const [trimStart, setTrimStart] = useState(0);
+  const [trimEnd, setTrimEnd] = useState(MAX_VIDEO_SECONDS);
+  const [mustTrim, setMustTrim] = useState(false);
+  const [trimming, setTrimming] = useState(false);
+  const [trimUnavailable, setTrimUnavailable] = useState(false);
+
+  const ffmpegRef = useRef(null);
+  const ffmpegLoadingRef = useRef(false);
 
   const [text, setText] = useState("");
   const [mediaFile, setMediaFile] = useState(null);
@@ -139,8 +147,9 @@ export default function StoryCompose() {
   const canPost = useMemo(() => {
     if (!mediaFile) return false;
     if (uploading || posting) return false;
+    if (mustTrim && mediaType === "video") return false;
     return true;
-  }, [mediaFile, uploading, posting]);
+  }, [mediaFile, uploading, posting, mustTrim, mediaType]);
 
   useEffect(() => {
     const el = textareaRef.current;
@@ -169,6 +178,9 @@ export default function StoryCompose() {
     setMediaType("image");
     setVideoDuration(0);
     setVideoPreviewError("");
+    setTrimStart(0);
+    setTrimEnd(MAX_VIDEO_SECONDS);
+    setMustTrim(false);
 
     try {
       if (mediaPreviewUrl) URL.revokeObjectURL(mediaPreviewUrl);
@@ -182,6 +194,171 @@ export default function StoryCompose() {
 
     if (fileInputRef.current) fileInputRef.current.value = "";
     if (cameraInputRef.current) cameraInputRef.current.value = "";
+  }
+
+  async function ensureFFmpegLoaded() {
+    if (ffmpegRef.current) return ffmpegRef.current;
+
+    if (ffmpegLoadingRef.current) {
+      while (ffmpegLoadingRef.current) {
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      return ffmpegRef.current;
+    }
+
+    ffmpegLoadingRef.current = true;
+    try {
+      const [{ FFmpeg }, { fetchFile }] = await Promise.all([
+        import("@ffmpeg/ffmpeg"),
+        import("@ffmpeg/util"),
+      ]);
+
+      const ffmpeg = new FFmpeg();
+
+      try {
+        await ffmpeg.load({
+          coreURL: "/ffmpeg/ffmpeg-core.js",
+          wasmURL: "/ffmpeg/ffmpeg-core.wasm",
+          workerURL: "/ffmpeg/ffmpeg-core.worker.js",
+        });
+      } catch (err) {
+        console.error("[story][ffmpeg] load failed", err);
+        setTrimUnavailable(true);
+        throw new Error("FFMPEG_LOAD_FAILED");
+      }
+
+      ffmpeg.__fetchFile = fetchFile;
+      ffmpegRef.current = ffmpeg;
+      setTrimUnavailable(false);
+      return ffmpeg;
+    } finally {
+      ffmpegLoadingRef.current = false;
+    }
+  }
+
+  async function applyVideoTrim() {
+    if (!mediaFile || mediaType !== "video") return;
+
+    const s = Math.max(0, Number(trimStart) || 0);
+    const e = Math.max(0, Number(trimEnd) || 0);
+
+    if (!(e > s)) {
+      toast.error("Invalid trim range.");
+      return;
+    }
+
+    if (e - s > MAX_VIDEO_SECONDS) {
+      toast.error("Story trim result must be 30 seconds max.");
+      return;
+    }
+
+    setTrimming(true);
+    toast.info("Trimming story video…");
+
+    try {
+      const ffmpeg = await ensureFFmpegLoaded();
+      const fetchFile = ffmpeg.__fetchFile;
+
+      const uid = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+      const inName = `story_in_${uid}.mp4`;
+      const outName = `story_out_${uid}.mp4`;
+
+      try {
+        await ffmpeg.deleteFile(inName);
+      } catch {}
+      try {
+        await ffmpeg.deleteFile(outName);
+      } catch {}
+
+      await ffmpeg.writeFile(inName, await fetchFile(mediaFile));
+
+      const duration = Math.max(0, Number(videoDuration) || 0);
+      const safeEnd = duration ? Math.min(e, Math.floor(duration)) : e;
+      const safeStart = Math.min(s, Math.max(0, safeEnd - 1));
+      const len = Math.max(1, safeEnd - safeStart);
+
+      await ffmpeg.exec([
+        "-hide_banner",
+        "-y",
+        "-ss",
+        String(safeStart),
+        "-t",
+        String(len),
+        "-i",
+        inName,
+        "-map",
+        "0:v:0?",
+        "-map",
+        "0:a:0?",
+        "-vf",
+        "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "23",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "128k",
+        "-movflags",
+        "+faststart",
+        "-fflags",
+        "+genpts",
+        "-avoid_negative_ts",
+        "make_zero",
+        outName,
+      ]);
+
+      const data = await ffmpeg.readFile(outName);
+      const trimmedFile = new File([data.buffer], "story-trimmed.mp4", {
+        type: "video/mp4",
+      });
+
+      try {
+        await ffmpeg.deleteFile(inName);
+      } catch {}
+      try {
+        await ffmpeg.deleteFile(outName);
+      } catch {}
+
+      const url = URL.createObjectURL(trimmedFile);
+      try {
+        if (mediaPreviewUrl) URL.revokeObjectURL(mediaPreviewUrl);
+      } catch {}
+      setMediaPreviewUrl(url);
+
+      const thumb = await makeVideoThumbnail(trimmedFile);
+      try {
+        if (videoThumbUrl) URL.revokeObjectURL(videoThumbUrl);
+      } catch {}
+      setVideoThumbUrl(thumb || "");
+
+      setMediaFile(trimmedFile);
+      setVideoDuration(Math.min(MAX_VIDEO_SECONDS, len));
+      setTrimStart(0);
+      setTrimEnd(Math.min(MAX_VIDEO_SECONDS, len));
+      setMustTrim(false);
+
+      toast.success("Story trim applied.");
+    } catch (err) {
+      const msg = String(err?.message || err || "");
+      console.error("[story][trim] failed", err);
+
+      if (msg.includes("FFMPEG_LOAD_FAILED")) {
+        toast.error(
+          "Story video trimming is unavailable on this device right now.",
+        );
+      } else {
+        toast.error("Unable to trim this story video right now.");
+      }
+    } finally {
+      setTrimming(false);
+    }
   }
 
   async function onPickFile(file) {
@@ -209,13 +386,16 @@ export default function StoryCompose() {
     setMediaFile(file);
     setMediaType(isVideo ? "video" : "image");
     setVideoPreviewError("");
+    setTrimStart(0);
+    setTrimEnd(MAX_VIDEO_SECONDS);
+    setMustTrim(false);
+    setVideoDuration(0);
 
     if (!isVideo) {
       try {
         if (videoThumbUrl) URL.revokeObjectURL(videoThumbUrl);
       } catch {}
       setVideoThumbUrl("");
-      setVideoDuration(0);
       toast.success("Story image selected.");
       return;
     }
@@ -224,9 +404,14 @@ export default function StoryCompose() {
     setVideoDuration(dur || 0);
 
     if (dur && dur > MAX_VIDEO_SECONDS) {
-      clearMedia();
-      toast.error("Story videos must be 30 seconds max.");
-      return;
+      setMustTrim(true);
+      setTrimStart(0);
+      setTrimEnd(MAX_VIDEO_SECONDS);
+      toast.error("Story video is longer than 30 seconds. Trim is required.");
+    } else {
+      setMustTrim(false);
+      setTrimStart(0);
+      setTrimEnd(dur ? Math.floor(dur) : MAX_VIDEO_SECONDS);
     }
 
     const thumb = await makeVideoThumbnail(file);
@@ -250,6 +435,11 @@ export default function StoryCompose() {
       return;
     }
 
+    if (mustTrim && mediaType === "video") {
+      toast.error("Please trim the story video to 30 seconds before posting.");
+      return;
+    }
+
     try {
       setPosting(true);
       setUploading(true);
@@ -262,6 +452,14 @@ export default function StoryCompose() {
         type: mediaType,
         visibility: "public",
       });
+
+      if (mediaType === "video") {
+        toast.info("Processing story video…");
+        await waitForMediaAssetReady({
+          api,
+          assetId: main.assetId,
+        });
+      }
 
       let thumbAssetId = "";
 
@@ -394,6 +592,116 @@ export default function StoryCompose() {
                 {videoPreviewError ? (
                   <div className="mt-2 text-[11px] text-red-300">
                     {videoPreviewError}
+                  </div>
+                ) : null}
+                {mustTrim ? (
+                  <div className="mt-2 rounded-lg border border-red-900/60 bg-red-950/20 p-3">
+                    <div className="text-[11px] text-red-300 mb-2">
+                      Story video is longer than 30 seconds — trimming is
+                      required.
+                    </div>
+
+                    <div className="flex items-center justify-between text-[11px] text-zinc-400 mb-2">
+                      <div>
+                        Trim: {String(trimStart).padStart(2, "0")}s →{" "}
+                        {String(trimEnd).padStart(2, "0")}s
+                      </div>
+                      <div>
+                        Length:{" "}
+                        {Math.max(0, Number(trimEnd) - Number(trimStart))}s
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div>
+                        <div className="text-[10px] text-zinc-500 mb-1">
+                          Start
+                        </div>
+                        <input
+                          type="range"
+                          min="0"
+                          max={Math.max(
+                            0,
+                            Math.floor(videoDuration || MAX_VIDEO_SECONDS),
+                          )}
+                          step="1"
+                          value={trimStart}
+                          onChange={(e) => {
+                            const next = Number(e.target.value) || 0;
+                            setTrimStart(
+                              Math.min(next, Math.max(0, Number(trimEnd) - 1)),
+                            );
+                          }}
+                          className="w-full"
+                          disabled={trimming || uploading || posting}
+                        />
+                      </div>
+
+                      <div>
+                        <div className="text-[10px] text-zinc-500 mb-1">
+                          End
+                        </div>
+                        <input
+                          type="range"
+                          min="1"
+                          max={Math.max(
+                            1,
+                            Math.floor(videoDuration || MAX_VIDEO_SECONDS),
+                          )}
+                          step="1"
+                          value={trimEnd}
+                          onChange={(e) => {
+                            const next = Number(e.target.value) || 1;
+                            setTrimEnd(Math.max(next, Number(trimStart) + 1));
+                          }}
+                          className="w-full"
+                          disabled={trimming || uploading || posting}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="mt-3 flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTrimStart(0);
+                          setTrimEnd(
+                            Math.min(
+                              MAX_VIDEO_SECONDS,
+                              Math.floor(videoDuration || MAX_VIDEO_SECONDS),
+                            ),
+                          );
+                        }}
+                        className="rounded-md border border-zinc-700 px-3 py-1.5 text-xs hover:bg-zinc-900"
+                        disabled={trimming || uploading || posting}
+                      >
+                        Reset 0–0:30
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (trimUnavailable) {
+                            toast.error(
+                              "Story video trimming is unavailable on this device right now.",
+                            );
+                            return;
+                          }
+                          applyVideoTrim();
+                        }}
+                        className="ml-auto rounded-md border border-zinc-700 px-4 py-2 text-sm hover:bg-zinc-900 disabled:opacity-50"
+                        disabled={
+                          trimUnavailable ||
+                          trimming ||
+                          uploading ||
+                          posting ||
+                          !videoDuration ||
+                          !(Number(trimEnd) > Number(trimStart))
+                        }
+                      >
+                        {trimming ? "Trimming…" : "Trim story video"}
+                      </button>
+                    </div>
                   </div>
                 ) : null}
               </>

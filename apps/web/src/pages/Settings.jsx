@@ -360,13 +360,7 @@ export default function SettingsPage() {
         setAvatarPreviewUrl("");
 
         setAvatarAssetId(
-          clientData?.photoAssetId ||
-            clientData?.identity?.photoAssetId ||
-            proData?.photoAssetId ||
-            proData?.identity?.photoAssetId ||
-            meData?.photoAssetId ||
-            meData?.identity?.photoAssetId ||
-            "",
+          clientData?.photoAssetId || clientData?.identity?.photoAssetId || "",
         );
 
         // username + last change time
@@ -419,10 +413,6 @@ export default function SettingsPage() {
           avatarAssetId:
             clientData?.photoAssetId ||
             clientData?.identity?.photoAssetId ||
-            proData?.photoAssetId ||
-            proData?.identity?.photoAssetId ||
-            meData?.photoAssetId ||
-            meData?.identity?.photoAssetId ||
             "",
           clientBio: clientData?.bio || "",
           username: serverUsername || "",
@@ -1125,7 +1115,23 @@ export default function SettingsPage() {
 
         await startAwsLivenessFlow();
       } else {
-        flashErr(e?.response?.data?.error || "Failed to save profile.");
+        const raw = String(e?.response?.data?.error || "").trim();
+
+        if (raw === "asset_must_be_public") {
+          flashErr(
+            "Your profile photo must be a public image. Please upload/select a public profile photo, then save again.",
+          );
+        } else if (raw === "asset_not_ready") {
+          flashErr(
+            "Your selected photo is still processing. Wait a moment, then save again.",
+          );
+        } else if (raw === "asset_must_be_image") {
+          flashErr("Profile photo must be an image.");
+        } else if (raw === "asset_forbidden") {
+          flashErr("That profile photo does not belong to your account.");
+        } else {
+          flashErr(raw || "Failed to save profile.");
+        }
       }
     } finally {
       setSavingProfile(false);

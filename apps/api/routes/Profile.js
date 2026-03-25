@@ -232,6 +232,44 @@ async function assertPrivateOwnedReadyImageAssetIds(ownerUid, assetIds = []) {
   return { ok: true, ids };
 }
 
+async function assertPublicOwnedReadyImageAssetId(ownerUid, assetId) {
+  const id = String(assetId || "").trim();
+  if (!id) return { ok: true, id: "" };
+
+  const a = await MediaAsset.findById(id)
+    .select("_id ownerUid visibility type status")
+    .lean()
+    .catch(() => null);
+
+  if (!a) {
+    return { ok: false, status: 404, error: "asset_not_found", assetId: id };
+  }
+  if (String(a.ownerUid) !== String(ownerUid)) {
+    return { ok: false, status: 403, error: "asset_forbidden", assetId: id };
+  }
+  if (a.visibility !== "public") {
+    return {
+      ok: false,
+      status: 400,
+      error: "asset_must_be_public",
+      assetId: id,
+    };
+  }
+  if (a.type !== "image") {
+    return {
+      ok: false,
+      status: 400,
+      error: "asset_must_be_image",
+      assetId: id,
+    };
+  }
+  if (a.status !== "ready") {
+    return { ok: false, status: 409, error: "asset_not_ready", assetId: id };
+  }
+
+  return { ok: true, id };
+}
+
 /* ------------------------------------------------------------------
    1) ENSURE PROFILE (this is the ONLY one allowed to CREATE)
    ------------------------------------------------------------------ */
@@ -378,43 +416,6 @@ async function handlePutClientMe(req, res) {
       return res.status(404).json({ error: "profile_not_found" });
     }
 
-    async function assertPrivateOwnedReadyImage(
-      assetId,
-      fieldName = "assetId",
-    ) {
-      const a = await MediaAsset.findById(assetId)
-        .select("_id ownerUid visibility type status")
-        .lean()
-        .catch(() => null);
-
-      if (!a) {
-        return { ok: false, status: 404, error: "asset_not_found", fieldName };
-      }
-      if (String(a.ownerUid) !== String(uid)) {
-        return { ok: false, status: 403, error: "asset_forbidden", fieldName };
-      }
-      if (a.visibility !== "private") {
-        return {
-          ok: false,
-          status: 400,
-          error: "asset_must_be_private",
-          fieldName,
-        };
-      }
-      if (a.type !== "image") {
-        return {
-          ok: false,
-          status: 400,
-          error: "asset_must_be_image",
-          fieldName,
-        };
-      }
-      if (a.status !== "ready") {
-        return { ok: false, status: 409, error: "asset_not_ready", fieldName };
-      }
-      return { ok: true };
-    }
-
     // normalize casing only if present
     if (payload.lga) payload.lga = String(payload.lga).toUpperCase();
     if (payload.state) payload.state = String(payload.state).toUpperCase();
@@ -447,11 +448,10 @@ async function handlePutClientMe(req, res) {
       clientSet.identity = identityClean;
     }
 
-    // ✅ Facebook-style rule:
-    // Any assetId stored in PRIVATE profile fields must be PRIVATE, owned by user, ready, and image.
+    // ✅ Avatar/profile photo must be PUBLIC, owned by user, ready, and image.
     if (payload.photoAssetId && String(payload.photoAssetId).trim()) {
       const id = String(payload.photoAssetId).trim();
-      const check = await assertPrivateOwnedReadyImage(id, "photoAssetId");
+      const check = await assertPublicOwnedReadyImageAssetId(uid, id);
       if (!check.ok)
         return res.status(check.status).json({ error: check.error });
     }
@@ -462,10 +462,7 @@ async function handlePutClientMe(req, res) {
         String(payload.identity.photoAssetId).trim()
       ) {
         const id = String(payload.identity.photoAssetId).trim();
-        const check = await assertPrivateOwnedReadyImage(
-          id,
-          "identity.photoAssetId",
-        );
+        const check = await assertPublicOwnedReadyImageAssetId(uid, id);
         if (!check.ok)
           return res.status(check.status).json({ error: check.error });
       }
