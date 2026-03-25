@@ -60,6 +60,9 @@ export default function SupportWidget() {
   const bodyRef = useRef(null);
   const bootstrappedRef = useRef(false);
 
+  const userUidRef = useRef("");
+  const bootstrapRunRef = useRef(0);
+
   const header = useMemo(
     () => supportHeader(session, messages),
     [session, messages],
@@ -74,7 +77,11 @@ export default function SupportWidget() {
   }
 
   async function bootstrap() {
-    if (!user || bootstrappedRef.current) return;
+    const activeUid = String(user?.uid || "");
+    if (!activeUid || bootstrappedRef.current) return;
+
+    const runId = Date.now();
+    bootstrapRunRef.current = runId;
 
     setLoading(true);
     setErr("");
@@ -83,14 +90,37 @@ export default function SupportWidget() {
       const sessionRes = await supportGetSession();
       const messagesRes = await supportGetMessages();
 
-      setSession(sessionRes.session || messagesRes.session || null);
-      setMessages(messagesRes.messages || []);
+      // ignore stale bootstrap result after auth/user switch
+      if (bootstrapRunRef.current !== runId) return;
+      if (String(userUidRef.current || "") !== activeUid) return;
+
+      const nextSession = sessionRes.session || messagesRes.session || null;
+      const nextMessages = messagesRes.messages || [];
+
+      // never render a session that does not belong to the current signed-in user
+      if (
+        nextSession &&
+        nextSession.userUid &&
+        String(nextSession.userUid) !== activeUid
+      ) {
+        setSession(null);
+        setMessages([]);
+        setErr("Failed to load support.");
+        bootstrappedRef.current = false;
+        return;
+      }
+
+      setSession(nextSession);
+      setMessages(nextMessages);
       bootstrappedRef.current = true;
       scrollToBottom();
     } catch (e) {
+      if (bootstrapRunRef.current !== runId) return;
       setErr(e?.message || "Failed to load support.");
     } finally {
-      setLoading(false);
+      if (bootstrapRunRef.current === runId) {
+        setLoading(false);
+      }
     }
   }
 
@@ -106,9 +136,9 @@ export default function SupportWidget() {
   }, []);
 
   useEffect(() => {
-    if (!open || !user) return;
+    if (!open || authLoading || !user?.uid) return;
     bootstrap();
-  }, [open, user]);
+  }, [open, authLoading, user?.uid]);
 
   useEffect(() => {
     if (!open || !user) return;
@@ -118,6 +148,17 @@ export default function SupportWidget() {
     const offMessage = registerSocketHandler(
       "support:message",
       ({ session: nextSession, message } = {}) => {
+        const activeUid = String(userUidRef.current || "");
+
+        if (
+          nextSession &&
+          nextSession.userUid &&
+          activeUid &&
+          String(nextSession.userUid) !== activeUid
+        ) {
+          return;
+        }
+
         if (nextSession) setSession(nextSession);
         if (message) {
           setMessages((prev) => mergeMessages(prev, [message]));
@@ -129,6 +170,17 @@ export default function SupportWidget() {
     const offSession = registerSocketHandler(
       "support:session-updated",
       ({ session: nextSession } = {}) => {
+        const activeUid = String(userUidRef.current || "");
+
+        if (
+          nextSession &&
+          nextSession.userUid &&
+          activeUid &&
+          String(nextSession.userUid) !== activeUid
+        ) {
+          return;
+        }
+
         if (nextSession) setSession(nextSession);
       },
     );
@@ -137,7 +189,7 @@ export default function SupportWidget() {
       offMessage();
       offSession();
     };
-  }, [open, user]);
+  }, [open, user?.uid]);
 
   useEffect(() => {
     if (!open) return;
@@ -145,16 +197,22 @@ export default function SupportWidget() {
   }, [messages, open]);
 
   useEffect(() => {
-    if (!user) {
-      setSession(null);
-      setMessages([]);
-      setText("");
-      setSending(false);
-      setLoading(false);
-      setErr("");
-      bootstrappedRef.current = false;
-    }
-  }, [user]);
+    const nextUid = String(user?.uid || "");
+    const prevUid = String(userUidRef.current || "");
+
+    if (prevUid === nextUid) return;
+
+    userUidRef.current = nextUid;
+    bootstrapRunRef.current = 0;
+    bootstrappedRef.current = false;
+
+    setSession(null);
+    setMessages([]);
+    setText("");
+    setSending(false);
+    setLoading(false);
+    setErr("");
+  }, [user?.uid]);
 
   async function send() {
     const clean = text.trim();
@@ -233,7 +291,7 @@ export default function SupportWidget() {
                     Support chat is available for signed-in users.
                   </div>
                   <div className="kpo-support-pill">
-                    Please sign in to continue.
+                    Please close the chat and sign in to continue.
                   </div>
 
                   <div className="kpo-support-auth-row">
