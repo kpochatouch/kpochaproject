@@ -1,3 +1,4 @@
+//apps/web/src/component/PaymentMethodPicker.jsx
 import { useEffect } from "react";
 
 export default function PaymentMethodPicker({

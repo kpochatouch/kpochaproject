@@ -34,6 +34,7 @@ import {
   joinBookingRoom,
   getBookingUiLabel,
 } from "../lib/api";
+import { loadPaystackScript } from "../lib/loadPaystack";
 import PaymentMethodPicker from "../components/PaymentMethodPicker.jsx";
 import ClientWalletLinkButton from "../components/ClientWalletLinkButton.jsx";
 import DisplayName from "../components/DisplayName.jsx";
@@ -60,31 +61,6 @@ function formatWhen(iso) {
   }
 }
 
-/* -------- Paystack loader (same idea as BookService) -------- */
-function usePaystackReady() {
-  const [ready, setReady] = useState(
-    typeof window !== "undefined" && !!window.PaystackPop,
-  );
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (window.PaystackPop) {
-      setReady(true);
-      return;
-    }
-    const id = "paystack-inline-sdk";
-    if (document.getElementById(id)) return;
-    const s = document.createElement("script");
-    s.id = id;
-    s.src = "https://js.paystack.co/v1/inline.js";
-    s.async = true;
-    s.onload = () => setReady(!!window.PaystackPop);
-    document.body.appendChild(s);
-  }, []);
-
-  return ready;
-}
-
 export default function BookingDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -96,7 +72,25 @@ export default function BookingDetails() {
   const [busy, setBusy] = useState(false);
 
   const [payMethod, setPayMethod] = useState("wallet"); // "wallet" | "card"
-  const paystackReady = usePaystackReady();
+  const [paystackReady, setPaystackReady] = useState(
+    typeof window !== "undefined" && !!window.PaystackPop,
+  );
+
+  useEffect(() => {
+    let alive = true;
+
+    loadPaystackScript()
+      .then(() => {
+        if (alive) setPaystackReady(true);
+      })
+      .catch(() => {
+        if (alive) setPaystackReady(false);
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   // Ring/calling UX
   const [ringSeconds, setRingSeconds] = useState(null); // from /api/settings

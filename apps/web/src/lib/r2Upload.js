@@ -92,15 +92,18 @@ export async function waitForMediaAssetReady({
     }
 
     if (status === "failed") {
-      const errMsg =
-        res?.data?.asset?.error?.message || "Video processing failed.";
-      throw new Error(errMsg);
+      const err = new Error("MEDIA_PROCESSING_FAILED");
+      err.code = "MEDIA_PROCESSING_FAILED";
+      err.asset = res?.data?.asset || null;
+      throw err;
     }
 
     await new Promise((r) => setTimeout(r, intervalMs));
   }
 
-  throw new Error("Video processing timed out.");
+  const err = new Error("MEDIA_PROCESSING_TIMEOUT");
+  err.code = "MEDIA_PROCESSING_TIMEOUT";
+  throw err;
 }
 
 /**

@@ -1,30 +1,7 @@
 // apps/web/src/pages/ClientWallet.jsx
 import { useEffect, useState } from "react";
 import { api, fmtNairaFromKobo } from "../lib/api";
-
-function usePaystackScript() {
-  const [ready, setReady] = useState(
-    typeof window !== "undefined" && !!window.PaystackPop
-  );
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (window.PaystackPop) {
-      setReady(true);
-      return;
-    }
-    const id = "paystack-inline-sdk";
-    if (document.getElementById(id)) return;
-    const s = document.createElement("script");
-    s.id = id;
-    s.src = "https://js.paystack.co/v1/inline.js";
-    s.async = true;
-    s.onload = () => setReady(!!window.PaystackPop);
-    s.onerror = () => setReady(false);
-    document.body.appendChild(s);
-  }, []);
-  return ready;
-}
+import { loadPaystackScript } from "../lib/loadPaystack";
 
 export default function ClientWallet() {
   const [loading, setLoading] = useState(true);
@@ -36,7 +13,25 @@ export default function ClientWallet() {
   // top-up UI
   const [topupNaira, setTopupNaira] = useState("");
   const [busyTopup, setBusyTopup] = useState(false);
-  const paystackReady = usePaystackScript();
+  const [paystackReady, setPaystackReady] = useState(
+    typeof window !== "undefined" && !!window.PaystackPop,
+  );
+
+  useEffect(() => {
+    let alive = true;
+
+    loadPaystackScript()
+      .then(() => {
+        if (alive) setPaystackReady(true);
+      })
+      .catch(() => {
+        if (alive) setPaystackReady(false);
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   // ---------- helpers ----------
   const refreshWallet = async () => {

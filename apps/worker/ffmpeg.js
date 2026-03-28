@@ -41,16 +41,24 @@ export async function processVideo(asset) {
   // pick frame at 0.5s (or 0 if duration is unknown)
   const seek =
     durationSec && Number.isFinite(durationSec) && durationSec > 1 ? 0.5 : 0;
-  await run(
-    [
-      `ffmpeg -y`,
-      `-ss ${seek}`,
-      `-i "${input}"`,
-      `-frames:v 1`,
-      `-q:v 3`,
-      `"${thumbFile}"`,
-    ].join(" "),
-  );
+
+  try {
+    await run(
+      [
+        `ffmpeg -y`,
+        `-ss ${seek}`,
+        `-i "${input}"`,
+        `-frames:v 1`,
+        `-q:v 3`,
+        `"${thumbFile}"`,
+      ].join(" "),
+    );
+  } catch (e) {
+    console.warn(
+      "[worker][ffmpeg] thumbnail generation failed:",
+      e?.message || e,
+    );
+  }
 
   // 4) HLS transcode (audio-safe) — FIXED
   // Root cause (confirmed from your DB error): your previous command produced duplicate/identical variants,
@@ -69,10 +77,16 @@ export async function processVideo(asset) {
     `-map "[v480]"  -c:v:2 libx264 -b:v:2 1400k -maxrate:v:2 1498k -bufsize:v:2 2100k`,
   ];
 
-  const audioPart = hasAudio ? [`-map 0:a:0 -c:a aac -b:a 128k -ac 2`] : [];
+  const audioPart = hasAudio
+    ? [
+        `-map 0:a:0 -c:a:0 aac -b:a:0 128k -ac:a:0 2`,
+        `-map 0:a:0 -c:a:1 aac -b:a:1 128k -ac:a:1 2`,
+        `-map 0:a:0 -c:a:2 aac -b:a:2 128k -ac:a:2 2`,
+      ]
+    : [];
 
   const varMap = hasAudio
-    ? `-var_stream_map "v:0,a:0 v:1,a:0 v:2,a:0"`
+    ? `-var_stream_map "v:0,a:0 v:1,a:1 v:2,a:2"`
     : `-var_stream_map "v:0 v:1 v:2"`;
 
   const cmd = [
@@ -81,9 +95,15 @@ export async function processVideo(asset) {
     `-filter_complex "${filter}"`,
     ...maps,
     ...audioPart,
+    `-preset veryfast`,
+    `-pix_fmt yuv420p`,
+    `-g 48`,
+    `-keyint_min 48`,
+    `-sc_threshold 0`,
     `-f hls`,
     `-hls_time 4`,
     `-hls_playlist_type vod`,
+    `-hls_flags independent_segments`,
     `-hls_segment_filename "${outputDir}/v%v/segment_%03d.ts"`,
     `-master_pl_name master.m3u8`,
     varMap,
