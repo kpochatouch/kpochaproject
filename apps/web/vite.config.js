@@ -8,10 +8,26 @@ export default defineConfig({
     // ⬅️ Ensure only one copy of react & react-dom is bundled (fixes React error #31)
     dedupe: ["react", "react-dom"],
   },
+  optimizeDeps: {
+    exclude: ["@ffmpeg/ffmpeg", "@ffmpeg/util"],
+  },
+  worker: {
+    format: "es",
+  },
   base: "/",
   server: {
     port: 5173,
     host: true,
+    headers: {
+      "Cross-Origin-Opener-Policy": "same-origin",
+      "Cross-Origin-Embedder-Policy": "require-corp",
+    },
+  },
+  preview: {
+    headers: {
+      "Cross-Origin-Opener-Policy": "same-origin",
+      "Cross-Origin-Embedder-Policy": "require-corp",
+    },
   },
   build: {
     outDir: "dist",

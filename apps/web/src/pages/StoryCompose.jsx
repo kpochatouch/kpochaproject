@@ -147,9 +147,15 @@ export default function StoryCompose() {
   const canPost = useMemo(() => {
     if (!mediaFile) return false;
     if (uploading || posting) return false;
-    if (mustTrim && mediaType === "video") return false;
+    if (
+      mustTrim &&
+      mediaType === "video" &&
+      Number(videoDuration || 0) > MAX_VIDEO_SECONDS + 0.25
+    ) {
+      return false;
+    }
     return true;
-  }, [mediaFile, uploading, posting, mustTrim, mediaType]);
+  }, [mediaFile, uploading, posting, mustTrim, mediaType, videoDuration]);
 
   useEffect(() => {
     const el = textareaRef.current;
@@ -224,8 +230,15 @@ export default function StoryCompose() {
         });
       } catch (err) {
         console.error("[story][ffmpeg] load failed", err);
+        console.error(
+          "[story][ffmpeg] detail",
+          err?.message || err,
+          err?.stack || "",
+        );
         setTrimUnavailable(true);
-        throw new Error("FFMPEG_LOAD_FAILED");
+        throw new Error(
+          `FFMPEG_LOAD_FAILED: ${String(err?.message || err || "unknown")}`,
+        );
       }
 
       ffmpeg.__fetchFile = fetchFile;
@@ -350,11 +363,9 @@ export default function StoryCompose() {
       console.error("[story][trim] failed", err);
 
       if (msg.includes("FFMPEG_LOAD_FAILED")) {
-        toast.error(
-          "Story video trimming is unavailable on this device right now.",
-        );
+        toast.error(msg);
       } else {
-        toast.error("Unable to trim this story video right now.");
+        toast.error(`Unable to trim this story video right now: ${msg}`);
       }
     } finally {
       setTrimming(false);
@@ -400,10 +411,13 @@ export default function StoryCompose() {
       return;
     }
 
-    const dur = await getVideoDurationSeconds(file);
-    setVideoDuration(dur || 0);
+    const rawDur = await getVideoDurationSeconds(file);
+    const dur = Number.isFinite(rawDur) ? rawDur : 0;
+    const durRounded = dur > 0 ? Math.round(dur * 10) / 10 : 0;
 
-    if (dur && dur > MAX_VIDEO_SECONDS) {
+    setVideoDuration(durRounded || 0);
+
+    if (durRounded > MAX_VIDEO_SECONDS + 0.25) {
       setMustTrim(true);
       setTrimStart(0);
       setTrimEnd(MAX_VIDEO_SECONDS);
@@ -411,7 +425,11 @@ export default function StoryCompose() {
     } else {
       setMustTrim(false);
       setTrimStart(0);
-      setTrimEnd(dur ? Math.floor(dur) : MAX_VIDEO_SECONDS);
+      setTrimEnd(
+        durRounded
+          ? Math.min(MAX_VIDEO_SECONDS, Math.floor(durRounded))
+          : MAX_VIDEO_SECONDS,
+      );
     }
 
     const thumb = await makeVideoThumbnail(file);
@@ -435,7 +453,11 @@ export default function StoryCompose() {
       return;
     }
 
-    if (mustTrim && mediaType === "video") {
+    if (
+      mustTrim &&
+      mediaType === "video" &&
+      Number(videoDuration || 0) > MAX_VIDEO_SECONDS + 0.25
+    ) {
       toast.error("Please trim the story video to 30 seconds before posting.");
       return;
     }

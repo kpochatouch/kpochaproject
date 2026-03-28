@@ -180,10 +180,15 @@ export default function Compose() {
   const canPost = useMemo(() => {
     const hasText = text.trim().length > 0;
     const hasMedia = !!mediaFile;
-    // If mustTrim is true, user must apply a trim that yields <=120s
-    if (mustTrim && mediaType === "video") return false;
+    if (
+      mustTrim &&
+      mediaType === "video" &&
+      Number(videoDuration || 0) > MAX_VIDEO_SECONDS + 0.25
+    ) {
+      return false;
+    }
     return !uploading && !posting && (hasText || hasMedia);
-  }, [text, mediaFile, uploading, posting, mustTrim, mediaType]);
+  }, [text, mediaFile, uploading, posting, mustTrim, mediaType, videoDuration]);
 
   // Auto-expand textarea (smooth, durable)
   useEffect(() => {
@@ -237,8 +242,15 @@ export default function Compose() {
         });
       } catch (err) {
         console.error("[compose][ffmpeg] load failed", err);
+        console.error(
+          "[compose][ffmpeg] detail",
+          err?.message || err,
+          err?.stack || "",
+        );
         setTrimUnavailable(true);
-        throw new Error("FFMPEG_LOAD_FAILED");
+        throw new Error(
+          `FFMPEG_LOAD_FAILED: ${String(err?.message || err || "unknown")}`,
+        );
       }
 
       ffmpeg.__fetchFile = fetchFile;
@@ -330,21 +342,28 @@ export default function Compose() {
     // set new thumb url
     setVideoThumbUrl(thumb || "");
 
-    const dur = await getVideoDurationSeconds(file);
-    setVideoDuration(dur || 0);
-    if (!dur || !isFinite(dur) || dur <= 0) {
+    const rawDur = await getVideoDurationSeconds(file);
+    const dur = Number.isFinite(rawDur) ? rawDur : 0;
+    const durRounded = dur > 0 ? Math.round(dur * 10) / 10 : 0;
+
+    setVideoDuration(durRounded || 0);
+    if (!durRounded || durRounded <= 0) {
       toast.info("Video loaded. Duration not detected yet — trim still works.");
     }
 
-    if (dur && dur > MAX_VIDEO_SECONDS) {
+    if (durRounded > MAX_VIDEO_SECONDS + 0.25) {
       setMustTrim(true);
       setTrimStart(0);
-      setTrimEnd(MAX_VIDEO_SECONDS); // default 0–120
+      setTrimEnd(MAX_VIDEO_SECONDS);
       toast.error("Video is longer than 2 minutes. Trim is required.");
     } else {
       setMustTrim(false);
       setTrimStart(0);
-      setTrimEnd(dur ? Math.floor(dur) : MAX_VIDEO_SECONDS);
+      setTrimEnd(
+        durRounded
+          ? Math.min(MAX_VIDEO_SECONDS, Math.floor(durRounded))
+          : MAX_VIDEO_SECONDS,
+      );
       toast.info("Video selected. You can trim if you want.");
     }
   }
@@ -468,9 +487,9 @@ export default function Compose() {
       console.error("[compose][trim] failed", err);
 
       if (msg.includes("FFMPEG_LOAD_FAILED")) {
-        toast.error("Video trimming is unavailable on this device right now.");
+        toast.error(msg);
       } else {
-        toast.error("Unable to trim this video right now.");
+        toast.error(`Unable to trim this video right now: ${msg}`);
       }
     } finally {
       setTrimming(false);
@@ -485,7 +504,11 @@ export default function Compose() {
       return;
     }
 
-    if (mustTrim && mediaType === "video") {
+    if (
+      mustTrim &&
+      mediaType === "video" &&
+      Number(videoDuration || 0) > MAX_VIDEO_SECONDS + 0.25
+    ) {
       toast.error("Please trim the video to 2 minutes before posting.");
       return;
     }
