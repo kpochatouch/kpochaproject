@@ -71,17 +71,24 @@ export async function expandMediaForClient(mediaArr) {
       const base = resolveAssetDocToClient(a);
 
       if (!base) {
+        const legacyUrl =
+          typeof m?.url === "string" && m.url.trim() ? m.url.trim() : "";
+        const legacyThumb =
+          typeof m?.thumbnailUrl === "string" && m.thumbnailUrl.trim()
+            ? m.thumbnailUrl.trim()
+            : "";
+
         return {
           assetId: assetIdStr,
           visibility: "public",
-          url: "",
+          url: legacyUrl,
           hlsUrl: "",
           type: m?.type || "image",
-          thumbnailUrl: "",
+          thumbnailUrl: legacyThumb,
           width: Number(m?.width || 0),
           height: Number(m?.height || 0),
           durationSec: Number(m?.durationSec || 0),
-          status: "missing",
+          status: legacyUrl ? "legacy" : "missing",
           error: null,
         };
       }
@@ -97,17 +104,24 @@ export async function expandMediaForClient(mediaArr) {
       return { ...base, thumbnailUrl };
     }
 
+    const legacyUrl =
+      typeof m?.url === "string" && m.url.trim() ? m.url.trim() : "";
+    const legacyThumb =
+      typeof m?.thumbnailUrl === "string" && m.thumbnailUrl.trim()
+        ? m.thumbnailUrl.trim()
+        : "";
+
     return {
       assetId: assetIdStr || "",
       visibility: "public",
-      url: "",
+      url: legacyUrl,
       hlsUrl: "",
       type: m?.type || "image",
-      thumbnailUrl: "",
+      thumbnailUrl: legacyThumb,
       width: Number(m?.width || 0),
       height: Number(m?.height || 0),
       durationSec: Number(m?.durationSec || 0),
-      status: "missing",
+      status: legacyUrl ? "legacy" : "missing",
       error: null,
     };
   });
