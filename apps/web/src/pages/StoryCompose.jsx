@@ -473,6 +473,8 @@ export default function StoryCompose() {
         file: mediaFile,
         type: mediaType,
         visibility: "public",
+        trimStartSec: mediaType === "video" ? Number(trimStart || 0) : 0,
+        trimEndSec: mediaType === "video" ? Number(trimEnd || 0) : 0,
       });
 
       if (mediaType === "video") {

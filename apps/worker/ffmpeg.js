@@ -8,6 +8,8 @@ const TMP = process.env.TMPDIR || process.env.TEMP || process.env.TMP || "/tmp";
 
 function runCommand(command, args, options = {}) {
   return new Promise((resolve, reject) => {
+    const startedAt = Date.now();
+
     const child = spawn(command, args, {
       stdio: ["ignore", "pipe", "pipe"],
       ...options,
@@ -15,6 +17,11 @@ function runCommand(command, args, options = {}) {
 
     let stdout = "";
     let stderr = "";
+    let lastProgressLogAt = 0;
+
+    console.log(
+      `[worker][proc] spawn command=${command} pid=${child.pid || "unknown"}`,
+    );
 
     child.stdout?.on("data", (chunk) => {
       const text = String(chunk || "");
@@ -26,22 +33,47 @@ function runCommand(command, args, options = {}) {
       const text = String(chunk || "");
       stderr += text;
       if (stderr.length > 40000) stderr = stderr.slice(-40000);
+
+      const now = Date.now();
+      if (now - lastProgressLogAt > 5000) {
+        lastProgressLogAt = now;
+        const tail = stderr.slice(-500).replace(/\s+/g, " ").trim();
+        console.log(
+          `[worker][proc] ${command} pid=${
+            child.pid || "unknown"
+          } running ${Math.round((now - startedAt) / 1000)}s tail=${tail}`,
+        );
+      }
     });
 
     child.on("error", (err) => {
+      console.error(
+        `[worker][proc] error command=${command} pid=${child.pid || "unknown"}`,
+        err,
+      );
       reject(err);
     });
 
-    child.on("close", (code) => {
+    child.on("close", (code, signal) => {
+      const durationSec = Math.round((Date.now() - startedAt) / 1000);
+      console.log(
+        `[worker][proc] close command=${command} pid=${
+          child.pid || "unknown"
+        } code=${code} signal=${signal || "none"} duration=${durationSec}s`,
+      );
+
       if (code === 0) {
         resolve({ stdout, stderr });
         return;
       }
 
       const err = new Error(
-        `${command} exited with code ${code}${stderr ? `: ${stderr.slice(-1000)}` : ""}`,
+        `${command} exited with code ${code}${
+          signal ? ` signal ${signal}` : ""
+        }${stderr ? `: ${stderr.slice(-1000)}` : ""}`,
       );
       err.code = code;
+      err.signal = signal;
       err.stdout = stdout;
       err.stderr = stderr;
       reject(err);
@@ -53,7 +85,9 @@ function logMemory(tag) {
   const m = process.memoryUsage();
   const toMB = (n) => Math.round((n / 1024 / 1024) * 10) / 10;
   console.log(
-    `[worker][mem] ${tag} rss=${toMB(m.rss)}MB heapUsed=${toMB(m.heapUsed)}MB heapTotal=${toMB(m.heapTotal)}MB external=${toMB(m.external)}MB`,
+    `[worker][mem] ${tag} rss=${toMB(m.rss)}MB heapUsed=${toMB(
+      m.heapUsed,
+    )}MB heapTotal=${toMB(m.heapTotal)}MB external=${toMB(m.external)}MB`,
   );
 }
 
@@ -63,6 +97,7 @@ export async function processVideo(asset) {
 
   const ext = (origKey.split(".").pop() || "mp4").replace(/[^a-z0-9]/gi, "");
   const input = path.join(TMP, `${asset._id}-original.${ext || "mp4"}`);
+  const trimmedInput = path.join(TMP, `${asset._id}-trimmed.mp4`);
   const outputDir = path.join(TMP, `${asset._id}-hls`);
   const thumbFile = path.join(TMP, `${asset._id}-thumb.jpg`);
 
@@ -78,10 +113,55 @@ export async function processVideo(asset) {
 
     logMemory(`after download ${asset._id}`);
 
-    const probe = await ffprobe(input);
+    const trimStart = Number(asset?.trim?.startSec || 0);
+    const trimEnd = Number(asset?.trim?.endSec || 0);
+    const hasTrim =
+      Number.isFinite(trimStart) &&
+      Number.isFinite(trimEnd) &&
+      trimEnd > trimStart;
+
+    let processingInput = input;
+
+    if (hasTrim) {
+      console.log(
+        `[worker][ffmpeg] trim start asset=${asset._id} start=${trimStart} end=${trimEnd}`,
+      );
+
+      await runCommand("ffmpeg", [
+        "-y",
+        "-ss",
+        String(trimStart),
+        "-to",
+        String(trimEnd),
+        "-i",
+        processingInput,
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-threads",
+        "1",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "128k",
+        "-movflags",
+        "+faststart",
+        trimmedInput,
+      ]);
+
+      console.log(`[worker][ffmpeg] trim finished asset=${asset._id}`);
+      processingInput = trimmedInput;
+    }
+
+    const probe = await ffprobe(processingInput);
     const vStream =
       (probe.streams || []).find((s) => s.codec_type === "video") || null;
-    const hasAudio = (probe.streams || []).some((s) => s.codec_type === "audio");
+    const hasAudio = (probe.streams || []).some(
+      (s) => s.codec_type === "audio",
+    );
 
     const width = Number(vStream?.width || 0);
     const height = Number(vStream?.height || 0);
@@ -96,7 +176,7 @@ export async function processVideo(asset) {
         "-ss",
         String(seek),
         "-i",
-        input,
+        processingInput,
         "-frames:v",
         "1",
         "-q:v",
@@ -120,7 +200,7 @@ export async function processVideo(asset) {
     const args = [
       "-y",
       "-i",
-      input,
+      processingInput,
       "-filter_complex",
       filter,
 
@@ -204,7 +284,9 @@ export async function processVideo(asset) {
       `${outputDir}/v%v/index.m3u8`,
     );
 
+    console.log(`[worker][ffmpeg] transcode start asset=${asset._id}`);
     await runCommand("ffmpeg", args);
+    console.log(`[worker][ffmpeg] transcode finished asset=${asset._id}`);
 
     logMemory(`after transcode ${asset._id}`);
 
@@ -256,10 +338,17 @@ export async function processVideo(asset) {
       },
     ];
 
+    if (asset.trim) {
+      asset.trim.applied = hasTrim;
+    }
+
     await asset.save();
 
     logMemory(`done ${asset._id}`);
   } finally {
+    try {
+      fs.unlinkSync(trimmedInput);
+    } catch {}
     try {
       fs.rmSync(outputDir, { recursive: true, force: true });
     } catch {}

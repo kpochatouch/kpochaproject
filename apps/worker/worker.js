@@ -19,6 +19,25 @@ console.log("[worker] node", process.version);
 
 console.log("[worker] has MONGODB_URI?", !!process.env.MONGODB_URI);
 
+process.on("SIGTERM", () => {
+  console.warn("[worker] SIGTERM received");
+  logMemory("SIGTERM");
+});
+
+process.on("SIGINT", () => {
+  console.warn("[worker] SIGINT received");
+  logMemory("SIGINT");
+});
+
+process.on("beforeExit", (code) => {
+  console.warn("[worker] beforeExit code=", code);
+  logMemory("beforeExit");
+});
+
+process.on("exit", (code) => {
+  console.warn("[worker] exit code=", code);
+});
+
 await mongoose.connect(mustEnv("MONGODB_URI"));
 console.log("[worker] ✅ mongo connected");
 

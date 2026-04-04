@@ -5,7 +5,6 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
   plugins: [react()],
   resolve: {
-    // ⬅️ Ensure only one copy of react & react-dom is bundled (fixes React error #31)
     dedupe: ["react", "react-dom"],
   },
   optimizeDeps: {
@@ -18,17 +17,8 @@ export default defineConfig({
   server: {
     port: 5173,
     host: true,
-    headers: {
-      "Cross-Origin-Opener-Policy": "same-origin",
-      "Cross-Origin-Embedder-Policy": "require-corp",
-    },
   },
-  preview: {
-    headers: {
-      "Cross-Origin-Opener-Policy": "same-origin",
-      "Cross-Origin-Embedder-Policy": "require-corp",
-    },
-  },
+  preview: {},
   build: {
     outDir: "dist",
     emptyOutDir: true,

@@ -533,6 +533,8 @@ export default function Compose() {
           file: mediaFile,
           type: mediaType,
           visibility: "public",
+          trimStartSec: mediaType === "video" ? Number(trimStart || 0) : 0,
+          trimEndSec: mediaType === "video" ? Number(trimEnd || 0) : 0,
         });
         mediaAssetId = main.assetId;
 

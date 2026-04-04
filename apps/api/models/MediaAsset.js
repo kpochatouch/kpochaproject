@@ -49,6 +49,13 @@ const MediaAssetSchema = new mongoose.Schema(
       height: Number,
     },
 
+    trim: {
+      startSec: { type: Number, default: 0 },
+      endSec: { type: Number, default: 0 },
+      required: { type: Boolean, default: false },
+      applied: { type: Boolean, default: false },
+    },
+
     renditions: [
       {
         name: String,

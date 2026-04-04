@@ -9,7 +9,14 @@ export default function mediaRoutes({ requireAuth }) {
 
   // INIT
   r.post("/media/init", requireAuth, async (req, res) => {
-    const { type, contentType, filename, visibility } = req.body;
+    const {
+      type,
+      contentType,
+      filename,
+      visibility,
+      trimStartSec = 0,
+      trimEndSec = 0,
+    } = req.body;
 
     if (!["video", "image"].includes(type)) {
       return res.status(400).json({ error: "invalid_type" });
@@ -43,11 +50,21 @@ export default function mediaRoutes({ requireAuth }) {
       (type === "image" ? "jpg" : "mp4")
     ).replace(/[^a-z0-9]/g, "");
 
+    const trimStart = Number(trimStartSec || 0);
+    const trimEnd = Number(trimEndSec || 0);
+    const hasTrim = trimEnd > trimStart;
+
     const asset = await MediaAsset.create({
       ownerUid: req.user.uid,
       type,
       status: "uploading",
-      visibility: vis, // ✅ persist visibility
+      visibility: vis,
+      trim: {
+        startSec: hasTrim ? trimStart : 0,
+        endSec: hasTrim ? trimEnd : 0,
+        required: hasTrim,
+        applied: false,
+      },
     });
 
     const key = `media/${req.user.uid}/${asset._id}/original.${ext}`;
