@@ -172,23 +172,32 @@ export default function Compose() {
   const [videoPreviewError, setVideoPreviewError] = useState("");
 
   // FFmpeg lazy refs
-  const ffmpegRef = useRef(null);
-  const ffmpegLoadingRef = useRef(false);
-  const [trimUnavailable, setTrimUnavailable] = useState(false);
 
   const wordCount = useMemo(() => wordsCount(text), [text]);
   const canPost = useMemo(() => {
     const hasText = text.trim().length > 0;
     const hasMedia = !!mediaFile;
-    if (
-      mustTrim &&
-      mediaType === "video" &&
-      Number(videoDuration || 0) > MAX_VIDEO_SECONDS + 0.25
-    ) {
-      return false;
+
+    if (uploading || posting || trimming) return false;
+
+    if (mediaType === "video" && mediaFile) {
+      const start = Number(trimStart || 0);
+      const end = Number(trimEnd || 0);
+      if (!(end > start)) return false;
+      if (end - start > MAX_VIDEO_SECONDS) return false;
     }
-    return !uploading && !posting && (hasText || hasMedia);
-  }, [text, mediaFile, uploading, posting, mustTrim, mediaType, videoDuration]);
+
+    return hasText || hasMedia;
+  }, [
+    text,
+    mediaFile,
+    uploading,
+    posting,
+    trimming,
+    mediaType,
+    trimStart,
+    trimEnd,
+  ]);
 
   // Auto-expand textarea (smooth, durable)
   useEffect(() => {
@@ -212,54 +221,6 @@ export default function Compose() {
 
   function close() {
     navigate(-1);
-  }
-
-  async function ensureFFmpegLoaded() {
-    if (ffmpegRef.current) return ffmpegRef.current;
-
-    if (ffmpegLoadingRef.current) {
-      while (ffmpegLoadingRef.current) {
-        // eslint-disable-next-line no-await-in-loop
-        await new Promise((r) => setTimeout(r, 100));
-      }
-      return ffmpegRef.current;
-    }
-
-    ffmpegLoadingRef.current = true;
-    try {
-      const [{ FFmpeg }, { fetchFile }] = await Promise.all([
-        import("@ffmpeg/ffmpeg"),
-        import("@ffmpeg/util"),
-      ]);
-
-      const ffmpeg = new FFmpeg();
-
-      try {
-        await ffmpeg.load({
-          coreURL: "/ffmpeg/ffmpeg-core.js",
-          wasmURL: "/ffmpeg/ffmpeg-core.wasm",
-          workerURL: "/ffmpeg/ffmpeg-core.worker.js",
-        });
-      } catch (err) {
-        console.error("[compose][ffmpeg] load failed", err);
-        console.error(
-          "[compose][ffmpeg] detail",
-          err?.message || err,
-          err?.stack || "",
-        );
-        setTrimUnavailable(true);
-        throw new Error(
-          `FFMPEG_LOAD_FAILED: ${String(err?.message || err || "unknown")}`,
-        );
-      }
-
-      ffmpeg.__fetchFile = fetchFile;
-      ffmpegRef.current = ffmpeg;
-      setTrimUnavailable(false);
-      return ffmpeg;
-    } finally {
-      ffmpegLoadingRef.current = false;
-    }
   }
 
   function clearMedia() {
@@ -368,134 +329,6 @@ export default function Compose() {
     }
   }
 
-  async function applyVideoTrim() {
-    if (!mediaFile || mediaType !== "video") return;
-
-    const s = Math.max(0, Number(trimStart) || 0);
-    const e = Math.max(0, Number(trimEnd) || 0);
-
-    if (!(e > s)) {
-      toast.error("Invalid trim range.");
-      return;
-    }
-    if (e - s > MAX_VIDEO_SECONDS) {
-      toast.error("Trim result must be 2:00 max.");
-      return;
-    }
-
-    setTrimming(true);
-    toast.info("Trimming…");
-
-    try {
-      const ffmpeg = await ensureFFmpegLoaded();
-      const fetchFile = ffmpeg.__fetchFile;
-
-      // ✅ unique names (prevents collisions across multiple trims)
-      const uid = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
-      const inName = `in_${uid}.mp4`;
-      const outName = `out_${uid}.mp4`;
-
-      // ✅ best-effort cleanup if something exists
-      try {
-        await ffmpeg.deleteFile(inName);
-      } catch {}
-      try {
-        await ffmpeg.deleteFile(outName);
-      } catch {}
-
-      // write input
-      await ffmpeg.writeFile(inName, await fetchFile(mediaFile));
-
-      const duration = Math.max(0, Number(videoDuration) || 0);
-      const safeEnd = duration ? Math.min(e, Math.floor(duration)) : e;
-      const safeStart = Math.min(s, Math.max(0, safeEnd - 1));
-      const len = Math.max(1, safeEnd - safeStart);
-
-      // ✅ SAFE trim command for WebView:
-      // -ss BEFORE -i for fast seek
-      // -t for length
-      // re-encode to H.264/AAC
-      // yuv420p + faststart
-      // +genpts fixes timestamp weirdness
-      // -avoid_negative_ts make_zero prevents negative ts issues
-      await ffmpeg.exec([
-        "-hide_banner",
-        "-y",
-        "-ss",
-        String(safeStart),
-        "-t",
-        String(len),
-        "-i",
-        inName,
-        "-map",
-        "0:v:0?",
-        "-map",
-        "0:a:0?",
-        "-vf",
-        "scale=trunc(iw/2)*2:trunc(ih/2)*2",
-        "-c:v",
-        "libx264",
-        "-preset",
-        "veryfast",
-        "-crf",
-        "23",
-        "-pix_fmt",
-        "yuv420p",
-        "-c:a",
-        "aac",
-        "-b:a",
-        "128k",
-        "-movflags",
-        "+faststart",
-        "-fflags",
-        "+genpts",
-        "-avoid_negative_ts",
-        "make_zero",
-        outName,
-      ]);
-
-      const data = await ffmpeg.readFile(outName);
-      const trimmedFile = new File([data.buffer], "trimmed.mp4", {
-        type: "video/mp4",
-      });
-
-      // ✅ cleanup FFmpeg FS to save memory
-      try {
-        await ffmpeg.deleteFile(inName);
-      } catch {}
-      try {
-        await ffmpeg.deleteFile(outName);
-      } catch {}
-
-      // update state + preview
-      const url = URL.createObjectURL(trimmedFile);
-      try {
-        if (mediaPreviewUrl) URL.revokeObjectURL(mediaPreviewUrl);
-      } catch {}
-      setMediaPreviewUrl(url);
-
-      // thumbnail is now stale (optional): regenerate later if you want
-      setMediaFile(trimmedFile);
-      setVideoDuration(Math.min(MAX_VIDEO_SECONDS, len));
-      setTrimStart(0);
-      setTrimEnd(Math.min(MAX_VIDEO_SECONDS, len));
-      setMustTrim(false);
-
-      toast.success("Trim applied.");
-    } catch (err) {
-      const msg = String(err?.message || err || "");
-      console.error("[compose][trim] failed", err);
-
-      if (msg.includes("FFMPEG_LOAD_FAILED")) {
-        toast.error(msg);
-      } else {
-        toast.error(`Unable to trim this video right now: ${msg}`);
-      }
-    } finally {
-      setTrimming(false);
-    }
-  }
-
   async function submit() {
     // messages go to toast now
 
@@ -504,13 +337,19 @@ export default function Compose() {
       return;
     }
 
-    if (
-      mustTrim &&
-      mediaType === "video" &&
-      Number(videoDuration || 0) > MAX_VIDEO_SECONDS + 0.25
-    ) {
-      toast.error("Please trim the video to 2 minutes before posting.");
-      return;
+    if (mediaType === "video" && mediaFile) {
+      const start = Number(trimStart || 0);
+      const end = Number(trimEnd || 0);
+
+      if (!(end > start)) {
+        toast.error("Select a valid trim range.");
+        return;
+      }
+
+      if (end - start > MAX_VIDEO_SECONDS) {
+        toast.error("Trim range must be 2:00 max.");
+        return;
+      }
     }
 
     if (!text.trim() && !mediaFile) {
@@ -715,17 +554,13 @@ export default function Compose() {
                   </div>
                 </div>
 
-                {trimUnavailable ? (
+                {mustTrim ? (
                   <div className="text-[11px] text-red-300 mb-2">
-                    Video trimming is unavailable on this device right now.
-                  </div>
-                ) : mustTrim ? (
-                  <div className="text-[11px] text-red-300 mb-2">
-                    Longer than 2:00 — trimming is required.
+                    Longer than 2:00 — selected range will be trimmed on upload.
                   </div>
                 ) : (
                   <div className="text-[11px] text-zinc-500 mb-2">
-                    Trimming is optional.
+                    Selected range will be trimmed on upload.
                   </div>
                 )}
 
@@ -851,42 +686,9 @@ export default function Compose() {
                     Reset 0–2:00
                   </button>
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (trimUnavailable) {
-                        toast.error(
-                          "Video trimming is unavailable on this device right now.",
-                        );
-                        return;
-                      }
-
-                      if (
-                        Number(trimEnd) - Number(trimStart) >
-                        MAX_VIDEO_SECONDS
-                      ) {
-                        toast.error("Trim must be 2:00 max. Reduce the range.");
-                        return;
-                      }
-
-                      applyVideoTrim();
-                    }}
-                    className="ml-auto rounded-md border border-zinc-700 px-4 py-2 text-sm hover:bg-zinc-900 disabled:opacity-50"
-                    disabled={
-                      trimUnavailable ||
-                      trimming ||
-                      uploading ||
-                      posting ||
-                      !videoDuration ||
-                      !(Number(trimEnd) > Number(trimStart))
-                    }
-                  >
-                    {trimming
-                      ? "Trimming…"
-                      : mustTrim
-                      ? "Trim (required)"
-                      : "Trim"}
-                  </button>
+                  <div className="ml-auto text-[11px] text-zinc-400">
+                    Selected range will be trimmed on upload.
+                  </div>
                 </div>
               </div>
             ) : null}
