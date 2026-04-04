@@ -29,11 +29,26 @@ function callStillRinging(call) {
   return ["initiated", "ringing"].includes(call.status);
 }
 
+function logMemory(tag) {
+  const m = process.memoryUsage();
+  const toMB = (n) => Math.round((n / 1024 / 1024) * 10) / 10;
+  console.log(
+    `[worker][mem] ${tag} rss=${toMB(m.rss)}MB heapUsed=${toMB(
+      m.heapUsed,
+    )}MB heapTotal=${toMB(m.heapTotal)}MB external=${toMB(m.external)}MB`,
+  );
+}
+
+setInterval(() => {
+  logMemory("heartbeat");
+}, 15000);
+
 const worker = new Worker(
   "media-processing",
   async (job) => {
     const { assetId } = job.data;
     console.log("[worker] job start", job.name, assetId);
+    logMemory(`before job ${job.name}:${assetId}`);
 
     const asset = await MediaAsset.findById(assetId);
     if (!asset) {
@@ -49,6 +64,7 @@ const worker = new Worker(
       asset.status = "ready";
       await asset.save();
       console.log("[worker] ✅ job done", assetId);
+      logMemory(`after job ${job.name}:${assetId}`);
     } catch (e) {
       const msg = String(e?.message || e || "unknown_error");
       const stderr =
@@ -60,6 +76,7 @@ const worker = new Worker(
       console.error("[worker] message:", msg);
       if (stderr) console.error("[worker] stderr:", stderr);
       if (stdout) console.error("[worker] stdout:", stdout);
+      logMemory(`failed job ${job.name}:${assetId}`);
 
       asset.status = "failed";
       asset.error = {
@@ -72,8 +89,26 @@ const worker = new Worker(
       throw e;
     }
   },
-  { connection: bullRedis },
+  {
+    connection: bullRedis,
+    concurrency: 1,
+  },
 );
+
+worker.on("active", (job) => {
+  console.log(`[worker] active id=${job.id} name=${job.name}`);
+  logMemory(`active ${job.name}:${job.id}`);
+});
+
+worker.on("completed", (job) => {
+  console.log(`[worker] completed id=${job.id} name=${job.name}`);
+  logMemory(`completed ${job.name}:${job.id}`);
+});
+
+worker.on("failed", (job, err) => {
+  console.error(`[worker] failed id=${job?.id} name=${job?.name}`, err);
+  logMemory(`failed ${job?.name}:${job?.id}`);
+});
 
 const callRingWorker = new Worker(
   CALL_RING_QUEUE,
