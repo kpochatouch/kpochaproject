@@ -14,6 +14,7 @@ export default function mediaRoutes({ requireAuth }) {
       contentType,
       filename,
       visibility,
+      purpose = "post",
       trimStartSec = 0,
       trimEndSec = 0,
     } = req.body;
@@ -27,6 +28,7 @@ export default function mediaRoutes({ requireAuth }) {
 
     // ✅ Visibility gate (default private)
     const vis = visibility === "public" ? "public" : "private";
+    const finalPurpose = purpose === "story" ? "story" : "post";
 
     // file extension (best-effort)
     const safeName = String(filename || "").toLowerCase();
@@ -57,6 +59,7 @@ export default function mediaRoutes({ requireAuth }) {
     const asset = await MediaAsset.create({
       ownerUid: req.user.uid,
       type,
+      purpose: finalPurpose,
       status: "uploading",
       visibility: vis,
       trim: {

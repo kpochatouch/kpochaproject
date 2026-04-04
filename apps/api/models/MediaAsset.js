@@ -26,6 +26,13 @@ const MediaAssetSchema = new mongoose.Schema(
       index: true,
     },
 
+    purpose: {
+      type: String,
+      enum: ["post", "story"],
+      default: "post",
+      index: true,
+    },
+
     status: {
       type: String,
       enum: [

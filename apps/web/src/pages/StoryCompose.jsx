@@ -296,7 +296,7 @@ export default function StoryCompose() {
     }
 
     try {
-      setPosting(true);
+      setPosting(false);
       setUploading(true);
 
       toast.info("Uploading story media…");
@@ -306,6 +306,7 @@ export default function StoryCompose() {
         file: mediaFile,
         type: mediaType,
         visibility: "public",
+        purpose: "story",
         trimStartSec: mediaType === "video" ? Number(trimStart || 0) : 0,
         trimEndSec: mediaType === "video" ? Number(trimEnd || 0) : 0,
       });
@@ -318,27 +319,8 @@ export default function StoryCompose() {
         });
       }
 
-      let thumbAssetId = "";
-
-      if (mediaType === "video" && videoThumbUrl) {
-        try {
-          const blob = await fetch(videoThumbUrl).then((r) => r.blob());
-          const thumbFile = new File([blob], "story-thumb.jpg", {
-            type: blob.type || "image/jpeg",
-          });
-
-          const thumb = await uploadMediaAsset({
-            api,
-            file: thumbFile,
-            type: "image",
-            visibility: "public",
-          });
-
-          thumbAssetId = thumb.assetId || "";
-        } catch {}
-      }
-
       setUploading(false);
+      setPosting(true);
       toast.info("Posting story…");
 
       await api.post("/api/stories", {
@@ -347,7 +329,6 @@ export default function StoryCompose() {
           {
             assetId: main.assetId,
             type: mediaType,
-            ...(thumbAssetId ? { thumbnailAssetId: thumbAssetId } : {}),
           },
         ],
         isPublic: true,

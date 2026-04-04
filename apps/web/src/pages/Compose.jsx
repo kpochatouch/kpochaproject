@@ -361,7 +361,6 @@ export default function Compose() {
       setPosting(true);
 
       let mediaAssetId = "";
-      let thumbAssetId = "";
 
       if (mediaFile) {
         setUploading(true);
@@ -372,6 +371,7 @@ export default function Compose() {
           file: mediaFile,
           type: mediaType,
           visibility: "public",
+          purpose: "post",
           trimStartSec: mediaType === "video" ? Number(trimStart || 0) : 0,
           trimEndSec: mediaType === "video" ? Number(trimEnd || 0) : 0,
         });
@@ -383,22 +383,6 @@ export default function Compose() {
             api,
             assetId: mediaAssetId,
           });
-        }
-
-        if (mediaType === "video" && videoThumbUrl) {
-          try {
-            const blob = await fetch(videoThumbUrl).then((r) => r.blob());
-            const thumbFile = new File([blob], "thumb.jpg", {
-              type: blob.type || "image/jpeg",
-            });
-            const t = await uploadMediaAsset({
-              api,
-              file: thumbFile,
-              type: "image",
-              visibility: "public",
-            });
-            thumbAssetId = t.assetId;
-          } catch {}
         }
 
         setUploading(false);
@@ -413,7 +397,6 @@ export default function Compose() {
               {
                 assetId: mediaAssetId,
                 type: mediaType,
-                ...(thumbAssetId ? { thumbnailAssetId: thumbAssetId } : {}),
               },
             ]
           : [],

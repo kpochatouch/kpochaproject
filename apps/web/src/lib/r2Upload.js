@@ -28,6 +28,7 @@ export async function uploadMediaAsset({
   file,
   type,
   visibility = "private",
+  purpose = "post",
   trimStartSec = 0,
   trimEndSec = 0,
 }) {
@@ -40,6 +41,7 @@ export async function uploadMediaAsset({
   const initRes = await api.post("/api/media/init", {
     type: finalType,
     visibility,
+    purpose,
     trimStartSec,
     trimEndSec,
     contentType:

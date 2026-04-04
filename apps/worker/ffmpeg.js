@@ -121,6 +121,7 @@ export async function processVideo(asset) {
       trimEnd > trimStart;
 
     let processingInput = input;
+    const isStory = asset?.purpose === "story";
 
     if (hasTrim) {
       console.log(
@@ -192,72 +193,114 @@ export async function processVideo(asset) {
 
     logMemory(`before transcode ${asset._id}`);
 
-    const filter = [
-      `[0:v]scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2[v720]`,
-      `[0:v]scale=854:480:force_original_aspect_ratio=decrease,pad=854:480:(ow-iw)/2:(oh-ih)/2[v480]`,
-    ].join(";");
+    const filter = isStory
+      ? [
+          `[0:v]scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2[v360]`,
+        ].join(";")
+      : [
+          `[0:v]scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2[v720]`,
+          `[0:v]scale=854:480:force_original_aspect_ratio=decrease,pad=854:480:(ow-iw)/2:(oh-ih)/2[v480]`,
+        ].join(";");
 
-    const args = [
-      "-y",
-      "-i",
-      processingInput,
-      "-filter_complex",
-      filter,
+    const args = isStory
+      ? [
+          "-y",
+          "-i",
+          processingInput,
+          "-filter_complex",
+          filter,
 
-      "-map",
-      "[v720]",
-      "-c:v:0",
-      "libx264",
-      "-preset",
-      "veryfast",
-      "-threads",
-      "1",
-      "-pix_fmt",
-      "yuv420p",
-      "-b:v:0",
-      "2800k",
-      "-maxrate:v:0",
-      "2996k",
-      "-bufsize:v:0",
-      "4200k",
+          "-map",
+          "[v360]",
+          "-c:v:0",
+          "libx264",
+          "-preset",
+          "veryfast",
+          "-threads",
+          "1",
+          "-pix_fmt",
+          "yuv420p",
+          "-b:v:0",
+          "700k",
+          "-maxrate:v:0",
+          "800k",
+          "-bufsize:v:0",
+          "1200k",
+        ]
+      : [
+          "-y",
+          "-i",
+          processingInput,
+          "-filter_complex",
+          filter,
 
-      "-map",
-      "[v480]",
-      "-c:v:1",
-      "libx264",
-      "-preset",
-      "veryfast",
-      "-threads",
-      "1",
-      "-pix_fmt",
-      "yuv420p",
-      "-b:v:1",
-      "1400k",
-      "-maxrate:v:1",
-      "1498k",
-      "-bufsize:v:1",
-      "2100k",
-    ];
+          "-map",
+          "[v720]",
+          "-c:v:0",
+          "libx264",
+          "-preset",
+          "veryfast",
+          "-threads",
+          "1",
+          "-pix_fmt",
+          "yuv420p",
+          "-b:v:0",
+          "2800k",
+          "-maxrate:v:0",
+          "2996k",
+          "-bufsize:v:0",
+          "4200k",
+
+          "-map",
+          "[v480]",
+          "-c:v:1",
+          "libx264",
+          "-preset",
+          "veryfast",
+          "-threads",
+          "1",
+          "-pix_fmt",
+          "yuv420p",
+          "-b:v:1",
+          "1400k",
+          "-maxrate:v:1",
+          "1498k",
+          "-bufsize:v:1",
+          "2100k",
+        ];
 
     if (hasAudio) {
-      args.push(
-        "-map",
-        "0:a:0",
-        "-c:a:0",
-        "aac",
-        "-b:a:0",
-        "128k",
-        "-ac:a:0",
-        "2",
-        "-map",
-        "0:a:0",
-        "-c:a:1",
-        "aac",
-        "-b:a:1",
-        "128k",
-        "-ac:a:1",
-        "2",
-      );
+      if (isStory) {
+        args.push(
+          "-map",
+          "0:a:0",
+          "-c:a:0",
+          "aac",
+          "-b:a:0",
+          "96k",
+          "-ac:a:0",
+          "2",
+        );
+      } else {
+        args.push(
+          "-map",
+          "0:a:0",
+          "-c:a:0",
+          "aac",
+          "-b:a:0",
+          "128k",
+          "-ac:a:0",
+          "2",
+          "-map",
+          "0:a:0",
+          "-c:a:1",
+          "aac",
+          "-b:a:1",
+          "128k",
+          "-ac:a:1",
+          "2",
+        );
+      }
     }
 
     args.push(
@@ -280,7 +323,13 @@ export async function processVideo(asset) {
       "-master_pl_name",
       "master.m3u8",
       "-var_stream_map",
-      hasAudio ? "v:0,a:0 v:1,a:1" : "v:0 v:1",
+      isStory
+        ? hasAudio
+          ? "v:0,a:0"
+          : "v:0"
+        : hasAudio
+        ? "v:0,a:0 v:1,a:1"
+        : "v:0 v:1",
       `${outputDir}/v%v/index.m3u8`,
     );
 
@@ -321,22 +370,32 @@ export async function processVideo(asset) {
       masterPlaylistKey: `media/${asset.ownerUid}/${asset._id}/hls/master.m3u8`,
     };
 
-    asset.renditions = [
-      {
-        name: "720p",
-        playlistKey: `media/${asset.ownerUid}/${asset._id}/hls/v0/index.m3u8`,
-        bandwidth: 2800000,
-        width: 1280,
-        height: 720,
-      },
-      {
-        name: "480p",
-        playlistKey: `media/${asset.ownerUid}/${asset._id}/hls/v1/index.m3u8`,
-        bandwidth: 1400000,
-        width: 854,
-        height: 480,
-      },
-    ];
+    asset.renditions = isStory
+      ? [
+          {
+            name: "360p",
+            playlistKey: `media/${asset.ownerUid}/${asset._id}/hls/v0/index.m3u8`,
+            bandwidth: 700000,
+            width: 640,
+            height: 360,
+          },
+        ]
+      : [
+          {
+            name: "720p",
+            playlistKey: `media/${asset.ownerUid}/${asset._id}/hls/v0/index.m3u8`,
+            bandwidth: 2800000,
+            width: 1280,
+            height: 720,
+          },
+          {
+            name: "480p",
+            playlistKey: `media/${asset.ownerUid}/${asset._id}/hls/v1/index.m3u8`,
+            bandwidth: 1400000,
+            width: 854,
+            height: 480,
+          },
+        ];
 
     if (asset.trim) {
       asset.trim.applied = hasTrim;
