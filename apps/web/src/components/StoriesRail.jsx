@@ -42,13 +42,21 @@ export default function StoriesRail({
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(0);
 
+  const [pendingStoryUpload, setPendingStoryUpload] = useState(null);
+  const uploadPollRef = useRef(null);
+  const clearPendingRef = useRef(null);
+  const didInitialLoadRef = useRef(false);
+
   const videoRef = useRef(null);
   const hlsCleanupRef = useRef(null);
   const hlsSrcRef = useRef("");
 
-  async function loadStories() {
+  async function loadStories({ silent = false } = {}) {
+    const shouldShowInitialLoader = !didInitialLoadRef.current && !silent;
+
     try {
-      setLoading(true);
+      if (shouldShowInitialLoader) setLoading(true);
+
       const res = await api.get("/api/stories/public", {
         params: { limit },
       });
@@ -60,10 +68,13 @@ export default function StoriesRail({
         : [];
 
       setStories(list);
+      didInitialLoadRef.current = true;
     } catch {
-      setStories([]);
+      if (!didInitialLoadRef.current) {
+        setStories([]);
+      }
     } finally {
-      setLoading(false);
+      if (shouldShowInitialLoader) setLoading(false);
     }
   }
 
@@ -85,10 +96,166 @@ export default function StoriesRail({
     }
   }
 
+  function readPendingStoryUpload() {
+    try {
+      const raw = sessionStorage.getItem("kpocha:pendingStoryUpload");
+      if (!raw) {
+        setPendingStoryUpload(null);
+        return null;
+      }
+
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") {
+        setPendingStoryUpload(null);
+        return null;
+      }
+
+      setPendingStoryUpload(parsed);
+      return parsed;
+    } catch {
+      setPendingStoryUpload(null);
+      return null;
+    }
+  }
+
+  function clearPendingStoryUpload() {
+    try {
+      sessionStorage.removeItem("kpocha:pendingStoryUpload");
+    } catch {}
+
+    setPendingStoryUpload(null);
+
+    try {
+      window.dispatchEvent(new Event("kpocha:story-upload-state"));
+    } catch {}
+  }
+
+  function dismissPendingStoryUpload() {
+    clearPendingStoryUpload();
+  }
+
   useEffect(() => {
-    loadStories();
+    didInitialLoadRef.current = false;
+    loadStories({ silent: false });
     loadStoryAdverts();
   }, [limit]);
+
+  useEffect(() => {
+    readPendingStoryUpload();
+
+    const onFocus = () => readPendingStoryUpload();
+    const onStoryUploadState = () => readPendingStoryUpload();
+
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("kpocha:story-upload-state", onStoryUploadState);
+
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener(
+        "kpocha:story-upload-state",
+        onStoryUploadState,
+      );
+    };
+  }, []);
+
+  useEffect(() => {
+    if (uploadPollRef.current) {
+      clearInterval(uploadPollRef.current);
+      uploadPollRef.current = null;
+    }
+
+    if (!pendingStoryUpload) return;
+
+    if (
+      pendingStoryUpload.status === "uploading" ||
+      pendingStoryUpload.status === "processing" ||
+      pendingStoryUpload.status === "publishing" ||
+      pendingStoryUpload.status === "success"
+    ) {
+      uploadPollRef.current = setInterval(() => {
+        loadStories({ silent: true });
+      }, 2000);
+    }
+
+    return () => {
+      if (uploadPollRef.current) {
+        clearInterval(uploadPollRef.current);
+        uploadPollRef.current = null;
+      }
+    };
+  }, [pendingStoryUpload]);
+
+  useEffect(() => {
+    if (!pendingStoryUpload) return;
+    if (!me?.uid) return;
+
+    const targetStoryId = String(pendingStoryUpload?.storyId || "").trim();
+
+    const createdStory = targetStoryId
+      ? (stories || []).find(
+          (s) => String(s?._id || s?.id || "") === targetStoryId,
+        )
+      : null;
+
+    const mine = (stories || []).filter(
+      (s) => String(s?.ownerUid || s?.proOwnerUid || "") === String(me.uid),
+    );
+
+    const matchedStory = createdStory || mine[0] || null;
+    if (!matchedStory) return;
+
+    if (clearPendingRef.current) {
+      clearTimeout(clearPendingRef.current);
+      clearPendingRef.current = null;
+    }
+
+    clearPendingRef.current = setTimeout(() => {
+      clearPendingStoryUpload();
+      clearPendingRef.current = null;
+    }, 1200);
+
+    return () => {
+      if (clearPendingRef.current) {
+        clearTimeout(clearPendingRef.current);
+        clearPendingRef.current = null;
+      }
+    };
+  }, [pendingStoryUpload, stories, me?.uid]);
+
+  useEffect(() => {
+    if (!pendingStoryUpload) return;
+    if (pendingStoryUpload.status !== "error") return;
+
+    if (clearPendingRef.current) {
+      clearTimeout(clearPendingRef.current);
+      clearPendingRef.current = null;
+    }
+
+    clearPendingRef.current = setTimeout(() => {
+      clearPendingStoryUpload();
+      clearPendingRef.current = null;
+    }, 5000);
+
+    return () => {
+      if (clearPendingRef.current) {
+        clearTimeout(clearPendingRef.current);
+        clearPendingRef.current = null;
+      }
+    };
+  }, [pendingStoryUpload]);
+
+  useEffect(() => {
+    return () => {
+      if (uploadPollRef.current) {
+        clearInterval(uploadPollRef.current);
+        uploadPollRef.current = null;
+      }
+      if (clearPendingRef.current) {
+        clearTimeout(clearPendingRef.current);
+        clearPendingRef.current = null;
+      }
+    };
+  }, []);
 
   const items = useMemo(() => {
     const realStories = Array.isArray(stories) ? stories : [];
@@ -282,33 +449,107 @@ export default function StoriesRail({
         <div className="overflow-x-auto no-scrollbar">
           <div className="flex items-start gap-3 min-w-max pb-1">
             {showCreate && me ? (
-              <button
-                type="button"
-                onClick={openCreate}
-                className="shrink-0 w-[108px] rounded-2xl overflow-hidden border transition"
-                style={{
-                  borderColor: "var(--app-border)",
-                  backgroundColor: "var(--app-surface)",
-                  color: "var(--app-text)",
-                }}
-                aria-label="Create story"
-              >
-                <div
-                  className="h-[145px] relative flex items-end justify-center"
-                  style={{ backgroundColor: "var(--app-surface-2)" }}
+              <>
+                <button
+                  type="button"
+                  onClick={openCreate}
+                  className="shrink-0 w-[108px] rounded-2xl overflow-hidden border transition"
+                  style={{
+                    borderColor: "var(--app-border)",
+                    backgroundColor: "var(--app-surface)",
+                    color: "var(--app-text)",
+                  }}
+                  aria-label="Create story"
                 >
-                  <div className="absolute inset-0 bg-gradient-to-b from-black/10 to-black/5" />
-                  <div className="absolute bottom-8 w-10 h-10 rounded-full bg-gold text-black flex items-center justify-center text-3xl leading-none border-4 border-[#111]">
-                    +
+                  <div
+                    className="h-[145px] relative flex items-end justify-center"
+                    style={{ backgroundColor: "var(--app-surface-2)" }}
+                  >
+                    <div className="absolute inset-0 bg-gradient-to-b from-black/10 to-black/5" />
+                    <div className="absolute bottom-8 w-10 h-10 rounded-full bg-gold text-black flex items-center justify-center text-3xl leading-none border-4 border-[#111]">
+                      +
+                    </div>
                   </div>
-                </div>
-                <div
-                  className="px-2 py-2 text-[13px] font-medium text-center"
-                  style={{ color: "var(--app-text)" }}
-                >
-                  Create story
-                </div>
-              </button>
+
+                  <div
+                    className="px-2 py-2 text-[13px] font-medium text-center"
+                    style={{ color: "var(--app-text)" }}
+                  >
+                    Create story
+                  </div>
+                </button>
+
+                {pendingStoryUpload ? (
+                  <div
+                    className="relative shrink-0 w-[108px] rounded-2xl overflow-hidden border"
+                    style={{
+                      borderColor:
+                        pendingStoryUpload.status === "error"
+                          ? "#ef4444"
+                          : "#d4af37",
+                      backgroundColor: "var(--app-surface)",
+                      color: "var(--app-text)",
+                    }}
+                    aria-label="Pending story upload"
+                  >
+                    <div
+                      className="h-[145px] relative flex flex-col items-center justify-center px-3 text-center"
+                      style={{ backgroundColor: "var(--app-surface-2)" }}
+                    >
+                      <button
+                        type="button"
+                        onClick={dismissPendingStoryUpload}
+                        className="absolute top-2 right-2 w-6 h-6 rounded-full bg-black/50 text-white text-xs"
+                        aria-label="Dismiss pending story"
+                        title="Dismiss"
+                      >
+                        ×
+                      </button>
+
+                      {pendingStoryUpload.status === "uploading" ||
+                      pendingStoryUpload.status === "processing" ||
+                      pendingStoryUpload.status === "publishing" ? (
+                        <div className="w-9 h-9 rounded-full border-2 border-white/25 border-t-gold animate-spin mb-3" />
+                      ) : pendingStoryUpload.status === "success" ? (
+                        <div className="mb-3 w-9 h-9 rounded-full bg-emerald-500 text-white flex items-center justify-center text-lg font-bold">
+                          ✓
+                        </div>
+                      ) : (
+                        <div className="mb-3 w-9 h-9 rounded-full bg-red-500 text-white flex items-center justify-center text-lg font-bold">
+                          !
+                        </div>
+                      )}
+
+                      <div className="text-[11px] font-semibold text-white leading-tight">
+                        {pendingStoryUpload.status === "uploading"
+                          ? "Uploading"
+                          : pendingStoryUpload.status === "publishing"
+                          ? "Publishing"
+                          : pendingStoryUpload.status === "processing"
+                          ? "Finishing"
+                          : pendingStoryUpload.status === "success"
+                          ? "Uploaded"
+                          : "Failed"}
+                      </div>
+                    </div>
+
+                    <div
+                      className="px-2 py-2 text-[13px] font-medium text-center"
+                      style={{ color: "var(--app-text)" }}
+                    >
+                      {pendingStoryUpload.status === "uploading"
+                        ? "Uploading story"
+                        : pendingStoryUpload.status === "publishing"
+                        ? "Publishing story"
+                        : pendingStoryUpload.status === "processing"
+                        ? "Finishing video"
+                        : pendingStoryUpload.status === "success"
+                        ? "Story uploaded"
+                        : "Upload failed"}
+                    </div>
+                  </div>
+                ) : null}
+              </>
             ) : null}
 
             {loading ? (

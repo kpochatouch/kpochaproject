@@ -917,6 +917,7 @@ export default function Browse() {
               )}
 
               <StoriesRail />
+
               {errFeed && (
                 <div className="mb-4 rounded border border-red-800 bg-red-900/30 text-red-100 px-3 py-2">
                   {errFeed}

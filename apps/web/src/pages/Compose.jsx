@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import ImageCropperModal from "../components/ImageCropper.jsx";
 import { useToast } from "../components/Toast.jsx";
-import { uploadMediaAsset, waitForMediaAssetReady } from "../lib/r2Upload";
+import { uploadMediaAsset } from "../lib/r2Upload";
 
 const MAX_WORDS = 500;
 
@@ -378,11 +378,9 @@ export default function Compose() {
         mediaAssetId = main.assetId;
 
         if (mediaType === "video") {
-          toast.info("Processing video…");
-          await waitForMediaAssetReady({
-            api,
-            assetId: mediaAssetId,
-          });
+          toast.info(
+            "Video uploaded, you can keep browsing while it's being processed…",
+          );
         }
 
         setUploading(false);

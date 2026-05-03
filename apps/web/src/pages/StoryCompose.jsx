@@ -2,9 +2,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
-import { uploadMediaAsset, waitForMediaAssetReady } from "../lib/r2Upload";
+import { uploadMediaAsset } from "../lib/r2Upload";
 import { useToast } from "../components/Toast.jsx";
 import ImageCropperModal from "../components/ImageCropper.jsx";
+import { useMe } from "../context/MeContext.jsx";
 
 const MAX_STORY_WORDS = 80;
 const MAX_IMAGE_MB = 10;
@@ -118,10 +119,12 @@ async function makeVideoThumbnail(file) {
 export default function StoryCompose() {
   const navigate = useNavigate();
   const toast = useToast();
+  const { me } = useMe();
 
   const textareaRef = useRef(null);
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
+  const submitStartedRef = useRef(false);
   const [trimStart, setTrimStart] = useState(0);
   const [trimEnd, setTrimEnd] = useState(MAX_VIDEO_SECONDS);
   const [mustTrim, setMustTrim] = useState(false);
@@ -270,6 +273,8 @@ export default function StoryCompose() {
   }
 
   async function submit() {
+    if (submitStartedRef.current) return;
+
     if (!mediaFile) {
       toast.error("Add image or video for the story.");
       return;
@@ -295,12 +300,35 @@ export default function StoryCompose() {
       }
     }
 
+    function setStoryUploadState(next) {
+      try {
+        sessionStorage.setItem(
+          "kpocha:pendingStoryUpload",
+          JSON.stringify({
+            ...next,
+            ownerUid: me?.uid || null,
+            updatedAt: Date.now(),
+          }),
+        );
+      } catch {}
+
+      try {
+        window.dispatchEvent(new Event("kpocha:story-upload-state"));
+      } catch {}
+    }
+
+    submitStartedRef.current = true;
+    setUploading(true);
+    setPosting(true);
+
+    setStoryUploadState({
+      status: "uploading",
+      message: "Your story is being uploaded in the background.",
+    });
+
+    navigate("/browse", { replace: true });
+
     try {
-      setPosting(false);
-      setUploading(true);
-
-      toast.info("Uploading story media…");
-
       const main = await uploadMediaAsset({
         api,
         file: mediaFile,
@@ -311,19 +339,12 @@ export default function StoryCompose() {
         trimEndSec: mediaType === "video" ? Number(trimEnd || 0) : 0,
       });
 
-      if (mediaType === "video") {
-        toast.info("Processing story video…");
-        await waitForMediaAssetReady({
-          api,
-          assetId: main.assetId,
-        });
-      }
+      setStoryUploadState({
+        status: "publishing",
+        message: "Your story is being published.",
+      });
 
-      setUploading(false);
-      setPosting(true);
-      toast.info("Posting story…");
-
-      await api.post("/api/stories", {
+      const created = await api.post("/api/stories", {
         text: text.trim(),
         media: [
           {
@@ -335,12 +356,33 @@ export default function StoryCompose() {
         tags: [],
       });
 
-      toast.success("Story posted!");
-      navigate("/browse");
+      const createdStoryId =
+        created?.data?.story?._id || created?.data?.story?.id || null;
+
+      setStoryUploadState({
+        status: mediaType === "video" ? "processing" : "success",
+        storyId: createdStoryId,
+        assetId: main.assetId,
+        message:
+          mediaType === "video"
+            ? "Your story is live while video finishes in background."
+            : "Your story has been uploaded successfully.",
+      });
+
+      if (mediaType === "video") {
+        toast.info("Story posted. Video is still finishing.");
+      } else {
+        toast.success("Story uploaded.");
+      }
     } catch (e) {
-      setUploading(false);
+      setStoryUploadState({
+        status: "error",
+        message:
+          e?.response?.data?.error || e?.message || "Story upload failed.",
+      });
+
       toast.error(
-        e?.response?.data?.error || e?.message || "Story post failed.",
+        e?.response?.data?.error || e?.message || "Story upload failed.",
       );
     } finally {
       setPosting(false);
