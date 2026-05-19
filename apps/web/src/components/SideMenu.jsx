@@ -47,6 +47,7 @@ export default function SideMenu({ me }) {
     admin: IconAdmin,
     risk: IconAdmin, // no IconRisk yet — using Admin shield for now
     help: IconHelp,
+    docs: IconHelp,
   };
 
   const baseNav = [
@@ -317,6 +318,13 @@ export default function SideMenu({ me }) {
                 Help
               </div>
             )}
+            <MenuButton
+              label="Docs"
+              icon={icons.docs}
+              active={pathname === "/docs"}
+              collapsed={collapsed}
+              onClick={() => go("/docs")}
+            />
             <MenuButton
               label="Legal"
               icon={icons.help}

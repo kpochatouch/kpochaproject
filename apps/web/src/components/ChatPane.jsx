@@ -1,6 +1,7 @@
 // apps/web/src/components/ChatPane.jsx
 import { useEffect, useRef, useState } from "react";
 import { api, sendChatMessage } from "../lib/api";
+import { uploadMediaAsset } from "../lib/r2Upload";
 import VoiceInputButton from "./VoiceInputButton.jsx";
 import VoiceMessageButton from "./VoiceMessageButton.jsx";
 import DisplayName from "./DisplayName.jsx";
@@ -286,40 +287,26 @@ export default function ChatPane({
   }, [text]);
 
   // ---------- uploads ----------
-  async function uploadFileToCloudinary(file) {
-    const { data: sign } = await api.post("/api/uploads/sign", {
-      folder: "kpocha/chat",
-      overwrite: false,
-      tags: ["chat"],
+  async function uploadFileToR2(file) {
+    const result = await uploadMediaAsset({
+      api,
+      file,
+      visibility: "public",
+      purpose: "post",
     });
 
-    const form = new FormData();
-    form.append("file", file);
-    form.append("api_key", sign.apiKey);
-    form.append("timestamp", sign.timestamp);
-    form.append("signature", sign.signature);
-    form.append("folder", sign.folder || "kpocha/chat");
-    if (sign.public_id) form.append("public_id", sign.public_id);
-    if (sign.tags) form.append("tags", sign.tags);
+    if (!result?.publicUrl) {
+      throw new Error("chat_upload_failed");
+    }
 
-    const res = await fetch(
-      `https://api.cloudinary.com/v1_1/${sign.cloudName}/auto/upload`,
-      {
-        method: "POST",
-        body: form,
-      },
-    );
-
-    if (!res.ok) throw new Error("cloudinary_upload_failed");
-    const json = await res.json();
-    return json.secure_url || json.url;
+    return result.publicUrl;
   }
 
   async function uploadAudioBlob(blob) {
     const file = new File([blob], `voice-${Date.now()}.webm`, {
       type: blob.type || "audio/webm",
     });
-    return uploadFileToCloudinary(file);
+    return uploadFileToR2(file);
   }
 
   async function handleFileChange(e) {
@@ -329,7 +316,7 @@ export default function ChatPane({
 
     try {
       setUploading(true);
-      const url = await uploadFileToCloudinary(file);
+      const url = await uploadFileToR2(file);
       const now = Date.now();
       const attachment = {
         url,

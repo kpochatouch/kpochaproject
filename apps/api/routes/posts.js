@@ -6,6 +6,7 @@ import admin from "firebase-admin";
 import { Pro } from "../models.js";
 import Post from "../models/Post.js";
 import PostStats from "../models/PostStats.js";
+import MediaAsset from "../models/MediaAsset.js";
 
 import redisClient from "../redis.js";
 import { scoreFrom } from "../services/postScoring.js";
@@ -92,6 +93,24 @@ function pickOneFresh(list = [], avoidIds = []) {
   const pool = preferred.length ? preferred : clean;
   const idx = Math.floor(Math.random() * pool.length);
   return pool[idx] || null;
+}
+
+async function validateMediaAssetOwnership(mediaArr = [], ownerUid) {
+  const ids = Array.isArray(mediaArr)
+    ? mediaArr
+        .map((m) => (m && typeof m.assetId === "string" ? m.assetId : ""))
+        .filter((id) => isObjId(id))
+    : [];
+
+  if (!ids.length) return true;
+
+  const assets = await MediaAsset.find({ _id: { $in: ids } }).select(
+    "ownerUid",
+  );
+
+  if (assets.length !== ids.length) return false;
+
+  return assets.every((asset) => String(asset.ownerUid) === String(ownerUid));
 }
 
 // what we send to frontend
@@ -213,6 +232,15 @@ router.post("/posts", requireAuth, async (req, res) => {
         return null;
       })
       .filter(Boolean);
+
+    const ownsMedia = await validateMediaAssetOwnership(media, req.user.uid);
+    if (!ownsMedia) {
+      return res.status(403).json({
+        error: "invalid_media_assets",
+        message:
+          "One or more media assets are invalid or do not belong to you.",
+      });
+    }
 
     const lgaFinal = toUpper(lga || proDoc.lga || "");
 
@@ -831,6 +859,15 @@ router.post("/stories", requireAuth, async (req, res) => {
       })
 
       .filter(Boolean);
+
+    const ownsMedia = await validateMediaAssetOwnership(media, req.user.uid);
+    if (!ownsMedia) {
+      return res.status(403).json({
+        error: "invalid_media_assets",
+        message:
+          "One or more media assets are invalid or do not belong to you.",
+      });
+    }
 
     tags = Array.isArray(tags)
       ? tags

@@ -219,6 +219,11 @@ export default function Legal() {
             </a>
           </li>
           <li>
+            <Link to="/docs" className="text-gold underline">
+              Platform Documentation
+            </Link>
+          </li>
+          <li>
             <a href="#pro-agreement" className="text-gold underline">
               Professional Service Agreement
             </a>
@@ -878,7 +883,7 @@ export default function Legal() {
               </span>
             </summary>
             <address className="not-italic">
-              KPOCHA TOUCH NIG LTD
+              KPOCHA TOUCH NIG LTD (RC No. 7455105)
               <br />
               Address: 23, Adesuwa Road, GRA, Benin City, Edo State.
               <br />
@@ -888,6 +893,11 @@ export default function Legal() {
                 className="underline text-gold"
               >
                 kpochaout@gmail.com
+              </a>
+              <br />
+              Website:{" "}
+              <a href="https://kpochatouch.com" className="underline text-gold">
+                https://kpochatouch.com
               </a>
               <br />
               Last Updated: 18 Oct 2025

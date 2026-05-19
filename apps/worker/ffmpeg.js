@@ -1,6 +1,7 @@
 // apps/worker/ffmpeg.js
 import { spawn } from "child_process";
 import fs from "fs";
+import os from "os";
 import path from "path";
 import { downloadToFile, uploadFile } from "./r2.js";
 
@@ -91,13 +92,18 @@ function logMemory(tag) {
   );
 }
 
+function buildThreadArgs() {
+  const threads = Number(process.env.FFMPEG_THREADS || -1);
+  if (!Number.isFinite(threads) || threads < 0) return [];
+  return ["-threads", String(threads)];
+}
+
 export async function processVideo(asset) {
   const origKey = String(asset?.original?.key || "");
   if (!origKey) throw new Error("asset.original.key missing");
 
   const ext = (origKey.split(".").pop() || "mp4").replace(/[^a-z0-9]/gi, "");
   const input = path.join(TMP, `${asset._id}-original.${ext || "mp4"}`);
-  const trimmedInput = path.join(TMP, `${asset._id}-trimmed.mp4`);
   const outputDir = path.join(TMP, `${asset._id}-hls`);
   const thumbFile = path.join(TMP, `${asset._id}-thumb.jpg`);
 
@@ -116,48 +122,19 @@ export async function processVideo(asset) {
     const trimStart = Number(asset?.trim?.startSec || 0);
     const trimEnd = Number(asset?.trim?.endSec || 0);
     const hasTrim =
+      asset.type === "video" &&
       Number.isFinite(trimStart) &&
       Number.isFinite(trimEnd) &&
       trimEnd > trimStart;
 
-    let processingInput = input;
+    const trimDuration = hasTrim ? Number(trimEnd - trimStart) : 0;
+    const seekArgs = hasTrim ? ["-ss", String(trimStart)] : [];
+    const durationArgs = hasTrim
+      ? ["-t", String(Math.max(0, trimDuration))]
+      : [];
     const isStory = asset?.purpose === "story";
 
-    if (hasTrim) {
-      console.log(
-        `[worker][ffmpeg] trim start asset=${asset._id} start=${trimStart} end=${trimEnd}`,
-      );
-
-      await runCommand("ffmpeg", [
-        "-y",
-        "-ss",
-        String(trimStart),
-        "-to",
-        String(trimEnd),
-        "-i",
-        processingInput,
-        "-c:v",
-        "libx264",
-        "-preset",
-        "veryfast",
-        "-threads",
-        "1",
-        "-pix_fmt",
-        "yuv420p",
-        "-c:a",
-        "aac",
-        "-b:a",
-        "128k",
-        "-movflags",
-        "+faststart",
-        trimmedInput,
-      ]);
-
-      console.log(`[worker][ffmpeg] trim finished asset=${asset._id}`);
-      processingInput = trimmedInput;
-    }
-
-    const probe = await ffprobe(processingInput);
+    const probe = await ffprobe(input);
     const vStream =
       (probe.streams || []).find((s) => s.codec_type === "video") || null;
     const hasAudio = (probe.streams || []).some(
@@ -166,22 +143,24 @@ export async function processVideo(asset) {
 
     const width = Number(vStream?.width || 0);
     const height = Number(vStream?.height || 0);
-    const durationSec = Number(probe.format?.duration || 0);
+    const durationSec = hasTrim
+      ? Number(trimEnd - trimStart)
+      : Number(probe.format?.duration || 0);
 
-    const seek =
-      durationSec && Number.isFinite(durationSec) && durationSec > 1 ? 0.5 : 0;
+    const thumbTime = hasTrim ? Math.min(trimStart + 0.5, trimEnd - 0.1) : 0.5;
 
     try {
       await runCommand("ffmpeg", [
         "-y",
         "-ss",
-        String(seek),
+        String(Math.max(0, thumbTime)),
         "-i",
-        processingInput,
+        input,
         "-frames:v",
         "1",
         "-q:v",
         "3",
+        ...buildThreadArgs(),
         thumbFile,
       ]);
     } catch (e) {
@@ -205,8 +184,10 @@ export async function processVideo(asset) {
     const args = isStory
       ? [
           "-y",
+          ...seekArgs,
           "-i",
-          processingInput,
+          input,
+          ...durationArgs,
           "-filter_complex",
           filter,
 
@@ -216,8 +197,7 @@ export async function processVideo(asset) {
           "libx264",
           "-preset",
           "veryfast",
-          "-threads",
-          "1",
+          ...buildThreadArgs(),
           "-pix_fmt",
           "yuv420p",
           "-b:v:0",
@@ -229,8 +209,10 @@ export async function processVideo(asset) {
         ]
       : [
           "-y",
+          ...seekArgs,
           "-i",
-          processingInput,
+          input,
+          ...durationArgs,
           "-filter_complex",
           filter,
 
@@ -240,8 +222,7 @@ export async function processVideo(asset) {
           "libx264",
           "-preset",
           "veryfast",
-          "-threads",
-          "1",
+          ...buildThreadArgs(),
           "-pix_fmt",
           "yuv420p",
           "-b:v:0",
@@ -257,8 +238,7 @@ export async function processVideo(asset) {
           "libx264",
           "-preset",
           "veryfast",
-          "-threads",
-          "1",
+          ...buildThreadArgs(),
           "-pix_fmt",
           "yuv420p",
           "-b:v:1",
@@ -345,11 +325,7 @@ export async function processVideo(asset) {
     }
 
     const files = getAllFiles(outputDir);
-    for (const file of files) {
-      const relative = path.relative(outputDir, file).replaceAll("\\", "/");
-      const key = `media/${asset.ownerUid}/${asset._id}/hls/${relative}`;
-      await uploadFile(key, file, guessContentType(file));
-    }
+    await uploadFiles(files, outputDir, asset, 4);
 
     asset.original = {
       ...(asset.original || {}),
@@ -406,9 +382,6 @@ export async function processVideo(asset) {
     logMemory(`done ${asset._id}`);
   } finally {
     try {
-      fs.unlinkSync(trimmedInput);
-    } catch {}
-    try {
       fs.rmSync(outputDir, { recursive: true, force: true });
     } catch {}
     try {
@@ -454,4 +427,21 @@ function guessContentType(file) {
   if (file.endsWith(".mp4")) return "video/mp4";
   if (file.endsWith(".jpg") || file.endsWith(".jpeg")) return "image/jpeg";
   return "application/octet-stream";
+}
+
+async function uploadFiles(files, outputDir, asset, concurrency = 4) {
+  const queue = [...files];
+  const workers = Array.from(
+    { length: Math.min(concurrency, queue.length) },
+    async () => {
+      while (queue.length) {
+        const file = queue.shift();
+        if (!file) break;
+        const relative = path.relative(outputDir, file).replaceAll("\\", "/");
+        const key = `media/${asset.ownerUid}/${asset._id}/hls/${relative}`;
+        await uploadFile(key, file, guessContentType(file));
+      }
+    },
+  );
+  await Promise.all(workers);
 }

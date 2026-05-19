@@ -57,6 +57,7 @@ const Settings = lazy(() => import("./pages/Settings.jsx"));
 const ClientSettings = lazy(() => import("./pages/ClientSettings.jsx"));
 const AdminDecline = lazy(() => import("./pages/AdminDecline.jsx"));
 const Legal = lazy(() => import("./pages/Legal.jsx"));
+const Docs = lazy(() => import("./pages/Docs.jsx"));
 const ClientRegister = lazy(() => import("./pages/ClientRegister.jsx"));
 const DeactivateAccount = lazy(() => import("./pages/DeactivateAccount.jsx"));
 const ApplyThanks = lazy(() => import("./pages/ApplyThanks.jsx"));
@@ -640,6 +641,7 @@ export default function App() {
               />
               <Route path="/login" element={<Login />} />
               <Route path="/signup" element={<Signup />} />
+              <Route path="/docs" element={<Docs />} />
               <Route path="/legal" element={<Legal />} />
               <Route path="/legal/*" element={<Legal />} />
               <Route path="/profile/:username" element={<PublicProfile />} />

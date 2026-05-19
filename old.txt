@@ -1,0 +1,8 @@
+apps/web/android\app\src\main\java\touch\kpocha\app\VideoPlaybackManager.java
+apps/web/android\app\src\main\java\touch\kpocha\app\StoryViewerActivity.java
+apps/web/android\app\src\main\java\touch\kpocha\app\NativeVideoPlayerActivity.java
+apps/web/android\app\src\main\java\touch\kpocha\app\NativeFeedAdapter.java
+apps/web/android\app\src\main\res\layout\activity_story_viewer.xml
+apps/web/android\app\src\main\res\layout\activity_native_video_player.xml
+apps/web/android\app\src\main\res\layout\item_reel_post.xml
+apps/web/android\app\src\main\res\layout\item_feed_post.xml

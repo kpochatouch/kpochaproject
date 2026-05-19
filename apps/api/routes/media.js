@@ -52,9 +52,35 @@ export default function mediaRoutes({ requireAuth }) {
       (type === "image" ? "jpg" : "mp4")
     ).replace(/[^a-z0-9]/g, "");
 
-    const trimStart = Number(trimStartSec || 0);
-    const trimEnd = Number(trimEndSec || 0);
-    const hasTrim = trimEnd > trimStart;
+    const trimStart = type === "video" ? Number(trimStartSec || 0) : 0;
+    const trimEnd = type === "video" ? Number(trimEndSec || 0) : 0;
+
+    if (type === "video") {
+      if (!Number.isFinite(trimStart) || !Number.isFinite(trimEnd)) {
+        return res.status(400).json({
+          error: "invalid_trim",
+          message: "Invalid trim values.",
+        });
+      }
+
+      if (trimStart < 0 || trimEnd < 0 || trimEnd <= trimStart) {
+        return res.status(400).json({
+          error: "invalid_trim",
+          message:
+            "Trim start and end must be valid and end must be greater than start.",
+        });
+      }
+
+      const maxTrimSeconds = finalPurpose === "story" ? 30 : 120;
+      if (trimEnd - trimStart > maxTrimSeconds) {
+        return res.status(400).json({
+          error: "trim_too_long",
+          message: `Trim range may not exceed ${maxTrimSeconds} seconds.`,
+        });
+      }
+    }
+
+    const hasTrim = type === "video" && trimEnd > trimStart;
 
     const asset = await MediaAsset.create({
       ownerUid: req.user.uid,
