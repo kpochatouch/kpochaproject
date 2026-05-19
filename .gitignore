@@ -50,3 +50,15 @@ apps/web/ios/App/Podfile.lock
 # Vite local env
 apps/web/.env.local
 apps/api/.env.local
+
+# temp/debug
+*.tmp
+tmp_*
+old.txt
+
+# exports/backups
+*.csv
+*_backup.json
+
+# routing dumps
+table-routing-*
