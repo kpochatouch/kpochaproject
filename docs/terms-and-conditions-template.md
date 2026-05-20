@@ -14,7 +14,7 @@ These Terms and Conditions ("Terms") govern your use of the Kpocha Touch platfor
 
 ## 3. Definitions
 
-- "Platform": the KPOCHA TOUCH UNISEX SALON web and mobile applications.
+- "Platform": the Kpocha Touch web and mobile applications, including related communication, social interaction, marketplace, booking, content publishing, and digital service systems.
 - "Client": a user who books or receives services.
 - "Professional": a service provider registered on the Platform.
 - "Booking": an appointment or service request made through the Platform.

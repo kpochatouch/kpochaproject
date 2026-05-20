@@ -6,13 +6,22 @@ This guide is for service providers who want to join Kpocha Touch as a professio
 
 ## What is a Kpocha Touch professional?
 
-A professional is a verified service provider who offers work through the platform. This can include:
+## What is a Kpocha Touch professional?
 
-- Beauty and personal care specialists.
-- Health and wellness providers.
-- Home service technicians.
-- Event support and service professionals.
-- Other verified service experts.
+A professional is any verified individual, creator, freelancer, technician, artisan, vendor, consultant, business operator, educator, influencer, or service provider who uses the platform to offer services, build visibility, communicate with users, publish content, or manage customer relationships.
+
+This may include:
+
+- Local businesses and entrepreneurs
+- Freelancers and digital professionals
+- Technicians and artisans
+- Creators and influencers
+- Event and media professionals
+- Health and wellness providers
+- Logistics and support operators
+- Educators and consultants
+- Beauty and lifestyle specialists
+- Other verified service providers
 
 ## Becoming a professional
 
@@ -39,6 +48,23 @@ Your professional profile should include:
 - Use service names that clients will understand.
 - Update availability and location when your schedule changes.
 - Keep service descriptions accurate and professional.
+
+## Posting content and building visibility
+
+Professionals and businesses can publish public content to improve visibility and engagement on the platform.
+
+Content may include:
+
+- Promotional posts
+- Portfolio media
+- Service showcases
+- Business updates
+- Product announcements
+- Educational content
+- Event promotions
+- Community engagement posts
+
+Consistent activity can improve profile visibility, audience growth, and customer trust.
 
 ## Managing bookings
 

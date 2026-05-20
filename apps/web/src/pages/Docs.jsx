@@ -13,48 +13,89 @@ export default function Docs() {
         </p>
       </div>
 
-      <section className="border border-zinc-800 rounded-xl p-6 mb-6">
-        <h2 className="text-2xl font-semibold mb-3">What is Kpocha Touch?</h2>
-        <p className="text-sm leading-relaxed text-zinc-300">
-          Kpocha Touch is a professional booking marketplace for Nigeria. It
-          connects clients with verified service providers across categories
-          such as beauty, wellness, health, home services, events, and more.
-        </p>
-      </section>
+      <h2 className="text-2xl font-semibold mb-3">What is Kpocha Touch?</h2>
 
       <section className="border border-zinc-800 rounded-xl p-6 mb-6">
-        <h2 className="text-2xl font-semibold mb-3">For clients</h2>
-        <ul className="list-disc pl-5 space-y-2 text-sm leading-relaxed text-zinc-300">
-          <li>Search and browse professionals by service, state, or LGA.</li>
+        <h2 className="text-2xl font-semibold mb-3">What users can do</h2>
+
+        <ul className="list-disc pl-5 space-y-3 text-sm leading-relaxed text-zinc-300">
           <li>
-            View public profiles, galleries, ratings, and service details.
+            Discover professionals, businesses, creators, and service providers
+            across Nigeria.
           </li>
-          <li>Book services securely through the app and pay safely.</li>
+
           <li>
-            Manage upcoming bookings, communicate with providers, and leave
-            reviews.
+            Post updates, media content, business promotions, and public
+            activity.
+          </li>
+
+          <li>
+            Follow profiles, interact with content, and engage socially within
+            the platform.
+          </li>
+
+          <li>
+            Use real-time messaging, voice calls, and video calls for
+            communication.
+          </li>
+
+          <li>
+            Browse services, portfolios, ratings, and business information.
+          </li>
+
+          <li>
+            Book appointments, hire providers, negotiate services, and manage
+            transactions securely.
+          </li>
+
+          <li>
+            Build digital visibility for personal brands, businesses, and local
+            services.
           </li>
         </ul>
       </section>
 
       <section className="border border-zinc-800 rounded-xl p-6 mb-6">
-        <h2 className="text-2xl font-semibold mb-3">For professionals</h2>
-        <ul className="list-disc pl-5 space-y-2 text-sm leading-relaxed text-zinc-300">
-          <li>Create a verified pro profile and list your services.</li>
+        <h2 className="text-2xl font-semibold mb-3">
+          For professionals, businesses, and creators
+        </h2>
+
+        <ul className="list-disc pl-5 space-y-3 text-sm leading-relaxed text-zinc-300">
           <li>
-            Receive booking requests, manage your schedule, and handle client
-            communication.
+            Create verified public profiles for businesses, brands, services, or
+            creator identities.
           </li>
-          <li>Get paid via the platform after commission deduction.</li>
+
           <li>
-            Maintain service quality, confidentiality, and platform compliance.
+            Publish services, pricing, portfolios, promotional content, and
+            media posts.
+          </li>
+
+          <li>
+            Receive bookings, inquiries, messages, calls, reviews, and customer
+            engagement directly through the platform.
+          </li>
+
+          <li>
+            Build followers, improve visibility, and grow digital reach across
+            multiple industries.
+          </li>
+
+          <li>
+            Manage earnings, transactions, scheduling, and customer
+            relationships from one account.
+          </li>
+
+          <li>
+            Access communication tools including real-time chat, audio calls,
+            and video calls.
           </li>
         </ul>
       </section>
 
       <section className="border border-zinc-800 rounded-xl p-6 mb-6">
         <h2 className="text-2xl font-semibold mb-3">Quick links</h2>
-        <div className="grid sm:grid-cols-3 gap-3 text-sm">
+        <div className="grid sm:grid-cols-4 gap-3 text-sm">
           <Link
             to="/browse"
             className="rounded-xl border border-zinc-700 px-4 py-4 text-zinc-100 hover:bg-zinc-900"
@@ -66,6 +107,12 @@ export default function Docs() {
             className="rounded-xl border border-zinc-700 px-4 py-4 text-zinc-100 hover:bg-zinc-900"
           >
             Become a professional
+          </Link>
+          <Link
+            to="/feed"
+            className="rounded-xl border border-zinc-700 px-4 py-4 text-zinc-100 hover:bg-zinc-900"
+          >
+            Explore community feed
           </Link>
           <Link
             to="/legal"

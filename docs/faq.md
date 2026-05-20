@@ -23,6 +23,18 @@ The app uses supported payment providers and Wallet credit. Exact payment option
 
 The Wallet is an in-app balance for payments and refunds. It allows faster checkout and manages credits from refunds or adjustments.
 
+## Can users post content on Kpocha Touch?
+
+Yes. Kpocha Touch supports social and business posting features that allow users, creators, and businesses to publish updates, media content, promotions, and public activity within the platform ecosystem.
+
+## Is Kpocha Touch only for physical services?
+
+No. The platform supports multiple categories including local services, creators, freelancers, digital professionals, businesses, vendors, event operators, consultants, technicians, influencers, educators, and other service providers.
+
+## Does Kpocha Touch support messaging and calls?
+
+Yes. The platform includes real-time messaging, voice calls, and video communication features for users and professionals.
+
 ## How do I become a professional?
 
 Visit the “Become a Pro” page, submit your details and documents, and wait for approval. Once approved, you can list services and receive bookings.
@@ -50,7 +62,3 @@ Open the in-app Legal page to read the Client Terms, Privacy Policy, and Profess
 ## Who do I contact for support?
 
 Use the in-app support channel or contact the email provided in the app’s legal section. If you are unsure, consult the FAQ and user guide first.
-
-## Is Kpocha Touch only for salon services?
-
-No. Although some legacy legal text may reference salon, the platform serves a wider marketplace of professionals beyond grooming and beauty, including wellness, health, home services, and more.

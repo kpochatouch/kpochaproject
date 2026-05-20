@@ -1,6 +1,8 @@
 # Kpocha Touch — Starter Monorepo
 
-This is a **minimal, deployable skeleton** for the Kpocha Touch app.
+Kpocha Touch is a Nigerian multi-service digital ecosystem that combines professional services, business visibility, social interaction, creator engagement, real-time communication, and marketplace discovery into one platform.
+
+This repository contains the deployable monorepo powering the platform.
 
 - Frontend: React (Vite), TailwindCSS, React Router, Axios
 - Backend: Node.js (Express), CORS, (Mongo-ready but optional), Paystack-ready placeholders
@@ -10,19 +12,20 @@ This is a **minimal, deployable skeleton** for the Kpocha Touch app.
 
 ## Quickstart
 
-```bash
 unzip kpocha-touch-starter.zip -d .
 cd kpocha-touch-starter
 npm install
 
 # set envs:
+
 # apps/web/.env
+
 # apps/api/.env
 
 # run locally (two terminals)
+
 npm run dev:api
 npm run dev:web
-```
 
 ## Deploy
 
@@ -43,7 +46,7 @@ User-facing documentation is available in the `docs/` folder:
 
 We use WebRTC for real-time audio/video calls.
 
-👉 **Implementation notes & debugging guide:**  
+**Implementation notes & debugging guide:**  
 See [`docs/webrtc.md`](docs/webrtc.md) for a detailed explanation of:
 
 - why calls failed across networks

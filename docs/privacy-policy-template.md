@@ -2,7 +2,7 @@
 
 ## 1. Introduction
 
-This Privacy Policy describes how KPOCHA TOUCH NIG LTD ("we", "us", "our") collects, uses, discloses, and protects personal information when you use the Kpocha Touch platform, including web and mobile applications (the "Platform"). The Platform is also referred to in some materials as "KPOCHA TOUCH UNISEX SALON."
+This Privacy Policy describes how KPOCHA TOUCH NIG LTD ("we", "us", "our") collects, uses, discloses, and protects personal information when you use the Kpocha Touch platform, including web and mobile applications (the "Platform").
 
 This policy applies to all users of the Platform, including Clients, Professionals, and visitors.
 

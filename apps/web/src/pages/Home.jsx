@@ -124,9 +124,9 @@ export default function Home() {
           </h1>
 
           <p className="text-zinc-300 max-w-2xl mx-auto mb-8 leading-relaxed text-sm sm:text-base">
-            Connecting you to top Professionals across{" "}
-            <span className="text-gold">Nigeria</span>. Book home or office
-            services in minutes.
+            Discover trusted professionals, explore real work, build visibility,
+            and connect with services across{" "}
+            <span className="text-gold">Nigeria</span>.
           </p>
 
           {/* CTAs */}
@@ -155,8 +155,8 @@ export default function Home() {
           transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
         >
           <div className="whitespace-nowrap px-4">
-            ✨ Verified Pros • Secure Paystack Payments • 36 States &amp; FCT •
-            Home &amp; office Services ✨
+            ✨ Verified Professionals • Secure Payments • Discover Services •
+            Showcase Work • Connect Across Nigeria ✨
           </div>
         </motion.div>
       </section>
@@ -168,8 +168,8 @@ export default function Home() {
             {...fadeUp}
             className="text-lg sm:text-xl font-semibold tracking-wide"
           >
-            Nigeria’s grooming marketplace — trusted by clients and
-            professionals nationwide.
+            Nigeria’s live professional marketplace, built for discovery,
+            visibility, and trusted connections.
           </motion.p>
         </div>
       </section>
@@ -186,10 +186,11 @@ export default function Home() {
           {...fadeUp}
           className="text-zinc-300 text-center max-w-3xl mx-auto"
         >
-          Kpocha Touch connects clients to{" "}
-          <span className="text-gold">verified</span> professionals in all
-          fields across Nigeria. Discover trusted pros, book instantly, pay
-          securely, and enjoy premium service at home or in-salon.
+          Kpocha Touch connects people to{" "}
+          <span className="text-gold">verified</span> professionals, businesses,
+          creators, and service providers across Nigeria. Discover real work,
+          build trust, connect directly, and grow through a live social
+          marketplace experience.
         </motion.p>
       </section>
 
@@ -201,24 +202,24 @@ export default function Home() {
             className="rounded-2xl border border-zinc-800 bg-zinc-950/40 p-6"
           >
             <h3 className="text-xl font-semibold mb-3">
-              Why Clients Use Kpocha
+              Why People Use Kpocha
             </h3>
             <ul className="space-y-3 text-zinc-300">
               <li>
-                <span className="text-emerald-400">✔</span> Verified, top-rated
-                professionals
+                <span className="text-emerald-400">✔</span> Discover verified
+                professionals and businesses
               </li>
               <li>
-                <span className="text-emerald-400">✔</span> Book in minutes —
-                clear pricing
+                <span className="text-emerald-400">✔</span> Explore real work,
+                portfolios, and services
               </li>
               <li>
-                <span className="text-emerald-400">✔</span> Secure Paystack
-                payments
+                <span className="text-emerald-400">✔</span> Secure platform
+                payments and trusted interactions
               </li>
               <li>
-                <span className="text-emerald-400">✔</span> Home or in-salon —
-                your choice
+                <span className="text-emerald-400">✔</span> Connect, book, and
+                engage with confidence
               </li>
             </ul>
             <div className="mt-6">
@@ -241,20 +242,20 @@ export default function Home() {
             </h3>
             <ul className="space-y-3 text-zinc-300">
               <li>
-                <span className="text-emerald-400">✔</span> Get discovered by
-                new clients
+                <span className="text-emerald-400">✔</span> Showcase your work
+                and build visibility
               </li>
               <li>
-                <span className="text-emerald-400">✔</span> Easy scheduling and
-                payouts
+                <span className="text-emerald-400">✔</span> Connect with
+                clients, customers, and opportunities
               </li>
               <li>
-                <span className="text-emerald-400">✔</span> Transparent
-                commissions
+                <span className="text-emerald-400">✔</span> Grow your presence
+                through trusted engagement
               </li>
               <li>
-                <span className="text-emerald-400">✔</span> Build your brand
-                with reviews
+                <span className="text-emerald-400">✔</span> Build credibility
+                with reviews, media, and activity
               </li>
             </ul>
             <div className="mt-6">
@@ -288,8 +289,9 @@ export default function Home() {
               Built for Nigeria.
             </motion.h3>
             <motion.p {...fadeUp} className="text-zinc-300 max-w-2xl mx-auto">
-              From Lagos to Kano, Port Harcourt to Abuja — trusted grooming,
-              verified professionals, and smooth bookings that just work.
+              From Lagos to Kano, Port Harcourt to Abuja — discover trusted
+              professionals, real work, and meaningful connections across
+              Nigeria.
             </motion.p>
           </div>
         </div>
@@ -306,16 +308,16 @@ export default function Home() {
         <div className="grid md:grid-cols-3 gap-6">
           {[
             {
-              t: "Find a Professional",
-              d: "Browse verified experts near you.",
+              t: "Discover",
+              d: "Explore professionals, businesses, and creators across Nigeria.",
             },
             {
-              t: "Book & Pay",
-              d: "Pick a time and pay securely via Paystack.",
+              t: "Connect",
+              d: "Engage directly, book services, and build trusted interactions.",
             },
             {
-              t: "Get Styled",
-              d: "At home or in-salon — premium service, on time.",
+              t: "Grow",
+              d: "Showcase your work, build visibility, and expand opportunities.",
             },
           ].map((s, i) => (
             <motion.div

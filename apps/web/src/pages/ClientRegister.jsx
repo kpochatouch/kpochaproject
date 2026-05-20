@@ -508,7 +508,7 @@ export default function ClientRegister() {
               <MediaUploader
                 api={api}
                 type="image"
-                visibility="private"
+                visibility="public"
                 valueUrl={photoPreviewUrl}
                 valueAssetId={photoAssetId}
                 onChange={({ previewUrl, assetId }) => {
