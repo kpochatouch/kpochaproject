@@ -164,7 +164,7 @@ export async function getSupportDecision({
 
   try {
     const response = await client.chat.completions.create({
-      model: "gpt-5-nano",
+      model: "gpt-4o-mini",
       temperature: 0.3,
       messages,
       response_format: {
@@ -208,7 +208,12 @@ export async function getSupportDecision({
       };
     }
   } catch (err) {
-    console.warn("[support-ai] openai call failed:", err?.message || err);
+    console.error("[support-ai] openai call failed:", {
+      error: err?.message || String(err),
+      code: err?.code,
+      status: err?.status,
+      apiKey: process.env.OPENAI_API_KEY ? "SET" : "MISSING",
+    });
   }
 
   const fallback = await callChatbase({ text, history, context });
@@ -217,7 +222,7 @@ export async function getSupportDecision({
   }
 
   return {
-    type: "escalate",
-    text: "I’ve sent this to our human support team. Replies will appear here as soon as an agent responds.",
+    type: "bot_reply",
+    text: "I’m here to help. Can you tell me more about your issue, or would you like me to connect you with a human support specialist?",
   };
 }

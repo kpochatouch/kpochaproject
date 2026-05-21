@@ -535,7 +535,11 @@ export default function supportRoutes({ requireAuth }) {
         emitToSupportUser(String(session.userUid), "support:session-updated", {
           session: mappedSession,
         });
-        emitToSupportSession(String(session._id), "support:message", userPayload);
+        emitToSupportSession(
+          String(session._id),
+          "support:message",
+          userPayload,
+        );
         emitToSupportSession(
           String(session._id),
           "support:message",
@@ -582,8 +586,8 @@ export default function supportRoutes({ requireAuth }) {
       } catch (err) {
         console.error("[support-ai] failed:", err?.message || err);
         triage = {
-          type: "escalate",
-          text: "I’ve sent this to our human support team. Replies will appear here as soon as an agent responds.",
+          type: "bot_reply",
+          text: "I’m here to help. Can you tell me more about your issue, or would you like me to connect you with a human support specialist?",
         };
       }
 
@@ -637,6 +641,67 @@ export default function supportRoutes({ requireAuth }) {
           ok: true,
           session: mappedSession,
           messages: [mapMessage(userMsg), mapMessage(botMsg)],
+        });
+      }
+
+      if (triage.type === "escalate" && triage.confirmEscalation !== true) {
+        const confirmationText =
+          "I can keep helping you here. Would you like me to connect you with a human support specialist?";
+
+        const confirmationMsg = await SupportMessage.create({
+          sessionId: session._id,
+          sender: "assistant",
+          text: confirmationText,
+          meta: {
+            confirmEscalation: true,
+            autoEscalationFallback: true,
+            originalEscalationText: String(triage.text || "").trim(),
+          },
+          readAt: new Date(),
+          deliveryStatus: "read",
+        });
+
+        session.mode = "bot";
+        session.escalated = false;
+        session.escalatedAt = null;
+        session.lastMessageAt = confirmationMsg.createdAt;
+        session.lastMessageText = confirmationMsg.text;
+        session.lastSender = "assistant";
+        await session.save();
+
+        const mappedSession = await decorateSessionIdentity(session);
+
+        const payloads = [
+          {
+            session: mappedSession,
+            message: mapMessage(userMsg),
+          },
+          {
+            session: mappedSession,
+            message: mapMessage(confirmationMsg),
+          },
+        ];
+
+        payloads.forEach((payload) => {
+          emitToSupportUser(
+            String(session.userUid),
+            "support:message",
+            payload,
+          );
+          emitToSupportSession(String(session._id), "support:message", payload);
+        });
+
+        emitToSupportUser(String(session.userUid), "support:session-updated", {
+          session: mappedSession,
+        });
+        emitToSupportSession(String(session._id), "support:session-updated", {
+          session: mappedSession,
+        });
+
+        return res.json({
+          ok: true,
+          session: mappedSession,
+          messages: [mapMessage(userMsg), mapMessage(confirmationMsg)],
         });
       }
 
