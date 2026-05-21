@@ -57,9 +57,11 @@ export default function SupportWidget() {
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(false);
   const [restarting, setRestarting] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [err, setErr] = useState("");
 
   const bodyRef = useRef(null);
+  const menuRef = useRef(null);
   const bootstrappedRef = useRef(false);
 
   const userUidRef = useRef("");
@@ -136,6 +138,21 @@ export default function SupportWidget() {
       window.removeEventListener("kpocha:open-support", onOpenSupport);
     };
   }, []);
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (menuRef.current && !menuRef.current.contains(e.target)) {
+        setMenuOpen(false);
+      }
+    }
+
+    if (menuOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => {
+        document.removeEventListener("mousedown", handleClickOutside);
+      };
+    }
+  }, [menuOpen]);
 
   useEffect(() => {
     if (!open || authLoading || !user?.uid) return;
@@ -288,25 +305,76 @@ export default function SupportWidget() {
               </div>
 
               <div className="kpo-support-topbar-actions">
-                {session?.mode === "human" ? (
+                <div ref={menuRef} style={{ position: "relative" }}>
                   <button
                     type="button"
                     className="kpo-support-icon-btn"
-                    onClick={restartChat}
-                    disabled={restarting}
-                    aria-label="Start a new support chat"
-                    title="Start a new chat"
+                    onClick={() => setMenuOpen((v) => !v)}
+                    aria-label="Chat menu"
+                    title="Chat options"
                   >
-                    {restarting ? "…" : "↻"}
+                    •••
                   </button>
-                ) : null}
-                <button
-                  type="button"
-                  className="kpo-support-icon-btn"
-                  aria-label="More"
-                >
-                  •••
-                </button>
+
+                  {menuOpen && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        top: "100%",
+                        right: 0,
+                        background: "white",
+                        border: "1px solid #ddd",
+                        borderRadius: "4px",
+                        boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
+                        zIndex: 100,
+                        minWidth: "160px",
+                      }}
+                    >
+                      {session?.mode === "human" && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            restartChat();
+                            setMenuOpen(false);
+                          }}
+                          disabled={restarting}
+                          style={{
+                            display: "block",
+                            width: "100%",
+                            padding: "8px 12px",
+                            textAlign: "left",
+                            background: "none",
+                            border: "none",
+                            cursor: restarting ? "not-allowed" : "pointer",
+                            fontSize: "14px",
+                          }}
+                        >
+                          {restarting ? "Starting new chat…" : "Start new chat"}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMessages([]);
+                          setText("");
+                          setMenuOpen(false);
+                        }}
+                        style={{
+                          display: "block",
+                          width: "100%",
+                          padding: "8px 12px",
+                          textAlign: "left",
+                          background: "none",
+                          border: "none",
+                          cursor: "pointer",
+                          fontSize: "14px",
+                        }}
+                      >
+                        Clear chat
+                      </button>
+                    </div>
+                  )}
+                </div>
                 <button
                   type="button"
                   className="kpo-support-icon-btn"
@@ -368,8 +436,8 @@ export default function SupportWidget() {
                         !messages.some((m) => m.sender === "agent") ? (
                           <div className="kpo-support-pill">
                             Your message has been sent to human support. Replies
-                            will appear here. If you want to start a new bot
-                            chat, use the refresh button in the top-right.
+                            will appear here. Use the menu icon to start a new
+                            chat.
                           </div>
                         ) : null}
 

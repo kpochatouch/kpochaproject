@@ -189,6 +189,13 @@ export async function getSupportDecision({
   ];
 
   try {
+    console.debug("[support-ai] openai request start", {
+      model: "gpt-4o-mini",
+      messagesCount: messages.length,
+      historyCount: history.length,
+      openAIApiKey: process.env.OPENAI_API_KEY ? "SET" : "MISSING",
+    });
+
     const response = await client.chat.completions.create({
       model: "gpt-4o-mini",
       temperature: 0.3,
@@ -197,6 +204,12 @@ export async function getSupportDecision({
 
     const content = response.choices?.[0]?.message?.content;
     const parsed = parseJsonResponse(content);
+
+    console.debug("[support-ai] openai request success", {
+      choices: response.choices?.length ?? 0,
+      usage: response.usage || null,
+      contentPreview: String(content || "").slice(0, 200),
+    });
 
     if (
       parsed &&
