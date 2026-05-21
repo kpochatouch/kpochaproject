@@ -101,19 +101,22 @@ function normalizeText(text) {
 
 function isAffirmative(text) {
   const normalized = normalizeText(text);
-  return /\b(yes|yeah|yep|sure|ok|okay|please|affirmative|absolutely|definitely|indeed|connect me|connect|human|agent|support specialist|live agent|customer service)\b/.test(
+  return /\b(yes|yeah|yep|sure|ok|okay|please|affirmative|absolutely|definitely|indeed|connect me|connect|please connect|yes please|go ahead|do it)\b/.test(
     normalized,
   );
 }
 
 function isNegative(text) {
   const normalized = normalizeText(text);
-  return /\b(no|nah|nope|not now|do not|dont|never|later)\b/.test(normalized);
+  return /\b(no|nah|nope|not now|do not|dont|never|later|don't want|dont want|not interested|no thanks|no thank you)\b/.test(
+    normalized,
+  );
 }
 
 function isExplicitHumanRequest(text) {
   const normalized = normalizeText(text);
-  return /\b(human|agent|admin|support specialist|customer service|live agent|real person|someone who can help|someone from support)\b/.test(
+  if (isNegative(normalized)) return false;
+  return /\b(connect me|please connect|connect.*human|connect.*agent|human support|human.*support|human.*agent|agent.*support|support specialist|customer service|live agent|real person|someone who can help|someone from support)\b/.test(
     normalized,
   );
 }
@@ -376,6 +379,14 @@ export default function supportRoutes({ requireAuth }) {
         pendingEscalationPrompt && isNegative(clean),
       );
       const explicitHumanRequest = isExplicitHumanRequest(clean);
+
+      console.debug("[support] escalation flags", {
+        text: clean,
+        pendingEscalationPrompt: Boolean(pendingEscalationPrompt),
+        userWantsEscalationNow,
+        userDeniedEscalation,
+        explicitHumanRequest,
+      });
 
       const userMsg = await SupportMessage.create({
         sessionId: session._id,

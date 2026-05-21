@@ -143,9 +143,29 @@ function buildContextMessage(context = null) {
   if (!lines.length) return null;
 
   return {
-    role: "developer",
+    role: "system",
     content: lines.join("\n"),
   };
+}
+
+function parseJsonResponse(content) {
+  const raw = String(content || "").trim();
+  if (!raw) return null;
+
+  const first = raw.indexOf("{");
+  const last = raw.lastIndexOf("}");
+  if (first === -1 || last === -1 || last <= first) return null;
+
+  const jsonText = raw.slice(first, last + 1);
+  try {
+    return JSON.parse(jsonText);
+  } catch (err) {
+    console.warn("[support-ai] failed to parse JSON response", {
+      raw,
+      error: err?.message || String(err),
+    });
+    return null;
+  }
 }
 
 export async function getSupportDecision({
@@ -153,10 +173,16 @@ export async function getSupportDecision({
   history = [],
   context = null,
 }) {
+  console.debug("[support-ai] getSupportDecision called", {
+    text: String(text || "").slice(0, 120),
+    historyCount: history.length,
+    openAIApiKey: process.env.OPENAI_API_KEY ? "SET" : "MISSING",
+  });
+
   const contextMessage = buildContextMessage(context);
 
   const messages = [
-    { role: "developer", content: SUPPORT_SYSTEM_PROMPT },
+    { role: "system", content: SUPPORT_SYSTEM_PROMPT },
     ...(contextMessage ? [contextMessage] : []),
     ...buildHistory(history),
     { role: "user", content: text },
@@ -167,34 +193,10 @@ export async function getSupportDecision({
       model: "gpt-4o-mini",
       temperature: 0.3,
       messages,
-      response_format: {
-        type: "json_schema",
-        json_schema: {
-          name: "support_triage_decision",
-          strict: true,
-          schema: {
-            type: "object",
-            additionalProperties: false,
-            properties: {
-              type: {
-                type: "string",
-                enum: ["bot_reply", "escalate"],
-              },
-              text: {
-                type: "string",
-              },
-              confirmEscalation: {
-                type: "boolean",
-              },
-            },
-            required: ["type", "text"],
-          },
-        },
-      },
     });
 
-    const content = response.choices?.[0]?.message?.content || "{}";
-    const parsed = JSON.parse(content);
+    const content = response.choices?.[0]?.message?.content;
+    const parsed = parseJsonResponse(content);
 
     if (
       parsed &&
@@ -207,6 +209,10 @@ export async function getSupportDecision({
         confirmEscalation: parsed.confirmEscalation === true,
       };
     }
+
+    console.warn("[support-ai] openai returned invalid JSON response", {
+      raw: content,
+    });
   } catch (err) {
     console.error("[support-ai] openai call failed:", {
       error: err?.message || String(err),
