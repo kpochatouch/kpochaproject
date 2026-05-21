@@ -141,6 +141,11 @@ export async function supportSendMessage(text) {
   return data;
 }
 
+export async function supportRestartSession() {
+  const { data } = await api.post("/api/support/session/restart");
+  return data;
+}
+
 export async function adminSupportGetSessions() {
   const { data } = await api.get("/api/admin/support/sessions");
   return data;

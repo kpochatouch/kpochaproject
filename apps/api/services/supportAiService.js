@@ -5,6 +5,52 @@ const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+async function callChatbase({ text, history = [], context = {} }) {
+  const url = process.env.CHATBASE_URL;
+  const apiKey = process.env.CHATBASE_API_KEY;
+  const agentId = process.env.CHATBASE_AGENT_ID || null;
+
+  if (!url || !apiKey) return null;
+
+  try {
+    const payload = {
+      agent: agentId,
+      input: String(text || ""),
+      history: (history || []).map((m) => ({
+        role: m.sender === "user" ? "user" : "assistant",
+        content: String(m.text || ""),
+      })),
+      context: context || {},
+    };
+
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!resp.ok) return null;
+
+    const json = await resp.json().catch(() => null);
+    if (!json) return null;
+
+    const reply =
+      json.reply || json.answer || json.text || json.message || null;
+    if (!reply || !String(reply).trim()) return null;
+
+    return {
+      type: "bot_reply",
+      text: String(reply).trim(),
+    };
+  } catch (err) {
+    console.warn("[support-ai] chatbase fallback failed:", err?.message || err);
+    return null;
+  }
+}
+
 const SUPPORT_SYSTEM_PROMPT = `
 You are Kpocha Touch support assistant.
 
@@ -40,7 +86,9 @@ Rules:
 - If the issue is account-specific, booking-specific, payment-specific, refund-related, payout-related, wallet-related, login/access-related, verification-related, abuse-report-related, or requires manual review, escalate.
 - If the user sounds repeatedly frustrated, escalate.
 - If the question is general onboarding, how-to-use guidance, booking flow explanation, profile setup guidance, pro registration guidance, adverts guidance, wallet feature explanation, or FAQ-style guidance, reply normally.
-- If uncertain, escalate.
+- If uncertain, ask the user if they would like to connect with a human support specialist by returning an escalation prompt.
+- Use "type": "escalate" with "confirmEscalation": true when you want the user to confirm before escalating.
+- Do not escalate automatically unless the user explicitly asks for a human or admin.
 
 Advert guidance on Kpocha Touch:
 - Adverts appear as sponsored content in the platform
@@ -114,49 +162,62 @@ export async function getSupportDecision({
     { role: "user", content: text },
   ];
 
-  const response = await client.chat.completions.create({
-    model: "gpt-5-nano",
-    temperature: 0.3,
-    messages,
-    response_format: {
-      type: "json_schema",
-      json_schema: {
-        name: "support_triage_decision",
-        strict: true,
-        schema: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            type: {
-              type: "string",
-              enum: ["bot_reply", "escalate"],
+  try {
+    const response = await client.chat.completions.create({
+      model: "gpt-5-nano",
+      temperature: 0.3,
+      messages,
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "support_triage_decision",
+          strict: true,
+          schema: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              type: {
+                type: "string",
+                enum: ["bot_reply", "escalate"],
+              },
+              text: {
+                type: "string",
+              },
+              confirmEscalation: {
+                type: "boolean",
+              },
             },
-            text: {
-              type: "string",
-            },
+            required: ["type", "text"],
           },
-          required: ["type", "text"],
         },
       },
-    },
-  });
+    });
 
-  const content = response.choices?.[0]?.message?.content || "{}";
-  const parsed = JSON.parse(content);
+    const content = response.choices?.[0]?.message?.content || "{}";
+    const parsed = JSON.parse(content);
 
-  if (
-    !parsed ||
-    (parsed.type !== "bot_reply" && parsed.type !== "escalate") ||
-    !String(parsed.text || "").trim()
-  ) {
-    return {
-      type: "escalate",
-      text: "I’ve sent this to our human support team. Replies will appear here as soon as an agent responds.",
-    };
+    if (
+      parsed &&
+      (parsed.type === "bot_reply" || parsed.type === "escalate") &&
+      String(parsed.text || "").trim()
+    ) {
+      return {
+        type: parsed.type,
+        text: String(parsed.text).trim(),
+        confirmEscalation: parsed.confirmEscalation === true,
+      };
+    }
+  } catch (err) {
+    console.warn("[support-ai] openai call failed:", err?.message || err);
+  }
+
+  const fallback = await callChatbase({ text, history, context });
+  if (fallback && fallback.type === "bot_reply") {
+    return fallback;
   }
 
   return {
-    type: parsed.type,
-    text: String(parsed.text).trim(),
+    type: "escalate",
+    text: "I’ve sent this to our human support team. Replies will appear here as soon as an agent responds.",
   };
 }

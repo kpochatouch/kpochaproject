@@ -7,6 +7,7 @@ import {
   supportGetSession,
   supportGetMessages,
   supportSendMessage,
+  supportRestartSession,
 } from "../lib/api";
 import { useAuth } from "../context/AuthContext.jsx";
 
@@ -55,6 +56,7 @@ export default function SupportWidget() {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [restarting, setRestarting] = useState(false);
   const [err, setErr] = useState("");
 
   const bodyRef = useRef(null);
@@ -214,6 +216,26 @@ export default function SupportWidget() {
     setErr("");
   }, [user?.uid]);
 
+  async function restartChat() {
+    if (restarting || !user) return;
+
+    setRestarting(true);
+    setErr("");
+
+    try {
+      const res = await supportRestartSession();
+      if (res.session) {
+        setSession(res.session);
+        setMessages([]);
+        setText("");
+      }
+    } catch (e) {
+      setErr(e?.message || "Failed to start a new chat.");
+    } finally {
+      setRestarting(false);
+    }
+  }
+
   async function send() {
     const clean = text.trim();
     if (!clean || !user || sending) return;
@@ -266,6 +288,18 @@ export default function SupportWidget() {
               </div>
 
               <div className="kpo-support-topbar-actions">
+                {session?.mode === "human" ? (
+                  <button
+                    type="button"
+                    className="kpo-support-icon-btn"
+                    onClick={restartChat}
+                    disabled={restarting}
+                    aria-label="Start a new support chat"
+                    title="Start a new chat"
+                  >
+                    {restarting ? "…" : "↻"}
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className="kpo-support-icon-btn"
@@ -334,7 +368,8 @@ export default function SupportWidget() {
                         !messages.some((m) => m.sender === "agent") ? (
                           <div className="kpo-support-pill">
                             Your message has been sent to human support. Replies
-                            will appear here.
+                            will appear here. If you want to start a new bot
+                            chat, use the refresh button in the top-right.
                           </div>
                         ) : null}
 

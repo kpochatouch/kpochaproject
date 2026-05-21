@@ -18,6 +18,7 @@ export default function BookingAlert({
 
   const audioRef = useRef(null);
   const queueRef = useRef([]); // avoid stale closure
+  const initialLoadRef = useRef(true);
   const STORAGE_KEY = "pro:lastBookingAlertAt:v2";
 
   useEffect(() => {
@@ -123,12 +124,19 @@ export default function BookingAlert({
         const newestMs = Math.max(...fresh.map((b) => b._createdMs || 0));
         localStorage.setItem(STORAGE_KEY, String(newestMs));
 
-        if (playSound && audioRef.current) {
+        const isInitialLoad = initialLoadRef.current;
+        if (!isInitialLoad && playSound && audioRef.current) {
           try {
             audioRef.current.currentTime = 0;
             audioRef.current.play();
           } catch {}
         }
+      }
+
+      if (initialLoadRef.current) {
+        // On first mount, mark existing actionable bookings as already seen.
+        // This prevents the app from sounding chime for pre-existing bookings on a fresh open.
+        initialLoadRef.current = false;
       }
     } catch {
       // ignore; polling will catch later

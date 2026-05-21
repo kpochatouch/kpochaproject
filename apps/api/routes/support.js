@@ -93,6 +93,31 @@ function emitToSupportAdmins(event, payload) {
   }
 }
 
+function normalizeText(text) {
+  return String(text || "")
+    .trim()
+    .toLowerCase();
+}
+
+function isAffirmative(text) {
+  const normalized = normalizeText(text);
+  return /\b(yes|yeah|yep|sure|ok|okay|please|affirmative|absolutely|definitely|indeed|connect me|connect|human|agent|support specialist|live agent|customer service)\b/.test(
+    normalized,
+  );
+}
+
+function isNegative(text) {
+  const normalized = normalizeText(text);
+  return /\b(no|nah|nope|not now|do not|dont|never|later)\b/.test(normalized);
+}
+
+function isExplicitHumanRequest(text) {
+  const normalized = normalizeText(text);
+  return /\b(human|agent|admin|support specialist|customer service|live agent|real person|someone who can help|someone from support)\b/.test(
+    normalized,
+  );
+}
+
 async function getOrCreateOpenSupportSession(userUid) {
   let session = await SupportSession.findOne({
     userUid,
@@ -246,6 +271,36 @@ export default function supportRoutes({ requireAuth }) {
     }
   });
 
+  router.post("/support/session/restart", requireAuth, async (req, res) => {
+    try {
+      await SupportSession.updateMany(
+        { userUid: req.user.uid, status: "open" },
+        { $set: { status: "closed" } },
+      );
+
+      const session = await SupportSession.create({
+        userUid: req.user.uid,
+        mode: "bot",
+        status: "open",
+        escalated: false,
+        escalatedAt: null,
+        lastMessageAt: null,
+        lastMessageText: "",
+        lastSender: "",
+        unreadAdminCount: 0,
+        unreadUserCount: 0,
+      });
+
+      return res.json({
+        ok: true,
+        session: mapSession(session),
+      });
+    } catch (err) {
+      console.error("[support/session:restart] failed:", err?.message || err);
+      return res.status(500).json({ error: "support_session_restart_failed" });
+    }
+  });
+
   router.get("/support/messages", requireAuth, async (req, res) => {
     try {
       const session = await SupportSession.findOne({
@@ -306,6 +361,22 @@ export default function supportRoutes({ requireAuth }) {
 
       const session = await getOrCreateOpenSupportSession(req.user.uid);
 
+      const pendingEscalationPrompt = await SupportMessage.findOne({
+        sessionId: session._id,
+        sender: "assistant",
+        "meta.confirmEscalation": true,
+      })
+        .sort({ createdAt: -1 })
+        .lean();
+
+      const userWantsEscalationNow = Boolean(
+        pendingEscalationPrompt && isAffirmative(clean),
+      );
+      const userDeniedEscalation = Boolean(
+        pendingEscalationPrompt && isNegative(clean),
+      );
+      const explicitHumanRequest = isExplicitHumanRequest(clean);
+
       const userMsg = await SupportMessage.create({
         sessionId: session._id,
         sender: "user",
@@ -340,6 +411,155 @@ export default function supportRoutes({ requireAuth }) {
           ok: true,
           session: mappedSession,
           messages: [mapMessage(userMsg)],
+        });
+      }
+
+      if (userDeniedEscalation) {
+        if (pendingEscalationPrompt) {
+          await SupportMessage.updateOne(
+            { _id: pendingEscalationPrompt._id },
+            {
+              $set: {
+                "meta.confirmEscalation": false,
+                "meta.confirmationResolvedAt": new Date(),
+              },
+            },
+          );
+        }
+
+        const botMsg = await SupportMessage.create({
+          sessionId: session._id,
+          sender: "assistant",
+          text: "Okay, I’ll continue helping you here. What else can I assist you with?",
+          meta: { continuedFromEscalation: true },
+          readAt: new Date(),
+          deliveryStatus: "read",
+        });
+
+        session.mode = "bot";
+        session.escalated = false;
+        session.escalatedAt = null;
+        session.lastMessageAt = botMsg.createdAt;
+        session.lastMessageText = botMsg.text;
+        session.lastSender = "assistant";
+        await session.save();
+
+        const mappedSession = await decorateSessionIdentity(session);
+
+        const payloads = [
+          {
+            session: mappedSession,
+            message: mapMessage(userMsg),
+          },
+          {
+            session: mappedSession,
+            message: mapMessage(botMsg),
+          },
+        ];
+
+        payloads.forEach((payload) => {
+          emitToSupportUser(
+            String(session.userUid),
+            "support:message",
+            payload,
+          );
+          emitToSupportSession(String(session._id), "support:message", payload);
+        });
+
+        emitToSupportUser(String(session.userUid), "support:session-updated", {
+          session: mappedSession,
+        });
+        emitToSupportSession(String(session._id), "support:session-updated", {
+          session: mappedSession,
+        });
+
+        return res.json({
+          ok: true,
+          session: mappedSession,
+          messages: [mapMessage(userMsg), mapMessage(botMsg)],
+        });
+      }
+
+      if (userWantsEscalationNow || explicitHumanRequest) {
+        if (pendingEscalationPrompt) {
+          await SupportMessage.updateOne(
+            { _id: pendingEscalationPrompt._id },
+            {
+              $set: {
+                "meta.confirmEscalation": false,
+                "meta.confirmationResolvedAt": new Date(),
+              },
+            },
+          );
+        }
+
+        const handoffMsg = await SupportMessage.create({
+          sessionId: session._id,
+          sender: "assistant",
+          text: "I’ve sent this to our human support team. Replies will appear here as soon as an agent responds.",
+          readAt: new Date(),
+          deliveryStatus: "read",
+        });
+
+        session.mode = "human";
+        session.escalated = true;
+        session.escalatedAt = new Date();
+        session.lastMessageAt = handoffMsg.createdAt;
+        session.lastMessageText = handoffMsg.text;
+        session.lastSender = "assistant";
+        session.unreadAdminCount = Number(session.unreadAdminCount || 0) + 1;
+        await session.save();
+
+        const mappedSession = await decorateSessionIdentity(session);
+
+        const userPayload = {
+          session: mappedSession,
+          message: mapMessage(userMsg),
+        };
+
+        const handoffPayload = {
+          session: mappedSession,
+          message: mapMessage(handoffMsg),
+        };
+
+        emitToSupportUser(
+          String(session.userUid),
+          "support:message",
+          userPayload,
+        );
+        emitToSupportUser(
+          String(session.userUid),
+          "support:message",
+          handoffPayload,
+        );
+        emitToSupportUser(String(session.userUid), "support:session-updated", {
+          session: mappedSession,
+        });
+        emitToSupportSession(String(session._id), "support:message", userPayload);
+        emitToSupportSession(
+          String(session._id),
+          "support:message",
+          handoffPayload,
+        );
+        emitToSupportSession(String(session._id), "support:session-updated", {
+          session: mappedSession,
+        });
+
+        emitToSupportAdmins("admin-support:escalated", {
+          session: mappedSession,
+          messages: [mapMessage(userMsg), mapMessage(handoffMsg)],
+        });
+        emitToSupportAdmins("admin-support:session-updated", {
+          session: mappedSession,
+        });
+
+        await createAdminEscalationNotifications(session, userMsg, handoffMsg);
+        await notifyAdminsOfEscalation(session, userMsg, handoffMsg);
+
+        return res.json({
+          ok: true,
+          session: mappedSession,
+          messages: [mapMessage(userMsg), mapMessage(handoffMsg)],
         });
       }
 
@@ -417,6 +637,60 @@ export default function supportRoutes({ requireAuth }) {
           ok: true,
           session: mappedSession,
           messages: [mapMessage(userMsg), mapMessage(botMsg)],
+        });
+      }
+
+      if (triage.type === "escalate" && triage.confirmEscalation === true) {
+        const confirmationMsg = await SupportMessage.create({
+          sessionId: session._id,
+          sender: "assistant",
+          text: triage.text,
+          meta: { confirmEscalation: true },
+          readAt: new Date(),
+          deliveryStatus: "read",
+        });
+
+        session.mode = "bot";
+        session.escalated = false;
+        session.escalatedAt = null;
+        session.lastMessageAt = confirmationMsg.createdAt;
+        session.lastMessageText = confirmationMsg.text;
+        session.lastSender = "assistant";
+        await session.save();
+
+        const mappedSession = await decorateSessionIdentity(session);
+
+        const payloads = [
+          {
+            session: mappedSession,
+            message: mapMessage(userMsg),
+          },
+          {
+            session: mappedSession,
+            message: mapMessage(confirmationMsg),
+          },
+        ];
+
+        payloads.forEach((payload) => {
+          emitToSupportUser(
+            String(session.userUid),
+            "support:message",
+            payload,
+          );
+          emitToSupportSession(String(session._id), "support:message", payload);
+        });
+
+        emitToSupportUser(String(session.userUid), "support:session-updated", {
+          session: mappedSession,
+        });
+        emitToSupportSession(String(session._id), "support:session-updated", {
+          session: mappedSession,
+        });
+
+        return res.json({
+          ok: true,
+          session: mappedSession,
+          messages: [mapMessage(userMsg), mapMessage(confirmationMsg)],
         });
       }
 
