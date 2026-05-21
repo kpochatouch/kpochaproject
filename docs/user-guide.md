@@ -44,10 +44,9 @@ A public professional profile typically includes:
 ## How to book a service
 
 1. Open the professional profile or service listing.
-2. Choose the service you want to book.
-3. Select the preferred date, time, and location.
-4. Confirm your booking details.
-5. Complete payment using the supported checkout flow.
+2. Choose the service you want to book and confirm your address/contact details.
+3. Create the booking — the app may create an instant/ASAP booking or a scheduled booking depending on the professional.
+4. Complete payment on the booking details page (Wallet or card). Some professionals may offer scheduled appointments; follow the scheduling options shown when available.
 
 > The platform is designed to protect you. Do not pay professionals directly outside the app unless specifically authorized by Kpocha Touch.
 

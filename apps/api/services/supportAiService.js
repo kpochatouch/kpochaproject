@@ -223,16 +223,67 @@ export async function getSupportDecision({
       };
     }
 
-    // If OpenAI returned plain text instead of JSON, use it as the bot reply.
+    // If OpenAI returned plain text instead of JSON, attempt a single
+    // reformat request asking the model to output ONLY the required JSON.
     const plainText = String(content || "").trim();
     if (plainText) {
       console.debug(
-        "[support-ai] openai returned plain-text response; using as bot_reply",
+        "[support-ai] openai returned plain-text response; attempting reformat",
         {
           preview: plainText.slice(0, 500),
           length: plainText.length,
         },
       );
+
+      try {
+        const reformatMessages = [
+          {
+            role: "system",
+            content:
+              'You are a JSON formatter. The assistant previously replied with a plain-text support response. Extract and return ONLY a single valid JSON object with one of the two exact shapes: { "type": "bot_reply", "text": "..." } or { "type": "escalate", "text": "...", "confirmEscalation": true|false }. Do not include any extra text, explanation, or code fences.',
+          },
+          { role: "assistant", content: plainText },
+        ];
+
+        console.debug("[support-ai] openai reformat request start");
+        const reformatResp = await client.chat.completions.create({
+          model: "gpt-4o-mini",
+          temperature: 0,
+          messages: reformatMessages,
+        });
+
+        const reformatContent = reformatResp.choices?.[0]?.message?.content;
+        const reparsed = parseJsonResponse(reformatContent);
+
+        console.debug("[support-ai] openai reformat response", {
+          choices: reformatResp.choices?.length ?? 0,
+          usage: reformatResp.usage || null,
+          contentPreview: String(reformatContent || "").slice(0, 300),
+        });
+
+        if (
+          reparsed &&
+          (reparsed.type === "bot_reply" || reparsed.type === "escalate") &&
+          String(reparsed.text || "").trim()
+        ) {
+          return {
+            type: reparsed.type,
+            text: String(reparsed.text).trim(),
+            confirmEscalation: reparsed.confirmEscalation === true,
+          };
+        }
+
+        console.warn(
+          "[support-ai] reformat attempt did not yield valid JSON; falling back to plain text reply",
+        );
+      } catch (err) {
+        console.warn(
+          "[support-ai] reformat attempt failed:",
+          err?.message || String(err),
+        );
+      }
+
+      // As a last resort, use the plain text as bot reply to avoid degrading UX.
       return {
         type: "bot_reply",
         text: plainText,

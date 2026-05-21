@@ -322,10 +322,10 @@ export default function SupportWidget() {
                         position: "absolute",
                         top: "100%",
                         right: 0,
-                        background: "white",
-                        border: "1px solid #ddd",
-                        borderRadius: "4px",
-                        boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
+                        background: "#0b0f15",
+                        border: "1px solid rgba(255,255,255,0.08)",
+                        borderRadius: "8px",
+                        boxShadow: "0 12px 24px rgba(0,0,0,0.25)",
                         zIndex: 100,
                         minWidth: "160px",
                       }}
@@ -341,10 +341,11 @@ export default function SupportWidget() {
                           style={{
                             display: "block",
                             width: "100%",
-                            padding: "8px 12px",
+                            padding: "10px 14px",
                             textAlign: "left",
-                            background: "none",
+                            background: "transparent",
                             border: "none",
+                            color: "#fff",
                             cursor: restarting ? "not-allowed" : "pointer",
                             fontSize: "14px",
                           }}
@@ -362,10 +363,11 @@ export default function SupportWidget() {
                         style={{
                           display: "block",
                           width: "100%",
-                          padding: "8px 12px",
+                          padding: "10px 14px",
                           textAlign: "left",
-                          background: "none",
+                          background: "transparent",
                           border: "none",
+                          color: "#fff",
                           cursor: "pointer",
                           fontSize: "14px",
                         }}

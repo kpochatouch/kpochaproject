@@ -131,8 +131,18 @@ export default function Docs() {
           <div>
             <h3 className="font-semibold">How do I book a service?</h3>
             <p>
-              Search for a professional, select the service, choose a date and
-              time, then confirm and pay.
+              1. Find a professional or service (from Browse, a Post, or a
+              public profile).
+              <br />
+              2. Choose the service you want and confirm your address/contact
+              details.
+              <br />
+              3. Create the booking (the app may create an instant/ASAP booking
+              or a scheduled booking depending on the professional).
+              <br />
+              4. Complete payment on the booking details page (Wallet or card).
+              Some professionals may offer scheduled appointments; follow the
+              scheduling options shown when available.
             </p>
           </div>
           <div>

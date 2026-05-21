@@ -6,10 +6,10 @@ Kpocha Touch is a professional service marketplace that connects clients with ve
 
 ## How do I book a service?
 
-1. Search for a professional or service category.
-2. Open a professional’s profile.
-3. Choose the service, date, time, and location.
-4. Confirm the booking and pay through the app.
+1. Find a professional or service (from Browse, a Post, or a public profile).
+2. Choose the service you want and confirm your address/contact details.
+3. Create the booking — the app may create an instant/ASAP booking or a scheduled booking depending on the professional.
+4. Complete payment on the booking details page (Wallet or card). Some professionals may offer scheduled appointments; follow the scheduling options shown when available.
 
 ## Can I use Kpocha Touch in multiple Nigerian states?
 
