@@ -223,6 +223,22 @@ export async function getSupportDecision({
       };
     }
 
+    // If OpenAI returned plain text instead of JSON, use it as the bot reply.
+    const plainText = String(content || "").trim();
+    if (plainText) {
+      console.debug(
+        "[support-ai] openai returned plain-text response; using as bot_reply",
+        {
+          preview: plainText.slice(0, 500),
+          length: plainText.length,
+        },
+      );
+      return {
+        type: "bot_reply",
+        text: plainText,
+      };
+    }
+
     console.warn("[support-ai] openai returned invalid JSON response", {
       raw: content,
     });
