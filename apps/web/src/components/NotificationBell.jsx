@@ -10,7 +10,7 @@ import {
 
 export default function NotificationBell() {
   const navigate = useNavigate();
-  const { items, unread, markRead, markAll } = useNotifications();
+  const { items, unread, markRead, markAll, deleteItem } = useNotifications();
 
   const [open, setOpen] = useState(false);
   const rootRef = useRef(null);
@@ -157,6 +157,34 @@ export default function NotificationBell() {
                       </div>
                     </div>
                   </button>
+
+                  <div className="px-3 pb-2 flex items-center gap-2 text-[10px]">
+                    <button
+                      type="button"
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        try {
+                          await markRead(n.id);
+                        } catch {}
+                      }}
+                      className="text-blue-400 hover:text-blue-300"
+                    >
+                      Mark read
+                    </button>
+                    <span className="text-zinc-600">•</span>
+                    <button
+                      type="button"
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        try {
+                          await deleteItem(n.id);
+                        } catch {}
+                      }}
+                      className="text-red-400 hover:text-red-300"
+                    >
+                      Delete
+                    </button>
+                  </div>
                 </li>
               ))}
             </ul>

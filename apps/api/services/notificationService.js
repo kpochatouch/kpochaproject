@@ -666,6 +666,32 @@ export async function listNotifications(
   return items;
 }
 
+export async function deleteNotification(id, uid) {
+  if (!id) throw new Error("id required");
+  if (!uid) throw new Error("uid required");
+
+  const notification = await Notification.findOne({
+    _id: id,
+    ownerUid: uid,
+    deleted: false,
+  });
+
+  if (!notification) {
+    throw new Error("not_found");
+  }
+
+  const wasUnread = notification.seen === false;
+  notification.deleted = true;
+  await notification.save();
+
+  if (wasUnread) {
+    await decrUnreadCounter(uid, 1);
+  }
+
+  emitToUser(uid, "notification:deleted", { id: String(notification._id) });
+  return notification;
+}
+
 /**
  * Reset unread counter in Redis to match DB (useful for admin/repair)
  */

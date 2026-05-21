@@ -965,6 +965,12 @@ export async function markNotificationRead(id) {
   );
   return data;
 }
+export async function deleteNotification(id) {
+  const { data } = await api.delete(
+    `/api/notifications/${encodeURIComponent(id)}`,
+  );
+  return data;
+}
 export async function markAllNotificationsRead() {
   const { data } = await api.put("/api/notifications/read-all");
   return data;

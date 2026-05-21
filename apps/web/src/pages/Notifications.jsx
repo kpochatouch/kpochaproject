@@ -12,7 +12,7 @@ import {
 
 export default function NotificationsPage() {
   const navigate = useNavigate();
-  const { items, markRead, markAll, loading } = useNotifications();
+  const { items, markRead, deleteItem, markAll, loading } = useNotifications();
 
   const enhanced = useMemo(
     () =>
@@ -82,39 +82,60 @@ export default function NotificationsPage() {
         <ul className="divide-y divide-zinc-800 border border-zinc-800 rounded-xl overflow-hidden">
           {enhanced.map((n) => (
             <li key={n.id}>
-              <button
-                type="button"
-                onClick={() => handleOpen(n)}
-                className={`w-full text-left p-4 transition ${
+              <div
+                className={`w-full p-4 transition ${
                   n.seen ? "bg-black" : "bg-zinc-900/60"
                 } hover:bg-zinc-800`}
               >
-                <div className="flex items-start gap-3">
-                  {n.avatar ? (
-                    <img
-                      src={n.avatar}
-                      alt=""
-                      className="w-10 h-10 rounded-full object-cover"
-                    />
-                  ) : (
-                    <div className="text-xl leading-none mt-1">{n.icon}</div>
-                  )}
-
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-semibold">{n.title}</div>
-
-                    {n.body && (
-                      <div className="text-xs text-zinc-300 mt-0.5">
-                        {n.body}
-                      </div>
+                <button
+                  type="button"
+                  onClick={() => handleOpen(n)}
+                  className="w-full text-left"
+                >
+                  <div className="flex items-start gap-3">
+                    {n.avatar ? (
+                      <img
+                        src={n.avatar}
+                        alt=""
+                        className="w-10 h-10 rounded-full object-cover"
+                      />
+                    ) : (
+                      <div className="text-xl leading-none mt-1">{n.icon}</div>
                     )}
 
-                    <div className="text-[11px] text-zinc-500 mt-1">
-                      {formatNotificationTime(n.createdAt)}
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-semibold">{n.title}</div>
+
+                      {n.body && (
+                        <div className="text-xs text-zinc-300 mt-0.5">
+                          {n.body}
+                        </div>
+                      )}
+
+                      <div className="text-[11px] text-zinc-500 mt-1">
+                        {formatNotificationTime(n.createdAt)}
+                      </div>
                     </div>
                   </div>
+                </button>
+
+                <div className="mt-3 flex items-center justify-between gap-2 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => markRead(n.id)}
+                    className="text-blue-400"
+                  >
+                    Mark read
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => deleteItem(n.id)}
+                    className="text-red-400"
+                  >
+                    Delete
+                  </button>
                 </div>
-              </button>
+              </div>
             </li>
           ))}
         </ul>

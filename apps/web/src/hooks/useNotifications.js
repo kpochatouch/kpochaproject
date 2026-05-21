@@ -4,6 +4,7 @@ import {
   listNotifications,
   getNotificationsCounts,
   markNotificationRead as apiMarkNotificationRead,
+  deleteNotification as apiDeleteNotification,
   markAllNotificationsRead as apiMarkAllNotificationsRead,
   connectSocket,
   registerSocketHandler,
@@ -32,8 +33,8 @@ export default function useNotifications() {
         const arr = Array.isArray(list?.items)
           ? list.items
           : Array.isArray(list)
-            ? list
-            : [];
+          ? list
+          : [];
         if (mounted.current) setItems(arr);
         await refreshCounts();
       } catch {}
@@ -89,6 +90,17 @@ export default function useNotifications() {
     } catch {}
   }
 
+  async function deleteItem(id) {
+    if (!id) return;
+    try {
+      await apiDeleteNotification(id);
+      setItems((prev) =>
+        prev.filter((it) => String(it.id || it._id) !== String(id)),
+      );
+      refreshCounts();
+    } catch {}
+  }
+
   async function markAll() {
     try {
       await apiMarkAllNotificationsRead();
@@ -101,6 +113,7 @@ export default function useNotifications() {
     items,
     unread,
     markRead,
+    deleteItem,
     markAll,
     refreshCounts, // 🔥 expose this
   };

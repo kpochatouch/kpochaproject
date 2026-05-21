@@ -3,7 +3,7 @@ import React, { useState } from "react";
 import useNotifications from "../hooks/useNotifications";
 
 export default function NotificationsMenu() {
-  const { items, unread, markRead, markAll } = useNotifications();
+  const { items, unread, markRead, deleteItem, markAll } = useNotifications();
   const [open, setOpen] = useState(false);
 
   function toggle() {
@@ -45,18 +45,31 @@ export default function NotificationsMenu() {
                 n.read ? "opacity-60" : "bg-zinc-900/40"
               }`}
             >
-              <div className="text-sm font-semibold">
-                {n.title || n.type || "Notification"}
-              </div>
-              <div className="text-xs text-zinc-400">{n.body}</div>
-              <div className="text-[10px] text-zinc-500 mt-1">
-                {new Date(n.createdAt).toLocaleString()}
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <div className="text-sm font-semibold">
+                    {n.title || n.type || "Notification"}
+                  </div>
+                  <div className="text-xs text-zinc-400">{n.body}</div>
+                  <div className="text-[10px] text-zinc-500 mt-1">
+                    {new Date(n.createdAt).toLocaleString()}
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => deleteItem(n._id || n.id)}
+                  className="text-[10px] text-red-400"
+                >
+                  Delete
+                </button>
               </div>
 
               {!n.read && (
                 <button
                   onClick={() => markRead(n._id || n.id)}
                   className="text-[10px] mt-1 text-blue-400"
+                  type="button"
                 >
                   Mark read
                 </button>

@@ -34,6 +34,14 @@ export async function markNotificationSeen(id) {
   return data;
 }
 
+export async function deleteNotification(id) {
+  if (!id) throw new Error("notification id required");
+  const { data } = await api.delete(
+    `/api/notifications/${encodeURIComponent(id)}`,
+  );
+  return data;
+}
+
 /**
  * Mark all notifications as read.
  */

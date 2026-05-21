@@ -5,6 +5,7 @@ import {
   markRead,
   unreadCount,
   listNotifications,
+  deleteNotification,
 } from "../services/notificationService.js";
 import Notification from "../models/Notification.js";
 import redisClient from "../redis.js";
@@ -104,6 +105,19 @@ router.put("/notifications/read-all", requireAuth, async (req, res) => {
   } catch (e) {
     console.error("[notifications:readAll]", e?.message || e);
     return res.status(500).json({ error: "read_all_failed" });
+  }
+});
+
+router.delete("/notifications/:id", requireAuth, async (req, res) => {
+  try {
+    const notification = await deleteNotification(req.params.id, req.user.uid);
+    return res.json({ ok: true, id: String(notification._id) });
+  } catch (e) {
+    console.error("[notifications:delete]", e?.message || e);
+    if (e.message === "not_found") {
+      return res.status(404).json({ error: "not_found" });
+    }
+    return res.status(500).json({ error: "delete_failed" });
   }
 });
 
