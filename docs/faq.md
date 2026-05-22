@@ -1,64 +1,122 @@
-# Kpocha Touch FAQ
+# Kpocha Touch FAQ (Enhanced)
 
-## What is Kpocha Touch?
+**Company:** KPOCHA TOUCH NIG LTD — RC No. 7455105
 
-Kpocha Touch is a professional service marketplace that connects clients with verified professionals in Nigeria. It supports booking, payments, profile browsing, and secure communication.
+**Address:** 23, Adesuwa Road, GRA, Benin City, Edo State
 
-## How do I book a service?
+**Contact:** kpochaout@gmail.com
 
-1. Find a professional or service (from Browse, a Post, or a public profile).
-2. Choose the service you want and confirm your address/contact details.
-3. Create the booking — the app may create an instant/ASAP booking or a scheduled booking depending on the professional.
-4. Complete payment on the booking details page (Wallet or card). Some professionals may offer scheduled appointments; follow the scheduling options shown when available.
+## General
 
-## Can I use Kpocha Touch in multiple Nigerian states?
+Q: What is Kpocha Touch?
+A: Kpocha Touch is a marketplace for verified professionals offering home and local services. It connects clients with professionals, handles payments, and enforces safety and quality controls.
 
-Yes. The platform supports location-based searching by state and local government area (LGA), so you can find professionals across Nigeria.
+Q: Is Kpocha Touch available across Nigeria?
+A: Kpocha Touch operates in supported states and LGAs. Services may vary by location.
 
-## What payment methods are available?
+---
 
-The app uses supported payment providers and Wallet credit. Exact payment options may vary based on your region and app configuration.
+## Payments & Wallet
 
-## What is the Wallet?
+Q: How do I pay for a booking?
+A: You can pay using Wallet credits or a card via Paystack. Payment is taken at booking time and held in escrow until the job is completed.
 
-The Wallet is an in-app balance for payments and refunds. It allows faster checkout and manages credits from refunds or adjustments.
+Q: What happens to the money after I pay for a booking?
+A: Money is held in escrow by the platform and released to the professional after the job is completed and any holds (e.g., pending clearing period) expire.
 
-## Can users post content on Kpocha Touch?
+Q: Can I get a refund?
+A: Yes. Refunds are processed in case of cancellations or no-shows. If the professional doesn't show up, you will receive a full refund.
 
-Yes. Kpocha Touch supports social and business posting features that allow users, creators, and businesses to publish updates, media content, promotions, and public activity within the platform ecosystem.
+---
 
-## Is Kpocha Touch only for physical services?
+## Professional earnings & withdrawals
 
-No. The platform supports multiple categories including local services, creators, freelancers, digital professionals, businesses, vendors, event operators, consultants, technicians, influencers, educators, and other service providers.
+Q: How do professionals get paid?
+A: When a client marks a booking completed, the booking amount moves to the professional's holdings wallet (pending balance). Holdings funds remain for a 3-day safety hold for fraud and dispute protection; after 3 days funds move to the professional's available balance and become withdrawable. The platform also runs a scheduled cashout at 7 days after job completion: professionals who wait until the 7-day cashout receive 75% of the booking amount while the platform retains 25%.
 
-## Does Kpocha Touch support messaging and calls?
+If a professional cannot wait for the scheduled 7-day cashout, they can request an early move to available balance after the 3-day hold; early release is subject to a 3% maintenance fee on the moved amount (example: ₦10,000 early release costs ₦300, net ₦9,700). Withdrawals to bank accounts require a verified bank account and confirmation with the 4-digit withdrawal PIN.
 
-Yes. The platform includes real-time messaging, voice calls, and video communication features for users and professionals.
+Q: What is the 3-day hold?
+A: It's a fraud and dispute protection period. After job completion, funds are held as `pending` for 3 calendar days. After this period, pending funds automatically release to `available`.
 
-## How do I become a professional?
+Q: What is instant cashout?
+A: Instant cashout lets professionals receive funds immediately (without waiting for auto-release). Instant cashout is subject to a platform fee (typically 3%). The fee is deducted at withdrawal time and the net amount is transferred to the professional's verified bank account.
 
-Visit the “Become a Pro” page, submit your details and documents, and wait for approval. Once approved, you can list services and receive bookings.
+Q: How is the 3% instant cashout fee calculated? Give an example.
+A: Fee = 3% of the withdrawal amount. Example: If you instant cash out ₦10,000, fee = ₦300, net transfer = ₦9,700.
 
-## Can I contact professionals directly?
+Q: How do I withdraw money to my bank account?
+A: Set up and verify your bank account in the Profile → Payouts section. To withdraw, create a withdrawal request from `available` funds. For instant cashouts, use the instant cashout option; for scheduled withdrawals, use the standard bank transfer.
 
-Only use contact methods provided by the platform. Unauthorized direct cash payments or private contact outside the app are discouraged and may violate platform policies.
+Q: Do I need a PIN to withdraw funds?
+A: Yes. Professionals must set a 4-digit withdrawal PIN. The PIN is hashed (bcrypt) server-side and verified for security during withdrawals.
 
-## What happens if a booking is cancelled?
+Q: How long does a bank transfer take?
+A: Standard bank transfers usually take 1-3 business days. Instant cashouts are processed faster but attract the instant cashout fee.
 
-Cancellation rules are managed by the platform. Generally, clients can receive full or partial refunds depending on timing, and professionals should provide adequate notice.
+---
 
-## How do I leave a review?
+## Reviews & Ratings
 
-After a booking is completed, you can rate and review the professional based on the service you received.
+Q: How does the review system work?
+A: After a booking is completed, clients can leave a rating (1-5) and a written review for the professional. Professionals can also leave feedback for clients.
 
-## Is my data private?
+Q: Do reviews affect professional visibility?
+A: Yes. Average rating and number of reviews influence search ranking and booking visibility.
 
-Yes. The platform is designed to keep client and professional data secure. Personal details are only shared when necessary to fulfil a booking.
+Q: Can I edit my review?
+A: Reviews can be edited within a short window after posting; otherwise they remain as posted. Contact support if you need a change due to legitimate reasons.
 
-## Where can I read the terms and privacy policy?
+---
 
-Open the in-app Legal page to read the Client Terms, Privacy Policy, and Professional Service Agreement.
+## Verification & Safety
 
-## Who do I contact for support?
+Q: What is face liveness verification?
+A: It's an anti-fraud check requiring a short selfie video to confirm identity. It is used during professional onboarding and may be required for certain high-value transactions.
 
-Use the in-app support channel or contact the email provided in the app’s legal section. If you are unsure, consult the FAQ and user guide first.
+Q: Is my data safe?
+A: Yes. Bank details are secured and sensitive data is encrypted and only used for payment processing.
+
+---
+
+## Cancellation & Disputes
+
+Q: What is the cancellation policy?
+A: Specific rules:
+
+- If a client cancels _before_ the professional accepts the booking: full refund to the client's Wallet.
+- If a client cancels _after_ the professional accepts the booking: a 3% cancellation fee applies to the booking amount (split 1.5% to the platform and 1.5% to the booked professional); the remainder is refunded to the client's Wallet.
+- Professional no-show or a failed booking: full refund to the client's Wallet.
+- If a professional cancels after accepting, the client receives a full refund and the professional must provide a cancellation reason.
+
+Exact fees and additional service-specific policies may vary by service type and location; check the booking details for specifics.
+
+Q: How do I dispute a booking or payment?
+A: Open your booking → Report Issue → Submit details/photos. Support will investigate and may issue refunds if warranted.
+
+---
+
+## Account & Support
+
+Q: How do I become a professional?
+A: Tap **Become a Professional** in the app, complete the multi-step onboarding (profile, service list, ID upload, face liveness verification), and submit for review.
+
+Q: What if I forget my withdrawal PIN?
+A: Use the `Forgot PIN` option to request a reset. Verification steps are required to reset your withdrawal PIN.
+
+Q: How do I contact support?
+A: In-app Help → Contact Support, or email kpochaout@gmail.com.
+
+---
+
+## Technical
+
+Q: What payment provider do you use?
+A: We use Paystack for card processing and bank transfers.
+
+Q: How do I update my bank details?
+A: Profile → Payouts → Add/Update Bank Account. You may be asked to re-verify using Paystack's bank resolution and identity checks.
+
+---
+
+If you have a specific question not covered here, use the in-app Help & Support to get immediate assistance.

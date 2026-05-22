@@ -60,5 +60,10 @@ old.txt
 *.csv
 *_backup.json
 
+# ignore archived docs created during doc canonicalization
+docs/*.old.md
+docs/*-ENHANCED.md
+docs/*-template.md
+
 # routing dumps
 table-routing-*
