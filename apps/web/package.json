@@ -11,8 +11,8 @@
   "dependencies": {
     "@aws-amplify/ui-react": "^6.13.1",
     "@aws-amplify/ui-react-liveness": "^3.4.7",
-    "@aws-sdk/client-rekognition": "^3.600.0",
-    "@aws-sdk/credential-providers": "^3.600.0",
+    "@aws-sdk/client-rekognition": "^3.995.0",
+    "@aws-sdk/credential-providers": "^3.995.0",
     "@capacitor-firebase/authentication": "^8.0.1",
     "@capacitor/android": "^8.0.1",
     "@capacitor/app": "^8.0.0",
@@ -38,7 +38,8 @@
     "react-router-dom": "^6.26.1",
     "socket.io-client": "^4.8.1",
     "sweetalert2": "^11.25.0",
-    "uuid": "^13.0.0"
+    "uuid": "^13.0.0",
+    "marked": "^5.1.1"
   },
   "devDependencies": {
     "@capacitor/assets": "^3.0.5",

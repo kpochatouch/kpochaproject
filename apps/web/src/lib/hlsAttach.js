@@ -7,6 +7,34 @@ export function isHlsUrl(url) {
   return u.includes(".m3u8");
 }
 
+function estimateStartLevel() {
+  if (typeof navigator === "undefined") return 0;
+  const connection =
+    navigator.connection ||
+    navigator.mozConnection ||
+    navigator.webkitConnection;
+  if (!connection) return 0;
+
+  const effectiveType = String(connection.effectiveType || "").toLowerCase();
+  const downlink = Number(connection.downlink || 0);
+  const rtt = Number(connection.rtt || 0);
+
+  if (effectiveType.includes("2g") || effectiveType === "slow-2g") {
+    return 0;
+  }
+  if (effectiveType === "3g" || (downlink > 0 && downlink < 1.5)) {
+    return 0;
+  }
+  if (effectiveType === "4g" || downlink >= 1.5) {
+    return 1;
+  }
+  if (rtt > 200) {
+    return 0;
+  }
+
+  return 0;
+}
+
 export async function attachHlsToVideo(videoEl, src) {
   if (!videoEl || !src) return () => {};
 
@@ -39,11 +67,22 @@ export async function attachHlsToVideo(videoEl, src) {
     return () => {};
   }
 
+  const startLevel = estimateStartLevel();
   const hls = new Hls({
-    // keep defaults mostly; safe for feeds
+    // tuned for slow networks and feed usage
     enableWorker: true,
     lowLatencyMode: false,
-    backBufferLength: 90,
+    // keep buffer modest to avoid large memory usage on low-end devices
+    backBufferLength: 30,
+    maxBufferLength: 30,
+    maxMaxBufferLength: 60,
+    // choose a conservative start level based on current network conditions
+    startLevel,
+    startFragPrefetch: true,
+    // prefer levels matching player size to avoid unnecessarily large streams
+    capLevelToPlayerSize: true,
+    // make ABR more conservative so it doesn't ramp up too aggressively
+    abrBandWidthUpFactor: 0.6,
   });
 
   hls.loadSource(src);

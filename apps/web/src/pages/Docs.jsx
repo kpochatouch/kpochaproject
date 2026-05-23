@@ -1,4 +1,5 @@
-import { Link } from "react-router-dom";
+import { Link, Routes, Route } from "react-router-dom";
+import DocViewer from "../components/DocViewer.jsx";
 
 export default function Docs() {
   return (
@@ -126,32 +127,43 @@ export default function Docs() {
       <section className="border border-zinc-800 rounded-xl p-6 mb-6">
         <h2 className="text-2xl font-semibold mb-3">Documentation</h2>
         <div className="grid sm:grid-cols-3 gap-3 text-sm">
-          <a
-            href="/docs/terms-and-conditions.md"
-            target="_blank"
-            rel="noreferrer"
+          <Link
+            to="terms-and-conditions"
             className="rounded-xl border border-zinc-700 px-4 py-4 text-zinc-100 hover:bg-zinc-900"
           >
             Terms &amp; Conditions
-          </a>
-          <a
-            href="/docs/privacy-policy.md"
-            target="_blank"
-            rel="noreferrer"
+          </Link>
+          <Link
+            to="privacy-policy"
             className="rounded-xl border border-zinc-700 px-4 py-4 text-zinc-100 hover:bg-zinc-900"
           >
             Privacy Policy
-          </a>
-          <a
-            href="/docs/professional-guide.md"
-            target="_blank"
-            rel="noreferrer"
+          </Link>
+          <Link
+            to="professional-guide"
             className="rounded-xl border border-zinc-700 px-4 py-4 text-zinc-100 hover:bg-zinc-900"
           >
             Professional Guide
-          </a>
+          </Link>
+          <Link
+            to="user-guide"
+            className="rounded-xl border border-zinc-700 px-4 py-4 text-zinc-100 hover:bg-zinc-900"
+          >
+            User Guide
+          </Link>
+          <Link
+            to="faq"
+            className="rounded-xl border border-zinc-700 px-4 py-4 text-zinc-100 hover:bg-zinc-900"
+          >
+            FAQ
+          </Link>
         </div>
       </section>
+
+      {/* nested doc routes (viewer) */}
+      <Routes>
+        <Route path=":slug" element={<DocViewer />} />
+      </Routes>
 
       <section className="border border-zinc-800 rounded-xl p-6 mb-6">
         <h2 className="text-2xl font-semibold mb-3">

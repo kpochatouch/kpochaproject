@@ -56,54 +56,32 @@ export default function Legal() {
 
         <ul className="list-disc pl-5 space-y-2">
           <li>
-            <a
-              href="/docs/terms-and-conditions.md"
+            <Link
+              to="/docs/terms-and-conditions"
               className="text-gold underline"
-              target="_blank"
-              rel="noreferrer"
             >
               Terms &amp; Conditions
-            </a>
+            </Link>
           </li>
           <li>
-            <a
-              href="/docs/privacy-policy.md"
-              className="text-gold underline"
-              target="_blank"
-              rel="noreferrer"
-            >
+            <Link to="/docs/privacy-policy" className="text-gold underline">
               Privacy Policy
-            </a>
+            </Link>
           </li>
           <li>
-            <a
-              href="/docs/professional-guide.md"
-              className="text-gold underline"
-              target="_blank"
-              rel="noreferrer"
-            >
+            <Link to="/docs/professional-guide" className="text-gold underline">
               Professional Guide (Agreement &amp; Onboarding)
-            </a>
+            </Link>
           </li>
           <li>
-            <a
-              href="/docs/user-guide.md"
-              className="text-gold underline"
-              target="_blank"
-              rel="noreferrer"
-            >
+            <Link to="/docs/user-guide" className="text-gold underline">
               User Guide
-            </a>
+            </Link>
           </li>
           <li>
-            <a
-              href="/docs/faq.md"
-              className="text-gold underline"
-              target="_blank"
-              rel="noreferrer"
-            >
+            <Link to="/docs/faq" className="text-gold underline">
               FAQ
-            </a>
+            </Link>
           </li>
         </ul>
 

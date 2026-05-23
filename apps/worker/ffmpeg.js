@@ -108,7 +108,7 @@ export async function processVideo(asset) {
   const thumbFile = path.join(TMP, `${asset._id}-thumb.jpg`);
 
   fs.mkdirSync(outputDir, { recursive: true });
-  ["v0", "v1"].forEach((d) =>
+  ["v0", "v1", "v2"].forEach((d) =>
     fs.mkdirSync(path.join(outputDir, d), { recursive: true }),
   );
 
@@ -179,6 +179,7 @@ export async function processVideo(asset) {
       : [
           `[0:v]scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2[v720]`,
           `[0:v]scale=854:480:force_original_aspect_ratio=decrease,pad=854:480:(ow-iw)/2:(oh-ih)/2[v480]`,
+          `[0:v]scale=426:240:force_original_aspect_ratio=decrease,pad=426:240:(ow-iw)/2:(oh-ih)/2[v240]`,
         ].join(";");
 
     const args = isStory
@@ -247,6 +248,22 @@ export async function processVideo(asset) {
           "1498k",
           "-bufsize:v:1",
           "2100k",
+
+          "-map",
+          "[v240]",
+          "-c:v:2",
+          "libx264",
+          "-preset",
+          "veryfast",
+          ...buildThreadArgs(),
+          "-pix_fmt",
+          "yuv420p",
+          "-b:v:2",
+          "400k",
+          "-maxrate:v:2",
+          "450k",
+          "-bufsize:v:2",
+          "800k",
         ];
 
     if (hasAudio) {
@@ -370,6 +387,13 @@ export async function processVideo(asset) {
             bandwidth: 1400000,
             width: 854,
             height: 480,
+          },
+          {
+            name: "240p",
+            playlistKey: `media/${asset.ownerUid}/${asset._id}/hls/v2/index.m3u8`,
+            bandwidth: 400000,
+            width: 426,
+            height: 240,
           },
         ];
 

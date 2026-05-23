@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
+import { attachHlsToVideo, isHlsUrl } from "../lib/hlsAttach";
 import { useMe } from "../context/MeContext.jsx";
 
 import LikeButton from "../components/LikeButton.jsx";
@@ -68,6 +69,8 @@ export default function PostDetail() {
 
   // media bits
   const videoRef = useRef(null);
+  const hlsCleanupRef = useRef(null);
+  const hlsSrcRef = useRef("");
   const menuRef = useRef(null);
 
   // --- Engagement sheet (overlay) ---
@@ -140,6 +143,75 @@ export default function PostDetail() {
       on = false;
     };
   }, [id]);
+
+  useEffect(() => {
+    const vid = videoRef.current;
+    const src = String(post?.media?.[0]?.url || "").trim();
+    if (!vid || !src) return () => {};
+
+    let active = true;
+
+    async function attachSource() {
+      if (isHlsUrl(src)) {
+        if (hlsSrcRef.current === src) return;
+
+        if (hlsCleanupRef.current) {
+          try {
+            hlsCleanupRef.current();
+          } catch {}
+          hlsCleanupRef.current = null;
+          hlsSrcRef.current = "";
+        }
+
+        try {
+          const cleanup = await attachHlsToVideo(vid, src);
+          if (!active) {
+            try {
+              cleanup && cleanup();
+            } catch {}
+            return;
+          }
+          hlsCleanupRef.current = cleanup;
+          hlsSrcRef.current = src;
+        } catch (err) {
+          console.warn("[PostDetail] HLS attach failed:", err);
+          try {
+            vid.src = src;
+            vid.setAttribute("src", src);
+            vid.load();
+          } catch {}
+        }
+      } else {
+        if (hlsCleanupRef.current) {
+          try {
+            hlsCleanupRef.current();
+          } catch {}
+          hlsCleanupRef.current = null;
+          hlsSrcRef.current = "";
+        }
+        if (vid.src !== src) {
+          try {
+            vid.src = src;
+            vid.setAttribute("src", src);
+            vid.load();
+          } catch {}
+        }
+      }
+    }
+
+    attachSource();
+
+    return () => {
+      active = false;
+      if (hlsCleanupRef.current) {
+        try {
+          hlsCleanupRef.current();
+        } catch {}
+        hlsCleanupRef.current = null;
+        hlsSrcRef.current = "";
+      }
+    };
+  }, [media?.url]);
 
   // global menu close via custom "global-click" event
   useEffect(() => {
@@ -1004,7 +1076,7 @@ export default function PostDetail() {
             <>
               <video
                 ref={videoRef}
-                src={media.url}
+                src={isHlsUrl(media?.url) ? undefined : media?.url}
                 className="absolute inset-0 w-full h-full object-cover"
                 poster={
                   Capacitor.isNativePlatform() ? undefined : media?.thumbnailUrl

@@ -12,14 +12,16 @@
     "postinstall": "node scripts/postinstall.js"
   },
   "dependencies": {
-    "@codetrix-studio/capacitor-google-auth": "^3.4.0-rc.4",
+    "@alloc/quick-lru": "^5.2.0",
     "@ffmpeg/ffmpeg": "^0.12.15",
     "@ffmpeg/util": "^0.12.2",
+    "aws-amplify": "^6.17.0",
     "hls.js": "^1.6.15",
     "ioredis": "^5.9.3",
-    "patch-package": "^8.0.1"
+    "patch-package": "^8.0.1",
+    "uuid": "^11.1.0"
   },
   "engines": {
-  "node": "22.x"
-}
+    "node": "22.x"
+  }
 }

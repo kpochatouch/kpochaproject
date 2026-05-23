@@ -641,7 +641,7 @@ export default function App() {
               />
               <Route path="/login" element={<Login />} />
               <Route path="/signup" element={<Signup />} />
-              <Route path="/docs" element={<Docs />} />
+              <Route path="/docs/*" element={<Docs />} />
               <Route path="/legal" element={<Legal />} />
               <Route path="/legal/*" element={<Legal />} />
               <Route path="/profile/:username" element={<PublicProfile />} />

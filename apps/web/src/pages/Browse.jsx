@@ -10,6 +10,7 @@ import FeedCard from "../components/FeedCard";
 import ErrorBoundary from "../components/ErrorBoundary";
 import SideMenu from "../components/SideMenu.jsx";
 import FeedComposer from "../components/FeedComposer.jsx";
+import SkeletonFeed from "../components/SkeletonFeed.jsx";
 import { connectSocket, registerSocketHandler } from "../lib/api";
 import StoriesRail from "../components/StoriesRail.jsx";
 import AdvertCardFeed from "../components/AdvertCardFeed.jsx";
@@ -57,6 +58,17 @@ export default function Browse() {
   const FEED_SCROLL_KEY = `kpocha:browse:scroll:v2:${(
     lga || "ALL"
   ).toUpperCase()}`;
+
+  const FEED_CACHE_KEY = `kpocha:lastBrowseFeed:v1:${(
+    lga || "ALL"
+  ).toUpperCase()}`;
+
+  function cacheFeed(list = []) {
+    try {
+      const toSave = Array.isArray(list) ? list.slice(0, 40) : [];
+      sessionStorage.setItem(FEED_CACHE_KEY, JSON.stringify(toSave));
+    } catch {}
+  }
 
   // sentinel + latest state refs
   const sentinelRef = useRef(null);
@@ -362,6 +374,9 @@ export default function Browse() {
           nextBeforeRef.current = nextBefore;
 
           setFeed(mixed);
+          try {
+            cacheFeed(mixed);
+          } catch {}
           setHasMore(recent.length >= pageSize && !!nextBefore);
           return;
         }
@@ -394,10 +409,17 @@ export default function Browse() {
             if (!newItems.length) return prev;
 
             const shuffledPage = shufflePosts(newItems);
-            return [...prev, ...shuffledPage];
+            const next = [...prev, ...shuffledPage];
+            try {
+              cacheFeed(next);
+            } catch {}
+            return next;
           });
         } else {
           setFeed(list);
+          try {
+            cacheFeed(list);
+          } catch {}
         }
 
         if (!list.length || list.length < pageSize || !nextBefore) {
@@ -418,6 +440,18 @@ export default function Browse() {
 
   useEffect(() => {
     if (!isFeedTab) return;
+
+    // Attempt to restore a cached feed snapshot while the backend wakes
+    try {
+      const raw = sessionStorage.getItem(FEED_CACHE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length) {
+          setFeed(parsed);
+          // mark that we restored from cache; real fetch will replace/update
+        }
+      }
+    } catch {}
 
     setHasMore(true);
     fetchFeed({ append: false, before: null });
@@ -923,9 +957,8 @@ export default function Browse() {
                   {errFeed}
                 </div>
               )}
-
               {loadingFeed ? (
-                <p className="text-zinc-400">Loading feed…</p>
+                <SkeletonFeed items={4} />
               ) : feed.length ? (
                 <>
                   <div className="space-y-4">
