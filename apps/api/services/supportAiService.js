@@ -1,9 +1,17 @@
 //apps/api/services/supportAiService.js
 import OpenAI from "openai";
 
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+let client = null;
+try {
+  const config = {};
+  if (process.env.OPENAI_API_KEY) {
+    config.apiKey = process.env.OPENAI_API_KEY;
+  }
+  client = new OpenAI(config);
+} catch (err) {
+  console.error("[support-ai] openai client init failed:", err?.message || err);
+  client = null;
+}
 
 async function callChatbase({ text, history = [], context = {} }) {
   const url = process.env.CHATBASE_URL;
@@ -224,6 +232,13 @@ export async function getSupportDecision({
   ];
 
   try {
+    if (!client || !process.env.OPENAI_API_KEY) {
+      console.warn(
+        "[support-ai] skipping OpenAI request because OPENAI_API_KEY is not configured or client initialization failed",
+      );
+      throw new Error("openai_not_available");
+    }
+
     console.debug("[support-ai] openai request start", {
       model: "gpt-4o-mini",
       messagesCount: messages.length,

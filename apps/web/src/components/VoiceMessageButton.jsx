@@ -139,7 +139,9 @@ export default function VoiceMessageButton({ onRecorded, disabled = false }) {
 
   if (!supported) return null;
 
-  const label = recording ? `🎧 ${seconds.toString().padStart(2, "0")}s` : "🎧";
+  const label = recording
+    ? `Stop • ${seconds.toString().padStart(2, "0")}s`
+    : "🎤";
 
   return (
     <button

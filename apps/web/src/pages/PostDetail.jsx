@@ -1,6 +1,7 @@
 // apps/web/src/pages/PostDetail.jsx
 import { useEffect, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
+import { Capacitor } from "@capacitor/core";
 import { api } from "../lib/api";
 import { attachHlsToVideo, isHlsUrl } from "../lib/hlsAttach";
 import { useMe } from "../context/MeContext.jsx";
@@ -211,7 +212,7 @@ export default function PostDetail() {
         hlsSrcRef.current = "";
       }
     };
-  }, [media?.url]);
+  }, [post?.media?.[0]?.url]);
 
   // global menu close via custom "global-click" event
   useEffect(() => {

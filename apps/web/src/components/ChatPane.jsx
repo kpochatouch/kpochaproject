@@ -87,6 +87,7 @@ export default function ChatPane({
   const [msgs, setMsgs] = useState([]);
   const [text, setText] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [composerStatus, setComposerStatus] = useState("");
 
   const endRef = useRef(null);
   const textareaRef = useRef(null);
@@ -316,6 +317,7 @@ export default function ChatPane({
 
     try {
       setUploading(true);
+      setComposerStatus("Uploading attachment…");
       const url = await uploadFileToR2(file);
       const now = Date.now();
       const attachment = {
@@ -383,6 +385,7 @@ export default function ChatPane({
       alert("Upload failed");
     } finally {
       setUploading(false);
+      setComposerStatus("");
       e.target.value = "";
     }
   }
@@ -395,6 +398,7 @@ export default function ChatPane({
 
     try {
       setUploading(true);
+      setComposerStatus("Uploading voice note…");
 
       const url = await uploadAudioBlob(blob);
 
@@ -462,6 +466,7 @@ export default function ChatPane({
       );
     } finally {
       setUploading(false);
+      setComposerStatus("");
     }
   }
 
@@ -773,14 +778,16 @@ export default function ChatPane({
                 <span className="text-red-500 text-[10px]">⟳ failed</span>
               );
             } else if (m.status === "sent") {
-              statusNode = <span className="text-zinc-400 text-[11px]">✓</span>;
+              statusNode = (
+                <span className="text-zinc-400 text-[10px]">Sent</span>
+              );
             } else if (m.status === "delivered") {
               statusNode = (
-                <span className="text-zinc-100 text-[11px]">✓✓</span>
+                <span className="text-zinc-100 text-[10px]">Delivered</span>
               );
             } else if (m.status === "seen") {
               statusNode = (
-                <span className="text-amber-400 text-[11px]">✓✓</span>
+                <span className="text-amber-400 text-[10px]">Seen</span>
               );
             }
           }
@@ -1070,6 +1077,12 @@ export default function ChatPane({
         </div>
       )}
 
+      {composerStatus && (
+        <div className="mt-2 mx-1 px-3 py-1 rounded-full bg-zinc-900 text-xs text-zinc-300">
+          {composerStatus}
+        </div>
+      )}
+
       <div className="mt-2 flex gap-2 items-center">
         {/* Attach button – hidden on mobile when typing */}
         {!hideSideButtonsOnMobile && (
@@ -1105,14 +1118,14 @@ export default function ChatPane({
             <div title="Voice typing (convert speech to text)">
               <VoiceInputButton
                 onResult={handleVoiceResult}
-                disabled={!room || !socket}
+                disabled={!room || uploading}
               />
             </div>
 
-            <div title="Send voice note">
+            <div title="Record and send a voice note">
               <VoiceMessageButton
                 onRecorded={handleVoiceMessage}
-                disabled={!room || !socket || uploading}
+                disabled={!room || uploading}
               />
             </div>
           </>

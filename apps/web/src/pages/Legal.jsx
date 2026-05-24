@@ -46,6 +46,33 @@ export default function Legal() {
         </ul>
       </nav>
 
+      <div className="mb-8 flex flex-wrap gap-3">
+        <Link
+          to="/docs/terms-and-conditions"
+          className="inline-flex items-center justify-center rounded-full bg-gold px-4 py-2 text-sm font-semibold text-black transition hover:opacity-90"
+        >
+          Terms &amp; Conditions
+        </Link>
+        <Link
+          to="/docs/privacy-policy"
+          className="inline-flex items-center justify-center rounded-full bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800"
+        >
+          Privacy Policy
+        </Link>
+        <Link
+          to="/docs/professional-guide"
+          className="inline-flex items-center justify-center rounded-full bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800"
+        >
+          Professional Guide
+        </Link>
+        <Link
+          to="/contact"
+          className="inline-flex items-center justify-center rounded-full border border-gold px-4 py-2 text-sm font-semibold text-gold transition hover:bg-gold/10"
+        >
+          Contact Support
+        </Link>
+      </div>
+
       {/* Simplified legal navigation: link to canonical docs in /docs */}
       <div className="prose text-sm">
         <p>

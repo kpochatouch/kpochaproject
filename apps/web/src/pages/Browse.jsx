@@ -59,17 +59,6 @@ export default function Browse() {
     lga || "ALL"
   ).toUpperCase()}`;
 
-  const FEED_CACHE_KEY = `kpocha:lastBrowseFeed:v1:${(
-    lga || "ALL"
-  ).toUpperCase()}`;
-
-  function cacheFeed(list = []) {
-    try {
-      const toSave = Array.isArray(list) ? list.slice(0, 40) : [];
-      sessionStorage.setItem(FEED_CACHE_KEY, JSON.stringify(toSave));
-    } catch {}
-  }
-
   // sentinel + latest state refs
   const sentinelRef = useRef(null);
   const observerRef = useRef(null);
@@ -374,9 +363,6 @@ export default function Browse() {
           nextBeforeRef.current = nextBefore;
 
           setFeed(mixed);
-          try {
-            cacheFeed(mixed);
-          } catch {}
           setHasMore(recent.length >= pageSize && !!nextBefore);
           return;
         }
@@ -409,17 +395,10 @@ export default function Browse() {
             if (!newItems.length) return prev;
 
             const shuffledPage = shufflePosts(newItems);
-            const next = [...prev, ...shuffledPage];
-            try {
-              cacheFeed(next);
-            } catch {}
-            return next;
+            return [...prev, ...shuffledPage];
           });
         } else {
           setFeed(list);
-          try {
-            cacheFeed(list);
-          } catch {}
         }
 
         if (!list.length || list.length < pageSize || !nextBefore) {
@@ -440,18 +419,6 @@ export default function Browse() {
 
   useEffect(() => {
     if (!isFeedTab) return;
-
-    // Attempt to restore a cached feed snapshot while the backend wakes
-    try {
-      const raw = sessionStorage.getItem(FEED_CACHE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length) {
-          setFeed(parsed);
-          // mark that we restored from cache; real fetch will replace/update
-        }
-      }
-    } catch {}
 
     setHasMore(true);
     fetchFeed({ append: false, before: null });

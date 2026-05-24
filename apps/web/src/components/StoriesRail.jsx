@@ -5,6 +5,7 @@ import { api } from "../lib/api";
 import { useMe } from "../context/MeContext.jsx";
 import { attachHlsToVideo, isHlsUrl } from "../lib/hlsAttach";
 import AdvertStoryCard from "./AdvertStoryCard.jsx";
+import LikeButton from "./LikeButton.jsx";
 import { handleAdvertClick as runAdvertClick } from "../lib/advertActions";
 
 function timeLeftLabel(expiresAt) {
@@ -28,6 +29,31 @@ function storyMedia(story) {
   return m || null;
 }
 
+function StorySkeleton({ count = 4 }) {
+  const items = Array.from({ length: count });
+  return (
+    <>
+      {items.map((_, index) => (
+        <div
+          key={index}
+          className="relative shrink-0 w-[108px] h-[190px] rounded-2xl overflow-hidden border border-zinc-800 bg-zinc-900 animate-pulse"
+        >
+          <div className="absolute inset-0 p-3 flex flex-col justify-between">
+            <div className="space-y-3">
+              <div className="w-10 h-10 rounded-full bg-zinc-700" />
+              <div className="space-y-2">
+                <div className="w-20 h-3 rounded bg-zinc-700" />
+                <div className="w-14 h-2 rounded bg-zinc-700" />
+              </div>
+            </div>
+            <div className="w-full h-10 rounded bg-zinc-700" />
+          </div>
+        </div>
+      ))}
+    </>
+  );
+}
+
 export default function StoriesRail({
   className = "",
   limit = 50,
@@ -41,6 +67,11 @@ export default function StoriesRail({
   const [loading, setLoading] = useState(true);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(0);
+  const [storyStats, setStoryStats] = useState({
+    likesCount: 0,
+    likedByMe: false,
+  });
+  const [loadingStoryLike, setLoadingStoryLike] = useState(false);
 
   const [pendingStoryUpload, setPendingStoryUpload] = useState(null);
   const uploadPollRef = useRef(null);
@@ -300,6 +331,144 @@ export default function StoriesRail({
     : activeAdvert?.media?.[0] || null;
   const activeIsVideo = activeMedia?.type === "video";
 
+  const activeStoryOwnerUid =
+    activeStory?.ownerUid ||
+    activeStory?.proOwnerUid ||
+    activeStory?.createdBy ||
+    null;
+  const activeStoryUsername =
+    (activeStory?.username && String(activeStory.username).trim()) ||
+    (activeStory?.pro?.username && String(activeStory.pro.username).trim()) ||
+    (activeStory?.authorUsername &&
+      String(activeStory.authorUsername).trim()) ||
+    null;
+  const isOwnStory =
+    !!me?.uid && String(me.uid) === String(activeStoryOwnerUid);
+
+  function openStoryProfile() {
+    if (!activeStory) return;
+    if (activeStoryUsername) {
+      navigate(`/profile/${encodeURIComponent(activeStoryUsername)}`);
+      return;
+    }
+    if (!activeStoryOwnerUid) return;
+    navigate(`/profile/${encodeURIComponent(activeStoryOwnerUid)}`);
+  }
+
+  async function shareActiveStory() {
+    if (!activeStory) return;
+    const id = activeStory._id || activeStory.id || "";
+    if (!id) return;
+    const url = `${window.location.origin}/post/${encodeURIComponent(id)}`;
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: activeStory.authorName || "Story",
+          text: activeStory.text || "",
+          url,
+        });
+        return;
+      } catch {
+        // fall back to clipboard copy
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      alert("Link copied to clipboard.");
+    } catch {
+      alert("Copy this story URL: " + url);
+    }
+  }
+
+  async function hideActiveStory() {
+    if (!activeStory || !activeStory._id) return;
+    if (!window.confirm("Hide this story?")) return;
+    try {
+      await api.patch(`/api/posts/${encodeURIComponent(activeStory._id)}/hide`);
+      setViewerOpen(false);
+      loadStories({ silent: false });
+    } catch (err) {
+      console.warn("hideActiveStory failed", err);
+      alert("Could not hide story.");
+    }
+  }
+
+  useEffect(() => {
+    if (!viewerOpen || !activeStory?._id) {
+      setStoryStats({ likesCount: 0, likedByMe: false });
+      return;
+    }
+
+    let cancelled = false;
+    async function loadActiveStoryStats() {
+      const storyId = String(activeStory._id || activeStory.id || "").trim();
+      if (!storyId) return;
+
+      try {
+        const res = await api.get(
+          `/api/posts/${encodeURIComponent(storyId)}/stats`,
+        );
+        if (cancelled) return;
+        const srv = res?.data || {};
+        setStoryStats({
+          likesCount: typeof srv.likesCount === "number" ? srv.likesCount : 0,
+          likedByMe: typeof srv.likedByMe === "boolean" ? srv.likedByMe : false,
+        });
+      } catch {
+        if (cancelled) return;
+        setStoryStats({ likesCount: 0, likedByMe: false });
+      }
+    }
+
+    loadActiveStoryStats();
+    return () => {
+      cancelled = true;
+    };
+  }, [viewerOpen, activeStory?._id, me?.uid]);
+
+  async function toggleActiveStoryLike() {
+    if (!me?.uid) return alert("Login to like this story.");
+    if (!activeStory?._id) return;
+    if (loadingStoryLike) return;
+
+    const storyId = String(activeStory._id || activeStory.id || "").trim();
+    if (!storyId) return;
+
+    const wasLiked = storyStats.likedByMe;
+    setLoadingStoryLike(true);
+    setStoryStats((prev) => ({
+      ...prev,
+      likedByMe: !wasLiked,
+      likesCount: wasLiked
+        ? Math.max(0, prev.likesCount - 1)
+        : prev.likesCount + 1,
+    }));
+
+    try {
+      const res = wasLiked
+        ? await api.delete(`/api/posts/${encodeURIComponent(storyId)}/like`)
+        : await api.post(`/api/posts/${encodeURIComponent(storyId)}/like`);
+      const srv = res?.data || {};
+      setStoryStats((prev) => ({
+        ...prev,
+        likesCount:
+          typeof srv.likesCount === "number" ? srv.likesCount : prev.likesCount,
+        likedByMe:
+          typeof srv.likedByMe === "boolean" ? srv.likedByMe : !wasLiked,
+      }));
+    } catch {
+      setStoryStats((prev) => ({
+        ...prev,
+        likedByMe: wasLiked,
+        likesCount: wasLiked
+          ? prev.likesCount + 1
+          : Math.max(0, prev.likesCount - 1),
+      }));
+    } finally {
+      setLoadingStoryLike(false);
+    }
+  }
+
   function openCreate() {
     navigate("/stories/create");
   }
@@ -553,9 +722,7 @@ export default function StoriesRail({
             ) : null}
 
             {loading ? (
-              <div className="text-sm text-zinc-500 px-1 py-3">
-                Loading stories…
-              </div>
+              <StorySkeleton count={4} />
             ) : items.length ? (
               items.map((item, index) => {
                 if (item.kind === "advert") {
@@ -706,7 +873,47 @@ export default function StoriesRail({
                     <div className="text-[11px] text-zinc-300">
                       {timeLeftLabel(activeStory?.expiresAt) || "Story"}
                     </div>
+                    {storyStats.likesCount > 0 ? (
+                      <div className="text-[11px] text-zinc-400 mt-0.5">
+                        {storyStats.likesCount} like
+                        {storyStats.likesCount === 1 ? "" : "s"}
+                      </div>
+                    ) : null}
                   </div>
+                </div>
+
+                <div className="absolute top-3 right-3 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={openStoryProfile}
+                    className="rounded-full bg-white/10 px-3 py-1 text-xs text-white transition hover:bg-white/20"
+                  >
+                    Profile
+                  </button>
+                  <button
+                    type="button"
+                    onClick={shareActiveStory}
+                    className="rounded-full bg-white/10 px-3 py-1 text-xs text-white transition hover:bg-white/20"
+                  >
+                    Share
+                  </button>
+                  {!isOwnStory ? (
+                    <LikeButton
+                      active={storyStats.likedByMe}
+                      onClick={toggleActiveStoryLike}
+                      disabled={loadingStoryLike}
+                      className="!flex-none rounded-full bg-white/10 px-3 py-1 text-xs text-white transition hover:bg-white/20"
+                    />
+                  ) : null}
+                  {isOwnStory ? (
+                    <button
+                      type="button"
+                      onClick={hideActiveStory}
+                      className="rounded-full bg-red-500/90 px-3 py-1 text-xs text-white transition hover:bg-red-500"
+                    >
+                      Hide
+                    </button>
+                  ) : null}
                 </div>
               </div>
             ) : activeAdvert ? (
