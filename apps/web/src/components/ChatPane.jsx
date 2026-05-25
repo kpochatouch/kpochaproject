@@ -307,7 +307,18 @@ export default function ChatPane({
     const file = new File([blob], `voice-${Date.now()}.webm`, {
       type: blob.type || "audio/webm",
     });
-    return uploadFileToR2(file);
+    return uploadMediaAsset({
+      api,
+      file,
+      type: "audio",
+      visibility: "public",
+      purpose: "post",
+    }).then((result) => {
+      if (!result?.publicUrl) {
+        throw new Error("chat_upload_failed");
+      }
+      return result.publicUrl;
+    });
   }
 
   async function handleFileChange(e) {

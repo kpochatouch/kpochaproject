@@ -427,7 +427,7 @@ export default function Chat() {
           <button
             onClick={() => handleStartCall("audio")}
             title="Voice call"
-            className="p-2 rounded-full bg-zinc-800 hover:bg-zinc-700"
+            className="p-2 rounded-full bg-gold text-black hover:bg-[#d6b639]"
           >
             📞
           </button>
@@ -436,7 +436,7 @@ export default function Chat() {
           <button
             onClick={() => handleStartCall("video")}
             title="Video call"
-            className="p-2 rounded-full bg-zinc-800 hover:bg-zinc-700"
+            className="p-2 rounded-full bg-gold text-black hover:bg-[#d6b639]"
           >
             🎥
           </button>

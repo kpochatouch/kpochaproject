@@ -968,6 +968,28 @@ router.patch("/posts/:id/comments/disable", requireAuth, async (req, res) => {
   }
 });
 
+router.get("/posts/:id/stats", tryAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!isObjId(id)) return res.status(400).json({ error: "invalid_id" });
+
+    const stats = await PostStats.findOne({
+      postId: new mongoose.Types.ObjectId(id),
+    }).lean();
+
+    return res.json({
+      ok: true,
+      likesCount: Number(stats?.likesCount || 0),
+      likedByMe: Array.isArray(stats?.likedBy)
+        ? Boolean(req.user?.uid && stats.likedBy.includes(req.user.uid))
+        : false,
+    });
+  } catch (err) {
+    console.error("[posts:stats] error:", err);
+    return res.status(500).json({ error: "stats_failed" });
+  }
+});
+
 router.patch("/posts/:id/comments/enable", requireAuth, async (req, res) => {
   try {
     const { id } = req.params;

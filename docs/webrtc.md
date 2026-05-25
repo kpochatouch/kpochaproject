@@ -93,26 +93,70 @@ Run these after any call-related change.
 
 ## Implementation Notes (Where the fix lives)
 
-### Web client
+### Call flow in the app
 
-- `apps/web/src/components/CallSheet.jsx`
-  - `pendingOfferRef` for early offer
-  - `pendingIceRef` for early ICE
-  - flush logic after `setRemoteDescription`
+#### Caller flow
+
+- `apps/web/src/pages/Chat.jsx` and `apps/web/src/pages/BookingChat.jsx` start calls via `initiateCall(...)`.
+- They request `navigator.mediaDevices.getUserMedia(...)` first, so a call record is only created after microphone/camera permissions succeed.
+- When the call is initiated, the app dispatches `kpocha:start-call` and the global app listener opens `apps/web/src/components/CallSheet.jsx`.
+
+#### Incoming call flow
+
+- `apps/web/src/App.jsx` listens for socket events such as `call:incoming` and `call:status`.
+- `CallSheet.jsx` is responsible for the live call UI, peer connection lifecycle, ringing state, accept/decline actions, and cleanup.
+- It also handles native Android auto-accept and remote hangup via `call:status`.
+
+#### Chat and thread integration
+
+- `apps/web/src/components/ChatPane.jsx` normalizes chat messages and `meta.call` payloads so call bubbles and status updates render correctly.
+- `apps/web/src/pages/Inbox.jsx` surfaces call thread previews, including missed/ended call summaries.
+- `apps/web/src/pages/Notifications.jsx` is part of the same notification/event system and presents call-related activity targets.
 
 ### Signaling transport
 
 - `apps/web/src/lib/webrtc/SignalingClient.js`
-  - always emits `{ room, payload }` for backend compatibility
-  - keeps handler bookkeeping so we can `off()` cleanly
+  - queues signaling events until `room:join` is acknowledged by the backend
+  - flushes pending `webrtc:offer|answer|ice` messages after the room join completes
+  - always sends `{ room, payload }` so backend handlers can match the room
 
 ### Backend
 
 - `apps/api/sockets/index.js`
-  - forwards `webrtc:offer|answer|ice` to room
-  - ACK includes `deliveredTo` and `totalInRoom` for proof-based debugging
+  - handles `room:join`, `call:initiate`, `call:ready`, `call:status`, and forwarding of `webrtc:offer|answer|ice`
+  - emits `webrtc:*` ACKs with `deliveredTo` and `totalInRoom` so the client can detect empty or missing recipients
 - `apps/api/routes/webrtc.js`
-  - ICE server config is served from env vars
+  - serves `/api/webrtc/ice`
+  - constructs STUN/TURN `iceServers` from `ICE_STUN_URLS`, `ICE_TURN_URLS`, `ICE_TURN_USERNAME`, and `ICE_TURN_PASSWORD`
+  - falls back to public Google STUN servers when no env values are set
+
+### Android native call support
+
+- `apps/web/android/app/src/main/AndroidManifest.xml` declares native call permissions needed for WebRTC and full-screen incoming call handling:
+  - `RECORD_AUDIO`, `CAMERA`, `MODIFY_AUDIO_SETTINGS`, `WAKE_LOCK`
+  - `FOREGROUND_SERVICE`, `USE_FULL_SCREEN_INTENT`, `FOREGROUND_SERVICE_PHONE_CALL`
+- `apps/web/android/app/src/main/java/touch/kpocha/app/MainActivity.java`
+  - configures the Capacitor WebView for autoplay and deep-link fallbacks
+  - handles `onNewIntent` so native call actions can route into the SPA via `capacitor://localhost/...`
+- `apps/web/android/app/src/main/java/touch/kpocha/app/IncomingCallActivity.java`
+  - full-screen lockscreen incoming call UI with swipe accept/decline/message gestures
+  - accepts/declines calls via native buttons and gestures, then routes back into the web call flow
+- `apps/web/android/app/src/main/java/touch/kpocha/app/CallForegroundService.java`
+  - runs a foreground service while a native incoming call is ringing
+  - loops ringtone audio separately from Android notification sound
+  - auto-stops after a ring timeout and clears the active call session
+- `apps/web/android/app/src/main/java/touch/kpocha/app/CallNotification.java`
+  - builds the incoming call notification channel and full-screen intent
+  - renders Accept/Decline actions and keeps the channel silent so ringtone playback is handled by the service
+- `apps/web/android/app/src/main/java/touch/kpocha/app/CallActionReceiver.java`
+  - handles native accept/decline button presses
+  - Accept opens the SPA via deep link: `/browse?call=1&accept=1&callId=...&room=...`
+- `apps/web/android/app/src/main/java/touch/kpocha/app/CallMessagingService.java`
+  - receives Firebase data messages for `incoming_call`
+  - starts native foreground ringing only when the app is backgrounded
+- `apps/web/android/app/src/main/java/touch/kpocha/app/CallSession.java`
+  - deduplicates incoming calls and avoids stale/duplicate incoming screens
+  - tracks active and accepted call IDs across the native call lifecycle
 
 ## Quick Troubleshooting
 

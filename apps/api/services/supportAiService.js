@@ -236,7 +236,7 @@ export async function getSupportDecision({
       console.warn(
         "[support-ai] skipping OpenAI request because OPENAI_API_KEY is not configured or client initialization failed",
       );
-      throw new Error("openai_not_available");
+      return null; // graceful fallback
     }
 
     console.debug("[support-ai] openai request start", {

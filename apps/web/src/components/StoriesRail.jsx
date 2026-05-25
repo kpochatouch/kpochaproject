@@ -881,40 +881,6 @@ export default function StoriesRail({
                     ) : null}
                   </div>
                 </div>
-
-                <div className="absolute top-3 right-3 flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={openStoryProfile}
-                    className="rounded-full bg-white/10 px-3 py-1 text-xs text-white transition hover:bg-white/20"
-                  >
-                    Profile
-                  </button>
-                  <button
-                    type="button"
-                    onClick={shareActiveStory}
-                    className="rounded-full bg-white/10 px-3 py-1 text-xs text-white transition hover:bg-white/20"
-                  >
-                    Share
-                  </button>
-                  {!isOwnStory ? (
-                    <LikeButton
-                      active={storyStats.likedByMe}
-                      onClick={toggleActiveStoryLike}
-                      disabled={loadingStoryLike}
-                      className="!flex-none rounded-full bg-white/10 px-3 py-1 text-xs text-white transition hover:bg-white/20"
-                    />
-                  ) : null}
-                  {isOwnStory ? (
-                    <button
-                      type="button"
-                      onClick={hideActiveStory}
-                      className="rounded-full bg-red-500/90 px-3 py-1 text-xs text-white transition hover:bg-red-500"
-                    >
-                      Hide
-                    </button>
-                  ) : null}
-                </div>
               </div>
             ) : activeAdvert ? (
               <div className="absolute inset-x-0 top-0 z-10 p-4 bg-gradient-to-b from-black/70 to-transparent">
@@ -948,13 +914,61 @@ export default function StoriesRail({
               )}
             </div>
 
-            {activeStory && (activeStory?.text || "").trim() ? (
+            {activeStory ? (
               <div className="absolute inset-x-0 bottom-0 z-10 p-4 bg-gradient-to-t from-black/80 to-transparent">
+                <div className="flex justify-end items-center gap-2 mb-3">
+                  <button
+                    type="button"
+                    onClick={openStoryProfile}
+                    className="rounded-full bg-white/10 p-1.5 text-white transition hover:bg-white/20"
+                  aria-label="Open uploader profile"
+                >
+                  {activeStory?.authorAvatar ? (
+                    <img
+                      src={activeStory.authorAvatar}
+                      alt={activeStory.authorName || "Uploader"}
+                      className="w-8 h-8 rounded-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-8 h-8 rounded-full bg-zinc-700 flex items-center justify-center text-xs text-white">
+                      {(activeStory?.authorName || "P")
+                        .slice(0, 1)
+                        .toUpperCase()}
+                    </div>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={shareActiveStory}
+                  className="rounded-full bg-white/10 px-3 py-1 text-xs text-white transition hover:bg-white/20"
+                >
+                  Share
+                </button>
+                {!isOwnStory ? (
+                  <LikeButton
+                    active={storyStats.likedByMe}
+                    onClick={toggleActiveStoryLike}
+                    disabled={loadingStoryLike}
+                    className="!flex-none rounded-full bg-white/10 px-3 py-1 text-xs text-white transition hover:bg-white/20"
+                  />
+                ) : null}
+                {isOwnStory ? (
+                  <button
+                    type="button"
+                    onClick={hideActiveStory}
+                    className="rounded-full bg-red-500/90 px-3 py-1 text-xs text-white transition hover:bg-red-500"
+                  >
+                    Hide
+                  </button>
+                ) : null}
+              </div>
+              {activeStory && (activeStory?.text || "").trim() ? (
                 <div className="text-sm text-white whitespace-pre-wrap">
                   {activeStory.text}
                 </div>
-              </div>
-            ) : null}
+              ) : null}
+            </div>
+          ) : null}
           </div>
         </div>
       )}

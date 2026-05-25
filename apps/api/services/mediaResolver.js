@@ -9,25 +9,23 @@ export function resolveAssetDocToClient(a) {
   if (!a) return null;
 
   const isVideo = a.type === "video";
+  const isAudio = a.type === "audio";
   // If visibility is missing (older docs), treat it as public so URLs resolve.
   const vis = a.visibility || "public";
   const isPublic = vis === "public";
 
   // ✅ Never leak CDN URLs for private assets
   const originalUrl = isPublic ? keyToPublicUrl(a?.original?.key) : "";
-  const hlsUrl = isPublic
-    ? isVideo
-      ? keyToPublicUrl(a?.hls?.masterPlaylistKey)
-      : ""
-    : "";
+  const hlsUrl =
+    isPublic && isVideo ? keyToPublicUrl(a?.hls?.masterPlaylistKey) : "";
   const thumbnailUrl = isPublic ? keyToPublicUrl(a?.thumbnail?.key || "") : "";
 
   return {
     assetId: String(a._id),
     visibility: vis,
-    url: isVideo ? hlsUrl || originalUrl : originalUrl,
+    url: originalUrl,
     hlsUrl,
-    type: isVideo ? "video" : "image",
+    type: isVideo ? "video" : isAudio ? "audio" : "image",
     thumbnailUrl,
     width: Number(a?.original?.width || 0),
     height: Number(a?.original?.height || 0),

@@ -19,7 +19,7 @@ export default function mediaRoutes({ requireAuth }) {
       trimEndSec = 0,
     } = req.body;
 
-    if (!["video", "image"].includes(type)) {
+    if (!["video", "image", "audio"].includes(type)) {
       return res.status(400).json({ error: "invalid_type" });
     }
     if (!contentType || typeof contentType !== "string") {
@@ -40,6 +40,14 @@ export default function mediaRoutes({ requireAuth }) {
           : contentType.includes("webp")
           ? "webp"
           : "jpg"
+        : type === "audio"
+        ? contentType.includes("webm")
+          ? "webm"
+          : contentType.includes("mpeg")
+          ? "mp3"
+          : contentType.includes("wav")
+          ? "wav"
+          : "webm"
         : contentType.includes("webm")
         ? "webm"
         : contentType.includes("quicktime")
@@ -49,7 +57,7 @@ export default function mediaRoutes({ requireAuth }) {
     const ext = (
       extFromName ||
       extFromType ||
-      (type === "image" ? "jpg" : "mp4")
+      (type === "image" ? "jpg" : type === "audio" ? "webm" : "mp4")
     ).replace(/[^a-z0-9]/g, "");
 
     const trimStart = type === "video" ? Number(trimStartSec || 0) : 0;

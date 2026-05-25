@@ -12,15 +12,28 @@
  */
 
 function detectMediaType(file, explicitType) {
-  if (explicitType === "image" || explicitType === "video") return explicitType;
+  if (
+    explicitType === "image" ||
+    explicitType === "video" ||
+    explicitType === "audio"
+  ) {
+    return explicitType;
+  }
 
   const mime = String(file?.type || "").toLowerCase();
   const name = String(file?.name || "").toLowerCase();
 
+  const isImage =
+    mime.startsWith("image/") || /\.(png|jpe?g|gif|webp|svg)$/i.test(name);
   const isVideo =
     mime.startsWith("video/") || /\.(mp4|mov|webm|mkv|3gp|avi)$/i.test(name);
+  const isAudio =
+    mime.startsWith("audio/") || /\.(mp3|wav|m4a|webm|ogg|aac)$/i.test(name);
 
-  return isVideo ? "video" : "image";
+  if (isAudio) return "audio";
+  if (isVideo) return "video";
+  if (isImage) return "image";
+  return "image";
 }
 
 export async function uploadMediaAsset({
@@ -45,7 +58,12 @@ export async function uploadMediaAsset({
     trimStartSec,
     trimEndSec,
     contentType:
-      file.type || (finalType === "video" ? "video/mp4" : "image/jpeg"),
+      file.type ||
+      (finalType === "video"
+        ? "video/mp4"
+        : finalType === "audio"
+        ? "audio/webm"
+        : "image/jpeg"),
     filename: file.name || "",
   });
 
@@ -58,7 +76,12 @@ export async function uploadMediaAsset({
     body: file,
     headers: {
       "Content-Type":
-        file.type || (finalType === "video" ? "video/mp4" : "image/jpeg"),
+        file.type ||
+        (finalType === "video"
+          ? "video/mp4"
+          : finalType === "audio"
+          ? "audio/webm"
+          : "image/jpeg"),
     },
   });
 

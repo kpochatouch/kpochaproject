@@ -7,8 +7,10 @@ Welcome to the Kpocha Touch user documentation hub. This documentation is design
 - `docs/user-guide.md` — A practical guide for clients and general users.
 - `docs/professional-guide.md` — Instructions and best practices for professionals offering services.
 - `docs/faq.md` — Answers to common questions about booking, payments, profiles, and safety.
-- `docs/privacy-policy-template.md` — Standard privacy policy template to adapt for Kpocha Touch.
-- `docs/terms-and-conditions-template.md` — Standard platform terms and conditions template.
+- `docs/privacy-policy.md` — Privacy policy for the platform.
+- `docs/terms-and-conditions.md` — Platform terms and conditions.
+- `docs/privacy-policy-template.md` — Optional privacy policy template.
+- `docs/terms-and-conditions-template.md` — Optional terms and conditions template.
 - `docs/webrtc.md` — Technical notes on the WebRTC call implementation.
 
 ## What this platform is
