@@ -2,6 +2,14 @@
 
 Production-ready Nigerian marketplace and social platform for service professionals and clients.
 
+## Live deployment
+
+- Production site: [https://kpochatouch.com](https://kpochatouch.com)
+
+### Live screenshot
+
+![Kpocha Touch live screenshot](apps/web/public/Kpochatouch-screenshot.png)
+
 ## Table of Contents
 
 - [Overview](#overview)
