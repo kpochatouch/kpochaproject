@@ -81,8 +81,6 @@ When you click on a professional's profile, you see:
 - Their home address (business location is public)
 - Email address
 
----
-
 ## How to book a service
 
 **Step-by-step:**
@@ -122,7 +120,6 @@ Cancellation specifics:
 - If a booking fails (system error or cannot be fulfilled): full refund to the client's Wallet.
 - If a professional cancels a booking after accepting, the client receives a full refund and the professional must provide a cancellation reason.
 
----
 
 ## Managing bookings
 
@@ -157,8 +154,6 @@ Cancellation specifics:
 - Kpocha Touch support will investigate
 - Refunds may be issued based on investigation
 
----
-
 ## Wallet and payments
 
 **What is the Wallet?**
@@ -177,5 +172,3 @@ Cancellation specifics:
    - Other integrated payment methods
 4. Complete payment securely
 5. Credits appear instantly in your Wallet
-
----
