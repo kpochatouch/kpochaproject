@@ -6,26 +6,26 @@ Production-ready Nigerian marketplace and social platform for service profession
 
 Yesterday, I onboarded a friend to test Kpocha Touch.
 
-At first, he assumed it was just another social platform for showcasing talent.
+### Onboarding
+He signed in with Google and accessed the platform.
 
-But after signing in with Google, I walked him through a real flow:
-
+### Booking flow
 - He discovered a professional from a post
-- He placed a booking directly from that post
-- The booking was assigned to the selected professional (not random matching)
-- The professional received and accepted the request
-- A dedicated chat session automatically opened for both parties
-- They communicated inside the booking context and completed the job flow
-- After completion, he left a review
+- He placed a booking directly
+- The system assigned it to the selected professional (not random matching)
+- The professional accepted the request
 
-We also tested cancellation:
+### Communication
+- A dedicated chat session automatically opened
+- They completed the job inside the booking context
+- A review was submitted after completion
 
-- A second booking was made
+### Cancellation test
+- A second booking was created
 - It was cancelled before acceptance
-- The funds were automatically returned to the wallet
+- Funds were automatically returned to wallet
 
-After seeing both flows, his response was:
-
+His response after both tests:
 "This app is big."
 
 ## Live deployment
