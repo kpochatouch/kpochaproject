@@ -2,6 +2,32 @@
 
 Production-ready Nigerian marketplace and social platform for service professionals and clients.
 
+## Real-world usage example
+
+Yesterday, I onboarded a friend to test Kpocha Touch.
+
+At first, he assumed it was just another social platform for showcasing talent.
+
+But after signing in with Google, I walked him through a real flow:
+
+- He discovered a professional from a post
+- He placed a booking directly from that post
+- The booking was assigned to the selected professional (not random matching)
+- The professional received and accepted the request
+- A dedicated chat session automatically opened for both parties
+- They communicated inside the booking context and completed the job flow
+- After completion, he left a review
+
+We also tested cancellation:
+
+- A second booking was made
+- It was cancelled before acceptance
+- The funds were automatically returned to the wallet
+
+After seeing both flows, his response was:
+
+"This app is big."
+
 ## Live deployment
 
 - Production site: [https://kpochatouch.com](https://kpochatouch.com)
