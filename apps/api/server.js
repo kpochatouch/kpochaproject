@@ -1325,7 +1325,15 @@ app.use("/api/posts", (req, res, next) => {
     req.method,
   );
 
-  if (!needsAuthForWrite) {
+  // A post view is intentionally public. The posts router uses optional auth
+  // here so it can de-duplicate by Firebase UID when present, or by the
+  // anonymous browser identity when it is not. Do not make this write require
+  // login, otherwise the client shows an optimistic view that disappears after
+  // the next stats refresh.
+  const isPublicView =
+    req.method === "POST" && /^\/[0-9a-fA-F]{24}\/view\/?$/.test(req.path);
+
+  if (!needsAuthForWrite || isPublicView) {
     // public GETs - no auth required
     return next();
   }

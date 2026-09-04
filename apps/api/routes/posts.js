@@ -977,11 +977,26 @@ router.get("/posts/:id/stats", tryAuth, async (req, res) => {
       postId: new mongoose.Types.ObjectId(id),
     }).lean();
 
+    const viewsCount = Number(stats?.viewsCount || stats?.views || 0);
+    const likesCount = Number(stats?.likesCount || stats?.likes || 0);
+    const commentsCount = Number(stats?.commentsCount || stats?.comments || 0);
+    const sharesCount = Number(stats?.sharesCount || stats?.shares || 0);
+    const savesCount = Number(stats?.savesCount || stats?.saves || 0);
+
     return res.json({
       ok: true,
-      likesCount: Number(stats?.likesCount || 0),
+      viewsCount,
+      likesCount,
+      commentsCount,
+      sharesCount,
+      savesCount,
+      trendingScore: Number(stats?.trendingScore || 0),
+      lastEngagedAt: stats?.lastEngagedAt || null,
       likedByMe: Array.isArray(stats?.likedBy)
         ? Boolean(req.user?.uid && stats.likedBy.includes(req.user.uid))
+        : false,
+      savedByMe: Array.isArray(stats?.savedBy)
+        ? Boolean(req.user?.uid && stats.savedBy.includes(req.user.uid))
         : false,
     });
   } catch (err) {
