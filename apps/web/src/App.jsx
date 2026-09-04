@@ -34,6 +34,7 @@ import usePostPaymentRecovery from "./hooks/usePostPaymentRecovery";
 import { ensurePushSubscribed, getDeviceId } from "./lib/pushClient";
 import MobileTabBar from "./components/MobileTabBar.jsx";
 import PullToRefresh from "./components/PullToRefresh.jsx";
+import VerificationReminder from "./components/VerificationReminder.jsx";
 import { initTheme, getTheme } from "./lib/theme";
 console.log("[push] App.jsx loaded");
 
@@ -611,6 +612,8 @@ export default function App() {
         {!hideChrome && me?.isPro && (
           <BookingAlert pollMs={15000} playSound={true} />
         )}
+
+        {!hideChrome && <VerificationReminder />}
 
         <main
           className={`flex-1 ${hideChrome ? "" : "pb-[78px] md:pb-0"}`}

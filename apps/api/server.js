@@ -1642,6 +1642,7 @@ app.post(
         availability: appDoc.availability || {},
         bank: appDoc.bank || {},
         status: "approved",
+        verificationStatus: appDoc.verificationStatus || "pending",
         ...(derivedServices.length ? { services: derivedServices } : {}),
         ...(hasCoords
           ? { loc: { type: "Point", coordinates: [lon, lat] } }
@@ -2124,6 +2125,14 @@ app.post("/api/applications", requireAuth, async (req, res) => {
 
     const payload = req.body || {};
 
+    if (!payload?.acceptedTerms || !payload?.agreements?.terms) {
+      return res.status(400).json({ error: "terms_acceptance_required" });
+    }
+
+    if (!payload?.acceptedPrivacy || !payload?.agreements?.privacy) {
+      return res.status(400).json({ error: "privacy_acceptance_required" });
+    }
+
     const first = payload?.identity?.firstName || "";
     const last = payload?.identity?.lastName || "";
     const displayName =
@@ -2188,8 +2197,9 @@ app.post("/api/applications", requireAuth, async (req, res) => {
       phone,
       lga,
       services: servicesStr,
-      status,
       ...payload,
+      status,
+      verificationStatus: "pending",
       acceptedTerms: !!payload.acceptedTerms,
       acceptedPrivacy: !!payload.acceptedPrivacy,
       agreements: {

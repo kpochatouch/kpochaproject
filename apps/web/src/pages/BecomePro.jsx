@@ -1,6 +1,6 @@
 // apps/web/src/pages/BecomePro.jsx
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import {
   api,
   ensureClientProfile,
@@ -12,7 +12,6 @@ import NgGeoPicker from "../components/NgGeoPicker.jsx";
 import MediaUploader from "../components/MediaUploader.jsx";
 import ServicePicker from "../components/ServicePicker.jsx";
 import { useToast } from "../components/Toast.jsx";
-import FaceEnrollModal from "../components/FaceEnrollModal.jsx";
 
 /* ---------- Utils ---------- */
 function digitsOnly(s = "") {
@@ -38,34 +37,9 @@ function normName(s = "") {
     .trim();
 }
 
-/* ---------- BecomePro liveness pipeline keys ---------- */
-const BECOME_PRO_PENDING_KEY = "kpocha:becomeProPending";
-const AFTER_LIVENESS_KEY = "kpocha:afterLiveness";
-const BECOME_PRO_ENROLLED_ASSET_KEY = "kpocha:becomeProEnrolledAssetId";
-
-function lsSet(key, value) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {}
-}
-function lsGet(key) {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-}
-function lsDel(key) {
-  try {
-    localStorage.removeItem(key);
-  } catch {}
-}
-
 /* ======================= BecomePro Page ======================= */
 export default function BecomePro() {
   const nav = useNavigate();
-  const [params] = useSearchParams();
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const toast = useToast();
@@ -80,13 +54,6 @@ export default function BecomePro() {
     // must still satisfy your existing checks
     if (!canSubmit) {
       setMsg(`Please complete: ${missingAll.join(", ")}`);
-      return;
-    }
-
-    // must have selfie
-    if (!enrollSelfie.assetId) {
-      setMsg("");
-      setNeedEnrollSelfie(true);
       return;
     }
 
@@ -151,6 +118,7 @@ export default function BecomePro() {
         },
         portfolio,
         status: "submitted",
+        verificationStatus: "pending",
         acceptedTerms: !!agreements.terms,
         acceptedPrivacy: !!agreements.privacy,
         agreements: {
@@ -159,17 +127,9 @@ export default function BecomePro() {
         },
       };
 
-      // save draft so we can finish after liveness returns
-      lsSet(BECOME_PRO_PENDING_KEY, payload);
-
-      // store enrolled selfie asset for auto-resume
-      lsSet(BECOME_PRO_ENROLLED_ASSET_KEY, enrollSelfie.assetId);
-
-      // tell liveness page where to go next (routing token; one-shot)
-      lsSet(AFTER_LIVENESS_KEY, { next: "/become?auto=1" });
-
-      // start liveness
-      nav(`/aws-liveness?back=${encodeURIComponent("/become")}`);
+      await submitProApplication(payload);
+      toast.success("Application submitted.", { playSound: true });
+      nav("/apply/thanks");
     } catch (err) {
       const apiMsg =
         err?.response?.data?.error || "Failed to start verification.";
@@ -185,12 +145,6 @@ export default function BecomePro() {
   }
 
   // ✅ enrolled selfie (private/admin-only; used for face enrollment)
-  const [enrollSelfie, setEnrollSelfie] = useState({
-    assetId: "",
-    previewUrl: "",
-  });
-  const [needEnrollSelfie, setNeedEnrollSelfie] = useState(false);
-
   // step-by-step UI (like Settings)
   const [step, setStep] = useState("identity");
   const STEPS = [
@@ -342,12 +296,6 @@ export default function BecomePro() {
       } catch {}
 
       try {
-        if (enrollSelfie.previewUrl?.startsWith("blob:")) {
-          URL.revokeObjectURL(enrollSelfie.previewUrl);
-        }
-      } catch {}
-
-      try {
         if (business.shopPhotoOutsidePreviewUrl?.startsWith("blob:")) {
           URL.revokeObjectURL(business.shopPhotoOutsidePreviewUrl);
         }
@@ -361,7 +309,6 @@ export default function BecomePro() {
     };
   }, [
     identity.photoPreviewUrl,
-    enrollSelfie.previewUrl,
     business.shopPhotoOutsidePreviewUrl,
     business.shopPhotoInsidePreviewUrl,
   ]);
@@ -557,7 +504,7 @@ export default function BecomePro() {
   }, [bank.bankCode, bank.code, bank.accountNumber]);
 
   useEffect(() => {
-    const auto = params.get("auto");
+    const auto = "0";
     if (auto !== "1") return;
 
     let alive = true;
@@ -612,7 +559,7 @@ export default function BecomePro() {
     return () => {
       alive = false;
     };
-  }, [params, nav]);
+  }, [nav]);
 
   /* -------- GPS: Use my location -------- */
   async function useMyLocation() {
@@ -853,28 +800,6 @@ export default function BecomePro() {
           </ul>
         </div>
       )}
-
-      <FaceEnrollModal
-        open={needEnrollSelfie}
-        api={api}
-        busy={busy}
-        selfie={enrollSelfie}
-        onChangeSelfie={({ previewUrl, assetId }) =>
-          setEnrollSelfie((prev) => {
-            try {
-              if (prev.previewUrl?.startsWith("blob:")) {
-                URL.revokeObjectURL(prev.previewUrl);
-              }
-            } catch {}
-            return { assetId: assetId || "", previewUrl: previewUrl || "" };
-          })
-        }
-        onContinue={async () => {
-          setNeedEnrollSelfie(false);
-          await startBecomeProPipeline();
-        }}
-        onCancel={() => setNeedEnrollSelfie(false)}
-      />
 
       <form onSubmit={submit} className="space-y-8">
         {/* SECTION: Identity */}
