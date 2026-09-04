@@ -536,6 +536,9 @@ export function connectSocket({
       // common server events we want always
       _ensureWire("notification:new");
       _ensureWire("notification:received");
+      _ensureWire("notification:read");
+      _ensureWire("notification:all_read");
+      _ensureWire("notification:deleted");
       _ensureWire("chat:message");
       _ensureWire("presence:join");
       _ensureWire("presence:leave");
@@ -578,14 +581,6 @@ export function connectSocket({
       console.warn("[socket] connect_error:", err?.message || err);
       _reconnectWithBackoff();
     });
-
-    // bridge notification events -> unified "notification:received"
-    socket.on("notification:new", (payload) =>
-      _dispatch("notification:received", payload),
-    );
-    socket.on("notification:received", (payload) =>
-      _dispatch("notification:received", payload),
-    );
 
     // Ensure we always listen for booking events on user room.
     // NOTE: server emits booking:accepted to `user:<uid>` and also `booking:<id>`.

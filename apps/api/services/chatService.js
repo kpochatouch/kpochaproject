@@ -1,6 +1,7 @@
 // apps/api/services/chatService.js
 import ChatMessage from "../models/ChatMessage.js";
 import Thread from "../models/Thread.js";
+import { Booking } from "../models/Booking.js";
 import { createNotification } from "./notificationService.js";
 import { ClientProfile } from "../models/Profile.js";
 import { Pro } from "../models.js";
@@ -131,6 +132,56 @@ async function attachSender(payload) {
   return payload;
 }
 
+async function resolveMessageRecipient(room, fromUid, suppliedToUid = null) {
+  const normalizedRoom = String(room || "").trim();
+  const senderUid = String(fromUid || "");
+
+  if (normalizedRoom.startsWith("dm:")) {
+    const [, uidA, uidB, ...rest] = normalizedRoom.split(":");
+    if (!uidA || !uidB || rest.length || (senderUid !== uidA && senderUid !== uidB)) {
+      throw new Error("not_allowed");
+    }
+    return senderUid === uidA ? uidB : uidA;
+  }
+
+  if (normalizedRoom.startsWith("booking:")) {
+    const bookingId = normalizedRoom.slice("booking:".length);
+    if (!bookingId || bookingId.includes(":")) throw new Error("not_allowed");
+
+    const booking = await Booking.findById(bookingId)
+      .select("clientUid proOwnerUid")
+      .lean()
+      .catch(() => null);
+    if (!booking) throw new Error("not_allowed");
+
+    if (senderUid === String(booking.clientUid || "") && booking.proOwnerUid) {
+      return String(booking.proOwnerUid);
+    }
+    if (senderUid === String(booking.proOwnerUid || "") && booking.clientUid) {
+      return String(booking.clientUid);
+    }
+    throw new Error("not_allowed");
+  }
+
+  return suppliedToUid ? String(suppliedToUid) : null;
+}
+
+function notificationPreview(body, attachments = []) {
+  const text = String(body || "").trim();
+  if (text) return text.slice(0, 140);
+  if (
+    Array.isArray(attachments) &&
+    attachments.some((attachment) =>
+      String(attachment?.type || "").toLowerCase().startsWith("audio"),
+    )
+  ) {
+    return "Sent you a voice message";
+  }
+  return Array.isArray(attachments) && attachments.length
+    ? "Sent you an attachment"
+    : "Sent you a message";
+}
+
 export async function saveMessage({
   room,
   fromUid,
@@ -142,6 +193,8 @@ export async function saveMessage({
 } = {}) {
   if (!room) throw new Error("room required");
   if (!fromUid) throw new Error("fromUid required");
+
+  const recipientUid = await resolveMessageRecipient(room, fromUid, toUid);
 
   // 1) dedupe by clientId if provided
   try {
@@ -169,7 +222,7 @@ export async function saveMessage({
     const created = await ChatMessage.create({
       room,
       fromUid,
-      toUid: toUid || null,
+      toUid: recipientUid,
       clientId: clientId || null,
       body: body || "",
       attachments: Array.isArray(attachments) ? attachments : [],
@@ -200,20 +253,7 @@ export async function saveMessage({
 
       // increment unread for recipients:
       let incrementFor = null;
-      if (String(room).startsWith("dm:")) {
-        const parts = String(room).split(":");
-        if (parts.length >= 3) {
-          const uidA = parts[1];
-          const uidB = parts[2];
-          const recipient =
-            uidA === fromUid ? uidB : uidB === fromUid ? uidA : null;
-          if (recipient && recipient !== fromUid) incrementFor = [recipient];
-        }
-      } else if (toUid) {
-        incrementFor = [toUid];
-      } else if (String(room).startsWith("booking:")) {
-        incrementFor = null;
-      }
+      if (recipientUid && recipientUid !== fromUid) incrementFor = [recipientUid];
 
       // ensure DM/booking threads have canonical participants where possible
       try {
@@ -267,116 +307,43 @@ export async function saveMessage({
     console.warn("[chatService] emit chat:message failed:", e?.message || e);
   }
 
-  // 4) if DM -> notify recipient (via Notification + dm:incoming)
+  // 4) Notify the resolved recipient for all one-to-one chat rooms.
   try {
-    // DM rooms expected to be "dm:<uidA>:<uidB>"
-    if (String(room).startsWith("dm:")) {
-      const parts = String(room).split(":");
-      if (parts.length >= 3) {
-        const uidA = parts[1];
-        const uidB = parts[2];
-        // compute recipient robustly
-        const recipient =
-          uidA === fromUid ? uidB : uidB === fromUid ? uidA : null;
-        const realRecipient = toUid || recipient || null;
+    if (recipientUid && recipientUid !== fromUid) {
+      const senderName =
+        payload?.sender?.displayName || meta?.fromName || "New message";
+      const senderAvatar = payload?.sender?.photoUrl || meta?.fromAvatar || "";
+      const bodyPreview = notificationPreview(body, attachments);
 
-        if (realRecipient && realRecipient !== fromUid) {
-          // create a notification record for the recipient
-          try {
-            const senderName =
-              payload?.sender?.displayName || meta?.fromName || "New message";
-
-            const senderAvatar =
-              payload?.sender?.photoUrl || meta?.fromAvatar || "";
-
-            await createNotification({
-              toUid: realRecipient,
-              fromUid,
-              type: "chat_message",
-              title: senderName,
-              body: (body || "").slice(0, 140) || "Sent you a message",
-              data: {
-                room,
-                fromUid,
-                peerUid: fromUid,
-                actorName: senderName,
-                actorAvatar: senderAvatar,
-                bodyPreview: (body || "").slice(0, 140),
-              },
-              groupKey: `chat:${room}`,
-            });
-          } catch (e) {
-            console.warn(
-              "[chatService] createNotification(chat_message) failed:",
-              e?.message || e,
-            );
-          }
-
-          // also emit a DM-specific incoming event
-          try {
-            const io = getIO();
-            io?.to(userRoom(realRecipient)).emit("dm:incoming", {
-              room,
-              fromUid,
-              body: body || "",
-              at: payload.createdAt,
-            });
-          } catch (e) {
-            console.warn(
-              "[chatService] emit dm:incoming failed:",
-              e?.message || e,
-            );
-          }
-        }
-      }
-    } else if (toUid) {
-      // not a dm room, but toUid provided (one-to-one); still notify
-      try {
-        const senderName =
-          payload?.sender?.displayName || meta?.fromName || "New message";
-
-        const senderAvatar =
-          payload?.sender?.photoUrl || meta?.fromAvatar || "";
-
-        await createNotification({
-          toUid,
-          fromUid,
-          type: "chat_message",
-          title: senderName,
-          body: (body || "").slice(0, 140) || "Sent you a message",
-          data: {
-            room,
-            fromUid,
-            peerUid: fromUid,
-            actorName: senderName,
-            actorAvatar: senderAvatar,
-            bodyPreview: (body || "").slice(0, 140),
-          },
-          groupKey: `chat:${room}`,
-        });
-      } catch (e) {
-        console.warn(
-          "[chatService] createNotification(chat_message) failed:",
-          e?.message || e,
-        );
-      }
-      try {
-        const io = getIO();
-        io?.to(userRoom(toUid)).emit("dm:incoming", {
+      await createNotification({
+        toUid: recipientUid,
+        fromUid,
+        type: "chat_message",
+        title: senderName,
+        body: bodyPreview,
+        data: {
           room,
           fromUid,
-          body: body || "",
-          at: payload.createdAt,
-        });
-      } catch (e) {
-        console.warn(
-          "[chatService] emit dm:incoming (toUid flow) failed:",
-          e?.message || e,
-        );
-      }
+          peerUid: fromUid,
+          actorName: senderName,
+          actorAvatar: senderAvatar,
+          bodyPreview,
+          ...(String(room).startsWith("booking:")
+            ? { bookingId: String(room).slice("booking:".length) }
+            : {}),
+        },
+        groupKey: `chat:${room}`,
+      });
+
+      getIO()?.to(userRoom(recipientUid)).emit("dm:incoming", {
+        room,
+        fromUid,
+        body: bodyPreview,
+        at: payload.createdAt,
+      });
     }
   } catch (e) {
-    console.warn("[chatService] dm notify flow failed:", e?.message || e);
+    console.warn("[chatService] chat notify flow failed:", e?.message || e);
   }
 
   return { ok: true, existing: false, message: payload };
@@ -745,6 +712,52 @@ export async function deleteForMe(messageId, uid) {
   return { ok: true, message: payload };
 }
 
+export async function markAudioPlayed(messageId, uid) {
+  if (!messageId) throw new Error("messageId required");
+  if (!uid) throw new Error("uid required");
+
+  const doc = await ChatMessage.findById(messageId);
+  if (!doc) throw new Error("message_not_found");
+
+  const hasAudio = Array.isArray(doc.attachments)
+    ? doc.attachments.some((attachment) =>
+        String(attachment?.type || "").toLowerCase().startsWith("audio"),
+      )
+    : false;
+
+  if (!hasAudio) throw new Error("not_an_audio_message");
+
+  const recipientUid = await resolveMessageRecipient(
+    doc.room,
+    doc.fromUid,
+    doc.toUid,
+  );
+  if (
+    String(uid) !== String(doc.fromUid) &&
+    String(uid) !== String(recipientUid)
+  ) {
+    throw new Error("not_allowed");
+  }
+
+  // A sender does not create a recipient playback receipt for their own note.
+  let changed = false;
+  if (String(doc.fromUid) !== String(uid)) {
+    const meta = doc.meta || {};
+    const playedBy = Array.isArray(meta.playedBy) ? meta.playedBy : [];
+    if (!playedBy.includes(uid)) {
+      doc.meta = { ...meta, playedBy: [...playedBy, uid] };
+      await doc.save();
+      changed = true;
+    }
+  }
+
+  let payload = buildPayloadFromDoc(doc);
+  await attachSender(payload);
+  if (changed) getIO()?.to(doc.room).emit("chat:update", payload);
+
+  return { ok: true, changed, message: payload };
+}
+
 /* -------------------------------------------------
    Default export
 -------------------------------------------------- */
@@ -760,4 +773,5 @@ export default {
   togglePin,
   toggleReaction,
   deleteForMe,
+  markAudioPlayed,
 };

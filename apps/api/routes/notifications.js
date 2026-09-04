@@ -3,12 +3,11 @@ import express from "express";
 import admin from "firebase-admin";
 import {
   markRead,
+  markAllRead,
   unreadCount,
   listNotifications,
   deleteNotification,
 } from "../services/notificationService.js";
-import Notification from "../models/Notification.js";
-import redisClient from "../redis.js";
 
 /* --------------------------- Auth middleware --------------------------- */
 
@@ -86,22 +85,8 @@ router.put("/notifications/:id/read", requireAuth, async (req, res) => {
  */
 router.put("/notifications/read-all", requireAuth, async (req, res) => {
   try {
-    await Notification.updateMany(
-      { ownerUid: req.user.uid, seen: { $ne: true } },
-      { $set: { seen: true, readAt: new Date() } },
-    );
-
-    // reset redis counter
-    try {
-      if (redisClient) {
-        const key = `notifications:unread:${req.user.uid}`;
-        await redisClient.set(key, "0");
-      }
-    } catch (e) {
-      // ignore redis errors
-    }
-
-    return res.json({ ok: true });
+    const result = await markAllRead(req.user.uid);
+    return res.json({ ok: true, ...result });
   } catch (e) {
     console.error("[notifications:readAll]", e?.message || e);
     return res.status(500).json({ error: "read_all_failed" });

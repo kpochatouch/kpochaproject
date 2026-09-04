@@ -6,9 +6,9 @@ import admin from "firebase-admin";
 import { Pro } from "../models.js";
 import Post from "../models/Post.js";
 import PostStats from "../models/PostStats.js";
+import PostViewReceipt from "../models/PostViewReceipt.js";
 import MediaAsset from "../models/MediaAsset.js";
 
-import redisClient from "../redis.js";
 import { scoreFrom } from "../services/postScoring.js";
 import { expandMediaForClient } from "../services/mediaResolver.js";
 import postService from "../services/postService.js";
@@ -1116,7 +1116,7 @@ router.delete("/posts/:id/like", requireAuth, async (req, res) => {
   }
 });
 
-/** VIEW with Redis de-dup */
+/** VIEW with durable per-viewer de-duplication */
 router.post("/posts/:id/view", tryAuth, async (req, res) => {
   try {
     const { id } = req.params;
@@ -1125,21 +1125,23 @@ router.post("/posts/:id/view", tryAuth, async (req, res) => {
     const postObjectId = new mongoose.Types.ObjectId(id);
     const viewerId = req.user?.uid || req.viewIdentity?.anonId || null;
 
-    let shouldIncrement = true;
+    if (!viewerId) return res.status(400).json({ error: "viewer_required" });
 
-    // optional Redis: don't blow up if missing
-    if (redisClient && viewerId) {
-      const redisKey = `post:view:${id}:${viewerId}`;
-      try {
-        const setRes = await redisClient.set(redisKey, "1", {
-          EX: 10,
-          NX: true,
-        });
-        if (setRes !== "OK") shouldIncrement = false;
-      } catch (e) {
-        console.warn("[posts:view] redis set failed:", e?.message || e);
-        shouldIncrement = true;
-      }
+    let shouldIncrement = false;
+    const now = new Date();
+    const cutoff = new Date(now.getTime() - 10_000);
+
+    try {
+      await PostViewReceipt.findOneAndUpdate(
+        { postId: postObjectId, viewerId, countedAt: { $lte: cutoff } },
+        { $set: { countedAt: now } },
+        { upsert: true, new: true, setDefaultsOnInsert: true },
+      );
+      shouldIncrement = true;
+    } catch (err) {
+      // A duplicate-key error means another request already claimed this
+      // viewer's active window. Other database errors must not inflate counts.
+      if (err?.code !== 11000) throw err;
     }
 
     const update = { $setOnInsert: { postId: postObjectId } };

@@ -1,14 +1,30 @@
 //apps/web/src/lib/notificationPresentation.js
+function walletTarget(n) {
+  const params = new URLSearchParams();
+  const type = n?.type || "";
+  const bookingId = n?.data?.bookingId;
+  if (type) params.set("txType", type);
+  if (bookingId) params.set("bookingId", String(bookingId));
+  const query = params.toString();
+  return query ? `/wallet?${query}` : "/wallet";
+}
+
 export const NOTIFICATION_ROUTES = {
   chat_message: (n) => {
+    const room = n?.data?.room || null;
+    if (typeof room === "string" && room.startsWith("booking:")) {
+      const bookingId = n?.data?.bookingId || room.slice("booking:".length);
+      return bookingId
+        ? `/bookings/${encodeURIComponent(bookingId)}/chat`
+        : "/my-bookings";
+    }
+
     const peerUid =
       n?.actorUid ||
       n?.data?.fromUid ||
       n?.data?.peerUid ||
       n?.data?.callerUid ||
       null;
-
-    const room = n?.data?.room || null;
 
     if (peerUid) {
       return `/chat?with=${encodeURIComponent(peerUid)}`;
@@ -95,11 +111,24 @@ export const NOTIFICATION_ROUTES = {
   booking_update: (n) =>
     n?.data?.bookingId ? `/bookings/${n.data.bookingId}` : "/my-bookings",
 
-  booking_fund: () => "/wallet",
-  booking_fund_refund: () => "/wallet",
-  withdraw: () => "/wallet",
-  withdraw_pending: () => "/wallet",
-  release: () => "/wallet",
+  booking_paid: (n) =>
+    n?.data?.bookingId ? `/bookings/${n.data.bookingId}` : "/my-bookings",
+  booking_accepted: (n) =>
+    n?.data?.bookingId ? `/bookings/${n.data.bookingId}` : "/my-bookings",
+  booking_cancelled: (n) =>
+    n?.data?.bookingId ? `/bookings/${n.data.bookingId}` : "/my-bookings",
+  booking_completed: (n) =>
+    n?.data?.bookingId ? `/bookings/${n.data.bookingId}` : "/my-bookings",
+  booking_complete_requested: (n) =>
+    n?.data?.bookingId ? `/bookings/${n.data.bookingId}` : "/my-bookings",
+  booking_completion_reminder: (n) =>
+    n?.data?.bookingId ? `/bookings/${n.data.bookingId}` : "/my-bookings",
+
+  booking_fund: walletTarget,
+  booking_fund_refund: walletTarget,
+  withdraw: walletTarget,
+  withdraw_pending: walletTarget,
+  release: walletTarget,
   support_escalated: (n) =>
     n?.data?.url ||
     (n?.data?.sessionId
@@ -212,7 +241,17 @@ export function presentNotification(n) {
     };
   }
 
-  if (type === "booking_update") {
+  if (
+    [
+      "booking_update",
+      "booking_paid",
+      "booking_accepted",
+      "booking_cancelled",
+      "booking_completed",
+      "booking_complete_requested",
+      "booking_completion_reminder",
+    ].includes(type)
+  ) {
     return {
       icon: "📅",
       title: "Booking update",

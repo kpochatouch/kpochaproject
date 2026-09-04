@@ -1,9 +1,13 @@
 // apps/web/src/pages/ClientWallet.jsx
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api, fmtNairaFromKobo } from "../lib/api";
 import { loadPaystackScript } from "../lib/loadPaystack";
 
 export default function ClientWallet() {
+  const [searchParams] = useSearchParams();
+  const highlightedBookingId = searchParams.get("bookingId");
+  const highlightedTxType = searchParams.get("txType");
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [me, setMe] = useState(null);
@@ -16,6 +20,15 @@ export default function ClientWallet() {
   const [paystackReady, setPaystackReady] = useState(
     typeof window !== "undefined" && !!window.PaystackPop,
   );
+
+  function isHighlightedTransaction(transaction) {
+    return (
+      (highlightedTxType === transaction?.type || !highlightedTxType) &&
+      (highlightedBookingId
+        ? String(transaction?.meta?.bookingId || "") === highlightedBookingId
+        : true)
+    );
+  }
 
   useEffect(() => {
     let alive = true;
@@ -32,6 +45,17 @@ export default function ClientWallet() {
       alive = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!highlightedBookingId && !highlightedTxType) return;
+    const matched = txns.some(isHighlightedTransaction);
+    if (!matched) return;
+    requestAnimationFrame(() => {
+      document
+        .getElementById("client-wallet-highlighted-transaction")
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  }, [txns, highlightedBookingId, highlightedTxType]);
 
   // ---------- helpers ----------
   const refreshWallet = async () => {
@@ -276,6 +300,11 @@ export default function ClientWallet() {
 
           <section className="mt-8">
             <h2 className="text-lg font-semibold mb-2">Recent Activity</h2>
+            {(highlightedBookingId || highlightedTxType) && (
+              <div className="mb-3 rounded-lg border border-gold/50 bg-gold/10 px-3 py-2 text-sm text-gold">
+                Showing the transaction related to this notification.
+              </div>
+            )}
             <div className="rounded-lg border border-zinc-800">
               {txns.length === 0 ? (
                 <div className="px-4 py-6 text-zinc-400">No activity yet.</div>
@@ -288,7 +317,16 @@ export default function ClientWallet() {
                         t._id ||
                         `${t.ts || t.createdAt || ""}-${t.amountKobo || 0}-${i}`
                       }
-                      className="px-4 py-3 flex items-center justify-between"
+                      id={
+                        isHighlightedTransaction(t)
+                          ? "client-wallet-highlighted-transaction"
+                          : undefined
+                      }
+                      className={`px-4 py-3 flex items-center justify-between ${
+                        isHighlightedTransaction(t)
+                          ? "bg-gold/10 ring-1 ring-inset ring-gold/50"
+                          : ""
+                      }`}
                     >
                       <div>
                         <div className="text-sm capitalize">

@@ -547,5 +547,30 @@ export default function chatRoutes({ requireAuth }) {
     },
   );
 
+  router.post(
+    "/chat/message/:id/audio-played",
+    requireAuth,
+    async (req, res) => {
+      try {
+        const id = String(req.params.id || "").trim();
+        if (!id) return res.status(400).json({ error: "messageId_required" });
+
+        const result = await chatService.markAudioPlayed(id, req.user.uid);
+        return res.json(result);
+      } catch (e) {
+        const error = String(e?.message || "audio_played_failed");
+        const status =
+          error === "message_not_found"
+            ? 404
+            : error === "not_an_audio_message"
+              ? 400
+              : error === "not_allowed"
+                ? 403
+              : 500;
+        return res.status(status).json({ error });
+      }
+    },
+  );
+
   return router;
 }

@@ -492,6 +492,7 @@ export async function createNotification(rawArgs = {}, { lean = false } = {}) {
 
   // Increment unread in Redis (best-effort)
   await incrUnreadCounter(ownerUid, 1);
+  const currentUnread = await unreadCount(ownerUid);
 
   // Emit socket event to owner
   emitToUser(ownerUid, "notification:received", {
@@ -504,6 +505,7 @@ export async function createNotification(rawArgs = {}, { lean = false } = {}) {
     createdAt: doc.createdAt,
     groupKey: doc.groupKey || null,
     priority: doc.priority || "default",
+    unreadCount: currentUnread,
   });
 
   // Best-effort Push (WebPush + FCM)
@@ -522,6 +524,7 @@ export async function createNotification(rawArgs = {}, { lean = false } = {}) {
         actorName: doc?.meta?.actorName || doc?.data?.actorName || "",
         actorAvatar: doc?.meta?.actorAvatar || doc?.data?.actorAvatar || "",
         groupKey: doc.groupKey || "",
+        unreadCount: currentUnread,
         ...doc.data,
       },
     };

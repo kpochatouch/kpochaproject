@@ -45,6 +45,8 @@ export default function WalletPage() {
   const [err, setErr] = useState("");
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const highlightedBookingId = searchParams.get("bookingId");
+  const highlightedTxType = searchParams.get("txType");
 
   const [me, setMe] = useState(null);
   const [meHasPin, setMeHasPin] = useState(false);
@@ -59,6 +61,15 @@ export default function WalletPage() {
 
   // settings (best-effort)
   const [settings, setSettings] = useState(null);
+
+  function isHighlightedTransaction(transaction) {
+    return (
+      (highlightedTxType === transaction?.type || !highlightedTxType) &&
+      (highlightedBookingId
+        ? String(transaction?.meta?.bookingId || "") === highlightedBookingId
+        : true)
+    );
+  }
 
   const feePct = useMemo(
     () => Number(settings?.payouts?.instantCashoutFeePercent ?? 3),
@@ -113,6 +124,17 @@ export default function WalletPage() {
   useEffect(() => {
     load();
   }, []);
+
+  useEffect(() => {
+    if (!highlightedBookingId && !highlightedTxType) return;
+    const matched = (tx || []).some(isHighlightedTransaction);
+    if (!matched) return;
+    requestAnimationFrame(() => {
+      document
+        .getElementById("wallet-highlighted-transaction")
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  }, [tx, highlightedBookingId, highlightedTxType]);
 
   const fmt = (k) => `₦${(Math.floor(k || 0) / 100).toLocaleString()}`;
 
@@ -544,11 +566,25 @@ export default function WalletPage() {
           </div>
 
           <h3 className="text-lg font-semibold mb-3">Recent Transactions</h3>
+          {(highlightedBookingId || highlightedTxType) && (
+            <div className="mb-3 rounded-lg border border-gold/50 bg-gold/10 px-3 py-2 text-sm text-gold">
+              Showing the transaction related to this notification.
+            </div>
+          )}
           <div className="divide-y divide-zinc-800 rounded-lg border border-zinc-800">
             {(tx || []).map((t) => (
               <div
                 key={t._id}
-                className="p-4 flex items-center justify-between"
+                id={
+                  isHighlightedTransaction(t)
+                    ? "wallet-highlighted-transaction"
+                    : undefined
+                }
+                className={`p-4 flex items-center justify-between ${
+                  isHighlightedTransaction(t)
+                    ? "bg-gold/10 ring-1 ring-inset ring-gold/50"
+                    : ""
+                }`}
               >
                 <div className="flex items-center gap-3">
                   <span className="text-xs px-2 py-1 rounded bg-zinc-800">

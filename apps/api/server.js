@@ -45,7 +45,6 @@ import riskRoutes from "./routes/risk.js";
 import awsLivenessRoutes from "./routes/awsLiveness.js";
 import faceRoutes from "./routes/face.js";
 import redis from "./redis.js";
-import postStatsRouter from "./routes/postStats.js";
 import followRoutes from "./routes/follow.js";
 import reviewsRouter from "./routes/reviews.js";
 // correct (exact filename in your repo)
@@ -1359,7 +1358,6 @@ app.use("/api", followRoutes);
 app.use("/api", reviewsRouter({ requireAuth }));
 app.use("/api", commentsRouter);
 app.use("/api", paymentsRouter({ requireAuth }));
-app.use("/api", postStatsRouter);
 app.use("/api", uploadsRoutes({ requireAuth }));
 app.use("/api", payoutRoutes({ requireAuth, Application }));
 app.use("/api", riskRoutes({ requireAuth, requireAdmin, Application }));

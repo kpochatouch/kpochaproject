@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
+import { fetchPostStats, recordPostView } from "../lib/postStats";
 import FollowButton from "./FollowButton.jsx";
 import LikeButton from "./LikeButton.jsx";
 import ShareButton from "./ShareButton.jsx";
@@ -83,6 +84,7 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
 
   const [inView, setInView] = useState(false);
   const hasSentViewRef = useRef(false); // for non-video cards only
+  const statsRevisionRef = useRef(0);
   const videoViewTimerRef = useRef(null); // 3s in-view -> send view
   const playTriggeredByObserverRef = useRef(false);
 
@@ -305,9 +307,9 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
     (async () => {
       if (!postId) return;
       try {
-        const res = await api.get(`/api/posts/${postId}/stats`);
-        if (stopped) return;
-        const srv = res?.data || {};
+        const revision = statsRevisionRef.current;
+        const srv = await fetchPostStats(postId);
+        if (stopped || revision !== statsRevisionRef.current) return;
         setStats((prev) => ({
           ...prev,
           viewsCount:
@@ -500,15 +502,14 @@ export default function FeedCard({ post, currentUser, onDeleted }) {
   // send one "view tick" to backend
   async function sendViewTick() {
     if (!postId) return;
+    const revision = ++statsRevisionRef.current;
     try {
-      const res = await api.post(`/api/posts/${postId}/view`);
-      mergeStatsFromServer(res?.data || {});
+      const statsFromServer = await recordPostView(postId);
+      if (revision === statsRevisionRef.current) {
+        mergeStatsFromServer(statsFromServer);
+      }
     } catch {
-      // fallback: optimistic increment
-      setStats((prev) => ({
-        ...prev,
-        viewsCount: prev.viewsCount + 1,
-      }));
+      // Counts stay server-authoritative; the next successful read repairs UI.
     }
   }
 

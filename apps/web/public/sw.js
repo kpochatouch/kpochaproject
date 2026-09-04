@@ -70,6 +70,15 @@ self.addEventListener("push", (event) => {
   const endedCallTag = buildCallTag(callId, "ended");
 
   const job = (async () => {
+    const unreadCount = Number(data?.unreadCount);
+    if (typeof self.navigator?.setAppBadge === "function") {
+      if (Number.isFinite(unreadCount) && unreadCount > 0) {
+        await self.navigator.setAppBadge(unreadCount).catch(() => {});
+      } else if (Number.isFinite(unreadCount)) {
+        await self.navigator.clearAppBadge?.().catch(() => {});
+      }
+    }
+
     if (isMissedCall || isEndedCall) {
       await closeNotificationsByTag(liveCallTag);
     }
@@ -149,15 +158,23 @@ self.addEventListener("notificationclick", (event) => {
       url = "/inbox";
     }
   } else if (type === "chat_message") {
-    const peerUid =
-      data.peerUid || data.fromUid || data.actorUid || data.callerUid || "";
-
-    if (peerUid) {
-      url = `/chat?with=${encodeURIComponent(peerUid)}`;
-    } else if (data.room) {
-      url = `/chat?room=${encodeURIComponent(data.room)}`;
+    const room = data.room || "";
+    if (typeof room === "string" && room.startsWith("booking:")) {
+      const bookingId = data.bookingId || room.slice("booking:".length);
+      url = bookingId
+        ? `/bookings/${encodeURIComponent(bookingId)}/chat`
+        : "/my-bookings";
     } else {
-      url = "/inbox";
+      const peerUid =
+        data.peerUid || data.fromUid || data.actorUid || data.callerUid || "";
+
+      if (peerUid) {
+        url = `/chat?with=${encodeURIComponent(peerUid)}`;
+      } else if (room) {
+        url = `/chat?room=${encodeURIComponent(room)}`;
+      } else {
+        url = "/inbox";
+      }
     }
   } else if (
     ["post_like", "post_comment", "new_post"].includes(type) &&
@@ -170,9 +187,30 @@ self.addEventListener("notificationclick", (event) => {
     } else {
       url = "/browse";
     }
-  } else if (type === "booking_update" && data.bookingId) {
+  } else if (
+    [
+      "booking_update",
+      "booking_paid",
+      "booking_accepted",
+      "booking_cancelled",
+      "booking_completed",
+      "booking_complete_requested",
+      "booking_completion_reminder",
+    ].includes(type) &&
+    data.bookingId
+  ) {
     url = `/bookings/${encodeURIComponent(data.bookingId)}`;
-  } else if (type === "booking_update") {
+  } else if (
+    [
+      "booking_update",
+      "booking_paid",
+      "booking_accepted",
+      "booking_cancelled",
+      "booking_completed",
+      "booking_complete_requested",
+      "booking_completion_reminder",
+    ].includes(type)
+  ) {
     url = "/my-bookings";
   } else if (
     [
@@ -183,7 +221,10 @@ self.addEventListener("notificationclick", (event) => {
       "release",
     ].includes(type)
   ) {
-    url = "/wallet";
+    const params = new URLSearchParams();
+    params.set("txType", type);
+    if (data.bookingId) params.set("bookingId", String(data.bookingId));
+    url = `/wallet?${params.toString()}`;
   } else if (type === "support_escalated") {
     url = data.url || "/admin/support";
   }

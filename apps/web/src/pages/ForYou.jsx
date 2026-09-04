@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
+import { fetchPostStats, recordPostView } from "../lib/postStats";
 import { useMe } from "../context/MeContext.jsx";
 import { Capacitor } from "@capacitor/core";
 import { openNativeFeed } from "../lib/nativeFeed";
@@ -588,6 +589,7 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
   const watchAccumRef = useRef(0);
   const lastWatchTsRef = useRef(0);
   const isActiveRef = useRef(false);
+  const statsRevisionRef = useRef(0);
 
   function claimActiveVideo(vid) {
     try {
@@ -769,9 +771,9 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
 
     (async () => {
       try {
-        const res = await api.get(`/api/posts/${id}/stats`);
-        if (!on) return;
-        const srv = res?.data || {};
+        const revision = statsRevisionRef.current;
+        const srv = await fetchPostStats(id);
+        if (!on || revision !== statsRevisionRef.current) return;
         setStats((prev) => ({
           ...prev,
           viewsCount:
@@ -893,14 +895,14 @@ function ForYouPost({ post, index, me, navigate, onNeedMore }) {
 
   async function sendViewTick() {
     if (!id) return;
+    const revision = ++statsRevisionRef.current;
     try {
-      const res = await api.post(`/api/posts/${id}/view`);
-      mergeStatsFromServer(res?.data || {});
+      const statsFromServer = await recordPostView(id);
+      if (revision === statsRevisionRef.current) {
+        mergeStatsFromServer(statsFromServer);
+      }
     } catch {
-      setStats((prev) => ({
-        ...prev,
-        viewsCount: prev.viewsCount + 1,
-      }));
+      // Counts stay server-authoritative; the next successful read repairs UI.
     }
   }
 

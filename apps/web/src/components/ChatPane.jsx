@@ -91,6 +91,7 @@ export default function ChatPane({
 
   const endRef = useRef(null);
   const textareaRef = useRef(null);
+  const audioRefs = useRef(new Map());
   const [composerFocused, setComposerFocused] = useState(false);
 
   const hideSideButtonsOnMobile = isMobileDevice && composerFocused;
@@ -206,12 +207,8 @@ export default function ChatPane({
         }
 
         // avoid dupes
-        if (
-          prev.some(
-            (x) => x.id === n.id || (n.clientId && x.clientId === n.clientId),
-          )
-        ) {
-          return prev;
+        if (prev.some((x) => x.id === n.id)) {
+          return prev.map((x) => (x.id === n.id ? { ...x, ...n } : x));
         }
 
         return [...prev, n];
@@ -728,6 +725,42 @@ export default function ChatPane({
     );
   }
 
+  function audioKey(messageId, attachmentIndex) {
+    return `${String(messageId || "")}:${attachmentIndex}`;
+  }
+
+  async function toggleVoicePlayback(messageId, attachmentIndex) {
+    const audio = audioRefs.current.get(audioKey(messageId, attachmentIndex));
+    if (!audio) return;
+
+    if (audio.paused) {
+      try {
+        await audio.play();
+      } catch (err) {
+        console.warn("voice playback failed", err);
+      }
+    } else {
+      audio.pause();
+    }
+  }
+
+  async function markVoicePlayed(messageId) {
+    if (!messageId) return;
+    try {
+      const { data } = await api.post(
+        `/api/chat/message/${encodeURIComponent(messageId)}/audio-played`,
+      );
+      const updated = data?.message;
+      if (updated) {
+        setMsgs((prev) =>
+          prev.map((m) => (m.id === messageId ? { ...m, ...updated } : m)),
+        );
+      }
+    } catch (err) {
+      console.warn("voice played receipt failed", err);
+    }
+  }
+
   return (
     <div className="flex flex-col h-full relative">
       <div className="flex-1 overflow-y-auto overflow-x-hidden space-y-2 p-3 border border-zinc-800 rounded-xl no-scrollbar">
@@ -736,6 +769,15 @@ export default function ChatPane({
           const attachments = Array.isArray(m.meta?.attachments)
             ? m.meta.attachments
             : [];
+          const playedBy = Array.isArray(m.meta?.playedBy)
+            ? m.meta.playedBy
+            : [];
+          const voiceUnplayed =
+            !isMe &&
+            attachments.some((att) =>
+              String(att?.type || "").toLowerCase().startsWith("audio"),
+            ) &&
+            !playedBy.includes(meUid);
           const isStarred = isMsgStarred(m, meUid);
           const isPinned = isMsgPinned(m, meUid);
           const isSelected = selectedIds.includes(m.id);
@@ -959,14 +1001,47 @@ export default function ChatPane({
 
                         if (type.startsWith("audio")) {
                           return (
-                            <audio
+                            <div
                               key={idx}
-                              src={att.url}
-                              controls
-                              className="w-full"
+                              role="button"
+                              tabIndex={0}
+                              className="w-full rounded-lg border border-zinc-700 bg-black/20 p-2 text-left"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleVoicePlayback(m.id, idx);
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                  e.preventDefault();
+                                  toggleVoicePlayback(m.id, idx);
+                                }
+                              }}
                             >
-                              Your browser does not support audio playback.
-                            </audio>
+                              <div className="mb-1 flex items-center justify-between gap-2 text-xs text-zinc-300">
+                                <span>▶ Voice message</span>
+                                {voiceUnplayed ? (
+                                  <span className="rounded-full bg-gold px-1.5 py-0.5 text-[10px] font-semibold text-black">
+                                    New
+                                  </span>
+                                ) : null}
+                              </div>
+                              <audio
+                                ref={(node) => {
+                                  const key = audioKey(m.id, idx);
+                                  if (node) audioRefs.current.set(key, node);
+                                  else audioRefs.current.delete(key);
+                                }}
+                                src={att.url}
+                                controls
+                                className="w-full"
+                                onClick={(e) => e.stopPropagation()}
+                                onPlay={() => {
+                                  if (!m.isMe) markVoicePlayed(m.id);
+                                }}
+                              >
+                                Your browser does not support audio playback.
+                              </audio>
+                            </div>
                           );
                         }
 

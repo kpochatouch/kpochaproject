@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { Capacitor } from "@capacitor/core";
 import { api } from "../lib/api";
+import { fetchPostStats, recordPostView } from "../lib/postStats";
 import { attachHlsToVideo, isHlsUrl } from "../lib/hlsAttach";
 import { useMe } from "../context/MeContext.jsx";
 
@@ -115,6 +116,7 @@ export default function PostDetail() {
   const hasSentInitialViewRef = useRef(false); // for non-video single view
   const watchAccumRef = useRef(0); // seconds watched since last tick
   const lastWatchTsRef = useRef(0); // timestamp for watch-time
+  const statsRevisionRef = useRef(0);
 
   // 🆕 auto-jump state
   const hasAutoJumpedRef = useRef(false);
@@ -236,9 +238,9 @@ export default function PostDetail() {
     let on = true;
     (async () => {
       try {
-        const res = await api.get(`/api/posts/${id}/stats`);
-        if (!on) return;
-        const srv = res?.data || {};
+        const revision = statsRevisionRef.current;
+        const srv = await fetchPostStats(id);
+        if (!on || revision !== statsRevisionRef.current) return;
         setStats((prev) => ({
           ...prev,
           viewsCount:
@@ -373,14 +375,14 @@ export default function PostDetail() {
 
   async function sendViewTick() {
     if (!id) return;
+    const revision = ++statsRevisionRef.current;
     try {
-      const res = await api.post(`/api/posts/${id}/view`);
-      mergeStatsFromServer(res?.data || {});
+      const statsFromServer = await recordPostView(id);
+      if (revision === statsRevisionRef.current) {
+        mergeStatsFromServer(statsFromServer);
+      }
     } catch {
-      setStats((prev) => ({
-        ...prev,
-        viewsCount: prev.viewsCount + 1,
-      }));
+      // Counts stay server-authoritative; the next successful read repairs UI.
     }
   }
 

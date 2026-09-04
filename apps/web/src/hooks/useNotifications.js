@@ -45,6 +45,18 @@ export default function useNotifications() {
     };
   }, [refreshCounts]);
 
+  // Installed Chromium PWAs can display this number on the home-screen icon.
+  // Unsupported browsers simply ignore it and continue showing the in-app bell.
+  useEffect(() => {
+    const nav = navigator;
+    if (typeof nav.setAppBadge !== "function") return;
+    if (unread > 0) {
+      nav.setAppBadge(unread).catch(() => {});
+    } else {
+      nav.clearAppBadge?.().catch(() => {});
+    }
+  }, [unread]);
+
   // 🔔 SOCKET: update list ONLY — never touch unread counter
   useEffect(() => {
     connectSocket();
@@ -63,15 +75,48 @@ export default function useNotifications() {
       });
 
       // ✅ backend is the source of truth
+      if (Number.isFinite(Number(payload.unreadCount))) {
+        setUnread(Number(payload.unreadCount));
+      } else {
+        refreshCounts();
+      }
+    };
+
+    const onRead = ({ id } = {}) => {
+      if (!id) return;
+      setItems((prev) =>
+        prev.map((item) =>
+          String(item.id || item._id) === String(id)
+            ? { ...item, seen: true, read: true }
+            : item,
+        ),
+      );
+      refreshCounts();
+    };
+    const onAllRead = () => {
+      setItems((prev) =>
+        prev.map((item) => ({ ...item, seen: true, read: true })),
+      );
+      refreshCounts();
+    };
+    const onDeleted = ({ id } = {}) => {
+      if (!id) return;
+      setItems((prev) =>
+        prev.filter((item) => String(item.id || item._id) !== String(id)),
+      );
       refreshCounts();
     };
 
-    const off1 = registerSocketHandler("notification:new", handler);
-    const off2 = registerSocketHandler("notification:received", handler);
+    const offReceived = registerSocketHandler("notification:received", handler);
+    const offRead = registerSocketHandler("notification:read", onRead);
+    const offAllRead = registerSocketHandler("notification:all_read", onAllRead);
+    const offDeleted = registerSocketHandler("notification:deleted", onDeleted);
 
     return () => {
-      off1?.();
-      off2?.();
+      offReceived?.();
+      offRead?.();
+      offAllRead?.();
+      offDeleted?.();
     };
   }, [refreshCounts]);
 
